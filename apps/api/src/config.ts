@@ -36,6 +36,13 @@ export interface ApiConfig {
    * customers at once.
    */
   readonly trustProxyHops: number;
+  /**
+   * When set, rate limiting is shared across instances. When absent it is
+   * in-process, which is correct for one box and silently wrong for two — so
+   * bootstrap logs a warning naming that, rather than letting the limit quietly
+   * multiply by the instance count.
+   */
+  readonly redisUrl: string | undefined;
 }
 
 export class ConfigError extends Error {
@@ -148,5 +155,6 @@ export function loadConfig(env: Env): ApiConfig {
       },
     },
     trustProxyHops: integer(env, 'TRUST_PROXY_HOPS', 1),
+    redisUrl: env['REDIS_URL'] === '' ? undefined : env['REDIS_URL'],
   };
 }

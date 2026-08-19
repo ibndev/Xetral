@@ -46,6 +46,11 @@ function makeConfig(overrides: Partial<ApiConfig> = {}): ApiConfig {
       perIp: { max: 1000, windowSeconds: 900 },
     },
     trustProxyHops: 0,
+    // These suites pin the in-process limiter: each app instance then gets its
+    // own bucket, so the rate-limit cases cannot leak into the flow cases.
+    // RedisRateLimitStore is held to the same contract in
+    // rate-limit.redis.e2e.test.ts.
+    redisUrl: undefined,
     ...overrides,
   };
 }

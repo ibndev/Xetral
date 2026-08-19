@@ -22,7 +22,7 @@ export class LoginRateLimitGuard implements CanActivate {
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<Request>();
     const now = this.clock.nowMs();
     const { perIdentifier, perIp } = this.config.loginRateLimit;
@@ -38,13 +38,13 @@ export class LoginRateLimitGuard implements CanActivate {
         ? (body as { identifier?: unknown }).identifier
         : undefined;
 
-    const decisions = [this.store.hit(`ip:${ip}`, perIp.max, perIp.windowSeconds, now)];
+    const decisions = [await this.store.hit(`ip:${ip}`, perIp.max, perIp.windowSeconds, now)];
 
     // A malformed body has no identifier to key on. The per-IP bucket still
     // applies, so a flood of junk payloads is not a way around the limit.
     if (typeof identifier === 'string' && identifier.trim() !== '') {
       decisions.push(
-        this.store.hit(
+        await this.store.hit(
           `id:${identifier.trim().toLowerCase()}`,
           perIdentifier.max,
           perIdentifier.windowSeconds,

@@ -28,6 +28,10 @@ async function bootstrap(): Promise<void> {
   // hop count is configuration rather than a blanket `true`.
   app.set('trust proxy', config.trustProxyHops);
 
+  // Without this Nest never calls onApplicationShutdown, and the Redis
+  // connection is left for the runtime to tear down on SIGTERM.
+  app.enableShutdownHooks();
+
   const port = Number(process.env['PORT'] ?? 3000);
   await app.listen(port);
   new Logger('bootstrap').log(`xetral api listening on ${port}`);
