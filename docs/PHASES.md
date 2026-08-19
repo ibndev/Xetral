@@ -62,14 +62,71 @@ Three findings from building it, recorded so they are not rediscovered:
 
 ---
 
-## Phase 2 — Identity & auth
+## Phase 2 — Identity & auth ✅
 
 Short-lived access tokens, rotating refresh tokens with reuse detection, device
 binding, transaction PIN separate from login credentials, biometric gate.
+Executed against PostgreSQL 16; all 20 invariant blocks pass, plus 65 unit tests.
+
+| File | What it is |
+|---|---|
+| `packages/identity/sql/002_identity.sql` | users, credentials, PINs, devices, sessions, refresh tokens, biometrics |
+| `packages/identity/sql/002_identity.test.sql` | 20 invariant blocks |
+| `packages/identity/src/tokens.ts` | refresh token minting and hashing |
+| `packages/identity/src/access-token.ts` | short-lived signed access tokens |
+| `packages/identity/src/pin.ts` | transaction PIN policy and scrypt hashing |
+| `packages/identity/src/envelope.ts` | key-versioned AES-256-GCM envelopes |
+| `packages/identity/src/policy.ts` | deny-by-default route policy |
+| `packages/identity/src/redaction.ts` | log scrubbing |
+
+Enforced **in the database**, not in service code:
+
+- a refresh token is consumed at most once, and never un-consumed
+- reuse of a consumed token revokes the whole family, atomically
+- a session cannot be opened on a revoked device or on another user's device
+- revoking a device revokes its live sessions
+- revocation is final
+- biometric enrolment requires an existing transaction PIN
+- the PIN locks after five failures and cannot be verified while locked
+- every stored secret carries a version prefix
+
+Findings from building it, recorded so they are not rediscovered:
+
+1. **Reuse detection cannot live in service code.** It rests on "was this token
+   already consumed?", which as a SELECT-then-UPDATE lets two requests carrying
+   the same stolen token both read "not consumed" and both rotate — the theft is
+   not merely undetected, it has been served twice. `rotate_refresh_token()`
+   locks the family row before re-reading the token. Same reasoning that made
+   `idempotency_key` a UNIQUE constraint rather than a check in Phase 1.
+2. **Reuse must kill the family, not the presented token.** Revoking only what
+   was replayed leaves the generation the attacker is holding alive. The
+   accepted cost is that a client racing its own refresh gets logged out; that
+   is a client bug to fix with single-flight, not a reason to weaken the check.
+3. **Expiry is checked after consumption.** An expired-but-unused token is a
+   lapsed session, not theft. Reversing the order revokes families over nothing
+   and buries real incidents in the noise.
+4. **`INSERT ... ON CONFLICT` is not the only trigger-ordering trap.** Setting
+   `consumed_at` and `replaced_by_id` in two separate UPDATEs trips the
+   append-only trigger on the second pass, because by then the token is already
+   consumed. One UPDATE sets both.
 
 Authorisation is **deny by default**: an endpoint must explicitly opt out. The
 reference plugin had 45 routes declaring `permission_callback => '__return_true'`
 with the real check inside each callback — safe only for as long as nobody forgets.
+`RoutePolicyRegistry` inverts that: an undeclared route is denied, being public
+requires a written justification, and `publicRouteAudit()` lists the whole opt-out
+surface — the list the plugin never had.
+
+**Known limitation, deliberate:** a signed access token cannot be revoked
+mid-life. Revoking a session stops the next *refresh*, so a stolen access token
+stays valid until it expires. Fifteen minutes is the size of that window and the
+reason the number is small. Anything needing immediate effect — freezing an
+account, blocking a transfer — is checked against `users.status` at the point of
+the action, never inferred from the presence of a token.
+
+**Still open before this is wired to real traffic:** `apps/api` does not exist
+yet, so the NestJS guard that consumes `RoutePolicyRegistry`, the login and
+refresh endpoints, and rate limiting on the login path all land with it.
 
 ---
 

@@ -42,6 +42,7 @@ surface of the six and needs a review queue and hold periods before it is safe.
 packages/
   shared/     types, money primitives, Zod schemas — imported by API and app
   ledger/     double-entry core: schema, invariants, posting service
+  identity/   users, devices, sessions, refresh rotation, PINs, envelopes
 apps/
   api/        NestJS
   mobile/     Expo (iOS + Android)
@@ -57,12 +58,19 @@ See [`docs/PHASES.md`](docs/PHASES.md). Each phase lands independently.
 ```bash
 npm install
 npm test --workspace @xetral/shared        # 29 money tests
+npm test --workspace @xetral/identity      # 65 auth tests
 
-# Ledger invariants — needs a live PostgreSQL 16
+# SQL invariants — needs a live PostgreSQL 16. Migrations apply in order, and
+# the test files are not idempotent, so run them against a fresh database.
 createdb xetral
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
 ```
 
-All 12 ledger tests print `PASS`. Any `TEST FAILED` means an invariant is not wired
-up — do not deploy past it.
+All 12 ledger tests and all 20 identity blocks print `PASS`. Any `TEST FAILED`
+means an invariant is not wired up — do not deploy past it.
+
+The root `npm test` script calls `turbo`, which is not yet a dependency; use the
+per-workspace commands above until that is resolved.

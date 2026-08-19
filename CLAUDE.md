@@ -87,6 +87,46 @@ reversing entry. Never `UPDATE` or `DELETE` them.
 
 ---
 
+## Identity & auth — non-obvious rules
+
+Schema: `packages/identity/sql/`. Same contract as the ledger: every test prints
+`PASS`, and a `TEST FAILED` means an invariant is not wired up.
+
+1. **Refresh rotation is a database function, not service code.** Reuse detection
+   rests on "was this token already consumed?", which in service code is a SELECT
+   then an UPDATE — two requests carrying the same stolen token both read "not
+   consumed" and both rotate. `rotate_refresh_token()` locks the family row before
+   re-reading the token, so concurrent rotations serialise. Do not reimplement it
+   in TypeScript, and do not write `consumed_at` directly.
+2. **Reuse revokes the whole family, including the live token.** Revoking only the
+   presented token leaves the generation the thief is holding alive. The accepted
+   cost is that a client racing its own refresh gets logged out — fix that in the
+   client with single-flight, never by weakening the check.
+3. **Expiry is checked after consumption, and the order is load-bearing.** An
+   expired-but-unused token is a lapsed session, not theft. Treating it as reuse
+   revokes families over nothing and buries real incidents in the noise.
+4. **A consumed token can never be un-consumed.** Append-only, same as the ledger.
+   If `consumed_at` were clearable, "already used" would be a claim about the
+   present rather than about history, and one UPDATE would erase the evidence.
+5. **Only the hash is stored**, and the `^[0-9a-f]{64}$` CHECK is what makes that
+   structural — a raw token is 43 base64url characters and cannot reach a row.
+6. **Biometrics unlock the PIN; they do not replace it.** Enrolment requires an
+   existing transaction PIN, enforced by trigger rather than by the endpoint.
+
+Access tokens are signed, not stored, so they **cannot be revoked mid-life**.
+15 minutes is the exact window a stolen one keeps working — that is why the number
+is small, and raising it is a security decision. Anything needing immediate effect
+(freezing an account) is checked at the point of action, not inferred from a token.
+
+Authorisation is **deny by default** via `RoutePolicyRegistry`: an undeclared route
+returns a denial, and making one public requires a written justification that
+`publicRouteAudit()` can list.
+
+Access tokens are **not JWTs**, deliberately — see the header comment in
+`access-token.ts`. The version prefix selects a key, never an algorithm.
+
+---
+
 ## Providers
 
 Live set: **Bitnob** (crypto, USDT, stablecoin, virtual USD cards, FX),
@@ -145,12 +185,19 @@ the reference plugin and are out of scope.
 ```bash
 npm install
 npm test --workspace @xetral/shared     # money primitives (vitest)
+npm test --workspace @xetral/identity   # tokens, PIN, envelopes, policy (vitest)
 
-# Ledger invariants — needs live PostgreSQL 16
+# SQL invariants — needs live PostgreSQL 16. Apply migrations in order; the
+# test files are NOT idempotent, so run them against a freshly created database.
 createdb xetral
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
 ```
+
+Note: the root `npm test` script calls `turbo`, which is not yet a dependency.
+Use the per-workspace commands above until that is resolved.
 
 ## Deployment
 
