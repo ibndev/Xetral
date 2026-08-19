@@ -1,14 +1,20 @@
 {
   "name": "xetral",
   "private": true,
-  "workspaces": ["apps/*", "packages/*"],
-  "engines": { "node": ">=22" },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "build": "turbo run build",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck"
   },
   "devDependencies": {
+    "@types/node": "^22.20.1",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
   }
