@@ -80,9 +80,22 @@ The API's end-to-end suite runs the real login, rotation and reuse-detection
 flows against that database:
 
 ```bash
-DATABASE_URL=postgres://...  npm run test:e2e --workspace @xetral/api
+DATABASE_URL=postgres://... REDIS_URL=redis://localhost:6379 \
+  npm run test:e2e --workspace @xetral/api
 ```
 
 It is a separate script rather than a skip-when-unavailable block in `npm test`,
 because a suite that quietly skips is a suite that reports green on a machine
 where it never ran.
+
+## CI
+
+`.github/workflows/ci.yml` runs the whole of the above on every push and pull
+request, against Postgres 16 and Redis 7 service containers: SQL invariants on a
+dedicated database, typecheck, unit tests, end-to-end tests, build, and finally a
+smoke test that boots the built bundle and checks a guarded route answers 401.
+
+The invariant step scans psql's output as well as its exit code. `ON_ERROR_STOP`
+catches a raised `TEST FAILED`, but the drift check reports through a `SELECT`
+and exits zero — a reconciliation check that cannot fail the build is not a
+check.

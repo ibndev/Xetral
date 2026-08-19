@@ -136,10 +136,10 @@ Landed after the rest of the phase, closing what was open.
 | `apps/api/src/auth/routes.ts` | the whole route table and its policies, in one readable list |
 | `apps/api/src/auth/auth.controller.ts` | login, refresh, logout, session |
 | `apps/api/src/auth/auth.service.ts` | the flows, calling `rotate_refresh_token` and friends |
-| `apps/api/src/auth/rate-limit.ts` | sliding-window limiter behind a port |
+| `apps/api/src/auth/rate-limit.ts` | sliding-window limiter: in-memory and Redis, one contract |
 | `apps/api/src/config.ts` | env parsing that refuses to boot without secrets |
 
-Twenty-six unit tests plus twelve end-to-end tests against PostgreSQL 16.
+Twenty-seven unit tests plus twenty-four end-to-end tests against PostgreSQL 16 and Redis 7.
 
 Findings from wiring it up:
 
@@ -162,14 +162,41 @@ Findings from wiring it up:
    worst moment to discover it. The two metadata keys are literals now, with a
    canary test asserting they still match what Nest exports.
 
-**Known limitations, both deliberate and both stated in code:**
+9. **Naive Redis rate limiting reintroduces the race the in-memory store never
+   had.** Prune, count, then add is a read-modify-write; run it from several
+   instances and each reads "room available" before any of them writes.
+   JavaScript's single thread gave the in-memory version atomicity for free, so
+   moving to Redis is exactly the step that removes it — the decision is one Lua
+   script, and a test issues twenty concurrent attempts against a limit of five
+   and asserts exactly five are allowed.
 
-- Rate limiting is **in-memory, so it counts per process**. Two instances behind
-  a load balancer means double the effective limit. It sits behind
-  `RateLimitStore`; moving to Redis touches one file, and must happen before
-  the app scales horizontally.
-- Transaction-PIN enforcement is unbuilt, so no route can declare `pin: true`
-  and serve traffic. It lands with the first money-moving endpoint in Phase 4.
+Both backends are held to **one shared contract suite**. Asserting "Redis
+behaves like memory" with two hand-written suites lets them drift into testing
+two different behaviours while both stay green — and the entire reason to run
+Redis is that every instance agrees.
+
+**Known limitation, deliberate:** transaction-PIN enforcement is unbuilt, so no
+route can declare `pin: true` and serve traffic. It lands with the first
+money-moving endpoint in Phase 4.
+
+---
+
+## Continuous integration ✅
+
+`.github/workflows/ci.yml`, against Postgres 16 and Redis 7 service containers:
+SQL invariants on a dedicated database, typecheck, unit tests, end-to-end tests,
+build, and a smoke test that boots the built bundle.
+
+Two details that are not boilerplate:
+
+- **The invariant step scans psql's output, not just its exit code.**
+  `ON_ERROR_STOP` catches a raised `TEST FAILED`, but the ledger's drift check
+  reports through a `SELECT` and exits zero. Verified by corrupting a
+  materialised balance: psql exits 0 and only the output scan catches it. A
+  reconciliation check that cannot fail the build is not a check.
+- **The built bundle is started and probed.** Three failures in `apps/api` were
+  invisible to both the compiler and the test suite and appeared only at
+  startup. A green test run is not evidence the artifact runs.
 
 ---
 

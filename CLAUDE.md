@@ -142,9 +142,17 @@ Access tokens are **not JWTs**, deliberately — see the header comment in
 - DI uses explicit `@Inject` tokens throughout. esbuild — what vitest
   transpiles with — does not emit `design:paramtypes`, so type-inferred
   injection compiles and then fails at runtime.
-- Rate limiting is **in-memory and therefore per process**. Two instances means
-  double the effective limit. It sits behind `RateLimitStore` so moving to
-  Redis touches one file, and that has to happen before horizontal scaling.
+- Rate limiting has two backends behind `RateLimitStore`, chosen by whether
+  `REDIS_URL` is set. Both are held to **one shared contract suite**
+  (`rate-limit.contract.ts`) — the point of Redis is that every instance gives
+  the same answer, and two hand-written suites would drift into testing two
+  behaviours while staying green. Without `REDIS_URL` the limiter is
+  in-process and bootstrap logs a warning; that is correct for one box only.
+- The Redis limiter is a **Lua script, not three commands**. Prune-count-add
+  over separate round trips is a read-modify-write, and under the concurrency
+  that justifies running Redis at all, several instances each read "room
+  available" and each write. JavaScript's single thread gave the in-memory
+  store that atomicity for free; Redis has to be told.
 
 ---
 
@@ -218,9 +226,16 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
 
-# API flows end to end against that database
-DATABASE_URL=postgres://... npm run test:e2e --workspace @xetral/api
+# API flows end to end. Needs both services: Postgres for the auth flows,
+# Redis for the rate-limiter contract.
+DATABASE_URL=postgres://... REDIS_URL=redis://localhost:6379 \
+  npm run test:e2e --workspace @xetral/api
 ```
+
+CI (`.github/workflows/ci.yml`) runs all of the above against Postgres 16 and
+Redis 7, then boots the built bundle and checks a guarded route answers 401.
+That last step is not ceremony: three failures in this app were invisible to
+both the compiler and the tests and appeared only at startup.
 
 ## Deployment
 
