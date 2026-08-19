@@ -1,0 +1,15 @@
+{
+  "name": "xetral",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"],
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
