@@ -122,8 +122,11 @@ jobs:
           node apps/api/dist/main.js > /tmp/api.log 2>&1 &
           api_pid=$!
 
+          # No -f here. An unrouted path answers 404, and -f treats that as a
+          # failure, so the probe would never see the server come up and would
+          # burn the full timeout on every run. Any HTTP response means listening.
           for _ in $(seq 1 60); do
-            curl -sf -o /dev/null "http://127.0.0.1:3100/v1/nope" && break
+            curl -s -o /dev/null "http://127.0.0.1:3100/v1/nope" && break
             sleep 0.5
           done
 
