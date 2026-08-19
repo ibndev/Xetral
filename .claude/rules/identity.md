@@ -33,13 +33,17 @@ which is not a real failure but will waste your time if you do not expect it.
 
 ## Adding an endpoint
 
-1. Declare it on the `RoutePolicyRegistry`. An undeclared route is denied, so
-   forgetting this produces a 403 in the first test run rather than an open
-   endpoint in production.
+1. Declare it in `apps/api/src/auth/routes.ts`. An undeclared route is denied,
+   and `route-coverage.test.ts` fails the build — so forgetting this is a red
+   test, not an open endpoint.
 2. Decide `pin` deliberately. There is no default, because "does this move
-   money?" is the question the route's author must answer.
+   money?" is the question the route's author must answer. Note that `pin: true`
+   currently **fails closed with a 500**: enforcement is not built, and a route
+   that declares it cannot serve traffic until it is.
 3. If it must be public, write a real justification. It is listed by
-   `publicRouteAudit()` and read in review.
+   `publicRouteAudit()`, asserted in `route-coverage.test.ts`, and read in review.
+4. Inject dependencies with an explicit `@Inject(TOKEN)`. esbuild does not emit
+   `design:paramtypes`, so type-inferred injection compiles and fails at runtime.
 
 ## Adding a stored secret
 

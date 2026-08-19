@@ -125,6 +125,27 @@ returns a denial, and making one public requires a written justification that
 Access tokens are **not JWTs**, deliberately — see the header comment in
 `access-token.ts`. The version prefix selects a key, never an algorithm.
 
+### apps/api
+
+- `AuthGuard` is registered with `APP_GUARD`, so it runs for **every** route. A
+  route with no entry in `auth/routes.ts` is refused, and
+  `route-coverage.test.ts` fails the build if a controller declares one the
+  policy does not (and vice versa, so the audit cannot describe a route that no
+  longer exists).
+- A route declaring `pin: true` **fails closed with a 500** — transaction-PIN
+  enforcement is not built, and the one thing that must not happen is a
+  money-moving route going live while its author believes the flag protects it.
+- Nest's route metadata keys are hardcoded in `route-key.ts`, not imported from
+  `@nestjs/common/constants`: that module is unresolvable under native ESM and
+  the failure only appears once the bundle starts. A canary test asserts the
+  literals still match.
+- DI uses explicit `@Inject` tokens throughout. esbuild — what vitest
+  transpiles with — does not emit `design:paramtypes`, so type-inferred
+  injection compiles and then fails at runtime.
+- Rate limiting is **in-memory and therefore per process**. Two instances means
+  double the effective limit. It sits behind `RateLimitStore` so moving to
+  Redis touches one file, and that has to happen before horizontal scaling.
+
 ---
 
 ## Providers
@@ -184,8 +205,10 @@ the reference plugin and are out of scope.
 
 ```bash
 npm install
+npm test                                # all workspaces, via turbo
 npm test --workspace @xetral/shared     # money primitives (vitest)
 npm test --workspace @xetral/identity   # tokens, PIN, envelopes, policy (vitest)
+npm test --workspace @xetral/api        # guard, route coverage, rate limiting
 
 # SQL invariants — needs live PostgreSQL 16. Apply migrations in order; the
 # test files are NOT idempotent, so run them against a freshly created database.
@@ -194,10 +217,10 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
-```
 
-Note: the root `npm test` script calls `turbo`, which is not yet a dependency.
-Use the per-workspace commands above until that is resolved.
+# API flows end to end against that database
+DATABASE_URL=postgres://... npm run test:e2e --workspace @xetral/api
+```
 
 ## Deployment
 

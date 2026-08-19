@@ -66,7 +66,7 @@ Three findings from building it, recorded so they are not rediscovered:
 
 Short-lived access tokens, rotating refresh tokens with reuse detection, device
 binding, transaction PIN separate from login credentials, biometric gate.
-Executed against PostgreSQL 16; all 20 invariant blocks pass, plus 65 unit tests.
+Executed against PostgreSQL 16; all 20 invariant blocks pass, plus 76 unit tests.
 
 | File | What it is |
 |---|---|
@@ -74,7 +74,9 @@ Executed against PostgreSQL 16; all 20 invariant blocks pass, plus 65 unit tests
 | `packages/identity/sql/002_identity.test.sql` | 20 invariant blocks |
 | `packages/identity/src/tokens.ts` | refresh token minting and hashing |
 | `packages/identity/src/access-token.ts` | short-lived signed access tokens |
-| `packages/identity/src/pin.ts` | transaction PIN policy and scrypt hashing |
+| `packages/identity/src/secret-hash.ts` | the one scrypt path, shared by PINs and passwords |
+| `packages/identity/src/pin.ts` | transaction PIN policy |
+| `packages/identity/src/password.ts` | login password policy |
 | `packages/identity/src/envelope.ts` | key-versioned AES-256-GCM envelopes |
 | `packages/identity/src/policy.ts` | deny-by-default route policy |
 | `packages/identity/src/redaction.ts` | log scrubbing |
@@ -124,9 +126,50 @@ reason the number is small. Anything needing immediate effect — freezing an
 account, blocking a transfer — is checked against `users.status` at the point of
 the action, never inferred from the presence of a token.
 
-**Still open before this is wired to real traffic:** `apps/api` does not exist
-yet, so the NestJS guard that consumes `RoutePolicyRegistry`, the login and
-refresh endpoints, and rate limiting on the login path all land with it.
+### apps/api — the HTTP surface ✅
+
+Landed after the rest of the phase, closing what was open.
+
+| File | What it is |
+|---|---|
+| `apps/api/src/auth/auth.guard.ts` | global guard; denies any route without a declared policy |
+| `apps/api/src/auth/routes.ts` | the whole route table and its policies, in one readable list |
+| `apps/api/src/auth/auth.controller.ts` | login, refresh, logout, session |
+| `apps/api/src/auth/auth.service.ts` | the flows, calling `rotate_refresh_token` and friends |
+| `apps/api/src/auth/rate-limit.ts` | sliding-window limiter behind a port |
+| `apps/api/src/config.ts` | env parsing that refuses to boot without secrets |
+
+Twenty-six unit tests plus twelve end-to-end tests against PostgreSQL 16.
+
+Findings from wiring it up:
+
+5. **A "public route" annotation next to each handler cannot be audited.** The
+   policy lives in one list, and `route-coverage.test.ts` compares it against
+   the router in *both* directions — a live route with no policy fails the
+   build, and so does a policy for a route that no longer exists. The second
+   direction matters as much: an audit that describes a surface which is not
+   there invites the reader to stop trusting it.
+6. **`pin: true` fails closed with a 500, deliberately.** Transaction-PIN
+   enforcement is not built. A money-moving route must not serve traffic while
+   its author believes that flag is protecting it, so such a route cannot
+   respond at all until the check exists.
+7. **esbuild does not emit `design:paramtypes`.** NestJS's usual constructor
+   injection depends on it, so every dependency is named with an explicit
+   `@Inject` token. Type-inferred injection compiles and then fails at runtime
+   with an unhelpful "cannot resolve dependency at index 0".
+8. **`@nestjs/common/constants` is unresolvable under native ESM.** It works
+   under vitest and throws `ERR_MODULE_NOT_FOUND` once the bundle starts — the
+   worst moment to discover it. The two metadata keys are literals now, with a
+   canary test asserting they still match what Nest exports.
+
+**Known limitations, both deliberate and both stated in code:**
+
+- Rate limiting is **in-memory, so it counts per process**. Two instances behind
+  a load balancer means double the effective limit. It sits behind
+  `RateLimitStore`; moving to Redis touches one file, and must happen before
+  the app scales horizontally.
+- Transaction-PIN enforcement is unbuilt, so no route can declare `pin: true`
+  and serve traffic. It lands with the first money-moving endpoint in Phase 4.
 
 ---
 

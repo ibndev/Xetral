@@ -44,7 +44,7 @@ packages/
   ledger/     double-entry core: schema, invariants, posting service
   identity/   users, devices, sessions, refresh rotation, PINs, envelopes
 apps/
-  api/        NestJS
+  api/        NestJS — deny-by-default guard, login/refresh/logout
   mobile/     Expo (iOS + Android)
   web/        Next.js (marketing + authenticated dashboard)
 ```
@@ -57,8 +57,12 @@ See [`docs/PHASES.md`](docs/PHASES.md). Each phase lands independently.
 
 ```bash
 npm install
+npm test                                   # every workspace, via turbo
+
+# or one at a time
 npm test --workspace @xetral/shared        # 29 money tests
-npm test --workspace @xetral/identity      # 65 auth tests
+npm test --workspace @xetral/identity      # 76 auth tests
+npm test --workspace @xetral/api           # 26 guard, routing and rate-limit tests
 
 # SQL invariants — needs a live PostgreSQL 16. Migrations apply in order, and
 # the test files are not idempotent, so run them against a fresh database.
@@ -72,5 +76,13 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
 All 12 ledger tests and all 20 identity blocks print `PASS`. Any `TEST FAILED`
 means an invariant is not wired up — do not deploy past it.
 
-The root `npm test` script calls `turbo`, which is not yet a dependency; use the
-per-workspace commands above until that is resolved.
+The API's end-to-end suite runs the real login, rotation and reuse-detection
+flows against that database:
+
+```bash
+DATABASE_URL=postgres://...  npm run test:e2e --workspace @xetral/api
+```
+
+It is a separate script rather than a skip-when-unavailable block in `npm test`,
+because a suite that quietly skips is a suite that reports green on a machine
+where it never ran.
