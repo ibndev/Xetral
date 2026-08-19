@@ -1,0 +1,140 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'claude/**']
+  pull_request:
+
+# A superseded run tells you nothing useful, and these jobs hold a database.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      # Pinned to the major version the invariants were written against.
+      # Deferred constraints and trigger ordering are exactly the behaviour that
+      # a silent major upgrade would change underneath them.
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: xetral
+          POSTGRES_PASSWORD: xetral
+          POSTGRES_DB: xetral
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      PGPASSWORD: xetral
+      DATABASE_URL: postgres://xetral:xetral@localhost:5432/xetral
+      REDIS_URL: redis://localhost:6379
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # ------------------------------------------------------------------
+      # SQL invariants, on their own database.
+      #
+      # The test files insert fixtures and are NOT idempotent, so they need a
+      # database nothing else has touched. Keeping them off the one the e2e
+      # suite uses also stops either from explaining a failure in the other.
+      # ------------------------------------------------------------------
+      - name: Apply migrations (invariant database)
+        run: |
+          createdb -h localhost -U xetral xetral_invariants
+          psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
+            -f packages/ledger/sql/001_ledger.sql
+          psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
+            -f packages/identity/sql/002_identity.sql
+
+      - name: Ledger and identity invariants
+        run: |
+          set -o pipefail
+          # ON_ERROR_STOP makes a raised 'TEST FAILED' abort with a non-zero
+          # exit, which covers most blocks. It does NOT cover the reporting
+          # queries -- ledger test 9 prints 'FAIL: n account(s) drifted' from a
+          # SELECT and exits zero -- so the output is scanned as well. A drift
+          # check that cannot fail the build is not a check.
+          for f in packages/ledger/sql/001_ledger.test.sql \
+                   packages/identity/sql/002_identity.test.sql; do
+            echo "== $f"
+            psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
+              -f "$f" 2>&1 | tee "/tmp/$(basename "$f").out"
+          done
+          if grep -qE 'TEST FAILED|^FAIL' /tmp/*.test.sql.out; then
+            echo "::error::an invariant did not hold"
+            exit 1
+          fi
+
+      - name: Apply migrations (e2e database)
+        run: |
+          psql -h localhost -U xetral -d xetral -v ON_ERROR_STOP=1 \
+            -f packages/ledger/sql/001_ledger.sql
+          psql -h localhost -U xetral -d xetral -v ON_ERROR_STOP=1 \
+            -f packages/identity/sql/002_identity.sql
+
+      - run: npm run typecheck
+
+      - run: npm test
+
+      - name: End-to-end (real Postgres and Redis)
+        run: npm run test:e2e --workspace @xetral/api
+
+      - run: npm run build
+
+      # ------------------------------------------------------------------
+      # Boot the artifact that was just built.
+      #
+      # Three failures in this app were invisible to both the compiler and the
+      # test suite and appeared only when the bundle actually started: esbuild
+      # not emitting decorator metadata, '@nestjs/common/constants' being
+      # unresolvable under native ESM, and NestFactory's lazy platform require.
+      # A green test run is not evidence the thing starts.
+      # ------------------------------------------------------------------
+      - name: Smoke-test the built API
+        run: |
+          ACCESS_TOKEN_KEYS="v1:$(openssl rand -base64 32)" \
+          ACCESS_TOKEN_CURRENT_VERSION=v1 \
+          PORT=3100 \
+          node apps/api/dist/main.js > /tmp/api.log 2>&1 &
+          api_pid=$!
+
+          for _ in $(seq 1 60); do
+            curl -sf -o /dev/null "http://127.0.0.1:3100/v1/nope" && break
+            sleep 0.5
+          done
+
+          # An authenticated route with no token must answer 401, which proves
+          # the global guard is mounted rather than merely compiled.
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/v1/auth/session)
+          kill "$api_pid" 2>/dev/null || true
+
+          if [ "$code" != "401" ]; then
+            echo "::error::expected 401 from a guarded route on the built app, got $code"
+            cat /tmp/api.log
+            exit 1
+          fi
+          echo "built API booted and enforced its route policy"
