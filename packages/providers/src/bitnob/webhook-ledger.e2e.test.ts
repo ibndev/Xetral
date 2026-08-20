@@ -150,6 +150,7 @@ async function deliver(raw: string): Promise<LedgerIntent | undefined> {
 }
 
 const wallet = (): AccountRef => ({ kind: 'customer_wallet', ownerId, currency: 'USD' });
+const card = (): AccountRef => ({ kind: 'customer_card', ownerId, currency: 'USD' });
 const pending = (): AccountRef => ({ kind: 'customer_pending', ownerId, currency: 'USD' });
 const float = (): AccountRef => ({ kind: 'provider_float', currency: 'USD' });
 
@@ -163,9 +164,10 @@ beforeAll(async () => {
   // real customer inherits this suite's balances.
   ownerId = String(8_000_000_000n + BigInt(Math.floor(Math.random() * 1_000_000)));
 
-  // Fund the wallet: the overdraft guard is real, and an authorization out of
-  // an empty wallet would be refused by the database rather than by anything
-  // this suite is testing.
+  // Load the CARD, not the wallet: an authorization draws on the card's own
+  // balance, and the overdraft guard is real, so an authorization against an
+  // empty card would be refused by the database rather than by anything this
+  // suite is testing.
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -176,7 +178,7 @@ beforeAll(async () => {
     );
     const entryId = entry.rows[0]?.id;
     for (const [ref, amount] of [
-      [wallet(), '100000'],
+      [card(), '100000'],
       [float(), '-100000'],
     ] as const) {
       await client.query(
@@ -196,17 +198,25 @@ afterAll(async () => {
 });
 
 describe('the two-phase card flow against the real ledger', () => {
-  it('authorization moves spendable into pending without changing the total', async () => {
-    const before = { wallet: await balanceOf(wallet()), pending: await balanceOf(pending()) };
+  it('authorization moves the card balance into pending, leaving the total alone', async () => {
+    const before = { card: await balanceOf(card()), pending: await balanceOf(pending()) };
 
     await deliver(webhook(BITNOB_EVENTS.cardAuthorization, `evt-auth-${randomUUID()}`, '25000000'));
 
-    const after = { wallet: await balanceOf(wallet()), pending: await balanceOf(pending()) };
-    expect(after.wallet).toBe(before.wallet - 2500n);
+    const after = { card: await balanceOf(card()), pending: await balanceOf(pending()) };
+    expect(after.card).toBe(before.card - 2500n);
     expect(after.pending).toBe(before.pending + 2500n);
-    // The customer's TOTAL is wallet + pending, and it is unchanged: the money
-    // is committed, not yet spent.
-    expect(after.wallet + after.pending).toBe(before.wallet + before.pending);
+    // Committed, not yet spent: card + pending is unchanged.
+    expect(after.card + after.pending).toBe(before.card + before.pending);
+  });
+
+  it('never touches the wallet on a card event', async () => {
+    // The wallet funds the card; it does not back the card's spending. A card
+    // event reaching the wallet would mean a ten-dollar card could spend the
+    // whole balance.
+    const walletBefore = await balanceOf(wallet());
+    await deliver(webhook(BITNOB_EVENTS.cardAuthorization, `evt-nw-${randomUUID()}`, '1000000'));
+    expect(await balanceOf(wallet())).toBe(walletBefore);
   });
 
   it('settlement moves pending out to the provider', async () => {
@@ -219,18 +229,17 @@ describe('the two-phase card flow against the real ledger', () => {
     expect(await balanceOf(float())).toBe(beforeFloat + 2500n);
   });
 
-  it('an expiry returns the hold to the wallet', async () => {
-    const eventId = `evt-auth2-${randomUUID()}`;
-    await deliver(webhook(BITNOB_EVENTS.cardAuthorization, eventId, '10000000'));
+  it('an expiry returns the hold to the card', async () => {
+    await deliver(webhook(BITNOB_EVENTS.cardAuthorization, `evt-auth2-${randomUUID()}`, '10000000'));
 
-    const heldWallet = await balanceOf(wallet());
+    const heldCard = await balanceOf(card());
     const heldPending = await balanceOf(pending());
 
     await deliver(
       webhook(BITNOB_EVENTS.cardAuthorizationExpired, `evt-exp-${randomUUID()}`, '10000000'),
     );
 
-    expect(await balanceOf(wallet())).toBe(heldWallet + 1000n);
+    expect(await balanceOf(card())).toBe(heldCard + 1000n);
     expect(await balanceOf(pending())).toBe(heldPending - 1000n);
   });
 });
@@ -245,13 +254,13 @@ describe('replay', () => {
     const intent = await deliver(raw);
     expect(intent).toBeDefined();
 
-    const walletAfterFirst = await balanceOf(wallet());
+    const cardAfterFirst = await balanceOf(card());
 
     await expect(deliver(raw)).rejects.toMatchObject({ code: '23505' });
 
     // The balance did not move a second time, which is the thing that actually
     // matters to the customer.
-    expect(await balanceOf(wallet())).toBe(walletAfterFirst);
+    expect(await balanceOf(card())).toBe(cardAfterFirst);
 
     const entries = await pool.query(
       `SELECT COUNT(*)::int AS n FROM journal_entries WHERE idempotency_key = $1`,
@@ -287,7 +296,7 @@ describe('the ledger still refuses what it always refused', () => {
   });
 
   it('rejects an overdraft even though the adapter produced a balanced entry', async () => {
-    // Balanced is not the same as permitted. The wallet has far less than this,
+    // Balanced is not the same as permitted. The card holds far less than this,
     // and the database refuses regardless of how well-formed the entry is.
     const huge = String(50_000n * 1_000_000n);
     await expect(

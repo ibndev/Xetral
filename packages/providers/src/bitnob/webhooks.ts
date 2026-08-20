@@ -122,13 +122,17 @@ export interface WebhookContext {
  * one transaction produces an incorrect balance. The `customer_pending` account
  * from Phase 1 is what makes both representable:
  *
- *   Authorization  wallet -> pending           spendable drops, total unchanged
+ *   Authorization  card    -> pending          card balance drops, total same
  *   Settlement     pending -> provider_float   the hold becomes a real spend
- *   Expiry         pending -> wallet           the hold lapsed; money returns
+ *   Expiry         pending -> card             the hold lapsed; money returns
  *
- * The customer's SPENDABLE balance is the wallet; their TOTAL is wallet +
- * pending. Both are derived from postings, so both are provable, and an expiry
- * is an ordinary reversing entry rather than a special case.
+ * An authorization draws on the CARD's own balance, not the wallet. A Bitnob
+ * virtual card is topped up from the wallet and holds its own funds, so a
+ * purchase is authorised against that. Drawing from the wallet instead — which
+ * is what this adapter did before Phase 5 gave it a card table to know better —
+ * would let a card funded with ten dollars authorise five hundred, because the
+ * wallet happened to hold it. The overdraft guard already covers
+ * `customer_card`, so getting the account right is the entire fix.
  *
  * Returns undefined for events that carry no money — a decline moves nothing,
  * and writing a journal entry for it would mean an entry that cannot balance.
@@ -167,7 +171,7 @@ export function toLedgerIntent(
     },
   };
 
-  const wallet = { kind: 'customer_wallet', ownerId, currency: 'USD' } as const;
+  const card = { kind: 'customer_card', ownerId, currency: 'USD' } as const;
   const pending = { kind: 'customer_pending', ownerId, currency: 'USD' } as const;
   const float = { kind: 'provider_float', currency: 'USD' } as const;
 
@@ -182,7 +186,7 @@ export function toLedgerIntent(
         ...base,
         kind: 'card_authorization',
         description: describe('authorization', envelope),
-        postings: legs(amount, wallet, pending),
+        postings: legs(amount, card, pending),
       };
       break;
     }
@@ -207,7 +211,7 @@ export function toLedgerIntent(
         ...base,
         kind: 'card_auth_expiry',
         description: describe('authorization expiry', envelope),
-        postings: legs(amount, pending, wallet),
+        postings: legs(amount, pending, card),
       };
       break;
     }
@@ -234,7 +238,7 @@ export function toLedgerIntent(
             : { ...base.metadata, remainder_micro: remainderMicro.toString() },
         kind: 'card_refund',
         description: describe('refund', envelope),
-        postings: legs(amount, float, wallet),
+        postings: legs(amount, float, card),
       };
       break;
     }

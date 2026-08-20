@@ -171,12 +171,15 @@ describe('idempotency key', () => {
 });
 
 describe('the two-phase card flow', () => {
-  it('moves wallet -> pending on authorization', () => {
-    // Spendable balance drops; the customer's total does not. The money is
-    // committed but not yet spent.
+  it('moves card -> pending on authorization, never the wallet', () => {
+    // The card's own balance drops; the customer's total does not. Drawing
+    // from the wallet here would let a card funded with ten dollars authorise
+    // whatever the wallet happened to hold -- the overdraft guard protects
+    // customer_card, so naming the right account IS the protection.
     const intent = intentFor(body());
     expect(intent.kind).toBe('card_authorization');
-    expect(byKind(intent)).toEqual({ customer_wallet: -2500n, customer_pending: 2500n });
+    expect(byKind(intent)).toEqual({ customer_card: -2500n, customer_pending: 2500n });
+    expect(byKind(intent)['customer_wallet']).toBeUndefined();
     expect(intent.occurredAt.toISOString()).toBe('2026-08-19T10:30:00.000Z');
   });
 
@@ -193,7 +196,7 @@ describe('the two-phase card flow', () => {
       body({ event_id: 'evt_3', event: BITNOB_EVENTS.cardAuthorizationExpired }),
     );
     expect(intent.kind).toBe('card_auth_expiry');
-    expect(byKind(intent)).toEqual({ customer_pending: -2500n, customer_wallet: 2500n });
+    expect(byKind(intent)).toEqual({ customer_pending: -2500n, customer_card: 2500n });
   });
 
   it('leaves the customer whole across authorize then expire', () => {
@@ -236,7 +239,7 @@ describe('display_amount can never reach a posting', () => {
     // wrong one must change nothing: the ledger amount comes from `amount`, in
     // micro-units, through the one conversion boundary.
     const intent = intentFor(body({}, { display_amount: 999999.99 }));
-    expect(byKind(intent)).toEqual({ customer_wallet: -2500n, customer_pending: 2500n });
+    expect(byKind(intent)).toEqual({ customer_card: -2500n, customer_pending: 2500n });
   });
 
   it('does not carry it into the domain event at all', () => {
@@ -259,7 +262,7 @@ describe('amounts arriving badly', () => {
     const intent = intentFor(
       body({ event_id: 'e', event: BITNOB_EVENTS.cardRefund }, { amount: '1234567' }),
     );
-    expect(byKind(intent)).toEqual({ provider_float: -123n, customer_wallet: 123n });
+    expect(byKind(intent)).toEqual({ provider_float: -123n, customer_card: 123n });
     expect(intent.metadata['remainder_micro']).toBe('4567');
   });
 
