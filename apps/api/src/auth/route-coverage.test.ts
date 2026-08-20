@@ -5,6 +5,10 @@ import { AuthController } from './auth.controller.js';
 import { WalletController } from '../wallet/wallet.controller.js';
 import { CardController, CardWebhookController } from '../cards/card.controller.js';
 import { PurchaseController } from '../purchases/purchase.controller.js';
+import {
+  GiftCardController,
+  GiftCardReviewController,
+} from '../giftcards/giftcard.controller.js';
 import { METHOD_METADATA, PATH_METADATA, buildRoutePath } from './route-key.js';
 import { buildRoutePolicy } from './routes.js';
 
@@ -30,6 +34,8 @@ const CONTROLLERS = [
   CardController,
   CardWebhookController,
   PurchaseController,
+  GiftCardController,
+  GiftCardReviewController,
 ];
 
 const METHOD_NAMES: Partial<Record<RequestMethod, string>> = {
@@ -102,5 +108,45 @@ describe('the public surface is small and justified', () => {
     for (const route of audit) {
       expect(route.justification.length).toBeGreaterThan(20);
     }
+  });
+});
+
+describe('the privileged surface is declared as privileged', () => {
+  const policy = buildRoutePolicy();
+  const staffRoutes = policy.staffRouteAudit();
+
+  /**
+   * The structural half of the rule.
+   *
+   * `staff()` is what gates a route on a role, and forgetting it leaves an
+   * approval endpoint reachable by any signed-in customer — authenticated, so
+   * not obviously wrong in a diff, and catastrophic. Tying the guarantee to
+   * the path prefix means the mistake cannot be made silently: an admin route
+   * declared with `authenticated()` fails the build here.
+   */
+  it('gates every /v1/admin/ route on a staff role', () => {
+    const admin = policy.declaredRoutes().filter((r) => r.includes(' /v1/admin/'));
+    expect(admin.length).toBeGreaterThan(0);
+
+    const gated = new Set(staffRoutes.map((r) => `${r.method} ${r.path}`));
+    expect(admin.filter((r) => !gated.has(r))).toEqual([]);
+  });
+
+  /** And the converse: a staff-only route that is not under /v1/admin/ is a
+   *  privileged endpoint hiding in the customer surface. */
+  it('keeps the staff surface under one prefix', () => {
+    const strays = staffRoutes
+      .map((r) => `${r.method} ${r.path}`)
+      .filter((r) => !r.includes(' /v1/admin/'));
+    expect(strays).toEqual([]);
+  });
+
+  it('lists exactly the routes only staff can reach', () => {
+    expect(staffRoutes.map((r) => `${r.method} ${r.path} (${r.role})`).sort()).toEqual([
+      'GET /v1/admin/giftcards/queue (giftcard_reviewer)',
+      'POST /v1/admin/giftcards/:id/clawback (giftcard_reviewer)',
+      'POST /v1/admin/giftcards/:id/reveal (giftcard_reviewer)',
+      'POST /v1/admin/giftcards/:id/review (giftcard_reviewer)',
+    ]);
   });
 });

@@ -18,6 +18,15 @@
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
+/**
+ * Mirrors the `staff_role` enum in 005_giftcards.sql.
+ *
+ * A literal union rather than a string, so a typo in a route declaration is a
+ * compile error rather than a route nobody can reach — which would look
+ * exactly like a permissions bug in production and take an afternoon.
+ */
+export type StaffRole = 'giftcard_reviewer' | 'admin';
+
 export type RouteAuth =
   | {
       readonly mode: 'authenticated';
@@ -28,6 +37,17 @@ export type RouteAuth =
        * default of `false` is how a transfer endpoint ends up PIN-free.
        */
       readonly pin: boolean;
+      /**
+       * A staff role the caller must hold. Absent means any authenticated
+       * customer, which is the overwhelmingly common case.
+       *
+       * Declared through `staff()` rather than as an option on
+       * `authenticated()`, so that gating a route on a role is a visibly
+       * different call in the policy list. A reviewer scanning the file sees
+       * the privileged surface without having to read the options object of
+       * every line.
+       */
+      readonly role?: StaffRole;
     }
   | {
       readonly mode: 'public';
@@ -37,7 +57,13 @@ export type RouteAuth =
 
 export type AccessDecision =
   | { readonly allow: true; readonly mode: 'public' }
-  | { readonly allow: true; readonly mode: 'authenticated'; readonly requiresPin: boolean }
+  | {
+      readonly allow: true;
+      readonly mode: 'authenticated';
+      readonly requiresPin: boolean;
+      /** Undefined means any authenticated customer. */
+      readonly requiresRole: StaffRole | undefined;
+    }
   | { readonly allow: false; readonly reason: 'undeclared_route' };
 
 export interface PublicRoute {
@@ -81,6 +107,26 @@ export class RoutePolicyRegistry {
   }
 
   /**
+   * A route only staff may call.
+   *
+   * The role is REQUIRED, with no default, for the same reason `pin` is: a
+   * default would let someone add an approval endpoint without stating who may
+   * use it, and "everyone signed in" is the wrong answer for every route that
+   * needs this method at all.
+   */
+  staff(
+    method: HttpMethod,
+    path: string,
+    options: { readonly pin: boolean; readonly role: StaffRole },
+  ): this {
+    return this.#declare(method, path, {
+      mode: 'authenticated',
+      pin: options.pin,
+      role: options.role,
+    });
+  }
+
+  /**
    * The justification is mandatory and is checked for content, not merely for
    * presence. It exists to be read during review: a route whose reason for
    * being public cannot be written down in a sentence usually should not be.
@@ -105,7 +151,12 @@ export class RoutePolicyRegistry {
 
     if (auth === undefined) return { allow: false, reason: 'undeclared_route' };
     if (auth.mode === 'public') return { allow: true, mode: 'public' };
-    return { allow: true, mode: 'authenticated', requiresPin: auth.pin };
+    return {
+      allow: true,
+      mode: 'authenticated',
+      requiresPin: auth.pin,
+      requiresRole: auth.role,
+    };
   }
 
   /**
@@ -131,5 +182,22 @@ export class RoutePolicyRegistry {
   /** Every declared route, for a coverage check against the router's own table. */
   declaredRoutes(): readonly string[] {
     return [...this.#routes.keys()].sort();
+  }
+
+  /**
+   * Every route gated on a staff role, with the role required.
+   *
+   * The privileged-surface counterpart to `publicRouteAudit()`. Both answer a
+   * question a reviewer should not have to grep for: what can be reached
+   * without signing in, and what can be reached only by staff.
+   */
+  staffRouteAudit(): readonly { method: HttpMethod; path: string; role: StaffRole }[] {
+    const out: { method: HttpMethod; path: string; role: StaffRole }[] = [];
+    for (const [key, auth] of this.#routes) {
+      if (auth.mode !== 'authenticated' || auth.role === undefined) continue;
+      const [method, ...rest] = key.split(' ');
+      out.push({ method: method as HttpMethod, path: rest.join(' '), role: auth.role });
+    }
+    return out.sort((a, b) => `${a.method} ${a.path}`.localeCompare(`${b.method} ${b.path}`));
   }
 }

@@ -58,6 +58,13 @@ export function testApiConfig(databaseUrl: string, overrides: Partial<ApiConfig>
     // fall back to the production default.
     reconcileGraceSeconds: 0,
     reconcileStaleSeconds: undefined,
+    // OFF by default here too, so the suite that asserts every gift card route
+    // refuses gets the production default rather than a test-only one. The
+    // suites that exercise the flow turn it on explicitly.
+    giftCardsEnabled: false,
+    giftCardHoldDays: 3,
+    // The gift card suite drives sweep() directly, so no timer.
+    giftCardReleaseIntervalSeconds: undefined,
     ...overrides,
   };
 }

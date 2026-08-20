@@ -220,6 +220,47 @@ Reverse   pending -> wallet           it did not — a reversal naming the reser
   on the port would give Airalo and Twilio a method that throws. Use
   `supportsVerification()`.
 
+### Gift cards — non-obvious rules
+
+Schema: `packages/ledger/sql/005_giftcards.sql`. Ships behind
+`GIFT_CARDS_ENABLED`, which defaults to **false**.
+
+Buying cards FROM customers inverts every other flow: they hand us a bearer
+instrument whose value we cannot verify at the moment we pay. Two controls
+follow, and both are in the schema.
+
+```
+Submit      (nothing)                                an offer, not a transaction
+Approve     giftcard_inventory -> customer_pending   paid, and NOT spendable
+Release     customer_pending   -> customer_wallet    the hold matured
+Claw back   a reversal naming the approval           only while still held
+Reject      (nothing)                                no entry ever existed
+```
+
+- **Every payout is approved by a human.** There is no auto-approval path and
+  no threshold below which one exists — "small" is what a fraudster sends first
+  to find where the threshold is.
+- **The hold is enforced by the database clock, in two places**: the
+  `giftcard_holds_due` view and the state-machine trigger. A release worker
+  with a skewed clock must not be able to shorten the only control still
+  standing after approval.
+- **A clawback works only while the money is held.** After release it may be
+  spent, and clawing back would overdraw a customer who did nothing wrong.
+- **Roles are read fresh per request, never carried in the access token.** A
+  signed token cannot be revoked mid-life; a role baked into one outlives its
+  own withdrawal by fifteen minutes.
+- **The role is checked before the PIN**, so probing an admin path cannot spend
+  a customer's PIN attempts.
+- **`/v1/admin/` routes must be declared with `staff()`**, and
+  `route-coverage.test.ts` fails the build otherwise. Using `authenticated()`
+  by mistake leaves an approval endpoint open to every signed-in customer.
+- **Card codes are sealed** (`^v[0-9]+:` CHECK) and never returned to a
+  customer. A reviewer reveals ONE deliberately; the queue listing carries none.
+- **Rate cards are append-only.** Editing one rewrites the price of every past
+  trade. Retire and republish.
+- **The rate IS the FX** — "N1,250.00 per USD of face value" — so this phase
+  needs none of Phase 10's machinery.
+
 ### apps/api
 
 - `AuthGuard` is registered with `APP_GUARD`, so it runs for **every** route. A
@@ -392,10 +433,12 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/003_cards.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/004_purchases.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/005_giftcards.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/003_cards.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/004_purchases.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/005_giftcards.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,
 # Redis for the rate-limiter contract.

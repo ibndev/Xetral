@@ -15,13 +15,13 @@ shipped, that is called out explicitly.
 | 4 — NGN wallet | ✅ | funding split out to Phase 8 |
 | 5 — Virtual USD cards | ✅ | Bitnob registration under review |
 | 6 — Bills, eSIM, numbers | ✅ | |
-| 7 — Gift cards | not built | ships flagged off by design |
+| 7 — Gift cards | ✅ | ships flagged off by design |
 | 8 — NGN funding rail | not built | **choosing a bank-rail provider** |
 | 9 — Crypto / USDT / stablecoin | not built | Bitnob registration under review |
 | 10 — Multi-currency + FX / remittance | not built | Bitnob registration under review |
 | 11 — Mobile and web clients | not built | |
 
-Five phases remain. Phase 8 is the one that gates taking real customer money:
+Four phases remain. Phase 8 is the one that gates taking real customer money:
 the platform can currently move, spend and reconcile funds it has no way to
 receive.
 
@@ -575,14 +575,88 @@ sets `RECONCILE_INTERVAL_SECONDS`, and exactly one instance should. The default
 is off and bootstrap warns about it, rather than every instance behind a load
 balancer sweeping at once.
 
-## Phase 7 — Gift cards *(flagged off)*
+## Phase 7 — Gift cards ✅ *(ships flagged off)*
 
-Ships disabled. Needs a review queue, hold periods and rate cards before enabling.
+Buying gift cards FROM customers, behind `GIFT_CARDS_ENABLED`, which defaults
+to false. 17 invariant blocks, 20 end-to-end, 4 guard tests.
 
-Buying cards *from* users is the highest-fraud surface in the product: the goods
-are bearer instruments, the seller is anonymous enough, and a redeemed card
-cannot be un-redeemed. The flag exists so the code can land and be reviewed
-without the risk being live.
+| File | What it is |
+|---|---|
+| `packages/ledger/sql/005_giftcards.sql` | staff roles, rate cards, submissions, the state machine |
+| `packages/ledger/sql/005_giftcards.test.sql` | 17 invariant blocks |
+| `packages/identity/src/policy.ts` | `staff()` and `staffRouteAudit()` |
+| `apps/api/src/auth/staff.service.ts` | who holds a role, read fresh per request |
+| `apps/api/src/giftcards/giftcard.service.ts` | quote, submit, review, claw back |
+| `apps/api/src/giftcards/hold-release.service.ts` | the sweep that makes held money spendable |
+
+**The shape of this flow is the fraud model.** Everywhere else the customer
+gives us money and we give them a thing. Here they give us a THING whose value
+we cannot verify at the moment we pay — a code that may already be redeemed,
+may be redeemed by the seller minutes later, or may belong to a card bought
+with a stolen credit card and voided weeks afterwards. There is no arrangement
+in which paying immediately is safe, so:
+
+```
+Submit      (nothing)                                an offer, not a transaction
+Approve     giftcard_inventory -> customer_pending   paid, and NOT spendable
+Release     customer_pending   -> customer_wallet    the hold matured
+Claw back   a reversal naming the approval           only while still held
+Reject      (nothing)                                no entry ever existed
+```
+
+Findings from building it:
+
+1. **A hold needed no new ledger machinery.** `customer_pending` already exists
+   and the wallet already reports it as unspendable, so the hold is an ordinary
+   posting to an account built in Phase 1 for card authorizations. The flow
+   that looked like it needed the most new invariants needed the fewest.
+2. **The hold period is enforced by the DATABASE clock, twice.**
+   `giftcard_holds_due` selects on `now()` and the state-machine trigger
+   refuses a release whose `hold_until` has not passed. A release worker on a
+   box with a skewed clock is exactly how a fraudulent card gets cashed out,
+   and the hold is the only control still standing once a card is approved.
+3. **A clawback is possible only while the money is held.** After release it
+   may already be spent, so clawing back would overdraw a customer who did
+   nothing wrong. The state machine refuses it with a reason rather than
+   letting the overdraft guard refuse it with a constraint violation.
+4. **Roles are read fresh, never carried in the token.** A signed access token
+   cannot be revoked mid-life, so a role baked into one keeps working for
+   fifteen minutes after it is withdrawn — and the moment you most want to
+   remove someone's approval rights is the moment you have just found out why.
+   Same rule the codebase already applies to `users.status`.
+5. **The role is checked BEFORE the PIN.** A customer poking at an admin path
+   must not have one of their five PIN attempts spent proving they are not
+   staff; that is a way to lock somebody out of their own money from an
+   endpoint they were never allowed to call. Asserted, not commented.
+6. **`/v1/admin/` is a structural guarantee, not a convention.**
+   `route-coverage.test.ts` fails the build if any admin route is declared with
+   `authenticated()` instead of `staff()`, and if any staff route lives outside
+   that prefix. Forgetting `staff()` would leave an approval endpoint reachable
+   by any signed-in customer — authenticated, so not obviously wrong in a diff.
+7. **The queue does not carry card codes.** Revealing one is a separate,
+   deliberate request against a single submission. A backlog listing that
+   returned every code would put a page of bearer instruments into a browser
+   tab, a log and a screenshot every time somebody glanced at it.
+8. **The rate is the FX.** Gift cards are quoted as "N1,250.00 per USD of face
+   value", which is how the Nigerian market actually prices them — so this
+   phase needs none of Phase 10's machinery. The rate is a price we set and
+   review, not a market quote.
+9. **Rate cards are append-only.** Editing one in place silently rewrites the
+   price of every past trade, which is noticed only when a customer produces a
+   screenshot. Retire and republish; the submission stores the id it was quoted
+   against.
+10. **"Flagged off" has to mean tested-and-disabled.** Both states are covered
+    end to end: a suite boots one app with the flag off and asserts every route
+    refuses with `gift_cards_disabled` (while still authenticating — a disabled
+    feature must not become an unauthenticated one), and another with it on
+    that drives the whole flow. A flag protecting code that has never run is
+    not a safety mechanism.
+
+**Before enabling, an operator must:** publish rate cards, grant
+`giftcard_reviewer` to real people, set `GIFTCARD_RELEASE_INTERVAL_SECONDS` on
+exactly one instance, and set `GIFT_CARD_HOLD_DAYS` deliberately. Bootstrap
+warns loudly if the feature is on and nobody is releasing holds — that failure
+is silent and slow: customers are paid and can never spend it.
 
 ---
 

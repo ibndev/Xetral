@@ -133,6 +133,36 @@ export interface ApiConfig {
    * development box and wrong for production.
    */
   readonly reconcileStaleSeconds: number | undefined;
+
+  /**
+   * Gift card trading. DEFAULTS TO OFF, and the default is the feature.
+   *
+   * Buying cards from customers is the highest-fraud surface in the product:
+   * the goods are bearer instruments, the seller is anonymous enough, and a
+   * redeemed card cannot be un-redeemed. The routes exist, are covered by the
+   * policy audit and are exercised by tests — so enabling it is a
+   * configuration change rather than a deploy of code nobody has run. That is
+   * what "ships flagged off" is supposed to mean, as opposed to "unfinished".
+   */
+  readonly giftCardsEnabled: boolean;
+  /**
+   * How long an approved gift card payout stays unspendable.
+   *
+   * This is the window in which a clawback is recoverable rather than a loss:
+   * an issuer voiding a card bought with a stolen credit card can take weeks,
+   * and every day of hold is a day of that risk we can still undo. Shortening
+   * it is a fraud-policy decision, not a UX tweak.
+   */
+  readonly giftCardHoldDays: number;
+  /**
+   * How often matured gift card holds are released, in seconds.
+   *
+   * Undefined means this instance does not release them, and exactly one
+   * should — same arrangement as the reconciliation sweep. Bootstrap warns
+   * loudly when gift cards are on and nobody is releasing, because that
+   * failure is silent and slow: customers are paid and can never spend it.
+   */
+  readonly giftCardReleaseIntervalSeconds: number | undefined;
 }
 
 export class ConfigError extends Error {
@@ -316,6 +346,18 @@ function optionalWholeNumber(env: Env, key: string): number | undefined {
   return value;
 }
 
+/**
+ * A boolean that must be spelled out.
+ *
+ * Anything other than the exact string 'true' is false, including 'yes', '1'
+ * and 'TRUE'. A permissive parser here would let a typo in a deployment
+ * variable enable the highest-fraud surface in the product, and the failure
+ * would be silent in the safe direction only by luck.
+ */
+function flag(env: Env, key: string): boolean {
+  return env[key] === 'true';
+}
+
 function optional(env: Env, key: string): string | undefined {
   const value = env[key];
   return value === undefined || value.trim() === '' ? undefined : value;
@@ -379,5 +421,8 @@ export function loadConfig(env: Env): ApiConfig {
     // Zero means "escalate anything still held", which is a legitimate, if
     // very loud, setting — so whole numbers rather than positive ones.
     reconcileStaleSeconds: optionalWholeNumber(env, 'RECONCILE_STALE_SECONDS'),
+    giftCardsEnabled: flag(env, 'GIFT_CARDS_ENABLED'),
+    giftCardHoldDays: integer(env, 'GIFT_CARD_HOLD_DAYS', 3),
+    giftCardReleaseIntervalSeconds: optionalInteger(env, 'GIFTCARD_RELEASE_INTERVAL_SECONDS'),
   };
 }

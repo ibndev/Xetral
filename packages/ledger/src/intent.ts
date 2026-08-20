@@ -38,6 +38,8 @@ export type EntryKind =
   | 'bill_payment'
   | 'esim_purchase'
   | 'number_purchase'
+  | 'giftcard_purchase'
+  | 'giftcard_hold_release'
   | 'crypto_deposit'
   | 'crypto_withdrawal'
   | 'fee'
@@ -53,6 +55,7 @@ export type AccountRef =
   | { readonly kind: 'revenue_fx_spread'; readonly currency: Currency }
   | { readonly kind: 'expense_provider_cost'; readonly currency: Currency }
   | { readonly kind: 'provider_float'; readonly currency: Currency }
+  | { readonly kind: 'asset_giftcard_inventory'; readonly currency: Currency }
   | { readonly kind: 'liability_customer_funds'; readonly currency: Currency }
   | { readonly kind: 'suspense'; readonly currency: Currency };
 

@@ -64,6 +64,35 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // Buying spends the customer's wallet balance.
       .authenticated('POST', '/v1/purchases', { pin: true })
 
+      // Gift cards. Every one of these refuses with `gift_cards_disabled`
+      // until GIFT_CARDS_ENABLED is set — the policy is declared regardless,
+      // because a route that exists must be policed whether or not it is
+      // currently serving.
+      .authenticated('GET', '/v1/giftcards', { pin: false })
+      .authenticated('POST', '/v1/giftcards/quote', { pin: false })
+      // Selling a card hands over a bearer instrument from the customer's
+      // account, so a stolen session must not be able to do it.
+      .authenticated('POST', '/v1/giftcards', { pin: true })
+
+      // The privileged surface. Declared with staff(), which is what makes
+      // them staff-only — and route-coverage.test.ts fails the build if any
+      // /v1/admin/ route is declared any other way.
+      .staff('GET', '/v1/admin/giftcards/queue', { pin: false, role: 'giftcard_reviewer' })
+      .staff('POST', '/v1/admin/giftcards/:id/reveal', {
+        pin: false,
+        role: 'giftcard_reviewer',
+      })
+      // Approving pays a customer. A reviewer who walked away from an unlocked
+      // laptop should not have left an approval button behind.
+      .staff('POST', '/v1/admin/giftcards/:id/review', {
+        pin: true,
+        role: 'giftcard_reviewer',
+      })
+      .staff('POST', '/v1/admin/giftcards/:id/clawback', {
+        pin: true,
+        role: 'giftcard_reviewer',
+      })
+
       .public(
         'POST',
         '/v1/webhooks/bitnob',

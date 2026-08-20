@@ -8,10 +8,11 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { RoutePolicyRegistry, signAccessToken } from '@xetral/identity';
 import type { AccessTokenKeyring } from '@xetral/identity';
-import { UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { afterAll, beforeEach, beforeAll, describe, expect, it } from 'vitest';
 import { AuthGuard } from './auth.guard.js';
 import { PinService } from './pin.service.js';
+import { StaffService } from './staff.service.js';
 import { API_CONFIG, CLOCK, ROUTE_POLICY } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
 
@@ -37,6 +38,7 @@ class ProbeController {
   @Get('open') open(): { ok: boolean } { return { ok: true }; }
   @Get('closed') closed(): { ok: boolean } { return { ok: true }; }
   @Post('money') money(): { ok: boolean } { return { ok: true }; }
+  @Post('review') review(): { ok: boolean } { return { ok: true }; }
   /** Declared nowhere. The mistake this whole design exists to catch. */
   @Get('forgotten') forgotten(): { ok: boolean } { return { ok: true }; }
 }
@@ -58,10 +60,20 @@ const pins = {
   },
 } as unknown as PinService;
 
+let staffAccepts = true;
+const staffCalls: string[] = [];
+const staff = {
+  assertRole: async (userUuid: string, role: string) => {
+    staffCalls.push(`${userUuid}:${role}`);
+    if (!staffAccepts) throw new ForbiddenException({ error: 'forbidden' });
+  },
+} as unknown as StaffService;
+
 const policy = new RoutePolicyRegistry()
   .public('GET', '/v1/probe/open', 'a probe with no customer data, for these tests')
   .authenticated('GET', '/v1/probe/closed', { pin: false })
-  .authenticated('POST', '/v1/probe/money', { pin: true });
+  .authenticated('POST', '/v1/probe/money', { pin: true })
+  .staff('POST', '/v1/probe/review', { pin: true, role: 'giftcard_reviewer' });
 
 @Module({
   controllers: [ProbeController],
@@ -70,6 +82,11 @@ const policy = new RoutePolicyRegistry()
     { provide: ROUTE_POLICY, useValue: policy },
     { provide: CLOCK, useValue: { nowMs: () => NOW * 1000, nowSeconds: () => NOW } },
     { provide: PinService, useValue: pins },
+    // Stands in for the real StaffService, which needs a database. These
+    // tests cover the guard's ORDERING -- that a role is checked after the
+    // bearer token and before the PIN -- not the role lookup itself, which is
+    // exercised end to end against real rows.
+    { provide: StaffService, useValue: staff },
     { provide: APP_GUARD, useClass: AuthGuard },
   ],
 })
@@ -89,6 +106,8 @@ beforeAll(async () => {
 beforeEach(() => {
   pinCalls.length = 0;
   pinAccepts = true;
+  staffCalls.length = 0;
+  staffAccepts = true;
 });
 
 afterAll(async () => {
@@ -224,5 +243,55 @@ describe('PIN-guarded routes', () => {
       .expect(200);
 
     expect(pinCalls).toEqual([]);
+  });
+});
+
+describe('staff routes', () => {
+  it('refuses a signed-in customer who holds no role', async () => {
+    staffAccepts = false;
+    const res = await request(app.getHttpServer())
+      .post('/v1/probe/review')
+      .set('Authorization', `Bearer ${bearer()}`)
+      .send({ transaction_pin: '123456' });
+
+    expect(res.status).toBe(403);
+    // No detail about which role was wanted. Somebody probing admin paths
+    // learns only that they cannot have them.
+    expect(res.body.error).toBe('forbidden');
+  });
+
+  it('checks the role BEFORE the PIN', async () => {
+    // The ordering claim, asserted rather than commented. A customer poking at
+    // an admin path must not have one of their five PIN attempts spent proving
+    // they are not staff — that is a way to lock somebody out of their own
+    // money from an endpoint they were never allowed to call.
+    staffAccepts = false;
+    await request(app.getHttpServer())
+      .post('/v1/probe/review')
+      .set('Authorization', `Bearer ${bearer()}`)
+      .send({ transaction_pin: '123456' });
+
+    expect(staffCalls).toHaveLength(1);
+    expect(pinCalls).toHaveLength(0);
+  });
+
+  it('does not look up a role for an unverified caller', async () => {
+    // And the same ordering one level up: an unauthenticated request must not
+    // reach the database at all.
+    const res = await request(app.getHttpServer()).post('/v1/probe/review').send({});
+    expect(res.status).toBe(401);
+    expect(staffCalls).toHaveLength(0);
+  });
+
+  it('lets a reviewer through, and still asks for their PIN', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/v1/probe/review')
+      .set('Authorization', `Bearer ${bearer()}`)
+      .send({ transaction_pin: '123456' })
+      .expect(201);
+
+    expect(res.body).toEqual({ ok: true });
+    expect(staffCalls).toEqual(['u:giftcard_reviewer']);
+    expect(pinCalls).toHaveLength(1);
   });
 });

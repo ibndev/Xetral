@@ -25,6 +25,13 @@ import { PurchaseController } from './purchases/purchase.controller.js';
 import { PurchaseService } from './purchases/purchase.service.js';
 import { PurchaseOutcome } from './purchases/purchase-outcome.js';
 import { ReconciliationService } from './purchases/reconciliation.service.js';
+import {
+  GiftCardController,
+  GiftCardReviewController,
+} from './giftcards/giftcard.controller.js';
+import { GiftCardService } from './giftcards/giftcard.service.js';
+import { GiftCardHoldService } from './giftcards/hold-release.service.js';
+import { StaffService } from './auth/staff.service.js';
 import { LoginRateLimitGuard } from './auth/login-rate-limit.guard.js';
 import { InMemoryRateLimitStore, RedisRateLimitStore } from './auth/rate-limit.js';
 import type { RateLimitStore } from './auth/rate-limit.js';
@@ -237,6 +244,17 @@ export class ReconciliationLifecycle implements OnApplicationBootstrap {
   }
 }
 
+/** Starts the gift card hold release sweep. Separate from the reconciliation
+ *  lifecycle because the two are enabled independently. */
+@Injectable()
+export class GiftCardLifecycle implements OnApplicationBootstrap {
+  constructor(@Inject(GiftCardHoldService) private readonly holds: GiftCardHoldService) {}
+
+  onApplicationBootstrap(): void {
+    this.holds.start();
+  }
+}
+
 /**
  * Configuration is passed in rather than read from process.env inside the
  * module. A module that reaches for the environment is a module that cannot be
@@ -254,6 +272,8 @@ export class AppModule {
         CardController,
         CardWebhookController,
         PurchaseController,
+        GiftCardController,
+        GiftCardReviewController,
       ],
       providers: [
         { provide: API_CONFIG, useValue: options.config },
@@ -285,8 +305,12 @@ export class AppModule {
         CardWebhookService,
         PurchaseService,
         PurchaseOutcome,
+        StaffService,
+        GiftCardService,
+        GiftCardHoldService,
         ReconciliationService,
         ReconciliationLifecycle,
+        GiftCardLifecycle,
         LoginRateLimitGuard,
 
         // Registered globally, so it runs for every route including one whose

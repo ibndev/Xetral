@@ -15,6 +15,7 @@ import type { Clock } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
 import { routeKeyOf } from './route-key.js';
 import { PinService } from './pin.service.js';
+import { StaffService } from './staff.service.js';
 
 /** The claims a handler can rely on once the guard has allowed the request. */
 export interface AuthenticatedRequest extends Request {
@@ -42,6 +43,7 @@ export class AuthGuard implements CanActivate {
     @Inject(API_CONFIG) private readonly config: ApiConfig,
     @Inject(CLOCK) private readonly clock: Clock,
     @Inject(PinService) private readonly pins: PinService,
+    @Inject(StaffService) private readonly staff: StaffService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -76,6 +78,14 @@ export class AuthGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const claims = this.#verifyBearer(request);
     request.auth = claims;
+
+    // The ROLE is checked before the PIN, and that order is also deliberate.
+    // A customer poking at an admin path should be refused for not being
+    // staff, not have one of their five PIN attempts spent proving it — the
+    // same reasoning that puts the bearer check before the PIN, one level up.
+    if (decision.requiresRole !== undefined) {
+      await this.staff.assertRole(claims.sub, decision.requiresRole);
+    }
 
     // The PIN is checked AFTER the bearer token, and the order is not
     // arbitrary: verifying a PIN for a caller whose session is invalid would
