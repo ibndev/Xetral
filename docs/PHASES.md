@@ -4,6 +4,27 @@ Each phase is independently landable. A later phase adds files and migrations; i
 does not require rewriting an earlier one. Where a phase changes something already
 shipped, that is called out explicitly.
 
+## Where things stand
+
+| Phase | | Blocked on |
+|---|---|---|
+| 0 — Foundation | ✅ | |
+| 1 — Ledger | ✅ | |
+| 2 — Identity & auth | ✅ | |
+| 3 — Provider ports + Bitnob adapter | ✅ | |
+| 4 — NGN wallet | ✅ | funding split out to Phase 8 |
+| 5 — Virtual USD cards | ✅ | Bitnob registration under review |
+| 6 — Bills, eSIM, numbers | ✅ | |
+| 7 — Gift cards | not built | ships flagged off by design |
+| 8 — NGN funding rail | not built | **choosing a bank-rail provider** |
+| 9 — Crypto / USDT / stablecoin | not built | Bitnob registration under review |
+| 10 — Multi-currency + FX / remittance | not built | Bitnob registration under review |
+| 11 — Mobile and web clients | not built | |
+
+Five phases remain. Phase 8 is the one that gates taking real customer money:
+the platform can currently move, spend and reconcile funds it has no way to
+receive.
+
 ---
 
 ## Phase 0 — Foundation ✅
@@ -270,8 +291,9 @@ constants, with tests written from the same assumptions, passed everything and
 would have failed on the first live call. The tests agreed with the code
 because the same person wrote both.
 
-**Still operational, and now the only open item:** Bitnob card issuing requires
-their approval before use. The card webhook EVENT NAMES resolve with it — their
+**CONFIRM BEFORE GO-LIVE — the only open item in the codebase.** Bitnob
+registration is currently UNDER REVIEW, and card issuing requires their
+approval before use. The card webhook EVENT NAMES resolve with it — their
 SDK does not define events, so the first real authorization is what settles the
 two-phase naming. An unrecognised event throws rather than being acknowledged,
 so a wrong name is loud and retried, never a dropped spend.
@@ -556,6 +578,59 @@ balancer sweeping at once.
 ## Phase 7 — Gift cards *(flagged off)*
 
 Ships disabled. Needs a review queue, hold periods and rate cards before enabling.
+
+Buying cards *from* users is the highest-fraud surface in the product: the goods
+are bearer instruments, the seller is anonymous enough, and a redeemed card
+cannot be un-redeemed. The flag exists so the code can land and be reviewed
+without the risk being live.
+
+---
+
+## Phase 8 — NGN funding rail
+
+**The one that blocks real deposits.** Everything else assumes money is already
+in a wallet; nothing puts it there. Customer-facing NGN funding needs virtual
+bank accounts, and none of the four live providers offers one — which makes
+choosing the provider a prerequisite rather than an implementation detail, and
+the reason this is a phase of its own rather than a task inside Phase 4.
+
+The accounting is already built and tested: funding is an ordinary journal
+entry, exercised by every e2e suite through a `fund()` helper standing in for
+the webhook. What is missing is the provider, its webhook, and the reconciliation
+of a bank rail — not the ledger.
+
+Note the constraint from Rule 0: Paystack, Anchor and ALAT appear in the
+reference plugin and are out of scope. A new provider means a new adapter behind
+`ports/`, not a resurrection.
+
+---
+
+## Phase 9 — Crypto: USDT, stablecoins, on-chain
+
+Bitnob. Deposits, withdrawals, and the `crypto_deposit` / `crypto_withdrawal`
+entry kinds that already exist in `001_ledger.sql` and have never been written.
+
+Blocked with Phase 5 on the same dependency: Bitnob registration is under
+review.
+
+---
+
+## Phase 10 — Multi-currency and FX / remittance
+
+Bitnob. The `fx_trade` entry kind and `revenue_fx_spread` account exist and are
+unused. The ledger was built multi-currency from Phase 1 precisely so this phase
+adds a flow rather than a migration — the per-currency balance invariant is
+already the thing that makes an FX entry safe.
+
+Also blocked on Bitnob.
+
+---
+
+## Phase 11 — The customer-facing clients
+
+`apps/mobile` (Expo, iOS + Android) and `apps/web` (Next.js) are in the
+documented layout and do not exist. Everything shipped so far is an HTTP API
+with no user in front of it.
 
 ---
 

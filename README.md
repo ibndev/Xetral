@@ -16,7 +16,7 @@ no PHP.
 | NGN wallet — transfer, balances, history | — | **built** |
 | NGN wallet — funding | *needs a bank rail* | blocked |
 | Bills, airtime, data | VTpass | **built** |
-| Virtual USD cards | Bitnob | **built** (needs Bitnob issuing approval) |
+| Virtual USD cards | Bitnob | **built** (Bitnob registration under review) |
 | Crypto / USDT / stablecoin | Bitnob | planned |
 | Multi-currency + FX / remittance | Bitnob | planned |
 | eSIM | Airalo | **built** |
@@ -27,7 +27,11 @@ Every adapter's endpoint table, auth scheme and signature is verified against
 that provider's own SDK or published documentation, and each names its source
 in a header comment. The one thing still unconfirmed is Bitnob's card **webhook
 event names**, which resolve together with the card-issuing approval that gates
-them — an unrecognised event throws and is retried rather than being dropped.
+them — Bitnob registration is under review. An unrecognised event throws and is
+retried rather than being dropped, so a wrong name there is loud rather than a
+lost spend. It is marked `CONFIRM BEFORE GO-LIVE` in
+`packages/providers/src/bitnob/events.ts`; that grep should return exactly one
+hit until the approval lands.
 
 Gift card trading ships disabled. Buying cards *from* users is the highest fraud
 surface of the six and needs a review queue and hold periods before it is safe.
@@ -60,7 +64,13 @@ apps/
 
 ## Phases
 
-See [`docs/PHASES.md`](docs/PHASES.md). Each phase lands independently.
+Phases 0–6 are built. Five remain — see [`docs/PHASES.md`](docs/PHASES.md),
+which opens with a status table and what each is blocked on. Each phase lands
+independently.
+
+**Phase 8 is the one that gates real money:** the platform can move, spend and
+reconcile funds it currently has no way to receive, because customer-facing NGN
+funding needs a bank rail and none of the four live providers offers one.
 
 ## Running the tests
 

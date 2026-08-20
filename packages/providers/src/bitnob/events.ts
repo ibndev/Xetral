@@ -3,8 +3,8 @@ import { z } from 'zod';
 /**
  * Bitnob's webhook event names and payload shapes.
  *
- * THE ONE THING IN THIS ADAPTER STILL UNVERIFIED, and it is blocked rather
- * than merely unfinished. Everything else Bitnob-shaped in this package was
+ * CONFIRM BEFORE GO-LIVE — THE ONE OPEN ITEM IN THE CODEBASE, and it is
+ * blocked rather than merely unfinished. Everything else Bitnob-shaped in this package was
  * checked against their official Node SDK (endpoint paths, request casing,
  * the HMAC-SHA512 webhook signature). The SDK does not define events, and
  * their documentation site is not reachable from this environment.
@@ -14,6 +14,10 @@ import { z } from 'zod';
  * only observable once that approval lands. Confirming these names is
  * therefore part of enabling issuing, not a prerequisite for it — the same
  * dependency PHASES.md records against Phase 5.
+ *
+ * STATUS: Bitnob registration is UNDER REVIEW. Nothing here can be closed
+ * until it clears, so this marker stays. When it does clear, the first live
+ * authorization settles the two names below and this comment goes with it.
  *
  * What is known: Bitnob's virtual-card webhooks use a `virtualcard.transaction.*`
  * family, including `.debit`, `.reversed` and `.declined`. What is NOT known is
