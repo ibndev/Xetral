@@ -106,6 +106,12 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       .authenticated('GET', '/v1/crypto/withdrawals/quote', { pin: false })
       .authenticated('POST', '/v1/crypto/withdrawals', { pin: true })
 
+      // FX and remittance. Converting spends one balance to create another,
+      // and remitting sends it to somebody else — both move money.
+      .authenticated('GET', '/v1/fx/quote', { pin: false })
+      .authenticated('GET', '/v1/fx/trades', { pin: false })
+      .authenticated('POST', '/v1/fx/convert', { pin: true })
+
       .public(
         'POST',
         '/v1/webhooks/bitnob/crypto',

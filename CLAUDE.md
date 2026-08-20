@@ -255,6 +255,37 @@ Suspense   provider_float -> suspense           it arrived; we cannot say whose
   never a side effect of tapping "add money".
 - **A forged webhook answers 401 and is dropped**, never 500 and never retried.
 
+### FX and remittance — non-obvious rules
+
+Schema: `packages/ledger/sql/008_fx.sql`. Added a **flow, not a migration** —
+`fx_trade` and `revenue_fx_spread` have been in the schema since Phase 1.
+
+```
+NGN legs:  wallet -X,  provider_float +(X - spread),  revenue_fx_spread +spread
+USD legs:  provider_float -Y,  wallet +Y
+```
+
+- **A rate is a RATIO of integers**, never a decimal and never minor-per-major.
+  Per-major works for USD→NGN and collapses for NGN→USD, where one kobo is
+  0.0006 cents. All rate arithmetic lives in `fx/rate-math.ts`.
+- **This is the flow the per-currency balance invariant was written for.** An
+  entry off by +1,000 kobo and −1,000 cents sums to zero whole-entry and would
+  credit ten dollars from nowhere.
+- **Helpers taking an amount must be generic** (`<B extends Currency>`). A bare
+  `Money` parameter is `Money<Currency>` and rejects every real caller.
+- **The spread comes off the base amount before conversion**, which makes it
+  revenue in the base currency and keeps each currency balanced.
+- **Both roundings are stated and favour opposite parties** — spread DOWN (the
+  customer keeps the fraction), conversion DOWN (we do). Never net them.
+- **A remittance is ONE entry.** Convert-then-transfer leaves a window where a
+  crash strands the money in a wallet the sender never meant to hold.
+- **Credit the FILL, not the quote.** A partial fill credited at quote pays the
+  difference out of the float, silently.
+- **A timed-out swap records nothing** — the one place doing nothing is safer
+  than holding, because the derived reference makes the retry idempotent at the
+  provider.
+- **An unpublished pair is refused, never quoted from a default.**
+
 ### Crypto (USDT, BTC, on-chain) — non-obvious rules
 
 Schema: `packages/ledger/sql/007_crypto.sql`. Needed **no new entry kinds** —
@@ -506,6 +537,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/004_purchases.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/005_giftcards.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/006_funding.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/007_crypto.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/008_fx.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/003_cards.test.sql
@@ -513,6 +545,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/004_purchases.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/005_giftcards.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/006_funding.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/007_crypto.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/008_fx.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,
 # Redis for the rate-limiter contract.

@@ -39,8 +39,8 @@ import {
 import { FundingService } from './funding/funding.service.js';
 import { DepositWebhookService } from './funding/deposit-webhook.service.js';
 import { DepositReconciliationService } from './funding/deposit-reconciliation.service.js';
-import { BitnobCryptoAdapter, BitnobFundingAdapter } from '@xetral/providers';
-import type { CryptoPort, FundingPort } from '@xetral/providers';
+import { BitnobCryptoAdapter, BitnobFundingAdapter, BitnobFxAdapter } from '@xetral/providers';
+import type { CryptoPort, FundingPort, FxPort } from '@xetral/providers';
 import {
   CryptoController,
   CryptoWebhookController,
@@ -48,6 +48,8 @@ import {
 import { CryptoService } from './crypto/crypto.service.js';
 import { CryptoWebhookService } from './crypto/crypto-webhook.service.js';
 import { CryptoReconciliationService } from './crypto/crypto-reconciliation.service.js';
+import { FxController } from './fx/fx.controller.js';
+import { FxService } from './fx/fx.service.js';
 import { LoginRateLimitGuard } from './auth/login-rate-limit.guard.js';
 import { InMemoryRateLimitStore, RedisRateLimitStore } from './auth/rate-limit.js';
 import type { RateLimitStore } from './auth/rate-limit.js';
@@ -62,6 +64,7 @@ import {
   FULFILMENT_PORTS,
   CRYPTO_PORT,
   FUNDING_PORT,
+  FX_PORT,
   LEDGER,
   RATE_LIMIT_STORE,
   ROUTE_POLICY,
@@ -85,6 +88,8 @@ export interface AppModuleOptions {
   readonly fundingPort?: FundingPort;
   /** Overridden in tests so crypto runs without a live Bitnob. */
   readonly cryptoPort?: CryptoPort;
+  /** Overridden in tests so FX runs without a live Bitnob. */
+  readonly fxPort?: FxPort;
 }
 
 /**
@@ -268,6 +273,23 @@ export function createCryptoPort(config: ApiConfig): CryptoPort {
   });
 }
 
+/** FX, or a stand-in that refuses. Same reasoning as the other single rails. */
+export function createFxPort(config: ApiConfig): FxPort {
+  const { bitnobBaseUrl, bitnobApiKey } = config;
+
+  if (bitnobBaseUrl === undefined || bitnobApiKey === undefined) {
+    new Logger('Fx').warn('BITNOB_BASE_URL or BITNOB_API_KEY is not set: FX routes will refuse.');
+    const refuse = async (): Promise<never> => {
+      throw new ServiceUnavailableException({ error: 'fx_provider_not_configured' });
+    };
+    return { provider: 'bitnob', rate: refuse, convert: refuse };
+  }
+
+  return new BitnobFxAdapter({
+    client: new BitnobClient({ baseUrl: bitnobBaseUrl, apiKey: bitnobApiKey }),
+  });
+}
+
 /**
  * Chooses the rate-limit backend, and says out loud when it picks the one that
  * only works on a single box.
@@ -387,6 +409,7 @@ export class AppModule {
         DepositWebhookController,
         CryptoController,
         CryptoWebhookController,
+        FxController,
       ],
       providers: [
         { provide: API_CONFIG, useValue: options.config },
@@ -419,6 +442,10 @@ export class AppModule {
           provide: CRYPTO_PORT,
           useValue: options.cryptoPort ?? createCryptoPort(options.config),
         },
+        {
+          provide: FX_PORT,
+          useValue: options.fxPort ?? createFxPort(options.config),
+        },
         AuthService,
         PinService,
         WalletService,
@@ -431,6 +458,7 @@ export class AppModule {
         DepositWebhookService,
         CryptoService,
         CryptoWebhookService,
+        FxService,
         CryptoReconciliationService,
         CryptoLifecycle,
         DepositReconciliationService,

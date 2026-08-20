@@ -18,12 +18,12 @@ shipped, that is called out explicitly.
 | 7 — Gift cards | ✅ | ships flagged off by design |
 | 8 — NGN funding rail | ✅ | |
 | 9 — Crypto / USDT / stablecoin | ✅ | Bitnob credentials to go live |
-| 10 — Multi-currency + FX / remittance | not built | Bitnob registration under review |
+| 10 — Multi-currency + FX / remittance | ✅ | Bitnob credentials to go live |
 | 11 — Mobile and web clients | not built | |
 
-Two phases remain. Everything shipped is implemented and tested against its
-port; Bitnob's live credentials are the only thing between the crypto and card
-flows and production traffic.
+One phase remains: the customer-facing clients. Every money flow in the product
+is built and tested against its port; Bitnob's live credentials are the only
+thing between the card, crypto and FX flows and production traffic.
 
 ---
 
@@ -834,14 +834,80 @@ wrong name is loud rather than a dropped deposit.
 
 ---
 
-## Phase 10 — Multi-currency and FX / remittance
+## Phase 10 — Multi-currency and FX / remittance ✅
 
-Bitnob. The `fx_trade` entry kind and `revenue_fx_spread` account exist and are
-unused. The ledger was built multi-currency from Phase 1 precisely so this phase
-adds a flow rather than a migration — the per-currency balance invariant is
-already the thing that makes an FX entry safe.
+Converting between currencies, and sending across them. 12 invariant blocks,
+14 rate-math unit tests, 17 end-to-end.
 
-Also blocked on Bitnob.
+| File | What it is |
+|---|---|
+| `packages/ledger/sql/008_fx.sql` | spread policies, executed trades |
+| `packages/ledger/sql/008_fx.test.sql` | 12 invariant blocks |
+| `packages/providers/src/ports/fx.ts` | the FX port |
+| `packages/providers/src/fx/rate-math.ts` | the one place a rate is applied |
+| `packages/providers/src/bitnob/fx-adapter.ts` | `FxPort` against Bitnob |
+| `apps/api/src/fx/fx.service.ts` | quote, convert, remit |
+
+**This phase added a flow, not a migration** — exactly as Phase 1 predicted.
+`fx_trade` and `revenue_fx_spread` have been in the schema since then, and the
+balance invariant has been PER CURRENCY since then, which is the thing that
+makes a two-currency entry safe:
+
+```
+NGN legs:  wallet -X,  provider_float +(X - spread),  revenue_fx_spread +spread
+USD legs:  provider_float -Y,  wallet +Y
+```
+
+Findings from building it:
+
+1. **A rate is a RATIO, not a decimal.** `quoteMinor = baseMinor * numerator /
+   denominator`, both integers. "Minor units per major unit" — which is how the
+   gift card rate card works — is fine for USD to NGN and collapses in the
+   other direction, where one kobo is 0.0006 cents and any per-major integer
+   rounds to zero.
+2. **The per-currency balance invariant earns its keep here.** Test 2 posts an
+   entry that is +1,000 kobo and −1,000 cents: a whole-entry sum is exactly
+   zero and it would commit, crediting ten dollars from nowhere. This is the
+   case Phase 1 finding 1 described, and this is the flow it was guarding.
+3. **A test can pass for the wrong reason, and only a specific assertion
+   catches it.** That same block was green while never reaching the balance
+   check — it was failing on the overdraft guard, because an earlier block had
+   spent the customer's naira. Tightening the handler from `WHEN OTHERS` to
+   "and the message must say `unbalanced journal entry`" turned a
+   green-and-meaningless test into a real one.
+4. **`Money` invariance bites helpers that look like they only read numbers.**
+   `convertWithSpread(amount: Money<Currency>, …)` compiles and then rejects
+   every caller, because a bare `Money` is the union. It has to be generic.
+   CLAUDE.md records this rule; the code still walked into it, which is why the
+   rule is written down.
+5. **The spread comes off the base amount, before conversion.** That makes it
+   revenue in the base currency and keeps each currency balanced without a
+   cross-currency fudge leg.
+6. **Both roundings are stated, and they favour opposite parties.** The spread
+   rounds DOWN (the customer keeps the fraction); the conversion rounds DOWN
+   (we do). Netting them into one number would hide both.
+7. **A remittance is ONE entry, not a conversion plus a transfer.** Two entries
+   would leave a window in which the money sits in a wallet the sender never
+   meant to hold it in, and a crash in that window strands it there.
+8. **Believe the fill, not the quote.** If the provider delivers less than
+   quoted, the customer receives what was delivered. Crediting the quote would
+   pay the difference out of the float, silently, on every partial fill.
+9. **A timed-out swap records nothing.** We do not know whether it happened;
+   posting would risk crediting twice on retry. The derived reference makes the
+   retry idempotent at the provider instead — the one place where doing nothing
+   is the safe move rather than holding money.
+10. **Shared invariant databases collide on names, not just on ids.** These
+    keys are prefixed `p10:` because `001_ledger.test.sql` has used
+    `test:fx-1` for its own FX test since Phase 1, and the unprefixed name
+    aborted this whole file on its first block in CI order.
+
+**Before going live, an operator must:** set `BITNOB_BASE_URL` and
+`BITNOB_API_KEY`, and publish an `fx_spread_policies` row per pair and
+direction. There is no default spread and no default minimum: an unpublished
+pair is refused rather than quoted from a number nobody reviewed.
+
+**CONFIRM BEFORE GO-LIVE:** the paths in `BITNOB_FX_ENDPOINTS`, with the rest
+of the Bitnob surface.
 
 ---
 

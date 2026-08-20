@@ -17,6 +17,7 @@ import {
   CryptoController,
   CryptoWebhookController,
 } from '../crypto/crypto.controller.js';
+import { FxController } from '../fx/fx.controller.js';
 import { METHOD_METADATA, PATH_METADATA, buildRoutePath } from './route-key.js';
 import { buildRoutePolicy } from './routes.js';
 
@@ -48,6 +49,7 @@ const CONTROLLERS = [
   DepositWebhookController,
   CryptoController,
   CryptoWebhookController,
+  FxController,
 ];
 
 const METHOD_NAMES: Partial<Record<RequestMethod, string>> = {

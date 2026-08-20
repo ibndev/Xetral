@@ -26,6 +26,8 @@ export const FULFILMENT_PORTS = Symbol('FULFILMENT_PORTS');
 export const FUNDING_PORT = Symbol('FUNDING_PORT');
 /** On-chain assets. One per instance. */
 export const CRYPTO_PORT = Symbol('CRYPTO_PORT');
+/** FX rates and swaps. One per instance. */
+export const FX_PORT = Symbol('FX_PORT');
 export const CLOCK = Symbol('CLOCK');
 
 /** Injected rather than read from Date.now() so expiry and rate-limit windows

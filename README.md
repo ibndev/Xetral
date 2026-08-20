@@ -18,7 +18,7 @@ no PHP.
 | Bills, airtime, data | VTpass | **built** |
 | Virtual USD cards | Bitnob | **built** (Bitnob registration under review) |
 | Crypto / USDT / stablecoin | Bitnob | **built** (needs Bitnob credentials) |
-| Multi-currency + FX / remittance | Bitnob | planned |
+| Multi-currency + FX / remittance | Bitnob | **built** (needs Bitnob credentials) |
 | eSIM | Airalo | **built** |
 | Virtual numbers | Twilio | **built** |
 | Gift card trading | — | **built**, ships flagged off (`GIFT_CARDS_ENABLED`) |
@@ -69,14 +69,15 @@ apps/
 
 ## Phases
 
-Phases 0–9 are built. Two remain — see [`docs/PHASES.md`](docs/PHASES.md),
+Phases 0–10 are built. One remains — see [`docs/PHASES.md`](docs/PHASES.md),
 which opens with a status table and what each is blocked on. Each phase lands
 independently.
 
 Customers fund their wallets through a **dedicated Nigerian account number**
 issued by Bitnob, in their own name and permanent, and can send and receive
-USDT and BTC on-chain. The two remaining phases are FX/remittance and the
-mobile and web clients.
+USDT and BTC on-chain, convert between currencies and remit across them. The
+one remaining phase is the mobile and web clients — everything shipped so far
+is an HTTP API with no user in front of it.
 
 ## Running the tests
 
@@ -101,6 +102,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/004_purchases.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/005_giftcards.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/006_funding.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/007_crypto.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/008_fx.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/003_cards.test.sql
@@ -108,6 +110,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/004_purchases.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/005_giftcards.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/006_funding.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/007_crypto.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/008_fx.test.sql
 ```
 
 All 12 ledger tests, 20 identity blocks, 10 card blocks and 11 purchase blocks print `PASS`. Any `TEST FAILED`
