@@ -8,8 +8,10 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { RoutePolicyRegistry, signAccessToken } from '@xetral/identity';
 import type { AccessTokenKeyring } from '@xetral/identity';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { UnauthorizedException } from '@nestjs/common';
+import { afterAll, beforeEach, beforeAll, describe, expect, it } from 'vitest';
 import { AuthGuard } from './auth.guard.js';
+import { PinService } from './pin.service.js';
 import { API_CONFIG, CLOCK, ROUTE_POLICY } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
 
@@ -39,6 +41,23 @@ class ProbeController {
   @Get('forgotten') forgotten(): { ok: boolean } { return { ok: true }; }
 }
 
+/**
+ * Stands in for the real PinService, which needs a database. What is under test
+ * here is the GUARD's behaviour around the PIN — that it demands one, that it
+ * refuses without one, and crucially that it does not reach for one until the
+ * bearer token has been verified. PinService's own logic is covered against a
+ * real database in the e2e suite.
+ */
+const pinCalls: { sub: string; pin: string }[] = [];
+let pinAccepts = true;
+
+const pins = {
+  async assertValid(sub: string, pin: string): Promise<void> {
+    pinCalls.push({ sub, pin });
+    if (!pinAccepts) throw new UnauthorizedException({ error: 'invalid_pin' });
+  },
+} as unknown as PinService;
+
 const policy = new RoutePolicyRegistry()
   .public('GET', '/v1/probe/open', 'a probe with no customer data, for these tests')
   .authenticated('GET', '/v1/probe/closed', { pin: false })
@@ -50,6 +69,7 @@ const policy = new RoutePolicyRegistry()
     { provide: API_CONFIG, useValue: config },
     { provide: ROUTE_POLICY, useValue: policy },
     { provide: CLOCK, useValue: { nowMs: () => NOW * 1000, nowSeconds: () => NOW } },
+    { provide: PinService, useValue: pins },
     { provide: APP_GUARD, useClass: AuthGuard },
   ],
 })
@@ -64,6 +84,11 @@ beforeAll(async () => {
   const mod = await Test.createTestingModule({ imports: [ProbeModule] }).compile();
   app = mod.createNestApplication(new ExpressAdapter());
   await app.init();
+});
+
+beforeEach(() => {
+  pinCalls.length = 0;
+  pinAccepts = true;
 });
 
 afterAll(async () => {
@@ -143,17 +168,61 @@ describe('bearer verification', () => {
   });
 });
 
-describe('PIN-guarded routes fail closed', () => {
-  it('refuses a route declaring pin: true while enforcement is unbuilt', async () => {
-    // The one outcome that must never happen is a money-moving route serving
-    // traffic while its author believes `pin: true` is protecting it. Until the
-    // PIN check exists, such a route cannot respond at all -- even with a
-    // perfectly valid access token.
+describe('PIN-guarded routes', () => {
+  it('verifies the transaction PIN before the handler runs', async () => {
     const res = await request(app.getHttpServer())
       .post('/v1/probe/money')
-      .set('Authorization', `Bearer ${bearer()}`);
+      .set('Authorization', `Bearer ${bearer()}`)
+      .send({ transaction_pin: '374915' });
 
-    expect(res.status).toBe(500);
-    expect(res.body.error).toBe('pin_enforcement_unavailable');
+    // 201: the probe controller sets no @HttpCode, so Nest's POST default
+    // applies. The real transfer route pins it to 200.
+    expect(res.status).toBe(201);
+    expect(pinCalls).toEqual([{ sub: 'u', pin: '374915' }]);
+  });
+
+  it('refuses a money route with no PIN in the body', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/v1/probe/money')
+      .set('Authorization', `Bearer ${bearer()}`)
+      .send({});
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('transaction_pin_required');
+    expect(pinCalls).toEqual([]);
+  });
+
+  it('refuses when the PIN is wrong', async () => {
+    pinAccepts = false;
+    const res = await request(app.getHttpServer())
+      .post('/v1/probe/money')
+      .set('Authorization', `Bearer ${bearer()}`)
+      .send({ transaction_pin: '000001' });
+
+    expect(res.status).toBe(401);
+    expect(res.body.error).toBe('invalid_pin');
+  });
+
+  it('does not spend a PIN attempt when the session is invalid', async () => {
+    // Order matters. Verifying a PIN for a caller whose bearer token is
+    // forged would burn one of that customer's five attempts on a request
+    // they never made -- a way to lock anyone out of their own money.
+    const res = await request(app.getHttpServer())
+      .post('/v1/probe/money')
+      .set('Authorization', 'Bearer forged')
+      .send({ transaction_pin: '374915' });
+
+    expect(res.status).toBe(401);
+    expect(res.body.error).toBe('invalid_token');
+    expect(pinCalls).toEqual([]);
+  });
+
+  it('does not ask for a PIN on a route that does not require one', async () => {
+    await request(app.getHttpServer())
+      .get('/v1/probe/closed')
+      .set('Authorization', `Bearer ${bearer()}`)
+      .expect(200);
+
+    expect(pinCalls).toEqual([]);
   });
 });

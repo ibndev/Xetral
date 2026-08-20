@@ -1,8 +1,8 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Inject,
   Injectable,
-  InternalServerErrorException,
   Logger,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -14,6 +14,7 @@ import { API_CONFIG, CLOCK, ROUTE_POLICY } from '../tokens.js';
 import type { Clock } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
 import { routeKeyOf } from './route-key.js';
+import { PinService } from './pin.service.js';
 
 /** The claims a handler can rely on once the guard has allowed the request. */
 export interface AuthenticatedRequest extends Request {
@@ -40,9 +41,10 @@ export class AuthGuard implements CanActivate {
     @Inject(ROUTE_POLICY) private readonly policy: RoutePolicyRegistry,
     @Inject(API_CONFIG) private readonly config: ApiConfig,
     @Inject(CLOCK) private readonly clock: Clock,
+    @Inject(PinService) private readonly pins: PinService,
   ) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     // Only HTTP is served today. Anything else has not been reasoned about, so
     // it is refused rather than waved through by a default case.
     if (context.getType() !== 'http') {
@@ -71,22 +73,17 @@ export class AuthGuard implements CanActivate {
 
     if (decision.mode === 'public') return true;
 
-    if (decision.requiresPin) {
-      // FAIL CLOSED. Transaction-PIN enforcement is not built yet, and the one
-      // thing that must never happen is a money-moving route going live while
-      // its author believes `pin: true` is protecting it. Refusing loudly is
-      // the only safe behaviour until the PIN check exists; a route that
-      // declares `pin: true` cannot serve traffic until then.
-      this.#logger.error(
-        `${route.method} ${route.path} declares pin: true, but transaction-PIN ` +
-          `enforcement is not implemented. Refusing.`,
-      );
-      throw new InternalServerErrorException({ error: 'pin_enforcement_unavailable' });
-    }
-
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const claims = this.#verifyBearer(request);
     request.auth = claims;
+
+    // The PIN is checked AFTER the bearer token, and the order is not
+    // arbitrary: verifying a PIN for a caller whose session is invalid would
+    // spend one of that customer's five attempts on a request they never made.
+    if (decision.requiresPin) {
+      await this.pins.assertValid(claims.sub, pinFrom(request));
+    }
+
     return true;
   }
 
@@ -112,4 +109,24 @@ export class AuthGuard implements CanActivate {
 
     return result.claims;
   }
+}
+
+/**
+ * Reads the transaction PIN out of the request body.
+ *
+ * It travels in the body rather than a header so it lands in the same place as
+ * the rest of the instruction it authorises, and so `redactPayload` — which
+ * matches any key containing "pin" — scrubs it on every path that logs a body.
+ */
+function pinFrom(request: AuthenticatedRequest): string {
+  const body: unknown = request.body;
+  const value =
+    typeof body === 'object' && body !== null && 'transaction_pin' in body
+      ? (body as { transaction_pin?: unknown }).transaction_pin
+      : undefined;
+
+  if (typeof value !== 'string' || value === '') {
+    throw new BadRequestException({ error: 'transaction_pin_required' });
+  }
+  return value;
 }

@@ -12,6 +12,8 @@ import {
 } from '@nestjs/common';
 import type { AuthenticatedRequest } from './auth.guard.js';
 import { AuthService } from './auth.service.js';
+import { PinService } from './pin.service.js';
+import { setPinSchema } from '../wallet/dto.js';
 import type { SessionSummary, TokenPair } from './auth.service.js';
 import { LoginRateLimitGuard } from './login-rate-limit.guard.js';
 import { loginSchema, refreshSchema } from './dto.js';
@@ -25,7 +27,10 @@ import { loginSchema, refreshSchema } from './dto.js';
  */
 @Controller('v1/auth')
 export class AuthController {
-  constructor(@Inject(AuthService) private readonly auth: AuthService) {}
+  constructor(
+    @Inject(AuthService) private readonly auth: AuthService,
+    @Inject(PinService) private readonly pins: PinService,
+  ) {}
 
   /**
    * 200 rather than 201: this creates a session, but the response body is a
@@ -70,6 +75,30 @@ export class AuthController {
     const claims = request.auth;
     if (claims === undefined) throw new Error('logout reached without verified claims');
     await this.auth.logout(claims.sid);
+  }
+
+  /**
+   * Sets a transaction PIN, or changes one.
+   *
+   * Declares `pin: false` even though it is about the PIN: requiring the PIN to
+   * set the first PIN would be circular. Changing one DOES require the current
+   * value, enforced in the service, because otherwise a stolen session could
+   * replace the very factor meant to stop it.
+   */
+  @Post('pin')
+  @HttpCode(204)
+  async setPin(@Req() request: AuthenticatedRequest, @Body() body: unknown): Promise<void> {
+    const claims = request.auth;
+    if (claims === undefined) throw new Error('setPin reached without verified claims');
+
+    const parsed = setPinSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException({
+        error: 'invalid_request',
+        fields: parsed.error.issues.map((issue) => issue.path.join('.')),
+      });
+    }
+    await this.pins.set(claims.sub, parsed.data.pin, parsed.data.current_pin);
   }
 
   @Get('session')

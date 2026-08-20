@@ -43,6 +43,15 @@ export interface ApiConfig {
    * multiply by the instance count.
    */
   readonly redisUrl: string | undefined;
+  /**
+   * Transfer fee in BASIS POINTS (150 = 1.5%), never a decimal.
+   *
+   * Defaults to ZERO, deliberately. A fee nobody configured is money taken
+   * from a customer because of a default, and the failure is silent — every
+   * transfer just costs slightly more than the product intended. Charging
+   * nothing until somebody sets a number is the safe direction to be wrong in.
+   */
+  readonly transferFeeBasisPoints: number;
 }
 
 export class ConfigError extends Error {
@@ -121,6 +130,19 @@ function parseKeyring(env: Env): AccessTokenKeyring {
   return { current, accepted };
 }
 
+/** Zero is a legitimate value, so this cannot reuse `integer()`, which treats
+ *  zero as unset and falls back. */
+function basisPoints(env: Env, key: string): number {
+  const raw = env[key];
+  if (raw === undefined || raw.trim() === '') return 0;
+
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0 || value > 10_000) {
+    throw new ConfigError(`${key} must be an integer between 0 and 10000, got '${raw}'`);
+  }
+  return value;
+}
+
 export function loadConfig(env: Env): ApiConfig {
   const accessTokenTtlSeconds = integer(env, 'ACCESS_TOKEN_TTL_SECONDS', ACCESS_TOKEN_TTL_SECONDS);
 
@@ -156,5 +178,6 @@ export function loadConfig(env: Env): ApiConfig {
     },
     trustProxyHops: integer(env, 'TRUST_PROXY_HOPS', 1),
     redisUrl: env['REDIS_URL'] === '' ? undefined : env['REDIS_URL'],
+    transferFeeBasisPoints: basisPoints(env, 'TRANSFER_FEE_BASIS_POINTS'),
   };
 }

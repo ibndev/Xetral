@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { RequestMethod } from '@nestjs/common';
 import { describe, expect, it } from 'vitest';
 import { AuthController } from './auth.controller.js';
+import { WalletController } from '../wallet/wallet.controller.js';
 import { METHOD_METADATA, PATH_METADATA, buildRoutePath } from './route-key.js';
 import { buildRoutePolicy } from './routes.js';
 
@@ -18,7 +19,10 @@ import { buildRoutePolicy } from './routes.js';
  * stop reading it.
  */
 
-const CONTROLLERS = [AuthController];
+// Every controller the app mounts. Missing one here would let its routes go
+// undeclared without failing this test -- so app.module.ts and this list are
+// the pair that must stay in step.
+const CONTROLLERS = [AuthController, WalletController];
 
 const METHOD_NAMES: Partial<Record<RequestMethod, string>> = {
   [RequestMethod.GET]: 'GET',

@@ -3,16 +3,28 @@ import { APP_GUARD } from '@nestjs/core';
 import type { DynamicModule, OnApplicationShutdown } from '@nestjs/common';
 import Redis from 'ioredis';
 import type { Pool } from 'pg';
+import { LedgerService } from '@xetral/ledger';
 import { AuthController } from './auth/auth.controller.js';
 import { AuthGuard } from './auth/auth.guard.js';
 import { AuthService } from './auth/auth.service.js';
+import { PinService } from './auth/pin.service.js';
+import { WalletController } from './wallet/wallet.controller.js';
+import { WalletService } from './wallet/wallet.service.js';
 import { LoginRateLimitGuard } from './auth/login-rate-limit.guard.js';
 import { InMemoryRateLimitStore, RedisRateLimitStore } from './auth/rate-limit.js';
 import type { RateLimitStore } from './auth/rate-limit.js';
 import { buildRoutePolicy } from './auth/routes.js';
 import { createPool } from './database.js';
 import type { ApiConfig } from './config.js';
-import { API_CONFIG, CLOCK, DATABASE, RATE_LIMIT_STORE, ROUTE_POLICY, systemClock } from './tokens.js';
+import {
+  API_CONFIG,
+  CLOCK,
+  DATABASE,
+  LEDGER,
+  RATE_LIMIT_STORE,
+  ROUTE_POLICY,
+  systemClock,
+} from './tokens.js';
 import type { Clock } from './tokens.js';
 
 export interface AppModuleOptions {
@@ -76,7 +88,7 @@ export class AppModule {
   static forRoot(options: AppModuleOptions): DynamicModule {
     return {
       module: AppModule,
-      controllers: [AuthController],
+      controllers: [AuthController, WalletController],
       providers: [
         { provide: API_CONFIG, useValue: options.config },
         { provide: CLOCK, useValue: options.clock ?? systemClock },
@@ -87,7 +99,14 @@ export class AppModule {
           useValue: options.rateLimitStore ?? createRateLimitStore(options.config),
         },
         RateLimitLifecycle,
+        {
+          provide: LEDGER,
+          useFactory: (pool: Pool) => new LedgerService(pool),
+          inject: [DATABASE],
+        },
         AuthService,
+        PinService,
+        WalletService,
         LoginRateLimitGuard,
 
         // Registered globally, so it runs for every route including one whose

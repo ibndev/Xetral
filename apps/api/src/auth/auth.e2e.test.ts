@@ -51,6 +51,7 @@ function makeConfig(overrides: Partial<ApiConfig> = {}): ApiConfig {
     // RedisRateLimitStore is held to the same contract in
     // rate-limit.redis.e2e.test.ts.
     redisUrl: undefined,
+    transferFeeBasisPoints: 0,
     ...overrides,
   };
 }

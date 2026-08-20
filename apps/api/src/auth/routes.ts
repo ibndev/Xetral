@@ -29,5 +29,16 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       )
       .authenticated('POST', '/v1/auth/logout', { pin: false })
       .authenticated('GET', '/v1/auth/session', { pin: false })
+      // Setting the first PIN cannot itself require a PIN. Changing one does,
+      // and that is enforced in PinService because only it knows whether a PIN
+      // already exists.
+      .authenticated('POST', '/v1/auth/pin', { pin: false })
+
+      .authenticated('GET', '/v1/wallets', { pin: false })
+      .authenticated('GET', '/v1/wallets/transactions', { pin: false })
+      // The first route in the platform to declare pin: true, and the reason
+      // the flag exists. Reading a balance does not need a PIN; moving money
+      // does.
+      .authenticated('POST', '/v1/wallets/transfers', { pin: true })
   );
 }
