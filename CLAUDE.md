@@ -255,6 +255,40 @@ Suspense   provider_float -> suspense           it arrived; we cannot say whose
   never a side effect of tapping "add money".
 - **A forged webhook answers 401 and is dropped**, never 500 and never retried.
 
+### Crypto (USDT, BTC, on-chain) — non-obvious rules
+
+Schema: `packages/ledger/sql/007_crypto.sql`. Needed **no new entry kinds** —
+`crypto_deposit` and `crypto_withdrawal` have been in `001_ledger.sql` since
+Phase 1.
+
+```
+Deposit seen        provider_float   -> customer_pending   visible, NOT spendable
+Deposit confirmed   customer_pending -> customer_wallet    final
+Withdrawal reserved customer_wallet  -> customer_pending   the guard decides
+Withdrawal sent     customer_pending -> provider_float     unrecallable
+Withdrawal failed   a reversal naming the reservation      it never left
+```
+
+- **A deposit is two events, like a card spend.** One confirmation can be
+  reorganised away, so money sits in `customer_pending` until the threshold.
+  The two phases carry DIFFERENT idempotency keys derived from one event —
+  without the suffix the confirmation replays the seen entry.
+- **The threshold is per chain and stored per deposit row.** A Bitcoin block is
+  ten minutes and a Tron block is three seconds. Storing it on the row means
+  raising it later cannot un-confirm money already spent.
+- **Address validation is checksum validation.** Base58Check (Tron, legacy
+  BTC), bech32 (SegWit), EIP-55 (ETH/BSC). Shape checks accept a transposed
+  character; checksums do not, and a wrong address cannot be undone.
+- **Never hand-roll a hash here.** Keccak-256 comes from `@noble/hashes`, and
+  Node's `sha3-256` is a different function that would silently break EIP-55.
+  Import `@noble/hashes/sha3.js` — the extensionless specifier is CommonJS-only
+  and fails under native ESM.
+- **A crypto deposit to an unknown address is NOT suspense.** An address we did
+  not issue is not ours; the event throws and is retried.
+- **`max_fee` is part of consent.** Fees move between quote and request.
+- **An unrecognised provider status throws**, never defaults — one default
+  reverses money that is on a chain, the other lies about money that never left.
+
 ### Gift cards — non-obvious rules
 
 Schema: `packages/ledger/sql/005_giftcards.sql`. Ships behind
@@ -471,12 +505,14 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/003_cards.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/004_purchases.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/005_giftcards.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/006_funding.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/007_crypto.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/003_cards.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/004_purchases.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/005_giftcards.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/006_funding.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/007_crypto.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,
 # Redis for the rate-limiter contract.

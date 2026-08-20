@@ -13,6 +13,10 @@ import {
   DepositWebhookController,
   FundingController,
 } from '../funding/funding.controller.js';
+import {
+  CryptoController,
+  CryptoWebhookController,
+} from '../crypto/crypto.controller.js';
 import { METHOD_METADATA, PATH_METADATA, buildRoutePath } from './route-key.js';
 import { buildRoutePolicy } from './routes.js';
 
@@ -42,6 +46,8 @@ const CONTROLLERS = [
   GiftCardReviewController,
   FundingController,
   DepositWebhookController,
+  CryptoController,
+  CryptoWebhookController,
 ];
 
 const METHOD_NAMES: Partial<Record<RequestMethod, string>> = {
@@ -107,6 +113,7 @@ describe('the public surface is small and justified', () => {
       'POST /v1/auth/login',
       'POST /v1/auth/refresh',
       'POST /v1/webhooks/bitnob',
+      'POST /v1/webhooks/bitnob/crypto',
       'POST /v1/webhooks/bitnob/deposits',
     ]);
   });

@@ -39,8 +39,15 @@ import {
 import { FundingService } from './funding/funding.service.js';
 import { DepositWebhookService } from './funding/deposit-webhook.service.js';
 import { DepositReconciliationService } from './funding/deposit-reconciliation.service.js';
-import { BitnobFundingAdapter } from '@xetral/providers';
-import type { FundingPort } from '@xetral/providers';
+import { BitnobCryptoAdapter, BitnobFundingAdapter } from '@xetral/providers';
+import type { CryptoPort, FundingPort } from '@xetral/providers';
+import {
+  CryptoController,
+  CryptoWebhookController,
+} from './crypto/crypto.controller.js';
+import { CryptoService } from './crypto/crypto.service.js';
+import { CryptoWebhookService } from './crypto/crypto-webhook.service.js';
+import { CryptoReconciliationService } from './crypto/crypto-reconciliation.service.js';
 import { LoginRateLimitGuard } from './auth/login-rate-limit.guard.js';
 import { InMemoryRateLimitStore, RedisRateLimitStore } from './auth/rate-limit.js';
 import type { RateLimitStore } from './auth/rate-limit.js';
@@ -53,6 +60,7 @@ import {
   CLOCK,
   DATABASE,
   FULFILMENT_PORTS,
+  CRYPTO_PORT,
   FUNDING_PORT,
   LEDGER,
   RATE_LIMIT_STORE,
@@ -75,6 +83,8 @@ export interface AppModuleOptions {
   readonly fulfilmentPorts?: ReadonlyMap<ServiceKind, FulfilmentPort>;
   /** Overridden in tests so funding runs without a live Bitnob. */
   readonly fundingPort?: FundingPort;
+  /** Overridden in tests so crypto runs without a live Bitnob. */
+  readonly cryptoPort?: CryptoPort;
 }
 
 /**
@@ -231,6 +241,33 @@ export function createFundingPort(config: ApiConfig): FundingPort {
   });
 }
 
+/** On-chain assets, or a stand-in that refuses. Same reasoning as the funding
+ *  port: one rail, so "not configured" and "unavailable" are the same. */
+export function createCryptoPort(config: ApiConfig): CryptoPort {
+  const { bitnobBaseUrl, bitnobApiKey } = config;
+
+  if (bitnobBaseUrl === undefined || bitnobApiKey === undefined) {
+    new Logger('Crypto').warn(
+      'BITNOB_BASE_URL or BITNOB_API_KEY is not set: crypto deposits and withdrawals ' +
+        'will refuse.',
+    );
+    const refuse = async (): Promise<never> => {
+      throw new ServiceUnavailableException({ error: 'crypto_provider_not_configured' });
+    };
+    return {
+      provider: 'bitnob',
+      createDepositAddress: refuse,
+      quoteWithdrawal: refuse,
+      send: refuse,
+      withdrawalStatus: refuse,
+    };
+  }
+
+  return new BitnobCryptoAdapter({
+    client: new BitnobClient({ baseUrl: bitnobBaseUrl, apiKey: bitnobApiKey }),
+  });
+}
+
 /**
  * Chooses the rate-limit backend, and says out loud when it picks the one that
  * only works on a single box.
@@ -303,6 +340,19 @@ export class DepositLifecycle implements OnApplicationBootstrap {
   }
 }
 
+/** Starts the crypto withdrawal reconciliation sweep. */
+@Injectable()
+export class CryptoLifecycle implements OnApplicationBootstrap {
+  constructor(
+    @Inject(CryptoReconciliationService)
+    private readonly crypto: CryptoReconciliationService,
+  ) {}
+
+  onApplicationBootstrap(): void {
+    this.crypto.start();
+  }
+}
+
 /** Starts the gift card hold release sweep. Separate from the reconciliation
  *  lifecycle because the two are enabled independently. */
 @Injectable()
@@ -335,6 +385,8 @@ export class AppModule {
         GiftCardReviewController,
         FundingController,
         DepositWebhookController,
+        CryptoController,
+        CryptoWebhookController,
       ],
       providers: [
         { provide: API_CONFIG, useValue: options.config },
@@ -363,6 +415,10 @@ export class AppModule {
           provide: FUNDING_PORT,
           useValue: options.fundingPort ?? createFundingPort(options.config),
         },
+        {
+          provide: CRYPTO_PORT,
+          useValue: options.cryptoPort ?? createCryptoPort(options.config),
+        },
         AuthService,
         PinService,
         WalletService,
@@ -373,6 +429,10 @@ export class AppModule {
         StaffService,
         FundingService,
         DepositWebhookService,
+        CryptoService,
+        CryptoWebhookService,
+        CryptoReconciliationService,
+        CryptoLifecycle,
         DepositReconciliationService,
         DepositLifecycle,
         GiftCardService,

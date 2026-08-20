@@ -99,6 +99,21 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       .authenticated('POST', '/v1/funding/account', { pin: false })
       .authenticated('GET', '/v1/funding/deposits', { pin: false })
 
+      // Crypto. Receiving an address takes no PIN; sending takes one, because
+      // a broadcast transaction cannot be recalled by anyone.
+      .authenticated('POST', '/v1/crypto/addresses', { pin: false })
+      .authenticated('GET', '/v1/crypto/withdrawals', { pin: false })
+      .authenticated('GET', '/v1/crypto/withdrawals/quote', { pin: false })
+      .authenticated('POST', '/v1/crypto/withdrawals', { pin: true })
+
+      .public(
+        'POST',
+        '/v1/webhooks/bitnob/crypto',
+        'Bitnob has no session with us; authenticated by an HMAC over the raw body, ' +
+          'checked before anything is parsed. Carries on-chain deposit events, which ' +
+          'credit customer balances',
+      )
+
       .public(
         'POST',
         '/v1/webhooks/bitnob/deposits',

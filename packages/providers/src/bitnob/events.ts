@@ -94,6 +94,46 @@ export const bitnobDepositEnvelope = z.object({
 
 export type BitnobDepositEnvelope = z.infer<typeof bitnobDepositEnvelope>;
 
+/**
+ * On-chain events.
+ *
+ * CONFIRM BEFORE GO-LIVE with the rest. Unrecognised events throw and are
+ * retried, so a wrong name is loud and repeating rather than a deposit that
+ * silently never happened.
+ *
+ * Note that a crypto deposit is TWO events, not one, for the same reason a
+ * card spend is: the moment a transaction is seen and the moment it is
+ * irreversible are different moments, and a system that cannot express the gap
+ * has to lie about one of them.
+ */
+export const BITNOB_CRYPTO_EVENTS = {
+  depositSeen: 'crypto.deposit.pending',
+  depositConfirmed: 'crypto.deposit.confirmed',
+  withdrawalConfirmed: 'crypto.withdrawal.confirmed',
+  withdrawalFailed: 'crypto.withdrawal.failed',
+} as const;
+
+export const cryptoDepositPayload = z.object({
+  id: z.string().min(1),
+  address: z.string().min(1),
+  chain: z.string().min(1),
+  currency: z.string().min(1),
+  /** Narrowed by the one conversion boundary, never by the schema. */
+  amount: z.unknown(),
+  tx_hash: z.string().min(1),
+  output_index: z.number().int().nonnegative().nullish(),
+  confirmations: z.number().int().nonnegative(),
+});
+
+export const bitnobCryptoEnvelope = z.object({
+  event_id: z.string().min(1),
+  event: z.string().min(1),
+  created_at: z.string().min(1),
+  data: cryptoDepositPayload,
+});
+
+export type BitnobCryptoEnvelope = z.infer<typeof bitnobCryptoEnvelope>;
+
 export type BitnobEventName = (typeof BITNOB_EVENTS)[keyof typeof BITNOB_EVENTS];
 
 /**

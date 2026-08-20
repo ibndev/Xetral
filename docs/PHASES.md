@@ -17,13 +17,13 @@ shipped, that is called out explicitly.
 | 6 — Bills, eSIM, numbers | ✅ | |
 | 7 — Gift cards | ✅ | ships flagged off by design |
 | 8 — NGN funding rail | ✅ | |
-| 9 — Crypto / USDT / stablecoin | not built | Bitnob registration under review |
+| 9 — Crypto / USDT / stablecoin | ✅ | Bitnob credentials to go live |
 | 10 — Multi-currency + FX / remittance | not built | Bitnob registration under review |
 | 11 — Mobile and web clients | not built | |
 
-Three phases remain, and the platform can now receive money as well as move it.
-Phases 9 and 10 are implemented-to-the-port work waiting on Bitnob credentials,
-not design work.
+Two phases remain. Everything shipped is implemented and tested against its
+port; Bitnob's live credentials are the only thing between the crypto and card
+flows and production traffic.
 
 ---
 
@@ -749,13 +749,88 @@ if wrong, will be sitting in suspense rather than in somebody's balance.
 
 ---
 
-## Phase 9 — Crypto: USDT, stablecoins, on-chain
+## Phase 9 — Crypto: USDT, stablecoins, on-chain ✅
 
-Bitnob. Deposits, withdrawals, and the `crypto_deposit` / `crypto_withdrawal`
-entry kinds that already exist in `001_ledger.sql` and have never been written.
+Deposit addresses, two-phase confirmed deposits, and irreversible withdrawals.
+19 invariant blocks, 34 provider unit tests, 18 end-to-end.
 
-Blocked with Phase 5 on the same dependency: Bitnob registration is under
-review.
+| File | What it is |
+|---|---|
+| `packages/ledger/sql/007_crypto.sql` | addresses, deposits, withdrawals, both state machines |
+| `packages/ledger/sql/007_crypto.test.sql` | 19 invariant blocks |
+| `packages/providers/src/ports/crypto.ts` | the on-chain port |
+| `packages/providers/src/crypto/address.ts` | address validation, with checksums |
+| `packages/providers/src/bitnob/crypto-adapter.ts` | `CryptoPort` against Bitnob |
+| `packages/providers/src/bitnob/crypto-webhooks.ts` | on-chain events into `LedgerIntent`s |
+| `apps/api/src/crypto/crypto.service.ts` | addresses, quotes, withdrawals |
+| `apps/api/src/crypto/crypto-webhook.service.ts` | seen, then confirmed |
+| `apps/api/src/crypto/crypto-reconciliation.service.ts` | withdrawals nobody answered for |
+
+**This phase needed no new entry kinds.** `crypto_deposit` and
+`crypto_withdrawal` have been in `001_ledger.sql` since Phase 1, and the
+two-phase shape is the one Phase 5 built for card authorizations. The ledger
+was designed for this in Phase 1 and the design held.
+
+```
+Deposit seen        provider_float   -> customer_pending    visible, not spendable
+Deposit confirmed   customer_pending -> customer_wallet     final
+Withdrawal reserved customer_wallet  -> customer_pending    the guard decides
+Withdrawal sent     customer_pending -> provider_float      on a chain, unrecallable
+Withdrawal failed   a reversal naming the reservation       it never left
+```
+
+Findings from building it:
+
+1. **A deposit is not final when first seen, so it is not spendable when first
+   seen.** One confirmation can be reorganised away, and a customer who
+   withdrew against it would have spent money that stopped having happened.
+   `customer_pending` — built in Phase 1 for card authorizations — was already
+   exactly the right account, and the confirmation threshold is checked by the
+   database so a service with a stale config cannot lower it.
+2. **The threshold is stored per deposit row, not read from config at
+   confirmation time.** Raising it later must not retroactively un-confirm
+   money already credited and possibly spent.
+3. **The confirmation threshold has to be per chain.** A Bitcoin block is ten
+   minutes and a Tron block is three seconds; one global number would either
+   make Bitcoin deposits unusable or Tron deposits unsafe.
+4. **Address validation is the only control that prevents an irreversible
+   mistake**, and shape checks are not enough. Every format here is verified by
+   its CHECKSUM — Base58Check for Tron and legacy Bitcoin, bech32 for SegWit,
+   EIP-55 for Ethereum and BSC — because that is what turns a single transposed
+   character from a lost balance into a rejected request.
+5. **Do not hand-roll a hash in a codebase that moves money.** The first
+   Keccak-256 here was written by hand; it produced plausible digests and every
+   known-answer vector rejected it. Replaced with `@noble/hashes`. Node's
+   built-in `sha3-256` is NOT the same function — it uses the standardised
+   padding — and would have silently broken every EIP-55 check.
+6. **A fee ceiling is part of consent.** Network fees move between the quote
+   and the request, so `max_fee` lets a customer say what they agreed to and
+   the request is refused rather than silently costing more.
+7. **An unrecognised provider status throws rather than defaulting.**
+   Defaulting to `failed` would reverse a withdrawal that is on a chain;
+   defaulting to `broadcast` would tell a customer money left when it did not.
+   Neither is a safe guess.
+8. **A crypto deposit to an unknown address cannot go to suspense**, unlike a
+   naira one. An address we did not issue is not ours, so the money is not ours
+   and recording it would invent a liability. The event throws and is retried.
+9. **The two phases carry different idempotency keys derived from one event.**
+   Without the suffix the confirmation would replay the seen entry and the
+   money would never become spendable.
+10. **`@noble/hashes/sha3` does not resolve under native ESM** — the
+    extensionless specifier is CommonJS-only, so it compiles and fails at
+    import. The same trap `@nestjs/common/constants` set in Phase 2, and the
+    same fix: use the `.js` specifier.
+
+**Before going live, an operator must:** set `BITNOB_BASE_URL` and
+`BITNOB_API_KEY`; set `CRYPTO_RECONCILE_INTERVAL_SECONDS` on exactly one
+instance; and review `CRYPTO_CONFIRMATIONS_*` per chain — the defaults are
+deliberately conservative, and lowering one is a decision about how much reorg
+risk to accept.
+
+**CONFIRM BEFORE GO-LIVE:** the endpoint paths in `BITNOB_CRYPTO_ENDPOINTS` and
+the event names in `BITNOB_CRYPTO_EVENTS`, which resolve with the same Bitnob
+approval that gates cards. An unrecognised event throws and is retried, so a
+wrong name is loud rather than a dropped deposit.
 
 ---
 

@@ -70,6 +70,10 @@ export function testApiConfig(databaseUrl: string, overrides: Partial<ApiConfig>
     // than one that never fires.
     depositCeilingKobo: 1_000_000_00n,
     depositReconcileIntervalSeconds: undefined,
+    // Low but non-zero, so the two-phase deposit flow is exercised for real
+    // rather than short-circuited by a threshold of one.
+    confirmationsFor: () => 3,
+    cryptoReconcileIntervalSeconds: undefined,
     ...overrides,
   };
 }

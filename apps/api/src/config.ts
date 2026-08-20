@@ -189,6 +189,24 @@ export interface ApiConfig {
   /** How often unmatched deposits are re-checked against the provider. One
    *  instance, same arrangement as the other sweeps. */
   readonly depositReconcileIntervalSeconds: number | undefined;
+
+  /**
+   * How many confirmations an on-chain deposit needs before it is spendable.
+   *
+   * A FUNCTION rather than a number, because the answer differs per chain by
+   * roughly two orders of magnitude: a Bitcoin block is ten minutes and three
+   * of them is an hour, while a Tron block is three seconds and twenty of them
+   * is a minute. One global number would either make Bitcoin deposits
+   * unusable or make Tron deposits unsafe.
+   *
+   * The value is stored on each deposit row when it is first seen, so raising
+   * the threshold later cannot retroactively un-confirm money already
+   * credited.
+   */
+  readonly confirmationsFor: (asset: string, network: string) => number;
+  /** How often withdrawals with an unknown outcome are re-checked. One
+   *  instance, same arrangement as the other sweeps. */
+  readonly cryptoReconcileIntervalSeconds: number | undefined;
 }
 
 export class ConfigError extends Error {
@@ -397,6 +415,47 @@ function ngnAmountUnit(env: Env): NgnAmountUnit {
   return raw;
 }
 
+/**
+ * Confirmation thresholds, per chain, overridable per environment.
+ *
+ * The defaults are conservative on purpose: the cost of waiting is a customer
+ * refreshing a screen, and the cost of being wrong is crediting money a
+ * reorganisation later removes, after it has been spent.
+ */
+function confirmationPolicy(env: Env): (asset: string, network: string) => number {
+  const defaults: Record<string, number> = {
+    // ~30 minutes. Deep reorganisations on Bitcoin are rare and expensive, but
+    // one- and two-block ones happen without anybody attacking anything.
+    bitcoin: 3,
+    ethereum: 12,
+    bsc: 15,
+    tron: 20,
+  };
+
+  const overrides: Record<string, number> = {};
+  for (const network of Object.keys(defaults)) {
+    const raw = env[`CRYPTO_CONFIRMATIONS_${network.toUpperCase()}`];
+    if (raw === undefined || raw.trim() === '') continue;
+    const value = Number(raw);
+    if (!Number.isInteger(value) || value <= 0) {
+      throw new ConfigError(
+        `CRYPTO_CONFIRMATIONS_${network.toUpperCase()} must be a positive integer, got '${raw}'`,
+      );
+    }
+    overrides[network] = value;
+  }
+
+  return (_asset, network) => {
+    const configured = overrides[network] ?? defaults[network];
+    if (configured === undefined) {
+      // An unknown chain has no safe default. Refusing beats inventing one for
+      // a chain whose reorganisation behaviour nobody here has considered.
+      throw new ConfigError(`no confirmation threshold is defined for '${network}'`);
+    }
+    return configured;
+  };
+}
+
 function optional(env: Env, key: string): string | undefined {
   const value = env[key];
   return value === undefined || value.trim() === '' ? undefined : value;
@@ -466,5 +525,7 @@ export function loadConfig(env: Env): ApiConfig {
     bitnobNgnAmountUnit: ngnAmountUnit(env),
     depositCeilingKobo: minorUnits(env, 'DEPOSIT_CEILING_KOBO') ?? 1_000_000_00n,
     depositReconcileIntervalSeconds: optionalInteger(env, 'DEPOSIT_RECONCILE_INTERVAL_SECONDS'),
+    confirmationsFor: confirmationPolicy(env),
+    cryptoReconcileIntervalSeconds: optionalInteger(env, 'CRYPTO_RECONCILE_INTERVAL_SECONDS'),
   };
 }
