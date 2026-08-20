@@ -40,5 +40,24 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // the flag exists. Reading a balance does not need a PIN; moving money
       // does.
       .authenticated('POST', '/v1/wallets/transfers', { pin: true })
+
+      .authenticated('GET', '/v1/cards', { pin: false })
+      .authenticated('GET', '/v1/cards/:id', { pin: false })
+      // Issuing and funding move money onto a card.
+      .authenticated('POST', '/v1/cards', { pin: true })
+      .authenticated('POST', '/v1/cards/:id/fund', { pin: true })
+      // Freezing is the PROTECTIVE action and takes no PIN: a customer watching
+      // fraudulent charges land should not have to remember one first.
+      // Unfreezing re-enables spending, so it does.
+      .authenticated('POST', '/v1/cards/:id/freeze', { pin: false })
+      .authenticated('POST', '/v1/cards/:id/unfreeze', { pin: true })
+      .authenticated('POST', '/v1/cards/:id/terminate', { pin: true })
+
+      .public(
+        'POST',
+        '/v1/webhooks/bitnob',
+        'Bitnob has no session with us; the request is authenticated by an HMAC ' +
+          'signature over the raw body, checked before anything is parsed',
+      )
   );
 }

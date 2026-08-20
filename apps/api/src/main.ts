@@ -20,6 +20,10 @@ async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(
     AppModule.forRoot({ config }),
     new ExpressAdapter(),
+    // Keeps the exact bytes of every request body. Webhook signatures cover
+    // what the provider sent, and a body round-tripped through parse and
+    // stringify fails verification in a way that looks like a wrong secret.
+    { rawBody: true },
   );
 
   // Without this, req.ip is the proxy's address and per-IP rate limiting

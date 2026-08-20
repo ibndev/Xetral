@@ -1,15 +1,20 @@
-import { Inject, Injectable, Logger, Module } from '@nestjs/common';
+import { Inject, Injectable, Logger, Module, ServiceUnavailableException } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import type { DynamicModule, OnApplicationShutdown } from '@nestjs/common';
 import Redis from 'ioredis';
 import type { Pool } from 'pg';
 import { LedgerService } from '@xetral/ledger';
+import { BitnobCardAdapter, BitnobClient } from '@xetral/providers';
+import type { CardPort } from '@xetral/providers';
 import { AuthController } from './auth/auth.controller.js';
 import { AuthGuard } from './auth/auth.guard.js';
 import { AuthService } from './auth/auth.service.js';
 import { PinService } from './auth/pin.service.js';
 import { WalletController } from './wallet/wallet.controller.js';
 import { WalletService } from './wallet/wallet.service.js';
+import { CardController, CardWebhookController } from './cards/card.controller.js';
+import { CardService } from './cards/card.service.js';
+import { CardWebhookService } from './cards/webhook.service.js';
 import { LoginRateLimitGuard } from './auth/login-rate-limit.guard.js';
 import { InMemoryRateLimitStore, RedisRateLimitStore } from './auth/rate-limit.js';
 import type { RateLimitStore } from './auth/rate-limit.js';
@@ -18,6 +23,7 @@ import { createPool } from './database.js';
 import type { ApiConfig } from './config.js';
 import {
   API_CONFIG,
+  CARD_PORT,
   CLOCK,
   DATABASE,
   LEDGER,
@@ -35,6 +41,43 @@ export interface AppModuleOptions {
   readonly pool?: Pool;
   /** Overridden in tests to pin the backend regardless of REDIS_URL. */
   readonly rateLimitStore?: RateLimitStore;
+  /** Overridden in tests so card flows run without a live Bitnob. */
+  readonly cardPort?: CardPort;
+}
+
+/**
+ * The card port, or a stand-in that refuses every call.
+ *
+ * An instance with no Bitnob credentials still serves wallets and auth. Booting
+ * with a placeholder key instead would move the failure to the first real card
+ * request, where it looks like a provider outage rather than a missing
+ * environment variable.
+ */
+export function createCardPort(config: ApiConfig): CardPort {
+  const { bitnobBaseUrl, bitnobApiKey } = config;
+
+  if (bitnobBaseUrl === undefined || bitnobApiKey === undefined) {
+    new Logger('Cards').warn(
+      'BITNOB_BASE_URL or BITNOB_API_KEY is not set: card routes will refuse requests.',
+    );
+    return unconfiguredCardPort();
+  }
+
+  return new BitnobCardAdapter(new BitnobClient({ baseUrl: bitnobBaseUrl, apiKey: bitnobApiKey }));
+}
+
+function unconfiguredCardPort(): CardPort {
+  const refuse = async (): Promise<never> => {
+    throw new ServiceUnavailableException({ error: 'card_provider_not_configured' });
+  };
+  return {
+    issue: refuse,
+    fund: refuse,
+    freeze: refuse,
+    unfreeze: refuse,
+    terminate: refuse,
+    get: refuse,
+  };
 }
 
 /**
@@ -88,7 +131,7 @@ export class AppModule {
   static forRoot(options: AppModuleOptions): DynamicModule {
     return {
       module: AppModule,
-      controllers: [AuthController, WalletController],
+      controllers: [AuthController, WalletController, CardController, CardWebhookController],
       providers: [
         { provide: API_CONFIG, useValue: options.config },
         { provide: CLOCK, useValue: options.clock ?? systemClock },
@@ -104,9 +147,15 @@ export class AppModule {
           useFactory: (pool: Pool) => new LedgerService(pool),
           inject: [DATABASE],
         },
+        {
+          provide: CARD_PORT,
+          useValue: options.cardPort ?? createCardPort(options.config),
+        },
         AuthService,
         PinService,
         WalletService,
+        CardService,
+        CardWebhookService,
         LoginRateLimitGuard,
 
         // Registered globally, so it runs for every route including one whose

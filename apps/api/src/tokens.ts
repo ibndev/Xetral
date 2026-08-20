@@ -16,6 +16,7 @@ export const DATABASE = Symbol('DATABASE');
 export const ROUTE_POLICY = Symbol('ROUTE_POLICY');
 export const RATE_LIMIT_STORE = Symbol('RATE_LIMIT_STORE');
 export const LEDGER = Symbol('LEDGER');
+export const CARD_PORT = Symbol('CARD_PORT');
 export const CLOCK = Symbol('CLOCK');
 
 /** Injected rather than read from Date.now() so expiry and rate-limit windows

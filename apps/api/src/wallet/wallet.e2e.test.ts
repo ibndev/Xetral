@@ -45,6 +45,9 @@ function makeConfig(overrides: Partial<ApiConfig> = {}): ApiConfig {
     trustProxyHops: 0,
     redisUrl: undefined,
     transferFeeBasisPoints: 0,
+    bitnobBaseUrl: undefined,
+    bitnobApiKey: undefined,
+    bitnobWebhookSecret: undefined,
     ...overrides,
   };
 }

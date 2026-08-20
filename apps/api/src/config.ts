@@ -52,6 +52,15 @@ export interface ApiConfig {
    * nothing until somebody sets a number is the safe direction to be wrong in.
    */
   readonly transferFeeBasisPoints: number;
+
+  /**
+   * Bitnob credentials. Optional as a set: an instance with no card
+   * configuration still serves wallets and auth, and refuses card routes rather
+   * than booting with a placeholder key that would fail on the first real call.
+   */
+  readonly bitnobBaseUrl: string | undefined;
+  readonly bitnobApiKey: string | undefined;
+  readonly bitnobWebhookSecret: string | undefined;
 }
 
 export class ConfigError extends Error {
@@ -143,6 +152,11 @@ function basisPoints(env: Env, key: string): number {
   return value;
 }
 
+function optional(env: Env, key: string): string | undefined {
+  const value = env[key];
+  return value === undefined || value.trim() === '' ? undefined : value;
+}
+
 export function loadConfig(env: Env): ApiConfig {
   const accessTokenTtlSeconds = integer(env, 'ACCESS_TOKEN_TTL_SECONDS', ACCESS_TOKEN_TTL_SECONDS);
 
@@ -179,5 +193,8 @@ export function loadConfig(env: Env): ApiConfig {
     trustProxyHops: integer(env, 'TRUST_PROXY_HOPS', 1),
     redisUrl: env['REDIS_URL'] === '' ? undefined : env['REDIS_URL'],
     transferFeeBasisPoints: basisPoints(env, 'TRANSFER_FEE_BASIS_POINTS'),
+    bitnobBaseUrl: optional(env, 'BITNOB_BASE_URL'),
+    bitnobApiKey: optional(env, 'BITNOB_API_KEY'),
+    bitnobWebhookSecret: optional(env, 'BITNOB_WEBHOOK_SECRET'),
   };
 }

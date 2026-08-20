@@ -52,6 +52,9 @@ function makeConfig(overrides: Partial<ApiConfig> = {}): ApiConfig {
     // rate-limit.redis.e2e.test.ts.
     redisUrl: undefined,
     transferFeeBasisPoints: 0,
+    bitnobBaseUrl: undefined,
+    bitnobApiKey: undefined,
+    bitnobWebhookSecret: undefined,
     ...overrides,
   };
 }
