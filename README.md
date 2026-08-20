@@ -58,26 +58,26 @@ in a hold before it becomes spendable.
 ```
 packages/
   shared/     types, money primitives, Zod schemas — imported by API and app
+  client/     the typed API client both apps use: sessions, refresh, money
   ledger/     double-entry core: schema, invariants, the one posting service
   identity/   users, devices, sessions, refresh rotation, PINs, envelopes
   providers/  provider ports and their adapters (Bitnob, VTpass, Airalo, Twilio)
 apps/
   api/        NestJS — deny-by-default guard, login/refresh/logout
-  mobile/     Expo (iOS + Android)
-  web/        Next.js (marketing + authenticated dashboard)
+  mobile/     Expo (iOS + Android), tokens in the Keychain/Keystore
+  web/        Next.js — a BFF that keeps the refresh token in an httpOnly cookie
 ```
 
 ## Phases
 
-Phases 0–10 are built. One remains — see [`docs/PHASES.md`](docs/PHASES.md),
+All eleven phases are built — see [`docs/PHASES.md`](docs/PHASES.md),
 which opens with a status table and what each is blocked on. Each phase lands
 independently.
 
 Customers fund their wallets through a **dedicated Nigerian account number**
 issued by Bitnob, in their own name and permanent, and can send and receive
-USDT and BTC on-chain, convert between currencies and remit across them. The
-one remaining phase is the mobile and web clients — everything shipped so far
-is an HTTP API with no user in front of it.
+USDT and BTC on-chain, convert between currencies and remit across them —
+through a web app and a mobile app over one shared, tested client package.
 
 ## Running the tests
 
@@ -91,6 +91,7 @@ npm test --workspace @xetral/identity      # 76 auth tests
 npm test --workspace @xetral/api           # 31 guard, PIN, routing and rate-limit tests
 npm test --workspace @xetral/providers     # 60 adapter, conversion and webhook tests
 npm test --workspace @xetral/ledger        # 10 intent-validation tests
+npm test --workspace @xetral/client        # 34 session, refresh and money tests
 
 # SQL invariants — needs a live PostgreSQL 16. Migrations apply in order, and
 # the test files are not idempotent, so run them against a fresh database.

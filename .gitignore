@@ -21,3 +21,10 @@ pgdata/
 
 # Redis writes this wherever it was started
 dump.rdb
+
+# Next.js build output
+.next/
+out/
+
+# Expo
+.expo/

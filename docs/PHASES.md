@@ -19,11 +19,11 @@ shipped, that is called out explicitly.
 | 8 — NGN funding rail | ✅ | |
 | 9 — Crypto / USDT / stablecoin | ✅ | Bitnob credentials to go live |
 | 10 — Multi-currency + FX / remittance | ✅ | Bitnob credentials to go live |
-| 11 — Mobile and web clients | not built | |
+| 11 — Mobile and web clients | ✅ | |
 
-One phase remains: the customer-facing clients. Every money flow in the product
-is built and tested against its port; Bitnob's live credentials are the only
-thing between the card, crypto and FX flows and production traffic.
+All eleven phases are built. Every money flow has an HTTP surface, a web app
+and a mobile app in front of it; Bitnob's live credentials are the only thing
+between the card, crypto and FX flows and production traffic.
 
 ---
 
@@ -911,11 +911,86 @@ of the Bitnob surface.
 
 ---
 
-## Phase 11 — The customer-facing clients
+## Phase 11 — The customer-facing clients ✅
 
-`apps/mobile` (Expo, iOS + Android) and `apps/web` (Next.js) are in the
-documented layout and do not exist. Everything shipped so far is an HTTP API
-with no user in front of it.
+`apps/web` (Next.js) and `apps/mobile` (Expo), over one shared, tested client
+package. 34 client unit tests.
+
+| File | What it is |
+|---|---|
+| `packages/client/src/session.ts` | tokens, and single-flight refresh |
+| `packages/client/src/money.ts` | money as strings, formatted without a float |
+| `packages/client/src/client.ts` | the typed HTTP surface |
+| `packages/client/src/errors.ts` | API codes as a union a caller can switch on |
+| `apps/web/src/app/api/auth/*` | the BFF that keeps the refresh token out of the browser |
+| `apps/mobile/src/session.ts` | tokens in the Keychain and Keystore |
+
+**The clients carry two obligations the backend deliberately handed them**, and
+both are named in earlier phases rather than invented here.
+
+1. **Single-flight refresh.** Phase 2 chose to revoke a whole device family on
+   a replayed refresh token, and recorded that the cost — a client racing its
+   own refresh signs itself out — "is a client bug to fix with single-flight,
+   never a reason to weaken the check". `Session.refresh()` is that fix: one
+   in-flight rotation, every other caller awaiting the same promise. A screen
+   firing four requests on mount is the ordinary case, and without the latch it
+   would sign the customer out for opening a page.
+2. **Money stays a string.** The API sends major units as decimal strings
+   precisely so no float is involved. `formatAmount` groups digits without ever
+   producing a number, and there is deliberately no `toNumber` for somebody to
+   reach for. A test formats an eight-decimal BTC balance and a value past
+   `MAX_SAFE_INTEGER`, which is where `Intl.NumberFormat` would start lying —
+   in the digits a customer reads to decide whether they have been paid.
+
+Findings from building it:
+
+1. **Where a refresh token lives is a per-platform security decision, so it is
+   a port.** `TokenStore` has two implementations and neither is a default:
+   the web keeps the refresh token in an **httpOnly, SameSite=strict cookie**
+   set by the app's own route handlers, so page JavaScript cannot read it;
+   mobile keeps it in the **Keychain/Keystore** via SecureStore, marked
+   `WHEN_UNLOCKED_THIS_DEVICE_ONLY` so a restored backup cannot resurrect a
+   session on hardware the customer no longer owns. `localStorage` and
+   `AsyncStorage` are wrong on both platforms and for the same reason.
+2. **The web app proxies the API rather than calling it cross-origin.** No CORS
+   policy to get subtly wrong, and the API's address is never published to the
+   page — so a later change cannot quietly start calling it directly and skip
+   the cookie handling.
+3. **The session must be a singleton.** The single-flight latch lives on the
+   instance, so a component constructing its own would refresh in parallel with
+   everybody else's — the exact race the latch exists to prevent.
+4. **An idempotency key belongs to the ATTEMPT, not the submit handler.** Both
+   clients generate it when the form mounts and reuse it across retries.
+   Generating it inside the handler defeats the guard entirely, and a phone on
+   a patchy connection is where double-sends actually happen.
+5. **`network` is our error code, not the server's.** Routing it through the
+   response parser made it fall through to `unknown`, so a dropped connection
+   read as a server fault. "Insufficient funds" and "your train went into a
+   tunnel" need very different words on screen.
+6. **A client must not widen the server's error union.** An unrecognised code
+   becomes `unknown` rather than being passed through, so a proxy or an error
+   page cannot inject something a caller's `switch` would then handle as if we
+   had sent it.
+7. **Both bundlers resolve `.js` specifiers literally.** The repo imports that
+   way because native ESM requires it; Next needs `resolve.extensionAlias` and
+   Metro needs a `resolveRequest` hook. Changing the imports instead would
+   break Node — the same shape as the `@nestjs/common/constants` and
+   `@noble/hashes/sha3` traps.
+8. **React 18 and React 19 coexist by nesting.** Next 15 wants 19 and React
+   Native 0.76 wants 18.3.1; npm hoists one and nests the other, which works
+   and is worth knowing before somebody "fixes" the duplicate.
+
+**Verified end to end against the running API**: sign-in through the BFF sets
+an `HttpOnly; SameSite=strict; Secure` cookie and returns a body containing
+**no refresh token**; a refresh rotates the cookie and returns only an access
+token; and replaying the previous cookie answers `401 invalid_grant` — Phase
+2's reuse detection firing through the whole web stack.
+
+**Not built, and deliberately:** the mobile app has not been run on a simulator
+or a device from here, so it is typechecked and configured rather than
+demonstrated. Biometric unlock is also absent: `002_identity.sql` supports it
+and enrolment requires an existing PIN, but wiring `expo-local-authentication`
+to that flow is its own piece of work with its own failure modes.
 
 ---
 

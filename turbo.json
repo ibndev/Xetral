@@ -6,7 +6,13 @@
         "^build"
       ],
       "outputs": [
-        "dist/**"
+        "dist/**",
+        ".next/**",
+        "!.next/cache/**"
+      ],
+      "env": [
+        "XETRAL_API_URL",
+        "NODE_ENV"
       ]
     },
     "typecheck": {

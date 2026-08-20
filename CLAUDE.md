@@ -491,6 +491,34 @@ signs the exact string it sends, so the two cannot drift.
 
 ---
 
+## The clients (`apps/web`, `apps/mobile`, `packages/client`)
+
+Both apps go through **one** client package. Adding a screen should not mean
+writing another fetch wrapper.
+
+- **Single-flight refresh is the client's job**, assigned to it by Phase 2. One
+  in-flight rotation; every other caller awaits the same promise. Without it, a
+  screen firing several requests on mount replays a refresh token and the
+  server correctly revokes the device family. The `Session` must therefore be a
+  **singleton** — the latch lives on the instance.
+- **Money is a string on the client and stays one.** `formatAmount` groups
+  digits without producing a number, and there is no `toNumber`. `Intl.NumberFormat`
+  takes a number and is wrong here.
+- **Where the refresh token lives is per-platform and is a `TokenStore`**: an
+  httpOnly `SameSite=strict` cookie on web (set by the app's own route
+  handlers), the Keychain/Keystore on mobile. Never `localStorage`, never
+  `AsyncStorage`.
+- **The web app proxies the API same-origin** through `/api/x/*`, so there is
+  no CORS policy and the API's address is never published to the page.
+- **An idempotency key belongs to the attempt**, generated when a form mounts
+  and reused across retries — never inside the submit handler.
+- **An unrecognised error code becomes `unknown`**, never passed through: a
+  proxy must not be able to inject a code a caller's `switch` handles.
+- Both bundlers need telling that `.js` specifiers mean `.ts` sources — Next
+  via `resolve.extensionAlias`, Metro via `resolveRequest`.
+
+---
+
 ## Security posture
 
 - **Deny by default.** An endpoint must explicitly opt out of auth. The reference
