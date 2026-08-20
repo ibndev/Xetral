@@ -65,7 +65,7 @@ npm test                                   # every workspace, via turbo
 # or one at a time
 npm test --workspace @xetral/shared        # 29 money tests
 npm test --workspace @xetral/identity      # 76 auth tests
-npm test --workspace @xetral/api           # 27 guard, routing and rate-limit tests
+npm test --workspace @xetral/api           # 31 guard, PIN, routing and rate-limit tests
 npm test --workspace @xetral/providers     # 60 adapter, conversion and webhook tests
 npm test --workspace @xetral/ledger        # 10 intent-validation tests
 
