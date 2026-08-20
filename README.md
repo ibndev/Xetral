@@ -16,7 +16,7 @@ no PHP.
 | NGN wallet — transfer, balances, history | — | **built** |
 | NGN wallet — funding | *needs a bank rail* | blocked |
 | Bills, airtime | VTpass | planned |
-| Virtual USD cards | Bitnob | planned |
+| Virtual USD cards | Bitnob | **built** (needs Bitnob issuing approval) |
 | Crypto / USDT / stablecoin | Bitnob | planned |
 | Multi-currency + FX / remittance | Bitnob | planned |
 | eSIM | Airalo | planned |
@@ -74,11 +74,13 @@ npm test --workspace @xetral/ledger        # 10 intent-validation tests
 createdb xetral
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/003_cards.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/003_cards.test.sql
 ```
 
-All 12 ledger tests and all 20 identity blocks print `PASS`. Any `TEST FAILED`
+All 12 ledger tests, 20 identity blocks and 10 card blocks print `PASS`. Any `TEST FAILED`
 means an invariant is not wired up — do not deploy past it.
 
 The API's end-to-end suite runs the real login, rotation and reuse-detection

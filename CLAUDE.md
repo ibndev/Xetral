@@ -149,6 +149,28 @@ returns a denial, and making one public requires a written justification that
 Access tokens are **not JWTs**, deliberately — see the header comment in
 `access-token.ts`. The version prefix selects a key, never an algorithm.
 
+### Cards — non-obvious rules
+
+Schema: `packages/ledger/sql/003_cards.sql`.
+
+- The card's balance shown to a customer comes from the **ledger**, not from
+  asking Bitnob. A provider figure can lag a settlement by days; reconciliation
+  compares the two deliberately.
+- `last4` has a `^[0-9]{4}$` CHECK. "Just the last four" becomes "the whole
+  number" the first time somebody is in a hurry, and then a database dump holds
+  PANs.
+- **Termination is final**, and a card's `(provider, provider_card_id)` and
+  owner are immutable — every webhook already delivered points at that row.
+- **Freezing takes no PIN; unfreezing does.** The protective action has to be
+  frictionless for a customer watching fraudulent charges land.
+- Registering a Bitnob customer is a **KYC step**, so `provider_customers` is
+  never populated as a side effect of "get a card" — the card route refuses
+  until it exists.
+- An authorization the card cannot cover is **rethrown, not acknowledged**, so
+  the provider retries: webhooks arrive out of order and a funding event landing
+  a moment later makes the retry succeed. Acknowledging would drop a real spend
+  from the books to save log noise.
+
 ### apps/api
 
 - `AuthGuard` is registered with `APP_GUARD`, so it runs for **every** route. A
@@ -196,8 +218,13 @@ the reference plugin and are out of scope.
   business days later, each with its own webhook. If no settlement arrives the hold
   expires and funds return. Bitnob's own docs warn that treating them as one
   transaction produces an incorrect balance. This is why the `customer_pending`
-  account exists: auth moves wallet → pending, settlement moves pending → float,
+  account exists: auth moves card → pending, settlement moves pending → float,
   expiry is an ordinary reversal.
+- **A card spends its OWN balance, not the wallet.** A Bitnob virtual card is
+  topped up from the wallet and holds its own funds. Authorising against the
+  wallet would let a card funded with $10 spend whatever the wallet held. The
+  overdraft guard already covers `customer_card`, so naming the right account
+  *is* the protection.
 - **Webhook amounts are micro-units: 1 USD = 1,000,000.** Six decimals where the
   ledger uses two. The sibling `display_amount` is a **float** and must never touch
   ledger maths — it is for display only. Conversion happens at exactly one audited
@@ -271,6 +298,9 @@ npm test --workspace @xetral/api        # guard, route coverage, rate limiting
 npm test --workspace @xetral/providers  # amount conversion, webhooks, card adapter
 npm test --workspace @xetral/ledger     # intent validation (service is e2e-only)
 
+# Cards need 003 as well:
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/003_cards.sql
+
 # SQL invariants — needs live PostgreSQL 16. Apply migrations in order; the
 # test files are NOT idempotent, so run them against a freshly created database.
 createdb xetral
@@ -278,6 +308,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/003_cards.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,
 # Redis for the rate-limiter contract.

@@ -317,9 +317,77 @@ providers offers one. The ledger side is built and tested (funding is an
 ordinary entry), so what is missing is the provider and its webhook, not the
 accounting. Choosing that provider is a prerequisite for taking real deposits.
 
-## Phase 5 — Virtual USD cards (Bitnob)
+## Phase 5 — Virtual USD cards (Bitnob) ✅
 
-Issue, fund, freeze, terminate. Auth/settlement webhooks into the ledger.
+Issue, fund, freeze, terminate, and the auth/settlement webhooks landing in the
+ledger. 10 card invariant blocks, plus 21 end-to-end covering the whole flow
+over HTTP.
+
+| File | What it is |
+|---|---|
+| `packages/ledger/sql/003_cards.sql` | provider customers, cards, termination invariants |
+| `packages/ledger/sql/003_cards.test.sql` | 10 invariant blocks |
+| `apps/api/src/cards/card.service.ts` | issue, fund, freeze, unfreeze, terminate |
+| `apps/api/src/cards/webhook.service.ts` | verify, resolve the customer, post |
+| `apps/api/src/cards/card.controller.ts` | card routes and the Bitnob webhook |
+
+**This phase CORRECTS Phase 3.** The Bitnob adapter mapped an authorization as
+`wallet -> pending`. A Bitnob virtual card is topped up from the wallet and
+holds its own funds, so a purchase is authorised against the CARD's balance —
+and drawing from the wallet would let a card funded with $10 authorise $500
+because the wallet happened to hold it. Phase 3 had no card table to know
+better. The flow is now:
+
+```
+Funding       wallet  -> card              reclassified, still the customer's
+Authorization card    -> pending           committed, not yet spent
+Settlement    pending -> provider_float    the hold becomes a real spend
+Expiry        pending -> card              the hold lapsed
+Termination   card    -> wallet            what is left comes back
+```
+
+The overdraft guard from Phase 1 already covers `customer_card`, so naming the
+right account *is* the protection — no new rule was needed.
+
+Findings from building it:
+
+1. **Freezing takes no PIN; unfreezing does.** The protective action has to be
+   frictionless: a customer watching fraudulent charges land should not have to
+   remember a PIN first. Unfreezing re-enables spending, so it asks.
+2. **Registering a provider customer is a KYC step, not a side effect.** It
+   means sending identity documents to Bitnob, with its own consent and audit
+   trail, so `provider_customers` is never populated by tapping "get a card" —
+   the route refuses until the mapping exists.
+3. **Provider call and ledger entry are ordered differently per operation, and
+   deliberately.** Issuing calls Bitnob first: posting first and having them
+   refuse would move a customer's money onto a card that does not exist.
+   Funding posts first: the overdraft guard must decide before anything is sent.
+   Terminating calls Bitnob first: a card emptied in our ledger but still live
+   at the provider is the worse of the two failures.
+4. **An authorization the card cannot cover is rethrown, not acknowledged.**
+   Webhooks arrive out of order, so a funding event landing a moment later makes
+   the retry succeed on its own. Acknowledging would drop a real spend from the
+   books permanently to save some log noise.
+5. **The balance a customer sees comes from the ledger, not from Bitnob.** A
+   provider figure can lag a settlement by days; reconciliation compares the two
+   deliberately, and the ledger is what we owe.
+6. **`last4` has a CHECK.** "Just the last four" becomes "the whole number" the
+   first time somebody is in a hurry, and then a database dump contains PANs.
+7. **A shared invariant database needs resolve-or-create for PLATFORM
+   accounts.** `provider_float` has one row per currency for the whole database,
+   so the card suite inserting it unconditionally aborted the run once the
+   ledger suite had already created it — a unique violation that reads as a card
+   bug and is not. Found by running the three SQL suites in CI order rather than
+   alone.
+
+**Still operational:** Bitnob card issuing requires their approval before any of
+this works against the live provider. The e2e suite drives a stand-in for the
+`CardPort`, so everything on our side of the port — ledger entries, the
+overdraft guard, signature verification, the replay constraint — is exercised
+for real; the provider calls are not.
+
+**Still to confirm before go-live**, unchanged from Phase 3: the webhook
+signature header and encoding, and the endpoint paths in `BITNOB_ENDPOINTS`.
 
 ## Phase 6 — Bills, eSIM, numbers
 

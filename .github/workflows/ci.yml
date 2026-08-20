@@ -69,6 +69,8 @@ jobs:
             -f packages/ledger/sql/001_ledger.sql
           psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
             -f packages/identity/sql/002_identity.sql
+          psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
+            -f packages/ledger/sql/003_cards.sql
 
       - name: Ledger and identity invariants
         run: |
@@ -79,7 +81,8 @@ jobs:
           # SELECT and exits zero -- so the output is scanned as well. A drift
           # check that cannot fail the build is not a check.
           for f in packages/ledger/sql/001_ledger.test.sql \
-                   packages/identity/sql/002_identity.test.sql; do
+                   packages/identity/sql/002_identity.test.sql \
+                   packages/ledger/sql/003_cards.test.sql; do
             echo "== $f"
             psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
               -f "$f" 2>&1 | tee "/tmp/$(basename "$f").out"
@@ -95,6 +98,8 @@ jobs:
             -f packages/ledger/sql/001_ledger.sql
           psql -h localhost -U xetral -d xetral -v ON_ERROR_STOP=1 \
             -f packages/identity/sql/002_identity.sql
+          psql -h localhost -U xetral -d xetral -v ON_ERROR_STOP=1 \
+            -f packages/ledger/sql/003_cards.sql
 
       - run: npm run typecheck
 
