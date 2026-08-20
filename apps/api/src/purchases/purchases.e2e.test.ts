@@ -13,6 +13,7 @@ import type {
   CatalogueItem,
   CatalogueQuery,
   FulfilmentPort,
+  PurchaseLookup,
   PurchaseRequest,
   PurchaseResult,
   ServiceKind,
@@ -87,8 +88,8 @@ class FakePort implements FulfilmentPort {
     return this.#next;
   }
 
-  async status(reference: string): Promise<PurchaseResult> {
-    return { status: 'pending', providerReference: reference, delivery: {} };
+  async status(lookup: PurchaseLookup): Promise<PurchaseResult> {
+    return { status: 'pending', providerReference: lookup.reference, delivery: {} };
   }
 }
 

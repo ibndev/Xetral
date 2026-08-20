@@ -58,6 +58,9 @@ export interface ApiConfig {
    * configuration still serves wallets and auth, and refuses card routes rather
    * than booting with a placeholder key that would fail on the first real call.
    */
+  /** Includes the version segment: `https://api.bitnob.co/api/v1` (sandbox:
+   *  `https://sandboxapi.bitnob.co/api/v1`). The endpoint table is relative to
+   *  it, so omitting `/api/v1` produces 404s on every card call. */
   readonly bitnobBaseUrl: string | undefined;
   readonly bitnobApiKey: string | undefined;
   readonly bitnobWebhookSecret: string | undefined;
@@ -73,19 +76,23 @@ export interface ApiConfig {
    */
   readonly encryptionKeyring: Keyring | undefined;
 
-  /** VTpass — airtime, data, utilities. Optional as a set, same reasoning as
-   *  Bitnob: an instance without them serves everything else and refuses these. */
+  /** VTpass — airtime, data, utilities. `https://vtpass.com` (sandbox:
+   *  `https://sandbox.vtpass.com`); the endpoint table adds `/api/...`.
+   *  Optional as a set, same reasoning as Bitnob: an instance without them
+   *  serves everything else and refuses these. */
   readonly vtpassBaseUrl: string | undefined;
   readonly vtpassApiKey: string | undefined;
   readonly vtpassSecretKey: string | undefined;
   readonly vtpassPublicKey: string | undefined;
 
-  /** Airalo — eSIM. */
+  /** Airalo — eSIM. `https://partners-api.airalo.com`; the endpoint table adds
+   *  the `/v2/...` slugs. */
   readonly airaloBaseUrl: string | undefined;
   readonly airaloClientId: string | undefined;
   readonly airaloClientSecret: string | undefined;
 
-  /** Twilio — virtual numbers. */
+  /** Twilio — virtual numbers. `https://api.twilio.com`; the endpoint table
+   *  adds the `/2010-04-01/...` paths. */
   readonly twilioBaseUrl: string | undefined;
   readonly twilioAccountSid: string | undefined;
   readonly twilioAuthToken: string | undefined;

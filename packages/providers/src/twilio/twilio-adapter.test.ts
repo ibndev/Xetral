@@ -3,6 +3,9 @@ import { TwilioAdapter } from './twilio-adapter.js';
 import { fulfilmentContract, scriptedFetch } from '../ports/fulfilment.contract.js';
 import { supportsVerification } from '../ports/fulfilment.js';
 
+/** A fixed instant, so a request_id derived from it is stable across runs. */
+const INITIATED_AT = new Date('2026-02-07T17:30:00.000Z');
+
 const available = {
   available_phone_numbers: [
     { phone_number: '+15005550006', friendly_name: '(500) 555-0006', locality: 'Austin', iso_country: 'US' },
@@ -76,7 +79,8 @@ describe('form encoding', () => {
       itemCode: '+15005550006',
       target: 'US',
       amountMinor: 300n,
-      currency: 'USD',
+      currency: 'USD',      initiatedAt: INITIATED_AT,
+
     });
 
     const call = transport.calls.at(-1);
@@ -103,7 +107,7 @@ describe('recovering from a timeout', () => {
     const { transport, port } = harness();
     transport.script([{ json: { incoming_phone_numbers: [purchased] } }]);
 
-    const result = await port.status('r1');
+    const result = await port.status({ reference: 'r1', initiatedAt: INITIATED_AT });
     expect(result.status).toBe('delivered');
     expect(result.delivery['phone_number']).toBe('+15005550006');
     expect(transport.calls[0]?.url).toContain('FriendlyName=xetral%3Ar1');
@@ -115,7 +119,7 @@ describe('recovering from a timeout', () => {
     const { transport, port } = harness();
     transport.script([{ json: { incoming_phone_numbers: [] } }]);
 
-    const result = await port.status('r-missing');
+    const result = await port.status({ reference: 'r-missing', initiatedAt: INITIATED_AT });
     expect(result.status).toBe('failed');
     expect(result.failureReason).toMatch(/no number was purchased/);
   });

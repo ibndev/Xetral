@@ -3,15 +3,34 @@ import { z } from 'zod';
 /**
  * Bitnob's webhook event names and payload shapes.
  *
- * Two details that are easy to get wrong and expensive to discover late:
+ * THE ONE THING IN THIS ADAPTER STILL UNVERIFIED, and it is blocked rather
+ * than merely unfinished. Everything else Bitnob-shaped in this package was
+ * checked against their official Node SDK (endpoint paths, request casing,
+ * the HMAC-SHA512 webhook signature). The SDK does not define events, and
+ * their documentation site is not reachable from this environment.
  *
- *  - The suffix is `.completed`, NOT `.complete`. A handler keyed on the wrong
- *    spelling silently receives nothing, which looks exactly like a provider
- *    that is not sending events.
- *  - JSON keys are snake_case. Camel-casing them produces `undefined` amounts,
- *    and `undefined` in a money path is how a posting of zero gets written.
+ * It also cannot be settled by reading alone: card issuing requires Bitnob's
+ * approval before any card exists, so the first real authorization webhook is
+ * only observable once that approval lands. Confirming these names is
+ * therefore part of enabling issuing, not a prerequisite for it — the same
+ * dependency PHASES.md records against Phase 5.
  *
- * Both are asserted in webhooks.test.ts rather than trusted to this comment.
+ * What is known: Bitnob's virtual-card webhooks use a `virtualcard.transaction.*`
+ * family, including `.debit`, `.reversed` and `.declined`. What is NOT known is
+ * how AUTHORIZATION and SETTLEMENT are named — the two-phase distinction this
+ * whole module is built around — so the names below remain the working
+ * assumption they always were.
+ *
+ * WHY THAT IS SAFE TO SHIP. An unrecognised event does not fall through: the
+ * `default` arm in webhooks.ts throws, the controller does not acknowledge,
+ * and Bitnob retries. A wrong name here therefore produces loud, retried
+ * failures and never a silently dropped spend — which is the failure mode
+ * worth designing for when the contract is uncertain.
+ *
+ * One detail that IS settled and easy to get wrong: JSON keys are snake_case.
+ * Camel-casing them produces `undefined` amounts, and `undefined` in a money
+ * path is how a posting of zero gets written. Asserted in webhooks.test.ts
+ * rather than trusted to this comment.
  */
 
 export const BITNOB_EVENTS = {

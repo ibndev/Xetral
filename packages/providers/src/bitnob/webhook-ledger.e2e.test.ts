@@ -141,7 +141,7 @@ function webhook(event: string, eventId: string, amountMicro: string): string {
 async function deliver(raw: string): Promise<LedgerIntent | undefined> {
   verifyWebhookSignature(
     raw,
-    { 'x-bitnob-signature': createHmac('sha256', SECRET).update(raw).digest('hex') },
+    { 'x-bitnob-signature': createHmac('sha512', SECRET).update(raw).digest('hex') },
     { secret: SECRET },
   );
   const intent = toLedgerIntent(parseWebhook(raw), { ownerId });

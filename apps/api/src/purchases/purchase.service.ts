@@ -70,6 +70,7 @@ interface PurchaseRow {
   status: string;
   delivery_sealed: string | null;
   failure_reason: string | null;
+  created_at: string;
 }
 
 /**
@@ -124,7 +125,7 @@ export class PurchaseService {
     const userId = await this.#activeUserId(userUuid);
     const rows = await this.pool.query<PurchaseRow>(
       `SELECT id, uuid, user_id, reference, service, target, amount_minor, currency,
-              status, delivery_sealed, failure_reason
+              status, delivery_sealed, failure_reason, created_at
          FROM purchases WHERE user_id = $1::bigint ORDER BY id DESC LIMIT 100`,
       [userId],
     );
@@ -153,6 +154,10 @@ export class PurchaseService {
         target: body.target,
         amountMinor: amount.amount,
         currency,
+        // The row's created_at, not `new Date()`. VTpass derives its
+        // de-duplication id from this, so it has to be the same value on a
+        // retry and on every later requery.
+        initiatedAt: reserve.initiatedAt,
       });
     } catch (error) {
       if (error instanceof ProviderTimeoutError) {
@@ -195,7 +200,7 @@ export class PurchaseService {
     reference: string,
     amount: Money<Currency>,
     currency: Currency,
-  ): Promise<{ purchaseId: string; entryId: string }> {
+  ): Promise<{ purchaseId: string; entryId: string; initiatedAt: Date }> {
     let entryId: string;
     try {
       const posted = await this.ledger.post({
@@ -217,12 +222,12 @@ export class PurchaseService {
       throw error;
     }
 
-    const inserted = await this.pool.query<{ id: string }>(
+    const inserted = await this.pool.query<{ id: string; created_at: string }>(
       `INSERT INTO purchases (user_id, reference, idempotency_key, provider, service,
                               item_code, target, amount_minor, currency, reserve_entry_id)
        VALUES ($1::bigint, $2, $3, $4, $5, $6, $7, $8, $9, $10::bigint)
        ON CONFLICT (user_id, idempotency_key) DO NOTHING
-       RETURNING id`,
+       RETURNING id, created_at`,
       [
         userId,
         reference,
@@ -237,7 +242,9 @@ export class PurchaseService {
       ],
     );
     const row = inserted.rows[0];
-    if (row !== undefined) return { purchaseId: row.id, entryId };
+    if (row !== undefined) {
+      return { purchaseId: row.id, entryId, initiatedAt: new Date(row.created_at) };
+    }
 
     // Two identical requests arrived at once. Both posted the reserve — the
     // second got the first one's entry back with `replayed: true`, so no money
@@ -247,7 +254,7 @@ export class PurchaseService {
     // describe a purchase that did happen as one that did not.
     const existing = await this.#byKey(userId, body.idempotency_key);
     if (existing === undefined) throw new Error('purchase insert returned no row');
-    return { purchaseId: existing.id, entryId };
+    return { purchaseId: existing.id, entryId, initiatedAt: new Date(existing.created_at) };
   }
 
   #port(service: ServiceKind): FulfilmentPort {
@@ -306,7 +313,7 @@ export class PurchaseService {
   async #reload(purchaseId: string): Promise<PurchaseRow> {
     const result = await this.pool.query<PurchaseRow>(
       `SELECT id, uuid, user_id, reference, service, target, amount_minor, currency,
-              status, delivery_sealed, failure_reason
+              status, delivery_sealed, failure_reason, created_at
          FROM purchases WHERE id = $1::bigint`,
       [purchaseId],
     );
@@ -318,7 +325,7 @@ export class PurchaseService {
   async #byKey(userId: string, idempotencyKey: string): Promise<PurchaseRow | undefined> {
     const result = await this.pool.query<PurchaseRow>(
       `SELECT id, uuid, user_id, reference, service, target, amount_minor, currency,
-              status, delivery_sealed, failure_reason
+              status, delivery_sealed, failure_reason, created_at
          FROM purchases WHERE user_id = $1::bigint AND idempotency_key = $2`,
       [userId, idempotencyKey],
     );

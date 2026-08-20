@@ -15,18 +15,19 @@ no PHP.
 |---|---|---|
 | NGN wallet — transfer, balances, history | — | **built** |
 | NGN wallet — funding | *needs a bank rail* | blocked |
-| Bills, airtime, data | VTpass | **built** (endpoints unconfirmed) |
+| Bills, airtime, data | VTpass | **built** |
 | Virtual USD cards | Bitnob | **built** (needs Bitnob issuing approval) |
 | Crypto / USDT / stablecoin | Bitnob | planned |
 | Multi-currency + FX / remittance | Bitnob | planned |
-| eSIM | Airalo | **built** (endpoints unconfirmed) |
-| Virtual numbers | Twilio | **built** (endpoints unconfirmed) |
+| eSIM | Airalo | **built** |
+| Virtual numbers | Twilio | **built** |
 | Gift card trading | — | **feature-flagged off at launch** |
 
-"Endpoints unconfirmed" means the flow is built and tested on our side of the
-port — ledger entries, reservation, reversal, sealing — while the provider's
-exact paths and payloads could not be verified from this repository. Each
-adapter collects them in one table so confirming them is a small diff.
+Every adapter's endpoint table, auth scheme and signature is verified against
+that provider's own SDK or published documentation, and each names its source
+in a header comment. The one thing still unconfirmed is Bitnob's card **webhook
+event names**, which resolve together with the card-issuing approval that gates
+them — an unrecognised event throws and is retried rather than being dropped.
 
 Gift card trading ships disabled. Buying cards *from* users is the highest fraud
 surface of the six and needs a review queue and hold periods before it is safe.

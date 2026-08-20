@@ -232,7 +232,7 @@ async function deliverWebhook(
     .set('content-type', 'application/json')
     .set(
       'x-bitnob-signature',
-      options.signature ?? createHmac('sha256', WEBHOOK_SECRET).update(raw).digest('hex'),
+      options.signature ?? createHmac('sha512', WEBHOOK_SECRET).update(raw).digest('hex'),
     )
     .send(raw);
 }
@@ -622,7 +622,7 @@ describe('the auth/settlement webhooks', () => {
         currency: 'USD',
       },
     });
-    const signature = createHmac('sha256', WEBHOOK_SECRET).update(raw).digest('hex');
+    const signature = createHmac('sha512', WEBHOOK_SECRET).update(raw).digest('hex');
 
     const send = () =>
       request(app.getHttpServer())

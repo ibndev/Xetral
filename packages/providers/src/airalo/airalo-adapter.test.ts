@@ -1,7 +1,11 @@
+import { createHmac } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { AiraloAdapter, usdToCents } from './airalo-adapter.js';
 import { fulfilmentContract, scriptedFetch } from '../ports/fulfilment.contract.js';
 import { supportsVerification } from '../ports/fulfilment.js';
+
+/** A fixed instant, so a request_id derived from it is stable across runs. */
+const INITIATED_AT = new Date('2026-02-07T17:30:00.000Z');
 
 const token = { data: { access_token: 'tok_live', expires_in: 3600 } };
 
@@ -88,7 +92,8 @@ describe('the eSIM activation payload is the product', () => {
       itemCode: 'ng-7day-1gb',
       target: 'NG',
       amountMinor: 450n,
-      currency: 'USD',
+      currency: 'USD',      initiatedAt: INITIATED_AT,
+
     });
 
     expect(result.status).toBe('delivered');
@@ -107,7 +112,8 @@ describe('the eSIM activation payload is the product', () => {
       itemCode: 'ng-7day-1gb',
       target: 'NG',
       amountMinor: 450n,
-      currency: 'USD',
+      currency: 'USD',      initiatedAt: INITIATED_AT,
+
     });
     expect(result.status).toBe('pending');
   });
@@ -121,7 +127,8 @@ describe('the eSIM activation payload is the product', () => {
       itemCode: 'ng-7day-1gb',
       target: 'NG',
       amountMinor: 450n,
-      currency: 'USD',
+      currency: 'USD',      initiatedAt: INITIATED_AT,
+
     });
     expect(result.status).toBe('failed');
   });
@@ -182,5 +189,70 @@ describe('capabilities', () => {
     // method that throws.
     const { port } = harness();
     expect(supportsVerification(port)).toBe(false);
+  });
+});
+
+describe('the token exchange matches what Airalo actually accepts', () => {
+  it('is form-encoded, not JSON', async () => {
+    // Verified against Airalo's official PHP SDK, which posts the credentials
+    // with http_build_query. Sending JSON here returns a 401 that reads as bad
+    // credentials, which is a long afternoon spent re-issuing working keys.
+    const { transport, port } = harness();
+    transport.script([{ json: token }, { json: packages }]);
+
+    await port.catalogue({});
+
+    const tokenCall = transport.calls[0];
+    const headers = tokenCall?.init.headers as Record<string, string>;
+    expect(headers['content-type']).toBe('application/x-www-form-urlencoded');
+
+    const sent = new URLSearchParams(String(tokenCall?.init.body));
+    expect(sent.get('grant_type')).toBe('client_credentials');
+    expect(sent.get('client_id')).toBe('id');
+    expect(sent.get('client_secret')).toBe('secret');
+  });
+
+  it('signs the JSON form of the payload, not the form-encoded body', async () => {
+    // The awkward part of Airalo's scheme: the body goes over the wire
+    // form-encoded while the signature covers the payload's JSON. Signing the
+    // bytes actually sent is the obvious thing to do and is rejected.
+    const { transport, port } = harness();
+    transport.script([{ json: token }, { json: packages }]);
+
+    await port.catalogue({});
+
+    const headers = transport.calls[0]?.init.headers as Record<string, string>;
+    const expected = createHmac('sha512', 'secret')
+      .update(
+        JSON.stringify({
+          client_id: 'id',
+          client_secret: 'secret',
+          grant_type: 'client_credentials',
+        }),
+        'utf8',
+      )
+      .digest('hex');
+
+    expect(headers['airalo-signature']).toBe(expected);
+  });
+
+  it('signs an order too', async () => {
+    const { transport, port } = harness();
+    transport.script([{ json: token }, { json: delivered }]);
+
+    await port.purchase({
+      reference: 'xetral-ref-1',
+      itemCode: 'ng-7day-1gb',
+      target: 'NG',
+      amountMinor: 450n,
+      currency: 'USD',      initiatedAt: INITIATED_AT,
+
+    });
+
+    const orderCall = transport.calls[1];
+    const headers = orderCall?.init.headers as Record<string, string>;
+    expect(headers['airalo-signature']).toEqual(expect.any(String));
+    expect(headers['content-type']).toBe('application/json');
+    expect(headers['authorization']).toBe('Bearer tok_live');
   });
 });

@@ -60,7 +60,14 @@ function adapterWith(responses: Parameters<typeof stub>[0]): {
   calls: Call[];
 } {
   const { fetch, calls } = stub(responses);
-  const client = new BitnobClient({ baseUrl: 'https://api.bitnob.test/', apiKey: 'sk', fetch });
+  // The version prefix belongs to the base URL, exactly as in Bitnob's SDK
+  // (BitnobLiveURL = 'https://api.bitnob.co/api/v1'). The trailing slash is
+  // deliberate — the client must not double it.
+  const client = new BitnobClient({
+    baseUrl: 'https://api.bitnob.test/api/v1/',
+    apiKey: 'sk',
+    fetch,
+  });
   return { adapter: new BitnobCardAdapter(client), calls };
 }
 
@@ -124,7 +131,10 @@ describe('issuing', () => {
     // 2500 cents must leave as 25,000,000 micro. Sending cents would fund the
     // card with a ten-thousandth of the intended amount.
     expect(sent['amount']).toBe('25000000');
-    expect(sent['currency']).toBe('USD');
+    // camelCase, and keyed by the registered card-user email. Both verified
+    // against Bitnob's own SDK rather than guessed from REST convention.
+    expect(sent['customerEmail']).toBe('cus_5');
+    expect(calls[0]?.url).toBe('https://api.bitnob.test/api/v1/virtualcards/create');
   });
 
   it('authenticates the request', async () => {
@@ -302,7 +312,7 @@ describe('failures are classified by what to do about them', () => {
 });
 
 describe('lifecycle operations', () => {
-  it('freezes, unfreezes and terminates through their own endpoints', async () => {
+  it('freezes, unfreezes and terminates by verb path, with the card in the body', async () => {
     const { adapter, calls } = adapterWith([
       { json: cardBody({ status: 'frozen' }) },
       { json: cardBody({ status: 'active' }) },
@@ -313,16 +323,23 @@ describe('lifecycle operations', () => {
     expect((await adapter.unfreeze('card_77')).status).toBe('active');
     expect((await adapter.terminate('card_77')).status).toBe('terminated');
 
+    // NOT /virtualcards/{id}/freeze. Bitnob has no per-card sub-resources; the
+    // card is named in the body. This asserted the REST-shaped guess until the
+    // paths were checked against their SDK, and a test agreeing with the code
+    // proves only that they were written by the same person.
     expect(calls.map((c) => c.url)).toEqual([
-      'https://api.bitnob.test/api/v1/virtualcards/card_77/freeze',
-      'https://api.bitnob.test/api/v1/virtualcards/card_77/unfreeze',
-      'https://api.bitnob.test/api/v1/virtualcards/card_77/terminate',
+      'https://api.bitnob.test/api/v1/virtualcards/freeze',
+      'https://api.bitnob.test/api/v1/virtualcards/unfreeze',
+      'https://api.bitnob.test/api/v1/virtualcards/terminate',
     ]);
+    for (const call of calls) {
+      expect(JSON.parse(String(call.init.body))).toEqual({ cardId: 'card_77' });
+    }
   });
 
   it('does not double up the slash between base url and path', async () => {
     const { adapter, calls } = adapterWith([{ json: cardBody() }]);
     await adapter.get('card_77');
-    expect(calls[0]?.url).toBe('https://api.bitnob.test/api/v1/virtualcards/card_77');
+    expect(calls[0]?.url).toBe('https://api.bitnob.test/api/v1/virtualcards/card/card_77');
   });
 });

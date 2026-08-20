@@ -29,16 +29,32 @@ export class WebhookVerificationError extends Error {
  * Verification happens BEFORE parsing, so no attacker-controlled bytes reach
  * the JSON parser or the schema until they are proven to come from Bitnob.
  *
- * CONFIRM BEFORE GO-LIVE: the header name and digest encoding below are the
- * common convention and are NOT verified against Bitnob's dashboard. They are
- * parameters rather than hardcoded constants for exactly that reason — check
- * the live docs and set them once, in one place.
+ * VERIFIED against Bitnob's official Node SDK (npm `bitnob`,
+ * `lib/base.ts::webhookAuthentication`): header `x-bitnob-signature`, HMAC
+ * SHA-512, hex digest. It was SHA-256 here on the strength of "that is what
+ * everyone uses", which would have failed every single webhook in production
+ * and looked exactly like a misconfigured secret.
+ *
+ * WHERE WE DELIBERATELY DIFFER FROM THEIR EXAMPLE. Their snippet signs
+ * `JSON.stringify(req.body)` — the body after Express has parsed it. We sign
+ * the RAW bytes instead. The two agree whenever the round trip is lossless,
+ * which it must be for their own SDK to work at all, so this is compatible;
+ * it is simply stricter, because a re-serialised body can differ in whitespace
+ * or unicode escaping and produce failures that read as a wrong secret. It
+ * also means no attacker-controlled bytes reach the JSON parser before the
+ * signature has been checked.
+ *
+ * The header and encoding stay parameters so a rotation or a change is one
+ * call site rather than a code change.
  */
+/** Bitnob's header and algorithm, from their official SDK. */
+export const BITNOB_SIGNATURE_HEADER = 'x-bitnob-signature';
+export const BITNOB_SIGNATURE_ALGORITHM = 'sha512';
+
 export interface WebhookVerifierOptions {
   readonly secret: string;
-  /** Header carrying the signature. Confirm against Bitnob's docs. */
+  /** Overrides the verified default only if Bitnob changes it. */
   readonly signatureHeader?: string;
-  /** How the digest is encoded in that header. Confirm against Bitnob's docs. */
   readonly encoding?: 'hex' | 'base64';
 }
 
@@ -47,7 +63,7 @@ export function verifyWebhookSignature(
   headers: Readonly<Record<string, string | undefined>>,
   options: WebhookVerifierOptions,
 ): void {
-  const headerName = (options.signatureHeader ?? 'x-bitnob-signature').toLowerCase();
+  const headerName = (options.signatureHeader ?? BITNOB_SIGNATURE_HEADER).toLowerCase();
   const encoding = options.encoding ?? 'hex';
 
   // Header lookup is case-insensitive because HTTP header names are, and
@@ -62,7 +78,9 @@ export function verifyWebhookSignature(
     throw new WebhookVerificationError(`missing ${headerName} header`);
   }
 
-  const expected = createHmac('sha256', options.secret).update(rawBody, 'utf8').digest(encoding);
+  const expected = createHmac(BITNOB_SIGNATURE_ALGORITHM, options.secret)
+    .update(rawBody, 'utf8')
+    .digest(encoding);
 
   const a = Buffer.from(expected, 'utf8');
   const b = Buffer.from(presented, 'utf8');

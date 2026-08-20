@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { VtpassAdapter, koboToNaira, nairaToKobo } from './vtpass-adapter.js';
+import { VtpassAdapter, vtpassRequestId, koboToNaira, nairaToKobo } from './vtpass-adapter.js';
 import { fulfilmentContract, scriptedFetch } from '../ports/fulfilment.contract.js';
 import { ProviderRejectedError } from '../ports/errors.js';
 import { supportsVerification } from '../ports/fulfilment.js';
+
+/** A fixed instant, so a request_id derived from it is stable across runs. */
+const INITIATED_AT = new Date('2026-02-07T17:30:00.000Z');
 
 const variations = {
   content: {
@@ -91,7 +94,8 @@ describe('provider response codes', () => {
       itemCode: 'mtn-data:mtn-10gb',
       target: '08030000000',
       amountMinor: 450_000n,
-      currency: 'NGN',
+      currency: 'NGN',      initiatedAt: INITIATED_AT,
+
     });
     expect(result.status).toBe('pending');
   });
@@ -108,7 +112,8 @@ describe('provider response codes', () => {
       itemCode: 'mtn-data:mtn-10gb',
       target: '08030000000',
       amountMinor: 450_000n,
-      currency: 'NGN',
+      currency: 'NGN',      initiatedAt: INITIATED_AT,
+
     });
     expect(result.status).toBe('pending');
   });
@@ -122,7 +127,8 @@ describe('provider response codes', () => {
       itemCode: 'mtn-data:mtn-10gb',
       target: '08030000000',
       amountMinor: 450_000n,
-      currency: 'NGN',
+      currency: 'NGN',      initiatedAt: INITIATED_AT,
+
     });
     expect(result.status).toBe('failed');
     expect(result.failureReason).toBe('TRANSACTION FAILED');
@@ -141,7 +147,8 @@ describe('provider response codes', () => {
       itemCode: 'ikeja-electric:prepaid',
       target: '01234567890',
       amountMinor: 500_000n,
-      currency: 'NGN',
+      currency: 'NGN',      initiatedAt: INITIATED_AT,
+
     });
     expect(result.delivery['token']).toBe('1234-5678-9012-3456');
   });
@@ -190,5 +197,49 @@ describe('meter verification', () => {
     await expect(port.verifyTarget('ikeja-electric:prepaid', '999')).rejects.toBeInstanceOf(
       ProviderRejectedError,
     );
+  });
+});
+
+describe("VTpass's request_id format", () => {
+  it('is a Lagos YYYYMMDDHHMM stamp followed by our reference', async () => {
+    // Their documented example is 202202071830YUs83meikd. 17:30Z is 18:30 in
+    // Lagos, which is UTC+1 all year.
+    const id = vtpassRequestId('xtabc123', new Date('2026-02-07T17:30:00.000Z'));
+    expect(id).toBe('202602071830xtabc123');
+  });
+
+  it('rolls the DATE over when the Lagos offset crosses midnight', async () => {
+    // 23:30Z is 00:30 the NEXT day in Lagos. Shifting only the hour would
+    // produce a stamp dated yesterday, which is the kind of thing that works
+    // for twenty-three hours a day.
+    const id = vtpassRequestId('xt1', new Date('2026-02-07T23:30:00.000Z'));
+    expect(id.slice(0, 12)).toBe('202602080030');
+  });
+
+  it('is DERIVED, so ordering and requerying use the same id', async () => {
+    // The property the entire recovery path rests on. If this read the clock,
+    // a requery would ask VTpass about an id that was never ordered, and a
+    // retry would look to them like a second purchase.
+    const initiatedAt = new Date('2026-02-07T17:30:00.000Z');
+    const { transport, port } = harness();
+    transport.script([
+      { json: { code: '099', content: { transactions: { status: 'pending' } } } },
+      { json: { code: '000', content: { transactions: { status: 'delivered' } } } },
+    ]);
+
+    await port.purchase({
+      reference: 'xt-shared-ref',
+      itemCode: 'mtn-data:500',
+      target: '08030000000',
+      amountMinor: 50_000n,
+      currency: 'NGN',
+      initiatedAt,
+    });
+    await port.status({ reference: 'xt-shared-ref', initiatedAt });
+
+    const ordered = JSON.parse(String(transport.calls[0]?.init.body)) as { request_id: string };
+    const requeried = JSON.parse(String(transport.calls[1]?.init.body)) as { request_id: string };
+    expect(requeried.request_id).toBe(ordered.request_id);
+    expect(ordered.request_id).toBe('202602071830xtsharedref');
   });
 });

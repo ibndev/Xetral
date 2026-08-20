@@ -84,12 +84,14 @@ export class BitnobCardAdapter implements CardPort {
   constructor(private readonly client: BitnobClient) {}
 
   async issue(request: IssueCardRequest): Promise<VirtualCard> {
+    // camelCase, and `customerEmail` rather than an id: Bitnob keys a card user
+    // by the email registered through /virtualcards/registercarduser. Verified
+    // against their Node SDK, which is also where the casing comes from — their
+    // request bodies are camelCase even though webhook payloads are not.
     const payload = await this.client.request('POST', BITNOB_ENDPOINTS.issueCard, {
-      customer_id: request.providerCustomerId,
-      name_on_card: request.nameOnCard,
+      customerEmail: request.providerCustomerId,
       // Converted at the one boundary, never inline.
       amount: usdToMicro(request.initialFunding).toString(),
-      currency: 'USD',
     });
     return this.#toVirtualCard(payload);
   }
@@ -106,8 +108,11 @@ export class BitnobCardAdapter implements CardPort {
   async fund(request: FundCardRequest): Promise<OperationOutcome> {
     const payload = await this.client.request(
       'POST',
-      BITNOB_ENDPOINTS.fundCard(request.providerCardId),
-      { amount: usdToMicro(request.amount).toString(), currency: 'USD' },
+      BITNOB_ENDPOINTS.fundCard,
+      {
+        cardId: request.providerCardId,
+        amount: usdToMicro(request.amount).toString(),
+      },
       request.idempotencyKey,
     );
 
@@ -131,19 +136,19 @@ export class BitnobCardAdapter implements CardPort {
 
   async freeze(providerCardId: string): Promise<VirtualCard> {
     return this.#toVirtualCard(
-      await this.client.request('POST', BITNOB_ENDPOINTS.freezeCard(providerCardId)),
+      await this.client.request('POST', BITNOB_ENDPOINTS.freezeCard, { cardId: providerCardId }),
     );
   }
 
   async unfreeze(providerCardId: string): Promise<VirtualCard> {
     return this.#toVirtualCard(
-      await this.client.request('POST', BITNOB_ENDPOINTS.unfreezeCard(providerCardId)),
+      await this.client.request('POST', BITNOB_ENDPOINTS.unfreezeCard, { cardId: providerCardId }),
     );
   }
 
   async terminate(providerCardId: string): Promise<VirtualCard> {
     return this.#toVirtualCard(
-      await this.client.request('POST', BITNOB_ENDPOINTS.terminateCard(providerCardId)),
+      await this.client.request('POST', BITNOB_ENDPOINTS.terminateCard, { cardId: providerCardId }),
     );
   }
 

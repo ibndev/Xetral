@@ -280,9 +280,19 @@ the reference plugin and are out of scope.
   boundary inside the adapter, with its own tests.
 - Webhook `event_id` is the natural source for `idempotency_key`. Format the key as
   `bitnob:<event_id>` so two providers cannot collide.
-- Event names use the `.completed` suffix (not `.complete`); JSON keys are
-  snake_case.
-- Card issuing **requires approval** from Bitnob before use.
+- JSON keys in webhook payloads are snake_case. Request bodies to their REST
+  API are **camelCase** (`customerEmail`, `cardId`) — the two do not match, and
+  both are verified against their official Node SDK.
+- The webhook signature is **HMAC-SHA512**, hex, in `x-bitnob-signature`. It was
+  SHA-256 here on the strength of "everyone uses SHA-256", which would have
+  rejected every webhook in production and looked like a bad secret.
+- Card endpoints have **no per-card sub-resources**. Every operation is a flat
+  POST to a verb path (`/virtualcards/freeze`) with `cardId` in the body, under
+  a base URL that includes `/api/v1`.
+- Card issuing **requires approval** from Bitnob before use. The card webhook
+  EVENT NAMES are the one thing still unconfirmed, and they resolve as part of
+  that approval — an unrecognised event throws and is retried, so a wrong name
+  is loud rather than a dropped spend.
 
 ### The fulfilment port
 
@@ -298,6 +308,18 @@ cache, Twilio's form-encoded bodies. None of that shape reaches a caller.
 
 Twilio is priced by **us**, not by Twilio: `priceCents` is what the customer pays,
 and an instance that has not set it cannot sell a number.
+
+**VTpass's `request_id` is derived, never generated.** It must start with a
+`YYYYMMDDHHMM` stamp in Africa/Lagos, so `PurchaseRequest` carries `initiatedAt`
+— the purchase row's `created_at` — and `vtpassRequestId()` builds the same
+string every time from it. Reading the clock instead would give a retry a new
+id (a second purchase, to VTpass) and leave reconciliation requerying an id that
+never existed.
+
+**Airalo signs every body it sends**: `airalo-signature`, HMAC-SHA512 of the
+payload's JSON, keyed by the client secret. The token exchange is the awkward
+one — form-encoded on the wire, signed as JSON. The adapter serialises once and
+signs the exact string it sends, so the two cannot drift.
 
 ### Working in `packages/providers`
 
@@ -319,10 +341,11 @@ and an instance that has not set it cannot sell a number.
 - `ProviderTimeoutError` is deliberately **not** retryable. A timeout means we
   do not know whether the provider acted, and the naive retry is how one card
   funding becomes two. Reconcile instead.
-- **CONFIRM BEFORE GO-LIVE**, both collected in one place each: the webhook
-  signature header and encoding (`bitnob/webhooks.ts`) and the endpoint paths
-  (`BITNOB_ENDPOINTS` in `bitnob/client.ts`). Neither could be verified from
-  the repository.
+- Every provider's endpoint table, auth scheme and signature is **verified
+  against that provider's own SDK or published docs**, and each says which in a
+  header comment. When one of these was a guess it was wrong — every Bitnob
+  card path, and the webhook hash — so treat an unsourced constant here as a
+  bug rather than a detail.
 
 ---
 

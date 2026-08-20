@@ -207,7 +207,13 @@ export class ReconciliationService implements OnApplicationShutdown {
       throw new Error(`no port configured for ${row.service}`);
     }
 
-    const result = await port.status(row.reference);
+    // The row's created_at, so the adapter can rebuild whatever id it gave the
+    // provider on the day. Passing `new Date()` here would have VTpass asked
+    // about a request that never existed.
+    const result = await port.status({
+      reference: row.reference,
+      initiatedAt: new Date(row.created_at),
+    });
 
     if (result.status === 'delivered') {
       await this.outcomes.settle(row, result);

@@ -30,19 +30,30 @@ export interface BitnobClientOptions {
 }
 
 /**
- * CONFIRM BEFORE GO-LIVE — these paths and the webhook signature header in
- * webhooks.ts are the two things in this adapter that could not be verified
- * from the repository. They are collected here, in one place, precisely so that
- * confirming them is a single small diff against Bitnob's live documentation
- * rather than a hunt through the module.
+ * Bitnob's virtual-card endpoints, verified against their official Node SDK
+ * (npm `bitnob`, `lib/virtual_card.ts`) rather than inferred.
+ *
+ * Two things about the shape are worth stating, because both are the opposite
+ * of what a REST-shaped guess produces — and this table WAS such a guess until
+ * it was checked:
+ *
+ *  1. There are no per-card sub-resources. Every operation is a flat POST to
+ *     its own verb path with `cardId` in the BODY. `/virtualcards/{id}/freeze`
+ *     does not exist.
+ *  2. The paths live under `/api/v1` on the host, so `baseUrl` is
+ *     `https://api.bitnob.co/api/v1` (sandbox: `https://sandboxapi.bitnob.co/api/v1`)
+ *     and the paths here are relative to that.
  */
 export const BITNOB_ENDPOINTS = {
-  issueCard: '/api/v1/virtualcards',
-  fundCard: (cardId: string) => `/api/v1/virtualcards/${cardId}/topup`,
-  freezeCard: (cardId: string) => `/api/v1/virtualcards/${cardId}/freeze`,
-  unfreezeCard: (cardId: string) => `/api/v1/virtualcards/${cardId}/unfreeze`,
-  terminateCard: (cardId: string) => `/api/v1/virtualcards/${cardId}/terminate`,
-  getCard: (cardId: string) => `/api/v1/virtualcards/${cardId}`,
+  /** KYC registration. A prerequisite for issuing, never a side effect of it. */
+  registerCardUser: '/virtualcards/registercarduser',
+  issueCard: '/virtualcards/create',
+  /** "credit", not "topup". */
+  fundCard: '/virtualcards/credit',
+  freezeCard: '/virtualcards/freeze',
+  unfreezeCard: '/virtualcards/unfreeze',
+  terminateCard: '/virtualcards/terminate',
+  getCard: (cardId: string) => `/virtualcards/card/${cardId}`,
 } as const;
 
 export class BitnobClient {

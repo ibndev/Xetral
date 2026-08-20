@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { z } from 'zod';
 import {
   ProviderContractError,
@@ -9,6 +10,7 @@ import type {
   CatalogueItem,
   CatalogueQuery,
   FulfilmentPort,
+  PurchaseLookup,
   PurchaseRequest,
   PurchaseResult,
   ServiceKind,
@@ -19,9 +21,11 @@ const PROVIDER = 'airalo';
 /**
  * Airalo — eSIM data packages, priced in USD.
  *
- * CONFIRM BEFORE GO-LIVE: endpoint paths and the OAuth token exchange below
- * could not be verified from this repository, and are collected here so that
- * confirming them is one small diff.
+ * VERIFIED against Airalo's official PHP SDK (`Constants/ApiConstants.php`,
+ * `Services/OAuthService.php`, `Helpers/Signature.php`): the
+ * `https://partners-api.airalo.com/v2/` base, the token/packages/orders slugs
+ * below, the form-encoded client_credentials token exchange, and the
+ * `airalo-signature` HMAC-SHA512 header.
  */
 export const AIRALO_ENDPOINTS = {
   token: '/v2/token',
@@ -143,7 +147,8 @@ export class AiraloAdapter implements FulfilmentPort {
     return this.#toResult(payload, request.reference);
   }
 
-  async status(reference: string): Promise<PurchaseResult> {
+  async status(lookup: PurchaseLookup): Promise<PurchaseResult> {
+    const reference = lookup.reference;
     const payload = await this.#request('GET', AIRALO_ENDPOINTS.order(reference));
     return this.#toResult(payload, reference);
   }
@@ -187,11 +192,21 @@ export class AiraloAdapter implements FulfilmentPort {
     const cached = this.#token;
     if (cached !== undefined && cached.expiresAtMs > this.#now()) return cached.value;
 
-    const response = await this.#send('POST', AIRALO_ENDPOINTS.token, {
+    const credentials = {
       client_id: this.#options.clientId,
       client_secret: this.#options.clientSecret,
       grant_type: 'client_credentials',
-    });
+    } as const;
+
+    // Form-encoded, and unauthenticated — this call is what produces the token
+    // every other call carries.
+    const response = await this.#send(
+      'POST',
+      AIRALO_ENDPOINTS.token,
+      undefined,
+      undefined,
+      credentials,
+    );
 
     const parsed = tokenResponse.safeParse(response);
     if (!parsed.success) {
@@ -210,12 +225,38 @@ export class AiraloAdapter implements FulfilmentPort {
     return this.#send(method, path, body, await this.#accessToken());
   }
 
+  /**
+   * `airalo-signature`: HMAC-SHA512 of the JSON payload, keyed by the client
+   * secret, hex encoded.
+   *
+   * Required on every request that carries a body, including the token
+   * exchange — which is the awkward one, because that body goes over the wire
+   * FORM-encoded while the signature is computed over its JSON form. Signing
+   * the form-encoded string instead produces a 401 that looks like bad
+   * credentials. Verified against Airalo's official PHP SDK
+   * (`Helpers/Signature.php`, `Services/OAuthService.php`).
+   */
+  #signature(serialisedPayload: string): string {
+    return createHmac('sha512', this.#options.clientSecret)
+      .update(serialisedPayload, 'utf8')
+      .digest('hex');
+  }
+
   async #send(
     method: 'GET' | 'POST',
     path: string,
     body?: unknown,
     token?: string,
+    /** Token exchange only: Airalo wants that one form-encoded. */
+    form?: Readonly<Record<string, string>>,
   ): Promise<unknown> {
+    // Serialised ONCE, and the same string is both signed and sent. Computing
+    // them separately is how a signature ends up covering a payload that
+    // differs from the bytes on the wire — which Airalo rejects as a bad
+    // signature and which is invisible in a diff.
+    const serialised = body === undefined ? undefined : JSON.stringify(body);
+    const signed = form !== undefined ? JSON.stringify(form) : serialised;
+
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.#options.timeoutMs ?? 20_000);
 
@@ -226,10 +267,16 @@ export class AiraloAdapter implements FulfilmentPort {
         signal: controller.signal,
         headers: {
           accept: 'application/json',
-          'content-type': 'application/json',
+          'content-type':
+            form === undefined ? 'application/json' : 'application/x-www-form-urlencoded',
           ...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
+          ...(signed === undefined ? {} : { 'airalo-signature': this.#signature(signed) }),
         },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        ...(form !== undefined
+          ? { body: new URLSearchParams(form).toString() }
+          : serialised === undefined
+            ? {}
+            : { body: serialised }),
       });
     } catch (cause) {
       if (cause instanceof Error && cause.name === 'AbortError') {
@@ -291,3 +338,4 @@ export function usdToCents(value: string | number): bigint {
   const cents = BigInt(`${whole}${fraction.padEnd(2, '0')}`);
   return sign === '-' ? -cents : cents;
 }
+

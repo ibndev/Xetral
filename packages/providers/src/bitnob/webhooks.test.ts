@@ -34,7 +34,7 @@ function body(overrides: Record<string, unknown> = {}, data: Record<string, unkn
 }
 
 const sign = (raw: string): string =>
-  createHmac('sha256', SECRET).update(raw, 'utf8').digest('hex');
+  createHmac('sha512', SECRET).update(raw, 'utf8').digest('hex');
 
 const intentFor = (raw: string): LedgerIntent => {
   const parsed = parseWebhook(raw);
@@ -67,7 +67,7 @@ describe('signature verification', () => {
 
   it('rejects a signature made with another secret', () => {
     const raw = body();
-    const foreign = createHmac('sha256', 'not-our-secret').update(raw).digest('hex');
+    const foreign = createHmac('sha512', 'not-our-secret').update(raw).digest('hex');
     expect(() =>
       verifyWebhookSignature(raw, { 'x-bitnob-signature': foreign }, { secret: SECRET }),
     ).toThrow(WebhookVerificationError);

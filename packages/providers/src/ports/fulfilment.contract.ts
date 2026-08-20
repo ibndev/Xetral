@@ -3,6 +3,9 @@ import { ProviderTimeoutError } from './errors.js';
 import { supportsVerification } from './fulfilment.js';
 import type { FulfilmentPort } from './fulfilment.js';
 
+/** A fixed instant, so a request_id derived from it is stable across runs. */
+const INITIATED_AT = new Date('2026-02-07T17:30:00.000Z');
+
 /**
  * What every FulfilmentPort must do, run against all three adapters.
  *
@@ -64,7 +67,8 @@ export function fulfilmentContract(make: () => ContractHarness): void {
       itemCode: harness.itemCode,
       target: harness.target,
       amountMinor: 50_000n,
-      currency: harness.currency,
+      currency: harness.currency,      initiatedAt: INITIATED_AT,
+
     });
 
     expect(result.status).toBe('delivered');
@@ -85,6 +89,7 @@ export function fulfilmentContract(make: () => ContractHarness): void {
         target: harness.target,
         amountMinor: 50_000n,
         currency: wrong,
+        initiatedAt: INITIATED_AT,
       }),
     ).rejects.toThrow();
   });
@@ -102,7 +107,8 @@ export function fulfilmentContract(make: () => ContractHarness): void {
         itemCode: harness.itemCode,
         target: harness.target,
         amountMinor: 50_000n,
-        currency: harness.currency,
+        currency: harness.currency,      initiatedAt: INITIATED_AT,
+
       }),
     ).rejects.toMatchObject({ name: 'ProviderTimeoutError', retryable: false });
   });
@@ -112,7 +118,10 @@ export function fulfilmentContract(make: () => ContractHarness): void {
     // we chose, without needing an id the provider never gave us.
     const harness = make();
     harness.script(harness.statusResponses);
-    const result = await harness.port.status('xetral-ref-1');
+    const result = await harness.port.status({
+      reference: 'xetral-ref-1',
+      initiatedAt: INITIATED_AT,
+    });
     expect(['delivered', 'pending', 'failed']).toContain(result.status);
   });
 
@@ -126,7 +135,8 @@ export function fulfilmentContract(make: () => ContractHarness): void {
         itemCode: harness.itemCode,
         target: harness.target,
         amountMinor: 50_000n,
-        currency: harness.currency,
+        currency: harness.currency,      initiatedAt: INITIATED_AT,
+
       }),
     ).rejects.toMatchObject({ name: 'ProviderContractError', retryable: false });
   });

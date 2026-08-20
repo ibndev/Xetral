@@ -9,6 +9,7 @@ import type {
   CatalogueItem,
   CatalogueQuery,
   FulfilmentPort,
+  PurchaseLookup,
   PurchaseRequest,
   PurchaseResult,
   ServiceKind,
@@ -25,9 +26,9 @@ const PROVIDER = 'twilio';
  * whoever owns billing, and modelling it here would make a purchase port into a
  * billing engine.
  *
- * CONFIRM BEFORE GO-LIVE: the API version segment and the exact resource paths
- * are collected in TWILIO_ENDPOINTS and were not verifiable from this
- * repository.
+ * VERIFIED against Twilio's official Node SDK (npm `twilio`): the
+ * `2010-04-01` version segment and both resource paths below, HTTP Basic auth
+ * with the account SID and auth token, and form-encoded request bodies.
  */
 export const TWILIO_ENDPOINTS = {
   available: (accountSid: string, country: string) =>
@@ -144,7 +145,8 @@ export class TwilioAdapter implements FulfilmentPort {
    * That is what makes a timeout recoverable: we can ask "did a number with
    * this reference get bought?" instead of buying another one to find out.
    */
-  async status(reference: string): Promise<PurchaseResult> {
+  async status(lookup: PurchaseLookup): Promise<PurchaseResult> {
+    const reference = lookup.reference;
     const payload = await this.#request(
       'GET',
       `${TWILIO_ENDPOINTS.owned(this.#options.accountSid)}?FriendlyName=${encodeURIComponent(

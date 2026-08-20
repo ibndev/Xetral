@@ -253,13 +253,28 @@ Findings from building it:
    delivered twice raises a unique violation and the balance does not move a
    second time.
 
-**CONFIRM BEFORE GO-LIVE.** Two things could not be verified from the
-repository and are each collected in one place so that confirming them is a
-small diff: the webhook signature header and encoding (`bitnob/webhooks.ts`),
-and the endpoint paths (`BITNOB_ENDPOINTS` in `bitnob/client.ts`).
+**CONFIRMED — and both guesses were wrong.** Checked against Bitnob's official
+Node SDK (npm `bitnob`):
 
-**Still operational:** Bitnob card issuing requires approval before use. That
-lead time blocks Phase 5 — request it now if it has not been requested.
+- The webhook signature is **HMAC-SHA512**, not SHA-256. Every webhook would
+  have been rejected in production, presenting as a misconfigured secret.
+- There are **no per-card sub-resources**. `POST /virtualcards/{id}/freeze` — a
+  reasonable REST guess — does not exist; it is `POST /virtualcards/freeze`
+  with `cardId` in the body, and funding is `/virtualcards/credit`, not
+  `/topup`. Every path in the table was wrong.
+- Request bodies are **camelCase** (`customerEmail`, `cardId`) even though
+  webhook payloads are snake_case, and `/api/v1` belongs to the base URL.
+
+The lesson worth keeping is not any one path: it is that a table of plausible
+constants, with tests written from the same assumptions, passed everything and
+would have failed on the first live call. The tests agreed with the code
+because the same person wrote both.
+
+**Still operational, and now the only open item:** Bitnob card issuing requires
+their approval before use. The card webhook EVENT NAMES resolve with it — their
+SDK does not define events, so the first real authorization is what settles the
+two-phase naming. An unrecognised event throws rather than being acknowledged,
+so a wrong name is loud and retried, never a dropped spend.
 
 ---
 
@@ -466,11 +481,28 @@ Findings from building it:
    is one suite quietly keeping the old shape and testing a config production
    does not have.
 
-**CONFIRM BEFORE GO-LIVE**, collected one place per adapter as in Phase 3: the
-endpoint tables (`VTPASS_ENDPOINTS`, `AIRALO_ENDPOINTS`, `TWILIO_ENDPOINTS`) and
-VTpass's `request_id` format, which their documentation constrains and which our
-derived reference may not satisfy. Reference generation is one function
-(`referenceFor`), so satisfying it is a small diff.
+**CONFIRMED against each provider's own SDK or published documentation.** Two
+findings changed the code rather than just the comments:
+
+14. **VTpass's `request_id` must carry a Lagos timestamp, and that fights
+    determinism.** Their format is `YYYYMMDDHHMM` in Africa/Lagos followed by a
+    unique tail. The obvious implementation reads the clock inside the adapter,
+    and it is wrong twice over: a retry a minute later becomes a second
+    purchase in their eyes, and reconciliation days later requeries an id that
+    never existed. `PurchaseRequest` therefore carries `initiatedAt` — the
+    purchase row's `created_at` — and the id is a pure function of it. That is
+    also why `status()` takes a lookup rather than a bare reference: an adapter
+    reconstructing a provider-side id needs both halves.
+15. **Airalo signs every body, including the one it sends form-encoded.**
+    `airalo-signature` is HMAC-SHA512 over the payload's JSON, keyed by the
+    client secret — while the token exchange goes over the wire as
+    `application/x-www-form-urlencoded`. Signing the bytes actually sent is the
+    natural thing to do and is rejected. The adapter serialises once and signs
+    that exact string, so the signature cannot cover a payload that differs
+    from the body.
+
+Twilio needed no change: the `2010-04-01` paths and form-encoded Basic auth
+were already right.
 
 ### The reconciliation worker ✅
 

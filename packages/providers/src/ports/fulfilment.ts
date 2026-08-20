@@ -58,6 +58,30 @@ export interface PurchaseRequest {
    */
   readonly amountMinor: bigint;
   readonly currency: Currency;
+  /**
+   * When this purchase was first initiated — the purchase row's `created_at`,
+   * NOT "now".
+   *
+   * It is here because VTpass requires the id it de-duplicates on to begin
+   * with a `YYYYMMDDHHMM` timestamp in Africa/Lagos, and an adapter that used
+   * the clock would compute a different id on a retry and on every requery,
+   * which defeats both sides' de-duplication at once. Passing the moment the
+   * purchase was created makes that id derivable again by anyone holding the
+   * row — which is exactly what reconciliation needs, days later.
+   *
+   * Providers with no such requirement ignore it.
+   */
+  readonly initiatedAt: Date;
+}
+
+/**
+ * What it takes to look a purchase up again: our reference, and when it
+ * started. The second half is not redundant — see `initiatedAt` above; an
+ * adapter that has to reconstruct a provider-side id needs both.
+ */
+export interface PurchaseLookup {
+  readonly reference: string;
+  readonly initiatedAt: Date;
 }
 
 /**
@@ -99,7 +123,7 @@ export interface FulfilmentPort {
    * find out, and sending the purchase again is how one airtime top-up becomes
    * two.
    */
-  status(reference: string): Promise<PurchaseResult>;
+  status(lookup: PurchaseLookup): Promise<PurchaseResult>;
 }
 
 export interface VerifiedTarget {

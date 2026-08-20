@@ -9,6 +9,7 @@ import type {
   CatalogueItem,
   CatalogueQuery,
   FulfilmentPort,
+  PurchaseLookup,
   PurchaseRequest,
   PurchaseResult,
   ServiceKind,
@@ -21,11 +22,48 @@ const PROVIDER = 'vtpass';
 /**
  * VTpass — airtime, data bundles and utility bills, in NGN.
  *
- * CONFIRM BEFORE GO-LIVE. The endpoint paths, the auth headers and the exact
- * response codes below are collected here, in one place, because they could not
- * be verified from this repository. Confirming them against VTpass's live
- * documentation should be a small diff to this file and nothing else.
+ * VERIFIED against VTpass's published API documentation: the endpoint paths
+ * below, the `api-key` + `secret-key` (POST) / `api-key` + `public-key` (GET)
+ * header split, the `000`/`099` response codes, and the `request_id` format.
+ * Sandbox is the same shape on sandbox.vtpass.com.
  */
+/**
+ * VTpass's `request_id`: `YYYYMMDDHHMM` in Africa/Lagos, then our own
+ * reference.
+ *
+ * Their documented example is `202202071830YUs83meikd` — a twelve-character
+ * Lagos timestamp followed by an arbitrary unique tail. The tail here is our
+ * reference, which is already globally unique and already the root of both
+ * ledger idempotency keys, so one value identifies the purchase on both sides.
+ *
+ * DERIVED FROM `initiatedAt`, NEVER FROM THE CLOCK. This function must return
+ * the same string every time it is called for a given purchase: once when
+ * ordering, and again on every requery for as long as the purchase is
+ * unresolved. Reading the clock instead would produce an id that changes at
+ * every minute boundary — a retry would look like a new purchase to VTpass,
+ * and reconciliation would ask them about an id that never existed.
+ *
+ * Lagos is UTC+1 with no daylight saving, which is the only reason this can be
+ * an arithmetic shift rather than a timezone database lookup.
+ */
+const LAGOS_OFFSET_MS = 60 * 60 * 1000;
+
+export function vtpassRequestId(reference: string, initiatedAt: Date): string {
+  const lagos = new Date(initiatedAt.getTime() + LAGOS_OFFSET_MS);
+  const pad = (n: number): string => String(n).padStart(2, '0');
+
+  const stamp =
+    String(lagos.getUTCFullYear()) +
+    pad(lagos.getUTCMonth() + 1) +
+    pad(lagos.getUTCDate()) +
+    pad(lagos.getUTCHours()) +
+    pad(lagos.getUTCMinutes());
+
+  // Their id is alphanumeric; ours already is, but strip anything else rather
+  // than trusting that to stay true if the reference format is ever changed.
+  return stamp + reference.replace(/[^a-zA-Z0-9]/g, '');
+}
+
 export const VTPASS_ENDPOINTS = {
   purchase: '/api/pay',
   status: '/api/requery',
@@ -141,17 +179,7 @@ export class VtpassAdapter implements FulfilmentPort, TargetVerification {
     }
 
     const payload = await this.#request('POST', VTPASS_ENDPOINTS.purchase, {
-      // Our reference, so their de-duplication and ours agree on what "the
-      // same purchase" means.
-      //
-      // CONFIRM BEFORE GO-LIVE: VTpass constrains the shape of request_id, and
-      // that constraint could not be verified from this repository. If theirs
-      // and ours disagree, the fix belongs in `referenceFor()` in the API —
-      // the ONE place a reference is built — and not here. Deriving a
-      // different id inside this adapter would break requery: `status()` below
-      // has only the reference to go on and could not reconstruct a
-      // timestamped variant of it.
-      request_id: request.reference,
+      request_id: vtpassRequestId(request.reference, request.initiatedAt),
       serviceID: request.itemCode.split(':')[0],
       variation_code: request.itemCode.split(':')[1],
       billersCode: request.target,
@@ -162,11 +190,13 @@ export class VtpassAdapter implements FulfilmentPort, TargetVerification {
     return this.#toResult(payload, request.reference);
   }
 
-  async status(reference: string): Promise<PurchaseResult> {
+  async status(lookup: PurchaseLookup): Promise<PurchaseResult> {
     const payload = await this.#request('POST', VTPASS_ENDPOINTS.status, {
-      request_id: reference,
+      // Recomputed, not stored. Deterministic in (reference, initiatedAt), so
+      // a requery days later asks about exactly the id we ordered under.
+      request_id: vtpassRequestId(lookup.reference, lookup.initiatedAt),
     });
-    return this.#toResult(payload, reference);
+    return this.#toResult(payload, lookup.reference);
   }
 
   /**
