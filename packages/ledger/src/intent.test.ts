@@ -4,8 +4,8 @@ import {
   UnbalancedIntentError,
   assertBalanced,
   posting,
-} from './ledger-intent.js';
-import type { AccountRef, LedgerIntent, PostingIntent } from './ledger-intent.js';
+} from './intent.js';
+import type { AccountRef, LedgerIntent, PostingIntent } from './intent.js';
 
 const wallet: AccountRef = { kind: 'customer_wallet', ownerId: 'u1', currency: 'NGN' };
 const usdWallet: AccountRef = { kind: 'customer_wallet', ownerId: 'u1', currency: 'USD' };

@@ -9,8 +9,8 @@ import {
   verifyWebhookSignature,
 } from './webhooks.js';
 import { ProviderContractError } from '../ports/errors.js';
-import { assertBalanced } from '../ports/ledger-intent.js';
-import type { LedgerIntent } from '../ports/ledger-intent.js';
+import { assertBalanced } from '@xetral/ledger';
+import type { LedgerIntent } from '@xetral/ledger';
 
 const SECRET = 'whsec_test_secret';
 const OWNER = 'user-42';

@@ -1,4 +1,5 @@
 import type { Currency, Money } from '@xetral/shared';
+import { InvalidEntryError } from './errors.js';
 
 /**
  * What an adapter produces instead of writing to the ledger.
@@ -105,12 +106,13 @@ export function posting<C extends Currency>(account: AccountRef, amount: Money<C
   return { account, amountMinor: amount.amount, currency: amount.currency };
 }
 
-export class UnbalancedIntentError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'UnbalancedIntentError';
-  }
-}
+/**
+ * Extends InvalidEntryError so a caller can catch one type for "this entry is
+ * structurally wrong" regardless of who noticed. We check before writing and
+ * Postgres checks at COMMIT; which of the two fired is our business, not the
+ * caller's.
+ */
+export class UnbalancedIntentError extends InvalidEntryError {}
 
 /**
  * Rejects an intent the ledger would refuse, before it reaches the ledger.

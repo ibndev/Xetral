@@ -5,8 +5,8 @@ import { microToUsd, microToUsdExact, parseMicro } from './amounts.js';
 import { BITNOB_EVENTS, bitnobWebhookEnvelope } from './events.js';
 import type { BitnobWebhookEnvelope } from './events.js';
 import { ProviderContractError } from '../ports/errors.js';
-import { assertBalanced, posting } from '../ports/ledger-intent.js';
-import type { LedgerIntent, PostingIntent } from '../ports/ledger-intent.js';
+import { assertBalanced, posting } from '@xetral/ledger';
+import type { LedgerIntent, PostingIntent } from '@xetral/ledger';
 
 const PROVIDER = 'bitnob';
 

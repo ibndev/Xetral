@@ -4,7 +4,7 @@ import type { PoolClient } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { BITNOB_EVENTS } from './events.js';
 import { parseWebhook, toLedgerIntent, verifyWebhookSignature } from './webhooks.js';
-import type { AccountRef, LedgerIntent } from '../ports/ledger-intent.js';
+import type { AccountRef, LedgerIntent } from '@xetral/ledger';
 
 /**
  * The adapter's output against the real ledger schema.
@@ -156,12 +156,12 @@ const float = (): AccountRef => ({ kind: 'provider_float', currency: 'USD' });
 beforeAll(async () => {
   pool = new pg.Pool({ connectionString: DATABASE_URL, max: 4 });
 
-  // A distinct owner per run, so a rerun against the same database starts from
-  // a clean balance rather than inheriting the last one's.
-  const seed = await pool.query<{ id: string }>(
-    `SELECT COALESCE(MAX(owner_id), 0) + 1 AS id FROM accounts WHERE owner_id IS NOT NULL`,
-  );
-  ownerId = seed.rows[0]?.id ?? '1';
+  // A high synthetic owner id rather than MAX(owner_id) + 1. accounts.owner_id
+  // is polymorphic and unconstrained, but the api suite creates real users from
+  // the users sequence against the same database -- and an id chosen just above
+  // today's maximum is one the sequence will eventually issue, at which point a
+  // real customer inherits this suite's balances.
+  ownerId = String(8_000_000_000n + BigInt(Math.floor(Math.random() * 1_000_000)));
 
   // Fund the wallet: the overdraft guard is real, and an authorization out of
   // an empty wallet would be refused by the database rather than by anything

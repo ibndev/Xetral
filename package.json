@@ -12,7 +12,7 @@
   "scripts": {
     "build": "turbo run build",
     "test": "turbo run test",
-    "test:e2e": "turbo run test:e2e",
+    "test:e2e": "turbo run test:e2e --concurrency 1",
     "typecheck": "turbo run typecheck"
   },
   "devDependencies": {

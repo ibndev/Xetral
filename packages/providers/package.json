@@ -12,5 +12,8 @@
   "devDependencies": {
     "@types/pg": "^8.23.1",
     "pg": "^8.23.0"
+  },
+  "dependencies": {
+    "@xetral/ledger": "^0.1.0"
   }
 }
