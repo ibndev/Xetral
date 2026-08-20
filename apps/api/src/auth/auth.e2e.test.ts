@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../app.module.js';
 import type { ApiConfig } from '../config.js';
 import { systemClock } from '../tokens.js';
+import { testApiConfig } from '../test-support/api-config.js';
 
 /**
  * The auth flows against a real PostgreSQL, because the invariants that matter
@@ -31,32 +32,11 @@ if (DATABASE_URL === undefined || DATABASE_URL === '') {
 }
 
 const PASSWORD = 'a-long-enough-password';
-const key = { version: 'v1', secret: randomBytes(32) };
 
 function makeConfig(overrides: Partial<ApiConfig> = {}): ApiConfig {
-  return {
-    databaseUrl: DATABASE_URL as string,
-    accessTokenKeyring: { current: key, accepted: [key] },
-    accessTokenTtlSeconds: 900,
-    refreshTokenTtlSeconds: 2_592_000,
-    loginRateLimit: {
-      // Deliberately high by default so the flow tests are not throttled by
-      // each other. The rate-limit test builds its own app with real limits.
-      perIdentifier: { max: 1000, windowSeconds: 900 },
-      perIp: { max: 1000, windowSeconds: 900 },
-    },
-    trustProxyHops: 0,
-    // These suites pin the in-process limiter: each app instance then gets its
-    // own bucket, so the rate-limit cases cannot leak into the flow cases.
-    // RedisRateLimitStore is held to the same contract in
-    // rate-limit.redis.e2e.test.ts.
-    redisUrl: undefined,
-    transferFeeBasisPoints: 0,
-    bitnobBaseUrl: undefined,
-    bitnobApiKey: undefined,
-    bitnobWebhookSecret: undefined,
+  return testApiConfig(DATABASE_URL as string, {
     ...overrides,
-  };
+  });
 }
 
 let pool: Pool;

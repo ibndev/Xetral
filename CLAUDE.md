@@ -171,6 +171,44 @@ Schema: `packages/ledger/sql/003_cards.sql`.
   a moment later makes the retry succeed. Acknowledging would drop a real spend
   from the books to save log noise.
 
+### Purchases (bills, eSIM, numbers) — non-obvious rules
+
+Schema: `packages/ledger/sql/004_purchases.sql`. One table for every "buy a thing
+from a provider": the providers differ, the money question does not.
+
+```
+Reserve   wallet  -> pending          BEFORE the provider is asked for anything
+Settle    pending -> provider_float   it happened
+Reverse   pending -> wallet           it did not — a reversal naming the reserve
+(neither)                             we do not know; the money stays held
+```
+
+- **The reference is derived from the customer's key, never generated.** The
+  reserve entry is posted before the purchase row exists, so a crash in that gap
+  leaves a retry with no row to find. A derived reference makes that retry reuse
+  the same ledger idempotency key and the ledger answers `replayed: true`. A
+  random one charges twice, only under a crash. `referenceFor()` is the one
+  place it is built.
+- **The customer's idempotency key is unique PER CUSTOMER.** Two customers will
+  send the same key; a client counting from one is enough. `reference` is ours
+  and globally unique, `(user_id, idempotency_key)` is theirs.
+- **A timeout settles nothing and reverses nothing.** Reversing refunds a
+  purchase that may have been delivered; retrying buys it twice. The row stays
+  `reserved`, and `pending_purchases` is the queue that resolves it. There is no
+  reconciliation worker yet — that is a job with its own tests, not a footnote
+  to this one.
+- **Delivery payloads are sealed with `envelope.ts`, never stored in the clear.**
+  An electricity token is a bearer instrument. The `^v[0-9]+:` CHECK on
+  `delivery_sealed` makes that structural.
+- **An outcome is final**, by trigger, and identity and amount are immutable.
+  Reopening a purchase would let a delivered token be re-delivered.
+- **A catalogue price is a bigint and must be mapped at the HTTP boundary.**
+  `JSON.stringify` throwing on one is correct behaviour, not a nuisance to patch
+  with a global BigInt serialiser.
+- **Verification is an optional capability**, not a port method — `verifyTarget`
+  on the port would give Airalo and Twilio a method that throws. Use
+  `supportsVerification()`.
+
 ### apps/api
 
 - `AuthGuard` is registered with `APP_GUARD`, so it runs for **every** route. A
@@ -235,6 +273,21 @@ the reference plugin and are out of scope.
   snake_case.
 - Card issuing **requires approval** from Bitnob before use.
 
+### The fulfilment port
+
+VTpass, Airalo and Twilio implement **one** port (`ports/fulfilment.ts`) and are
+held to **one** contract suite (`ports/fulfilment.contract.ts`). Three
+hand-written suites drift into testing three behaviours while all staying green,
+and the whole point of a port is that a caller cannot tell which implementation
+answered. Add an adapter, add it to the contract.
+
+Per-provider quirks are absorbed inside the adapter and stop there: VTpass codes
+(`000` success, `099` pending) and naira-as-text amounts, Airalo's OAuth2 token
+cache, Twilio's form-encoded bodies. None of that shape reaches a caller.
+
+Twilio is priced by **us**, not by Twilio: `priceCents` is what the customer pays,
+and an instance that has not set it cannot sell a number.
+
 ### Working in `packages/providers`
 
 - An adapter never writes postings. It produces a `LedgerIntent` — a *request*
@@ -295,20 +348,20 @@ npm test                                # all workspaces, via turbo
 npm test --workspace @xetral/shared     # money primitives (vitest)
 npm test --workspace @xetral/identity   # tokens, PIN, envelopes, policy (vitest)
 npm test --workspace @xetral/api        # guard, route coverage, rate limiting
-npm test --workspace @xetral/providers  # amount conversion, webhooks, card adapter
+npm test --workspace @xetral/providers  # conversion, webhooks, card and fulfilment adapters
 npm test --workspace @xetral/ledger     # intent validation (service is e2e-only)
-
-# Cards need 003 as well:
-psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/003_cards.sql
 
 # SQL invariants — needs live PostgreSQL 16. Apply migrations in order; the
 # test files are NOT idempotent, so run them against a freshly created database.
 createdb xetral
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/003_cards.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/004_purchases.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/003_cards.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/004_purchases.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,
 # Redis for the rate-limiter contract.

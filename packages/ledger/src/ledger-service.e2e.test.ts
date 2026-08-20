@@ -267,6 +267,79 @@ describe('what the database refuses', () => {
 
 });
 
+describe('reversals', () => {
+  it('corrects a mistake by appending, never by editing', async () => {
+    // The ledger is append-only. A wrong entry stays, and a reversing entry
+    // points at it -- which is what an auditor wants to see, and what an
+    // UPDATE would destroy.
+    const before = await spendable(alice);
+
+    const mistake = await ledger.post(
+      intent({
+        description: 'charged the wrong customer',
+        postings: [posting(wallet(alice), ngn(-250_00)), posting(wallet(bob), ngn(250_00))],
+      }),
+    );
+
+    const reversal = await ledger.post(
+      intent({
+        kind: 'reversal',
+        reversesEntryId: mistake.entryId,
+        description: 'reversing the wrong charge',
+        postings: [posting(wallet(bob), ngn(-250_00)), posting(wallet(alice), ngn(250_00))],
+      }),
+    );
+
+    expect(reversal.entryId).not.toBe(mistake.entryId);
+    expect(await spendable(alice)).toBe(before);
+
+    // Both entries survive, and the second names the first.
+    const rows = await pool.query<{ reverses_id: string | null }>(
+      `SELECT reverses_id FROM journal_entries WHERE id = $1`,
+      [reversal.entryId],
+    );
+    expect(rows.rows[0]?.reverses_id).toBe(mistake.entryId);
+  });
+
+  it('refuses a reversal that names no entry', async () => {
+    await expect(
+      ledger.post(
+        intent({
+          kind: 'reversal',
+          postings: [posting(wallet(alice), ngn(-100)), posting(wallet(bob), ngn(100))],
+        }),
+      ),
+    ).rejects.toThrow(/names no entry to reverse/);
+  });
+
+  it('refuses a non-reversal that names one', async () => {
+    // The database has the same CHECK. Catching it here names the code that
+    // built the entry instead of surfacing a constraint violation.
+    await expect(
+      ledger.post(
+        intent({
+          kind: 'wallet_transfer',
+          reversesEntryId: '1',
+          postings: [posting(wallet(alice), ngn(-100)), posting(wallet(bob), ngn(100))],
+        }),
+      ),
+    ).rejects.toThrow(/names an entry to reverse but is kind/);
+  });
+
+  it('refuses to reverse an entry that does not exist', async () => {
+    // A self-referencing foreign key, so a reversal cannot point into thin air.
+    await expect(
+      ledger.post(
+        intent({
+          kind: 'reversal',
+          reversesEntryId: '999999999',
+          postings: [posting(wallet(alice), ngn(-100)), posting(wallet(bob), ngn(100))],
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+});
+
 describe('reading balances', () => {
   it('reports spendable, pending and total separately', async () => {
     // The customer's SPENDABLE balance is the wallet; their TOTAL is wallet
@@ -317,9 +390,26 @@ describe('history', () => {
   it("shows only the customer's own leg", async () => {
     // A transfer is -N5,050 to the sender and +N5,000 to the recipient. Neither
     // wants to see the other's side, or the fee leg.
-    const history = await ledger.history(bob, 'NGN');
-    expect(history.length).toBeGreaterThan(0);
-    expect(history.every((h) => h.amountMinor > 0n)).toBe(true);
+    //
+    // Asserted with a distinctive amount rather than "every entry is positive":
+    // that weaker claim held only because nothing had ever sent money the other
+    // way, and it broke the moment a reversal did.
+    const marker = 7_531_00;
+    await ledger.post(
+      intent({
+        description: 'one-way marker transfer',
+        postings: [posting(wallet(alice), ngn(-marker)), posting(wallet(bob), ngn(marker))],
+      }),
+    );
+
+    const senderSide = await ledger.history(alice, 'NGN', { limit: 200 });
+    const recipientSide = await ledger.history(bob, 'NGN', { limit: 200 });
+
+    expect(senderSide.some((h) => h.amountMinor === BigInt(-marker))).toBe(true);
+    expect(senderSide.some((h) => h.amountMinor === BigInt(marker))).toBe(false);
+
+    expect(recipientSide.some((h) => h.amountMinor === BigInt(marker))).toBe(true);
+    expect(recipientSide.some((h) => h.amountMinor === BigInt(-marker))).toBe(false);
   });
 
   it('is newest first and paginates without an offset', async () => {

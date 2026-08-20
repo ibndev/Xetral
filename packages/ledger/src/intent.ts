@@ -79,6 +79,17 @@ export interface PostingIntent {
 }
 
 export interface LedgerIntent {
+  /**
+   * The entry this one reverses. Required when `kind` is 'reversal' and
+   * forbidden otherwise — `journal_entries` has a CHECK saying exactly that,
+   * and a self-referencing FK so a reversal can never point at an entry that
+   * does not exist.
+   *
+   * A mistake is corrected by appending one of these, never by editing
+   * history. That is what makes the ledger auditable rather than merely
+   * accurate.
+   */
+  readonly reversesEntryId?: string;
   /** `<provider>:<external id>`. The ledger's UNIQUE constraint on this is the
    *  replay guard, so it must be derived from the provider's own event id and
    *  never generated locally. */
@@ -129,6 +140,18 @@ export class UnbalancedIntentError extends InvalidEntryError {}
  * errors in different currencies cancel out and pass.
  */
 export function assertBalanced(intent: LedgerIntent): void {
+  // Mirrors the `reversal_has_target` CHECK. Caught here so the error names the
+  // code that built the entry, rather than surfacing as a constraint violation
+  // from inside a transaction several layers away.
+  const isReversal = intent.kind === 'reversal';
+  if (isReversal !== (intent.reversesEntryId !== undefined)) {
+    throw new UnbalancedIntentError(
+      isReversal
+        ? `entry '${intent.idempotencyKey}' is a reversal but names no entry to reverse`
+        : `entry '${intent.idempotencyKey}' names an entry to reverse but is kind '${intent.kind}'`,
+    );
+  }
+
   if (intent.postings.length < 2) {
     throw new UnbalancedIntentError(
       `entry '${intent.idempotencyKey}' has ${intent.postings.length} posting(s); at least 2 are required`,

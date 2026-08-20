@@ -97,12 +97,14 @@ export class LedgerService {
       await client.query('BEGIN');
 
       const entry = await client.query<{ id: string; uuid: string }>(
-        `INSERT INTO journal_entries (idempotency_key, kind, description, metadata, occurred_at)
-         VALUES ($1, $2::entry_kind, $3, $4::jsonb, $5)
+        `INSERT INTO journal_entries
+           (idempotency_key, kind, reverses_id, description, metadata, occurred_at)
+         VALUES ($1, $2::entry_kind, $3::bigint, $4, $5::jsonb, $6)
          RETURNING id, uuid`,
         [
           intent.idempotencyKey,
           intent.kind,
+          intent.reversesEntryId ?? null,
           intent.description,
           JSON.stringify(intent.metadata),
           intent.occurredAt,

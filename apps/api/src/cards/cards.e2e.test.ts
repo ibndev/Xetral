@@ -16,6 +16,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { AppModule } from '../app.module.js';
 import type { ApiConfig } from '../config.js';
 import { systemClock } from '../tokens.js';
+import { testApiConfig } from '../test-support/api-config.js';
 
 /**
  * Virtual USD cards end to end: issue, fund, freeze, terminate, and the
@@ -35,7 +36,6 @@ if (DATABASE_URL === undefined || DATABASE_URL === '') {
 const PASSWORD = 'a-long-enough-password';
 const PIN = '374915';
 const WEBHOOK_SECRET = 'whsec_cards_e2e';
-const key = { version: 'v1', secret: randomBytes(32) };
 
 /** Records what the port was asked to do, and can be made to fail. */
 class FakeCardPort implements CardPort {
@@ -103,22 +103,9 @@ let app: INestApplication;
 let cardPort: FakeCardPort;
 
 function makeConfig(): ApiConfig {
-  return {
-    databaseUrl: DATABASE_URL as string,
-    accessTokenKeyring: { current: key, accepted: [key] },
-    accessTokenTtlSeconds: 900,
-    refreshTokenTtlSeconds: 2_592_000,
-    loginRateLimit: {
-      perIdentifier: { max: 1000, windowSeconds: 900 },
-      perIp: { max: 1000, windowSeconds: 900 },
-    },
-    trustProxyHops: 0,
-    redisUrl: undefined,
-    transferFeeBasisPoints: 0,
-    bitnobBaseUrl: undefined,
-    bitnobApiKey: undefined,
+  return testApiConfig(DATABASE_URL as string, {
     bitnobWebhookSecret: WEBHOOK_SECRET,
-  };
+  });
 }
 
 interface Customer {

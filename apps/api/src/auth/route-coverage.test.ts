@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { AuthController } from './auth.controller.js';
 import { WalletController } from '../wallet/wallet.controller.js';
 import { CardController, CardWebhookController } from '../cards/card.controller.js';
+import { PurchaseController } from '../purchases/purchase.controller.js';
 import { METHOD_METADATA, PATH_METADATA, buildRoutePath } from './route-key.js';
 import { buildRoutePolicy } from './routes.js';
 
@@ -23,7 +24,13 @@ import { buildRoutePolicy } from './routes.js';
 // Every controller the app mounts. Missing one here would let its routes go
 // undeclared without failing this test -- so app.module.ts and this list are
 // the pair that must stay in step.
-const CONTROLLERS = [AuthController, WalletController, CardController, CardWebhookController];
+const CONTROLLERS = [
+  AuthController,
+  WalletController,
+  CardController,
+  CardWebhookController,
+  PurchaseController,
+];
 
 const METHOD_NAMES: Partial<Record<RequestMethod, string>> = {
   [RequestMethod.GET]: 'GET',

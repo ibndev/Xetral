@@ -53,6 +53,17 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       .authenticated('POST', '/v1/cards/:id/unfreeze', { pin: true })
       .authenticated('POST', '/v1/cards/:id/terminate', { pin: true })
 
+      // Airtime, data, utilities, eSIMs, numbers.
+      .authenticated('GET', '/v1/purchases', { pin: false })
+      .authenticated('GET', '/v1/purchases/catalogue', { pin: false })
+      // Verifying a meter reads a name from the provider and moves nothing, so
+      // no PIN. It is authenticated all the same: an open endpoint that turns a
+      // meter number into a customer's name is a lookup service for anyone who
+      // wants one.
+      .authenticated('POST', '/v1/purchases/verify', { pin: false })
+      // Buying spends the customer's wallet balance.
+      .authenticated('POST', '/v1/purchases', { pin: true })
+
       .public(
         'POST',
         '/v1/webhooks/bitnob',

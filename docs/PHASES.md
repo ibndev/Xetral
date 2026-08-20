@@ -389,10 +389,93 @@ for real; the provider calls are not.
 **Still to confirm before go-live**, unchanged from Phase 3: the webhook
 signature header and encoding, and the endpoint paths in `BITNOB_ENDPOINTS`.
 
-## Phase 6 — Bills, eSIM, numbers
+## Phase 6 — Bills, eSIM, numbers ✅
 
-VTpass (airtime, data, utilities), Airalo (eSIM), Twilio (virtual numbers). Three
-adapters against the same port; each lands separately.
+VTpass (airtime, data, utilities), Airalo (eSIM), Twilio (virtual numbers) — three
+providers behind **one** port, and one purchase flow over all five services. 113
+provider unit tests, 11 purchase invariant blocks, 14 end-to-end over HTTP.
+
+| File | What it is |
+|---|---|
+| `packages/providers/src/ports/fulfilment.ts` | the port all three implement |
+| `packages/providers/src/ports/fulfilment.contract.ts` | the suite all three are held to |
+| `packages/providers/src/vtpass/vtpass-adapter.ts` | airtime, data, utilities |
+| `packages/providers/src/airalo/airalo-adapter.ts` | eSIM |
+| `packages/providers/src/twilio/twilio-adapter.ts` | virtual numbers |
+| `packages/ledger/sql/004_purchases.sql` | purchases, the outcome trigger, the reconciliation queue |
+| `packages/ledger/sql/004_purchases.test.sql` | 11 invariant blocks |
+| `apps/api/src/purchases/purchase.service.ts` | reserve → settle or reverse |
+| `apps/api/src/purchases/purchase.controller.ts` | catalogue, verify, buy, list |
+
+The money flow, and the reason it is three entries rather than one:
+
+```
+Reserve   wallet  -> pending          the overdraft guard decides, BEFORE we order
+Settle    pending -> provider_float   it really happened
+Reverse   pending -> wallet           it definitely did not — appended, not edited
+(neither)                             we do not know; the money stays held
+```
+
+**This phase EXTENDS Phase 1's intent model.** `LedgerIntent` gained
+`reversesEntryId`, because a purchase that fails is the first flow that has to
+undo an entry it posted moments earlier. `journal_entries` already had the column
+and the CHECK; the intent had no way to fill it, so a reversal was expressible in
+SQL and not in the service that is the only thing allowed to write one.
+
+Findings from building it:
+
+1. **A random reference per attempt is a double charge waiting for a crash.**
+   The reserve entry is posted before the purchase row exists, so a process that
+   dies in that gap leaves a retry with no row to find. A reference *derived*
+   from the customer's key makes that retry reuse the same ledger idempotency
+   key, and the ledger answers `replayed: true`. A generated one would charge
+   twice — only under a crash, which is the hardest double charge there is to
+   reproduce and the easiest to ship.
+2. **A customer's idempotency key cannot be globally unique.** Two customers
+   will send the same key — a client counting from one is enough — so the
+   customer key is unique **per customer** and the provider-facing reference is
+   ours. It was one globally unique column until a test made two customers
+   collide, and the failure mode was the second customer getting an error with
+   their money already reserved.
+3. **A timeout settles nothing and reverses nothing.** Reversing would refund a
+   purchase that may have been delivered; retrying would buy it twice. The row
+   stays `reserved` and `pending_purchases` — an assertion in the invariant
+   suite, not a reporting SELECT — is the queue that resolves it. This is the
+   same rule as `ProviderTimeoutError` not being retryable, one layer up.
+4. **`JSON.stringify` throws on a bigint, and that is the correct behaviour.**
+   A catalogue price is minor units; it is mapped to a major-unit string at the
+   HTTP boundary. The tempting fix is a global BigInt serialiser, which is how a
+   money amount silently becomes a JSON number somewhere else six months later.
+5. **A delivery payload is sealed, not stored.** An electricity token is a
+   bearer instrument: whoever holds it before it is used can spend it. The CHECK
+   on `delivery_sealed` (`^v[0-9]+:`) makes that structural rather than
+   customary, so a plaintext token cannot reach a row even by accident.
+6. **Three adapters, one contract suite.** Written once and run against all
+   three, for the same reason the two rate-limit backends share one: three
+   hand-written suites drift into testing three behaviours while all staying
+   green, and the entire point of a port is that the caller cannot tell which
+   implementation answered.
+7. **Verification is an optional capability, not a port method.** VTpass can
+   confirm a meter belongs to who the customer thinks; Airalo and Twilio have
+   nothing to confirm. Putting `verifyTarget` on the port would give two
+   adapters a method that throws, and a caller a reason to catch and ignore it.
+   `supportsVerification()` is a type guard, so the compiler knows which is
+   which.
+8. **One ApiConfig fixture, not three.** Adding the encryption keyring broke
+   three hand-written copies at once, which is the mild version. The bad version
+   is one suite quietly keeping the old shape and testing a config production
+   does not have.
+
+**CONFIRM BEFORE GO-LIVE**, collected one place per adapter as in Phase 3: the
+endpoint tables (`VTPASS_ENDPOINTS`, `AIRALO_ENDPOINTS`, `TWILIO_ENDPOINTS`) and
+VTpass's `request_id` format, which their documentation constrains and which our
+derived reference may not satisfy. Reference generation is one function
+(`referenceFor`), so satisfying it is a small diff.
+
+**Not built, deliberately:** a reconciliation worker. `pending_purchases` is the
+queue and `FulfilmentPort.status()` is how to ask, but nothing runs on a
+schedule yet — a job that resolves held money is a thing to write with its
+own tests, not to tack onto this phase.
 
 ## Phase 7 — Gift cards *(flagged off)*
 

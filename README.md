@@ -15,13 +15,18 @@ no PHP.
 |---|---|---|
 | NGN wallet — transfer, balances, history | — | **built** |
 | NGN wallet — funding | *needs a bank rail* | blocked |
-| Bills, airtime | VTpass | planned |
+| Bills, airtime, data | VTpass | **built** (endpoints unconfirmed) |
 | Virtual USD cards | Bitnob | **built** (needs Bitnob issuing approval) |
 | Crypto / USDT / stablecoin | Bitnob | planned |
 | Multi-currency + FX / remittance | Bitnob | planned |
-| eSIM | Airalo | planned |
-| Virtual numbers | Twilio | planned |
+| eSIM | Airalo | **built** (endpoints unconfirmed) |
+| Virtual numbers | Twilio | **built** (endpoints unconfirmed) |
 | Gift card trading | — | **feature-flagged off at launch** |
+
+"Endpoints unconfirmed" means the flow is built and tested on our side of the
+port — ledger entries, reservation, reversal, sealing — while the provider's
+exact paths and payloads could not be verified from this repository. Each
+adapter collects them in one table so confirming them is a small diff.
 
 Gift card trading ships disabled. Buying cards *from* users is the highest fraud
 surface of the six and needs a review queue and hold periods before it is safe.
@@ -45,7 +50,7 @@ packages/
   shared/     types, money primitives, Zod schemas — imported by API and app
   ledger/     double-entry core: schema, invariants, the one posting service
   identity/   users, devices, sessions, refresh rotation, PINs, envelopes
-  providers/  provider ports and their adapters (Bitnob first)
+  providers/  provider ports and their adapters (Bitnob, VTpass, Airalo, Twilio)
 apps/
   api/        NestJS — deny-by-default guard, login/refresh/logout
   mobile/     Expo (iOS + Android)
@@ -75,12 +80,14 @@ createdb xetral
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/003_cards.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/004_purchases.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/003_cards.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/004_purchases.test.sql
 ```
 
-All 12 ledger tests, 20 identity blocks and 10 card blocks print `PASS`. Any `TEST FAILED`
+All 12 ledger tests, 20 identity blocks, 10 card blocks and 11 purchase blocks print `PASS`. Any `TEST FAILED`
 means an invariant is not wired up — do not deploy past it.
 
 The API's end-to-end suite runs the real login, rotation and reuse-detection
@@ -90,10 +97,10 @@ flows against that database:
 DATABASE_URL=postgres://... REDIS_URL=redis://localhost:6379 npm run test:e2e
 ```
 
-That covers the API's auth flows and the rate-limiter contract, plus the Bitnob
-adapter's output against the real ledger schema — the only check that its entry
-kinds and account roles exist as enum values rather than merely as TypeScript
-literals.
+That covers the API's auth flows, wallet transfers, cards and purchases, the
+rate-limiter contract, and the Bitnob adapter's output against the real ledger
+schema — the only check that its entry kinds and account roles exist as enum
+values rather than merely as TypeScript literals.
 
 It is a separate script rather than a skip-when-unavailable block in `npm test`,
 because a suite that quietly skips is a suite that reports green on a machine

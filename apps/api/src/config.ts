@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer';
-import type { AccessTokenKey, AccessTokenKeyring } from '@xetral/identity';
+import type { AccessTokenKey, AccessTokenKeyring, EncryptionKey, Keyring } from '@xetral/identity';
 import { ACCESS_TOKEN_TTL_SECONDS, REFRESH_TOKEN_TTL_SECONDS } from '@xetral/identity';
 
 /**
@@ -61,6 +61,42 @@ export interface ApiConfig {
   readonly bitnobBaseUrl: string | undefined;
   readonly bitnobApiKey: string | undefined;
   readonly bitnobWebhookSecret: string | undefined;
+
+  /**
+   * Keys for sealing what must be stored but not stored in the clear: an
+   * electricity token, an eSIM activation code.
+   *
+   * Optional as a set, and its absence REFUSES the routes that would write one
+   * rather than falling back to plaintext. A fallback here is not a degraded
+   * mode, it is a database column full of bearer instruments — and nothing in
+   * the logs would say which rows were written before the key arrived.
+   */
+  readonly encryptionKeyring: Keyring | undefined;
+
+  /** VTpass — airtime, data, utilities. Optional as a set, same reasoning as
+   *  Bitnob: an instance without them serves everything else and refuses these. */
+  readonly vtpassBaseUrl: string | undefined;
+  readonly vtpassApiKey: string | undefined;
+  readonly vtpassSecretKey: string | undefined;
+  readonly vtpassPublicKey: string | undefined;
+
+  /** Airalo — eSIM. */
+  readonly airaloBaseUrl: string | undefined;
+  readonly airaloClientId: string | undefined;
+  readonly airaloClientSecret: string | undefined;
+
+  /** Twilio — virtual numbers. */
+  readonly twilioBaseUrl: string | undefined;
+  readonly twilioAccountSid: string | undefined;
+  readonly twilioAuthToken: string | undefined;
+  /**
+   * What WE charge for a number, in cents — not what Twilio charges us. Twilio
+   * prices per country and changes them; billing a customer whatever a provider
+   * happened to answer that day is how a margin becomes a loss without anyone
+   * deciding to make it one. There is no default, so an instance that has not
+   * priced numbers cannot sell one.
+   */
+  readonly twilioNumberPriceCents: bigint | undefined;
 }
 
 export class ConfigError extends Error {
@@ -152,6 +188,76 @@ function basisPoints(env: Env, key: string): number {
   return value;
 }
 
+/**
+ * Parses `v1:<base64>,v2:<base64>` into an envelope keyring.
+ *
+ * Deliberately NOT shared with parseKeyring above, despite the identical
+ * format. Access-token keys sign; these encrypt, and AES-256 requires exactly
+ * 32 bytes where an HMAC key merely wants at least that many. One function
+ * with a length argument would let a 48-byte key past the check that is
+ * supposed to catch it, and the two key sets must never be the same value
+ * anyway — a key that both signs sessions and seals customer secrets makes one
+ * leak into two incidents.
+ */
+function parseEncryptionKeyring(env: Env): Keyring | undefined {
+  const raw = optional(env, 'ENCRYPTION_KEYS');
+  const currentVersion = optional(env, 'ENCRYPTION_CURRENT_VERSION');
+  if (raw === undefined && currentVersion === undefined) return undefined;
+  if (raw === undefined || currentVersion === undefined) {
+    throw new ConfigError('ENCRYPTION_KEYS and ENCRYPTION_CURRENT_VERSION must be set together');
+  }
+
+  const accepted: EncryptionKey[] = [];
+  for (const entry of raw.split(',')) {
+    const trimmed = entry.trim();
+    if (trimmed === '') continue;
+
+    const separator = trimmed.indexOf(':');
+    if (separator === -1) {
+      throw new ConfigError(`ENCRYPTION_KEYS entries must look like 'v1:<base64>'`);
+    }
+
+    const version = trimmed.slice(0, separator);
+    if (!/^v[0-9]+$/.test(version)) {
+      throw new ConfigError(`ENCRYPTION_KEYS version must look like 'v1', got '${version}'`);
+    }
+
+    const key = Buffer.from(trimmed.slice(separator + 1), 'base64');
+    if (key.length !== 32) {
+      throw new ConfigError(`the key for ${version} must be exactly 32 bytes, got ${key.length}`);
+    }
+    if (accepted.some((k) => k.version === version)) {
+      throw new ConfigError(`ENCRYPTION_KEYS declares ${version} twice`);
+    }
+    accepted.push({ version, key });
+  }
+
+  const current = accepted.find((k) => k.version === currentVersion);
+  if (current === undefined) {
+    throw new ConfigError(
+      `ENCRYPTION_CURRENT_VERSION is '${currentVersion}', which is not in ENCRYPTION_KEYS`,
+    );
+  }
+
+  // Retired keys stay in `accepted` so old rows still open; only `current`
+  // writes. Dropping a retired key is what makes existing data unreadable, and
+  // it fails at read time, one row at a time, long after the deploy.
+  return { current, accepted };
+}
+
+/** Minor units, parsed from a STRING and never a JSON number — the same rule
+ *  as everywhere else money is read from the outside world. */
+function minorUnits(env: Env, key: string): bigint | undefined {
+  const raw = optional(env, key);
+  if (raw === undefined) return undefined;
+  if (!/^[0-9]+$/.test(raw)) {
+    throw new ConfigError(`${key} must be a whole number of minor units, got '${raw}'`);
+  }
+  const value = BigInt(raw);
+  if (value <= 0n) throw new ConfigError(`${key} must be greater than zero`);
+  return value;
+}
+
 function optional(env: Env, key: string): string | undefined {
   const value = env[key];
   return value === undefined || value.trim() === '' ? undefined : value;
@@ -196,5 +302,17 @@ export function loadConfig(env: Env): ApiConfig {
     bitnobBaseUrl: optional(env, 'BITNOB_BASE_URL'),
     bitnobApiKey: optional(env, 'BITNOB_API_KEY'),
     bitnobWebhookSecret: optional(env, 'BITNOB_WEBHOOK_SECRET'),
+    encryptionKeyring: parseEncryptionKeyring(env),
+    vtpassBaseUrl: optional(env, 'VTPASS_BASE_URL'),
+    vtpassApiKey: optional(env, 'VTPASS_API_KEY'),
+    vtpassSecretKey: optional(env, 'VTPASS_SECRET_KEY'),
+    vtpassPublicKey: optional(env, 'VTPASS_PUBLIC_KEY'),
+    airaloBaseUrl: optional(env, 'AIRALO_BASE_URL'),
+    airaloClientId: optional(env, 'AIRALO_CLIENT_ID'),
+    airaloClientSecret: optional(env, 'AIRALO_CLIENT_SECRET'),
+    twilioBaseUrl: optional(env, 'TWILIO_BASE_URL'),
+    twilioAccountSid: optional(env, 'TWILIO_ACCOUNT_SID'),
+    twilioAuthToken: optional(env, 'TWILIO_AUTH_TOKEN'),
+    twilioNumberPriceCents: minorUnits(env, 'TWILIO_NUMBER_PRICE_CENTS'),
   };
 }

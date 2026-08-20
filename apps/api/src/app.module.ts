@@ -4,8 +4,14 @@ import type { DynamicModule, OnApplicationShutdown } from '@nestjs/common';
 import Redis from 'ioredis';
 import type { Pool } from 'pg';
 import { LedgerService } from '@xetral/ledger';
-import { BitnobCardAdapter, BitnobClient } from '@xetral/providers';
-import type { CardPort } from '@xetral/providers';
+import {
+  AiraloAdapter,
+  BitnobCardAdapter,
+  BitnobClient,
+  TwilioAdapter,
+  VtpassAdapter,
+} from '@xetral/providers';
+import type { CardPort, FulfilmentPort, ServiceKind } from '@xetral/providers';
 import { AuthController } from './auth/auth.controller.js';
 import { AuthGuard } from './auth/auth.guard.js';
 import { AuthService } from './auth/auth.service.js';
@@ -15,6 +21,8 @@ import { WalletService } from './wallet/wallet.service.js';
 import { CardController, CardWebhookController } from './cards/card.controller.js';
 import { CardService } from './cards/card.service.js';
 import { CardWebhookService } from './cards/webhook.service.js';
+import { PurchaseController } from './purchases/purchase.controller.js';
+import { PurchaseService } from './purchases/purchase.service.js';
 import { LoginRateLimitGuard } from './auth/login-rate-limit.guard.js';
 import { InMemoryRateLimitStore, RedisRateLimitStore } from './auth/rate-limit.js';
 import type { RateLimitStore } from './auth/rate-limit.js';
@@ -26,6 +34,7 @@ import {
   CARD_PORT,
   CLOCK,
   DATABASE,
+  FULFILMENT_PORTS,
   LEDGER,
   RATE_LIMIT_STORE,
   ROUTE_POLICY,
@@ -43,6 +52,8 @@ export interface AppModuleOptions {
   readonly rateLimitStore?: RateLimitStore;
   /** Overridden in tests so card flows run without a live Bitnob. */
   readonly cardPort?: CardPort;
+  /** Overridden in tests so purchases run without live VTpass/Airalo/Twilio. */
+  readonly fulfilmentPorts?: ReadonlyMap<ServiceKind, FulfilmentPort>;
 }
 
 /**
@@ -78,6 +89,92 @@ function unconfiguredCardPort(): CardPort {
     terminate: refuse,
     get: refuse,
   };
+}
+
+/**
+ * One adapter per service the instance is configured for — and NO entry for
+ * the ones it is not.
+ *
+ * There is no stand-in that refuses, unlike the card port above, and the
+ * difference is deliberate. A card port has one provider, so "not configured"
+ * and "this operation is unavailable" are the same statement. Here five
+ * services are served by three providers, and a map with a hole in it lets
+ * `PurchaseService` answer `service_not_configured` for the one that is
+ * missing while the other four work normally. A refusing stand-in would make
+ * every service look present until somebody paid for one.
+ */
+export function createFulfilmentPorts(config: ApiConfig): ReadonlyMap<ServiceKind, FulfilmentPort> {
+  const logger = new Logger('Fulfilment');
+  const ports = new Map<ServiceKind, FulfilmentPort>();
+
+  const { vtpassBaseUrl, vtpassApiKey, vtpassSecretKey, vtpassPublicKey } = config;
+  if (
+    vtpassBaseUrl !== undefined &&
+    vtpassApiKey !== undefined &&
+    vtpassSecretKey !== undefined &&
+    vtpassPublicKey !== undefined
+  ) {
+    // One adapter instance per service rather than one shared: `service` is
+    // part of the port's identity, and a caller asking a 'data' port for
+    // airtime should not typecheck its way into a wrong VTpass endpoint.
+    for (const service of ['airtime', 'data', 'utility'] as const) {
+      ports.set(
+        service,
+        new VtpassAdapter({
+          baseUrl: vtpassBaseUrl,
+          apiKey: vtpassApiKey,
+          secretKey: vtpassSecretKey,
+          publicKey: vtpassPublicKey,
+          service,
+        }),
+      );
+    }
+  } else {
+    logger.warn('VTpass is not configured: airtime, data and utility routes will refuse.');
+  }
+
+  const { airaloBaseUrl, airaloClientId, airaloClientSecret } = config;
+  if (
+    airaloBaseUrl !== undefined &&
+    airaloClientId !== undefined &&
+    airaloClientSecret !== undefined
+  ) {
+    ports.set(
+      'esim',
+      new AiraloAdapter({
+        baseUrl: airaloBaseUrl,
+        clientId: airaloClientId,
+        clientSecret: airaloClientSecret,
+      }),
+    );
+  } else {
+    logger.warn('Airalo is not configured: eSIM routes will refuse.');
+  }
+
+  const { twilioBaseUrl, twilioAccountSid, twilioAuthToken, twilioNumberPriceCents } = config;
+  if (
+    twilioBaseUrl !== undefined &&
+    twilioAccountSid !== undefined &&
+    twilioAuthToken !== undefined &&
+    twilioNumberPriceCents !== undefined
+  ) {
+    ports.set(
+      'number',
+      new TwilioAdapter({
+        baseUrl: twilioBaseUrl,
+        accountSid: twilioAccountSid,
+        authToken: twilioAuthToken,
+        priceCents: twilioNumberPriceCents,
+      }),
+    );
+  } else {
+    // Credentials without a price is the interesting case: everything needed to
+    // buy a number, and nothing saying what to charge for it. Selling at an
+    // unset price is worse than not selling.
+    logger.warn('Twilio is not configured (or has no price set): number routes will refuse.');
+  }
+
+  return ports;
 }
 
 /**
@@ -131,7 +228,13 @@ export class AppModule {
   static forRoot(options: AppModuleOptions): DynamicModule {
     return {
       module: AppModule,
-      controllers: [AuthController, WalletController, CardController, CardWebhookController],
+      controllers: [
+        AuthController,
+        WalletController,
+        CardController,
+        CardWebhookController,
+        PurchaseController,
+      ],
       providers: [
         { provide: API_CONFIG, useValue: options.config },
         { provide: CLOCK, useValue: options.clock ?? systemClock },
@@ -151,11 +254,16 @@ export class AppModule {
           provide: CARD_PORT,
           useValue: options.cardPort ?? createCardPort(options.config),
         },
+        {
+          provide: FULFILMENT_PORTS,
+          useValue: options.fulfilmentPorts ?? createFulfilmentPorts(options.config),
+        },
         AuthService,
         PinService,
         WalletService,
         CardService,
         CardWebhookService,
+        PurchaseService,
         LoginRateLimitGuard,
 
         // Registered globally, so it runs for every route including one whose
