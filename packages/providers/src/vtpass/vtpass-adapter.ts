@@ -143,6 +143,14 @@ export class VtpassAdapter implements FulfilmentPort, TargetVerification {
     const payload = await this.#request('POST', VTPASS_ENDPOINTS.purchase, {
       // Our reference, so their de-duplication and ours agree on what "the
       // same purchase" means.
+      //
+      // CONFIRM BEFORE GO-LIVE: VTpass constrains the shape of request_id, and
+      // that constraint could not be verified from this repository. If theirs
+      // and ours disagree, the fix belongs in `referenceFor()` in the API —
+      // the ONE place a reference is built — and not here. Deriving a
+      // different id inside this adapter would break requery: `status()` below
+      // has only the reference to go on and could not reconstruct a
+      // timestamped variant of it.
       request_id: request.reference,
       serviceID: request.itemCode.split(':')[0],
       variation_code: request.itemCode.split(':')[1],

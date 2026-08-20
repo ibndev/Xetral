@@ -12,7 +12,6 @@ import {
 } from '@nestjs/common';
 import type { Pool } from 'pg';
 import { InsufficientFundsError, LedgerService, posting } from '@xetral/ledger';
-import type { AccountRef, LedgerIntent } from '@xetral/ledger';
 import { ProviderTimeoutError, supportsVerification } from '@xetral/providers';
 import type {
   CatalogueItem,
@@ -21,13 +20,14 @@ import type {
   ServiceKind,
   VerifiedTarget,
 } from '@xetral/providers';
-import { open, seal } from '@xetral/identity';
-import type { Keyring } from '@xetral/identity';
-import { fromMajor, subtract, toMajor } from '@xetral/shared';
+import { open } from '@xetral/identity';
+import { fromMajor, toMajor } from '@xetral/shared';
 import type { Currency, Money } from '@xetral/shared';
 import { API_CONFIG, DATABASE, FULFILMENT_PORTS, LEDGER } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
 import type { PurchaseRequestBody } from './dto.js';
+import { ENTRY_KIND, PurchaseOutcome, negate, pending, wallet } from './purchase-outcome.js';
+import type { ReservedPurchase } from './purchase-outcome.js';
 
 /**
  * A catalogue item as it goes over the wire.
@@ -57,15 +57,6 @@ export interface PurchaseView {
   readonly delivery: Readonly<Record<string, string>> | null;
   readonly failure_reason: string | null;
 }
-
-/** Which entry kind a service's money movement is recorded under. */
-const ENTRY_KIND = {
-  airtime: 'bill_payment',
-  data: 'bill_payment',
-  utility: 'bill_payment',
-  esim: 'esim_purchase',
-  number: 'number_purchase',
-} as const satisfies Record<ServiceKind, LedgerIntent['kind']>;
 
 interface PurchaseRow {
   id: string;
@@ -107,6 +98,7 @@ export class PurchaseService {
     @Inject(LEDGER) private readonly ledger: LedgerService,
     @Inject(FULFILMENT_PORTS) private readonly ports: ReadonlyMap<ServiceKind, FulfilmentPort>,
     @Inject(API_CONFIG) private readonly config: ApiConfig,
+    @Inject(PurchaseOutcome) private readonly outcomes: PurchaseOutcome,
   ) {}
 
   async catalogue(
@@ -174,21 +166,24 @@ export class PurchaseService {
         return this.#toView(await this.#reload(reserve.purchaseId));
       }
       // A definite refusal. The customer's money comes straight back.
-      await this.#reverse(userId, reserve, amount, currency, describe(error));
+      await this.outcomes.reverse(await this.#reserved(reserve.purchaseId), describe(error));
       throw new UnprocessableEntityException({ error: 'purchase_failed', detail: describe(error) });
     }
 
     if (result.status === 'pending') {
-      await this.#recordProviderReference(reserve.purchaseId, result.providerReference);
+      await this.outcomes.recordProviderReference(reserve.purchaseId, result.providerReference);
       return this.#toView(await this.#reload(reserve.purchaseId));
     }
 
     if (result.status === 'failed') {
-      await this.#reverse(userId, reserve, amount, currency, result.failureReason ?? 'provider declined');
+      await this.outcomes.reverse(
+        await this.#reserved(reserve.purchaseId),
+        result.failureReason ?? 'provider declined',
+      );
       return this.#toView(await this.#reload(reserve.purchaseId));
     }
 
-    await this.#settle(userId, reserve, amount, currency, result);
+    await this.outcomes.settle(await this.#reserved(reserve.purchaseId), result);
     return this.#toView(await this.#reload(reserve.purchaseId));
   }
 
@@ -255,100 +250,12 @@ export class PurchaseService {
     return { purchaseId: existing.id, entryId };
   }
 
-  async #settle(
-    userId: string,
-    reserve: { purchaseId: string; entryId: string },
-    amount: Money<Currency>,
-    currency: Currency,
-    result: PurchaseResult,
-  ): Promise<void> {
-    const row = await this.#reload(reserve.purchaseId);
-
-    await this.ledger.post({
-      idempotencyKey: `purchase-settle:${row.reference}`,
-      kind: ENTRY_KIND[row.service as ServiceKind],
-      occurredAt: new Date(),
-      description: `${row.service} purchase delivered`,
-      metadata: { reference: row.reference, provider_reference: result.providerReference },
-      postings: [
-        posting(pending(userId, currency), negate(amount)),
-        posting({ kind: 'provider_float', currency }, amount),
-      ],
-    });
-
-    await this.pool.query(
-      `UPDATE purchases
-          SET status = 'delivered', provider_reference = $2, delivery_sealed = $3
-        WHERE id = $1::bigint`,
-      [
-        reserve.purchaseId,
-        result.providerReference,
-        // Sealed, not stored in the clear. An electricity token is spendable by
-        // whoever holds it before it is used.
-        Object.keys(result.delivery).length === 0
-          ? null
-          : seal(JSON.stringify(result.delivery), this.#keyring()),
-      ],
-    );
-  }
-
-  /**
-   * Gives the money back by APPENDING a reversal that names the reserve entry.
-   *
-   * Not by deleting the reserve, and not by a fresh unrelated credit: the
-   * ledger is append-only, and a reversal that points at what it undoes is the
-   * thing an auditor can follow.
-   */
-  async #reverse(
-    userId: string,
-    reserve: { purchaseId: string; entryId: string },
-    amount: Money<Currency>,
-    currency: Currency,
-    reason: string,
-  ): Promise<void> {
-    const row = await this.#reload(reserve.purchaseId);
-
-    await this.ledger.post({
-      idempotencyKey: `purchase-reverse:${row.reference}`,
-      kind: 'reversal',
-      reversesEntryId: reserve.entryId,
-      occurredAt: new Date(),
-      description: `${row.service} purchase reversed`,
-      metadata: { reference: row.reference, reason },
-      postings: [
-        posting(pending(userId, currency), negate(amount)),
-        posting(wallet(userId, currency), amount),
-      ],
-    });
-
-    await this.pool.query(
-      `UPDATE purchases SET status = 'reversed', failure_reason = $2 WHERE id = $1::bigint`,
-      [reserve.purchaseId, reason],
-    );
-  }
-
-  async #recordProviderReference(purchaseId: string, providerReference: string): Promise<void> {
-    await this.pool.query(
-      `UPDATE purchases SET provider_reference = $2 WHERE id = $1::bigint`,
-      [purchaseId, providerReference],
-    );
-  }
-
   #port(service: ServiceKind): FulfilmentPort {
     const port = this.ports.get(service);
     if (port === undefined) {
       throw new ServiceUnavailableException({ error: 'service_not_configured', service });
     }
     return port;
-  }
-
-  #keyring(): Keyring {
-    const keyring = this.config.encryptionKeyring;
-    if (keyring === undefined) {
-      // Refusing beats storing a bearer token in the clear.
-      throw new ServiceUnavailableException({ error: 'encryption_not_configured' });
-    }
-    return keyring;
   }
 
   #parseAmount(raw: string, currency: Currency): Money<Currency> {
@@ -379,9 +286,21 @@ export class PurchaseService {
       delivery:
         row.delivery_sealed === null
           ? null
-          : (JSON.parse(open(row.delivery_sealed, this.#keyring())) as Record<string, string>),
+          : (JSON.parse(open(row.delivery_sealed, this.outcomes.keyring())) as Record<string, string>),
       failure_reason: row.failure_reason,
     };
+  }
+
+  /** The narrow shape settling and reversing work from. */
+  async #reserved(purchaseId: string): Promise<ReservedPurchase> {
+    const result = await this.pool.query<ReservedPurchase>(
+      `SELECT id, user_id, reference, service, amount_minor, currency, reserve_entry_id
+         FROM purchases WHERE id = $1::bigint`,
+      [purchaseId],
+    );
+    const row = result.rows[0];
+    if (row === undefined) throw new NotFoundException({ error: 'purchase_not_found' });
+    return row;
   }
 
   async #reload(purchaseId: string): Promise<PurchaseRow> {
@@ -461,20 +380,6 @@ function currencyFor(service: ServiceKind): Currency {
   return service === 'esim' || service === 'number' ? 'USD' : 'NGN';
 }
 
-const wallet = (userId: string, currency: Currency): AccountRef => ({
-  kind: 'customer_wallet',
-  ownerId: userId,
-  currency,
-});
-const pending = (userId: string, currency: Currency): AccountRef => ({
-  kind: 'customer_pending',
-  ownerId: userId,
-  currency,
-});
-
-function negate<C extends Currency>(amount: Money<C>): Money<C> {
-  return subtract({ amount: 0n, currency: amount.currency }, amount);
-}
 
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : 'the provider refused the purchase';

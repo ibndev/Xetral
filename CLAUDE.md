@@ -194,9 +194,20 @@ Reverse   pending -> wallet           it did not — a reversal naming the reser
   and globally unique, `(user_id, idempotency_key)` is theirs.
 - **A timeout settles nothing and reverses nothing.** Reversing refunds a
   purchase that may have been delivered; retrying buys it twice. The row stays
-  `reserved`, and `pending_purchases` is the queue that resolves it. There is no
-  reconciliation worker yet — that is a job with its own tests, not a footnote
-  to this one.
+  `reserved`, and `ReconciliationService` resolves it later by ASKING the
+  provider. That worker never decides an outcome — a purchase the provider
+  still calls `pending` stays held however old it is, and one held past
+  `RECONCILE_STALE_SECONDS` is escalated to a human rather than auto-reversed.
+  By then both remaining answers can be the wrong one.
+- **Settling and reversing live in `purchase-outcome.ts`, used by both callers.**
+  The request handler resolves what it learned synchronously; the worker
+  resolves what nobody was left listening for. A second copy of those postings
+  would be a second set of assumptions about the ledger, and the copy that
+  drifts is the one that only runs at 4am against money nobody is watching.
+- **Exactly one instance sets `RECONCILE_INTERVAL_SECONDS`.** Duplicate sweeps
+  are safe — a session advisory lock serialises them and the ledger's
+  idempotency key makes a repeat posting a replay — but asking a provider about
+  the same purchase from four processes is rate-limited at best.
 - **Delivery payloads are sealed with `envelope.ts`, never stored in the clear.**
   An electricity token is a bearer instrument. The `^v[0-9]+:` CHECK on
   `delivery_sealed` makes that structural.

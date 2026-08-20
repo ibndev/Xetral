@@ -472,10 +472,54 @@ VTpass's `request_id` format, which their documentation constrains and which our
 derived reference may not satisfy. Reference generation is one function
 (`referenceFor`), so satisfying it is a small diff.
 
-**Not built, deliberately:** a reconciliation worker. `pending_purchases` is the
-queue and `FulfilmentPort.status()` is how to ask, but nothing runs on a
-schedule yet — a job that resolves held money is a thing to write with its
-own tests, not to tack onto this phase.
+### The reconciliation worker ✅
+
+Landed after the rest of the phase, closing the one thing it left open: money
+held against an outcome nobody would ever look up.
+
+| File | What it is |
+|---|---|
+| `apps/api/src/purchases/purchase-outcome.ts` | settling and reversing, shared by both callers |
+| `apps/api/src/purchases/reconciliation.service.ts` | the sweep, and what it refuses to do |
+| `apps/api/src/purchases/reconciliation.e2e.test.ts` | 7 end-to-end, each from a really-held purchase |
+
+A timeout leaves a purchase `reserved`, which is right at that moment and
+unacceptable to leave for ever. The sweep asks `FulfilmentPort.status()` and
+relays the answer — and that is the whole of its authority.
+
+Findings from building it:
+
+9. **It must never decide an outcome, only relay one.** A worker that reversed
+   on age alone would refund delivered electricity tokens on a bad afternoon,
+   and the money would be gone in both directions at once. A purchase the
+   provider still calls `pending` stays held however old it is; one held past
+   `RECONCILE_STALE_SECONDS` is ESCALATED to a person. That is deliberately not
+   an automated action, because by then the automated actions have all been
+   tried.
+10. **An unreachable provider is not a failed purchase.** Treating a refused
+    connection as "it did not happen" refunds every delivered purchase during
+    an outage. The row keeps its money held and the next sweep asks again.
+11. **`SELECT ... FOR UPDATE SKIP LOCKED` protects nothing here.** `pool.query`
+    runs each statement in its own implicit transaction, so those row locks are
+    released the moment the claim query returns — before a single provider has
+    been asked — while reading in review as though they guarded the work that
+    follows. Mutual exclusion is a session advisory lock held across the whole
+    sweep instead.
+12. **Two callers, one settle.** The request handler and the worker resolve
+    purchases at opposite ends of the same flow, so both go through
+    `PurchaseOutcome`. Two copies of "how a purchase settles" would drift, and
+    the copy that drifts is the one that only runs against money nobody is
+    watching.
+13. **The report counts are lower bounds in the tests, not equalities.** A sweep
+    is global by design and resolves whatever an earlier suite left behind, so
+    correctness is asserted on the specific purchase and the specific customer's
+    balance. A worker whose tests demanded exact global counts would be a worker
+    that only works on an empty database.
+
+**Still not built, deliberately:** nothing schedules a sweep unless an operator
+sets `RECONCILE_INTERVAL_SECONDS`, and exactly one instance should. The default
+is off and bootstrap warns about it, rather than every instance behind a load
+balancer sweeping at once.
 
 ## Phase 7 — Gift cards *(flagged off)*
 

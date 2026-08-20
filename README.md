@@ -97,10 +97,11 @@ flows against that database:
 DATABASE_URL=postgres://... REDIS_URL=redis://localhost:6379 npm run test:e2e
 ```
 
-That covers the API's auth flows, wallet transfers, cards and purchases, the
-rate-limiter contract, and the Bitnob adapter's output against the real ledger
-schema — the only check that its entry kinds and account roles exist as enum
-values rather than merely as TypeScript literals.
+That covers the API's auth flows, wallet transfers, cards, purchases and the
+reconciliation sweep that resolves held money, plus the rate-limiter contract
+and the Bitnob adapter's output against the real ledger schema — the only check
+that its entry kinds and account roles exist as enum values rather than merely
+as TypeScript literals.
 
 It is a separate script rather than a skip-when-unavailable block in `npm test`,
 because a suite that quietly skips is a suite that reports green on a machine

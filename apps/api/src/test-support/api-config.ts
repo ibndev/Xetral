@@ -50,6 +50,14 @@ export function testApiConfig(databaseUrl: string, overrides: Partial<ApiConfig>
     twilioAccountSid: undefined,
     twilioAuthToken: undefined,
     twilioNumberPriceCents: undefined,
+    // No timer in tests: the reconciliation suite drives `sweep()` directly, so
+    // a background one would race it and resolve rows out from under it.
+    reconcileIntervalSeconds: undefined,
+    // No grace either — a test that had to wait two minutes for a row to become
+    // eligible is a test nobody runs. Zero rather than undefined, which would
+    // fall back to the production default.
+    reconcileGraceSeconds: 0,
+    reconcileStaleSeconds: undefined,
     ...overrides,
   };
 }

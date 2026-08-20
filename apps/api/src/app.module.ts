@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger, Module, ServiceUnavailableException } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
-import type { DynamicModule, OnApplicationShutdown } from '@nestjs/common';
+import type { DynamicModule, OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common';
 import Redis from 'ioredis';
 import type { Pool } from 'pg';
 import { LedgerService } from '@xetral/ledger';
@@ -23,6 +23,8 @@ import { CardService } from './cards/card.service.js';
 import { CardWebhookService } from './cards/webhook.service.js';
 import { PurchaseController } from './purchases/purchase.controller.js';
 import { PurchaseService } from './purchases/purchase.service.js';
+import { PurchaseOutcome } from './purchases/purchase-outcome.js';
+import { ReconciliationService } from './purchases/reconciliation.service.js';
 import { LoginRateLimitGuard } from './auth/login-rate-limit.guard.js';
 import { InMemoryRateLimitStore, RedisRateLimitStore } from './auth/rate-limit.js';
 import type { RateLimitStore } from './auth/rate-limit.js';
@@ -218,6 +220,24 @@ export class RateLimitLifecycle implements OnApplicationShutdown {
 }
 
 /**
+ * Starts the reconciliation sweep once the app is up.
+ *
+ * Lives here for the same reason RateLimitLifecycle does: the service itself
+ * stays a plain object with a `sweep()` a test can call, rather than something
+ * that starts doing work to money the moment it is constructed. `onApplicationBootstrap`
+ * rather than the constructor also means a failed boot never leaves a timer
+ * running against a half-built app.
+ */
+@Injectable()
+export class ReconciliationLifecycle implements OnApplicationBootstrap {
+  constructor(@Inject(ReconciliationService) private readonly reconciler: ReconciliationService) {}
+
+  onApplicationBootstrap(): void {
+    this.reconciler.start();
+  }
+}
+
+/**
  * Configuration is passed in rather than read from process.env inside the
  * module. A module that reaches for the environment is a module that cannot be
  * instantiated twice with different settings, which makes the rate-limit and
@@ -264,6 +284,9 @@ export class AppModule {
         CardService,
         CardWebhookService,
         PurchaseService,
+        PurchaseOutcome,
+        ReconciliationService,
+        ReconciliationLifecycle,
         LoginRateLimitGuard,
 
         // Registered globally, so it runs for every route including one whose

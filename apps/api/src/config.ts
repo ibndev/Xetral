@@ -97,6 +97,35 @@ export interface ApiConfig {
    * priced numbers cannot sell one.
    */
   readonly twilioNumberPriceCents: bigint | undefined;
+
+  /**
+   * How often this instance sweeps held purchases, in seconds.
+   *
+   * Undefined means it does not sweep at all, and that is the default on
+   * purpose: several instances behind a load balancer would each run the
+   * sweep, and while duplicate work is safe, asking a provider about the same
+   * purchase from four processes is rude at best and rate-limited at worst.
+   * Exactly one instance sets this, and bootstrap warns when none has.
+   */
+  readonly reconcileIntervalSeconds: number | undefined;
+  /**
+   * How long a reserved purchase is left alone before we ask about it.
+   *
+   * Not zero: the purchase row is written before the provider is called, so a
+   * row a second old is almost certainly still in flight in a request handler
+   * that is about to settle it. Sweeping it now races that handler for no gain.
+   */
+  readonly reconcileGraceSeconds: number | undefined;
+  /**
+   * After this long, a still-unresolved purchase is escalated to a human.
+   *
+   * It is NOT auto-reversed. By this point the automated remedies have been
+   * tried and the provider still will not say what happened, and both
+   * remaining answers — release the money or keep holding it — can be the
+   * wrong one. Undefined means never escalate, which is right for a
+   * development box and wrong for production.
+   */
+  readonly reconcileStaleSeconds: number | undefined;
 }
 
 export class ConfigError extends Error {
@@ -258,6 +287,28 @@ function minorUnits(env: Env, key: string): bigint | undefined {
   return value;
 }
 
+/** Like `integer()`, but absent means absent rather than a default — the
+ *  caller needs to tell "unset" from "set to the default". */
+function optionalInteger(env: Env, key: string): number | undefined {
+  const raw = env[key];
+  if (raw === undefined || raw.trim() === '') return undefined;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new ConfigError(`${key} must be a positive integer, got '${raw}'`);
+  }
+  return value;
+}
+
+function optionalWholeNumber(env: Env, key: string): number | undefined {
+  const raw = env[key];
+  if (raw === undefined || raw.trim() === '') return undefined;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0) {
+    throw new ConfigError(`${key} must be a whole number of seconds, got '${raw}'`);
+  }
+  return value;
+}
+
 function optional(env: Env, key: string): string | undefined {
   const value = env[key];
   return value === undefined || value.trim() === '' ? undefined : value;
@@ -314,5 +365,12 @@ export function loadConfig(env: Env): ApiConfig {
     twilioAccountSid: optional(env, 'TWILIO_ACCOUNT_SID'),
     twilioAuthToken: optional(env, 'TWILIO_AUTH_TOKEN'),
     twilioNumberPriceCents: minorUnits(env, 'TWILIO_NUMBER_PRICE_CENTS'),
+    reconcileIntervalSeconds: optionalInteger(env, 'RECONCILE_INTERVAL_SECONDS'),
+    // Zero is meaningful here — "sweep with no grace at all" — so this cannot
+    // reuse optionalInteger, which treats zero as invalid.
+    reconcileGraceSeconds: optionalWholeNumber(env, 'RECONCILE_GRACE_SECONDS'),
+    // Zero means "escalate anything still held", which is a legitimate, if
+    // very loud, setting — so whole numbers rather than positive ones.
+    reconcileStaleSeconds: optionalWholeNumber(env, 'RECONCILE_STALE_SECONDS'),
   };
 }
