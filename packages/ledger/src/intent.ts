@@ -33,6 +33,7 @@ export type EntryKind =
   | 'card_settlement'
   | 'card_auth_expiry'
   | 'card_refund'
+  | 'card_termination'
   | 'fx_trade'
   | 'bill_payment'
   | 'esim_purchase'
