@@ -220,6 +220,41 @@ Reverse   pending -> wallet           it did not — a reversal naming the reser
   on the port would give Airalo and Twilio a method that throws. Use
   `supportsVerification()`.
 
+### NGN funding — non-obvious rules
+
+Schema: `packages/ledger/sql/006_funding.sql`. Bitnob dedicated Nigerian
+virtual accounts. **The only inbound flow that creates money** rather than
+moving money already ours.
+
+```
+Funding    provider_float -> customer_wallet    now owed to the customer
+Suspense   provider_float -> suspense           it arrived; we cannot say whose
+```
+
+- **The deposit webhook is the most dangerous in the system.** Signature
+  verification happens before a single byte is parsed, and the idempotency key
+  is the provider's event id, so a redelivery is a replay the ledger refuses.
+- **The NGN amount unit is a deployment value, guarded by a ceiling.**
+  `BITNOB_NGN_AMOUNT_UNIT` (default `kobo`) and `DEPOSIT_CEILING_KOBO`. A
+  factor-of-100 misread blows the ceiling, so the first wrong deposit is held
+  in suspense rather than spent. All conversion lives in `ngn-amounts.ts`.
+- **The ceiling is asymmetric on purpose.** It catches over-crediting, which is
+  spent before anyone notices. Under-crediting surfaces as a customer complaint
+  within the hour and is recoverable, and a floor would reject the small
+  deposits that are most of the traffic.
+- **An unattributable deposit posts to `suspense`, never nowhere.** The money
+  arrived whatever we can work out about it.
+- **A lost webhook is only found by asking.** `DepositReconciliationService`
+  posts under the SAME key the webhook would have used, so a late delivery is a
+  replay rather than a second credit.
+- **A virtual account is permanent and immutable.** Customers save the number
+  as a bank beneficiary; changing the owner or number redirects money silently.
+  One live account per (user, currency), enforced by a partial UNIQUE INDEX —
+  **not** an EXCLUDE constraint, because `ON CONFLICT` cannot target one.
+- **Issuing requires `provider_customers` to exist.** KYC is a prerequisite,
+  never a side effect of tapping "add money".
+- **A forged webhook answers 401 and is dropped**, never 500 and never retried.
+
 ### Gift cards — non-obvious rules
 
 Schema: `packages/ledger/sql/005_giftcards.sql`. Ships behind
@@ -296,7 +331,8 @@ Reject      (nothing)                                no entry ever existed
 
 ## Providers
 
-Live set: **Bitnob** (crypto, USDT, stablecoin, virtual USD cards, FX),
+Live set: **Bitnob** (NGN virtual accounts, crypto, USDT, stablecoin, virtual
+USD cards, FX),
 **VTpass** (airtime, data, bills), **Airalo** (eSIM), **Twilio** (virtual numbers).
 
 Do **not** reintroduce Reloadly, Maplerad, Anchor, Paystack or ALAT. They appear in
@@ -434,11 +470,13 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/003_cards.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/004_purchases.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/005_giftcards.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/006_funding.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/003_cards.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/004_purchases.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/005_giftcards.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/006_funding.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,
 # Redis for the rate-limiter contract.

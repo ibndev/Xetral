@@ -1,5 +1,6 @@
 import { Buffer } from 'node:buffer';
 import type { AccessTokenKey, AccessTokenKeyring, EncryptionKey, Keyring } from '@xetral/identity';
+import type { NgnAmountUnit } from '@xetral/providers';
 import { ACCESS_TOKEN_TTL_SECONDS, REFRESH_TOKEN_TTL_SECONDS } from '@xetral/identity';
 
 /**
@@ -163,6 +164,31 @@ export interface ApiConfig {
    * failure is silent and slow: customers are paid and can never spend it.
    */
   readonly giftCardReleaseIntervalSeconds: number | undefined;
+
+  /**
+   * How Bitnob expresses an NGN amount in a deposit payload.
+   *
+   * Defaults to `kobo`, the natural minor unit for NGN and what the ledger
+   * itself stores. It is a stated deployment value rather than a constant
+   * because it could not be verified against Bitnob's live payloads before
+   * go-live — and because being wrong in the expensive direction is caught by
+   * `depositCeilingKobo` below rather than by hope. See
+   * `packages/providers/src/bitnob/ngn-amounts.ts` for the full reasoning.
+   */
+  readonly bitnobNgnAmountUnit: NgnAmountUnit;
+  /**
+   * The largest single deposit that will be credited automatically, in kobo.
+   *
+   * Anything above it is posted to SUSPENSE and escalated instead. This is the
+   * control that makes a misread amount recoverable: a factor-of-100 error on
+   * any realistic transfer blows the ceiling, so the first wrong deposit is
+   * held rather than spent. Defaults to N1,000,000.00, which an operator
+   * should raise deliberately rather than discover.
+   */
+  readonly depositCeilingKobo: bigint;
+  /** How often unmatched deposits are re-checked against the provider. One
+   *  instance, same arrangement as the other sweeps. */
+  readonly depositReconcileIntervalSeconds: number | undefined;
 }
 
 export class ConfigError extends Error {
@@ -358,6 +384,19 @@ function flag(env: Env, key: string): boolean {
   return env[key] === 'true';
 }
 
+/** Refuses anything not in the union rather than falling back, because a typo
+ *  here reads every deposit amount wrong. */
+function ngnAmountUnit(env: Env): NgnAmountUnit {
+  const raw = optional(env, 'BITNOB_NGN_AMOUNT_UNIT');
+  if (raw === undefined) return 'kobo';
+  if (raw !== 'kobo' && raw !== 'naira' && raw !== 'micro') {
+    throw new ConfigError(
+      `BITNOB_NGN_AMOUNT_UNIT must be 'kobo', 'naira' or 'micro', got '${raw}'`,
+    );
+  }
+  return raw;
+}
+
 function optional(env: Env, key: string): string | undefined {
   const value = env[key];
   return value === undefined || value.trim() === '' ? undefined : value;
@@ -424,5 +463,8 @@ export function loadConfig(env: Env): ApiConfig {
     giftCardsEnabled: flag(env, 'GIFT_CARDS_ENABLED'),
     giftCardHoldDays: integer(env, 'GIFT_CARD_HOLD_DAYS', 3),
     giftCardReleaseIntervalSeconds: optionalInteger(env, 'GIFTCARD_RELEASE_INTERVAL_SECONDS'),
+    bitnobNgnAmountUnit: ngnAmountUnit(env),
+    depositCeilingKobo: minorUnits(env, 'DEPOSIT_CEILING_KOBO') ?? 1_000_000_00n,
+    depositReconcileIntervalSeconds: optionalInteger(env, 'DEPOSIT_RECONCILE_INTERVAL_SECONDS'),
   };
 }

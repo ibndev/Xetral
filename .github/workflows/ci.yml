@@ -75,6 +75,8 @@ jobs:
             -f packages/ledger/sql/004_purchases.sql
           psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
             -f packages/ledger/sql/005_giftcards.sql
+          psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
+            -f packages/ledger/sql/006_funding.sql
 
       - name: Ledger and identity invariants
         run: |
@@ -88,7 +90,8 @@ jobs:
                    packages/identity/sql/002_identity.test.sql \
                    packages/ledger/sql/003_cards.test.sql \
                    packages/ledger/sql/004_purchases.test.sql \
-                   packages/ledger/sql/005_giftcards.test.sql; do
+                   packages/ledger/sql/005_giftcards.test.sql \
+                   packages/ledger/sql/006_funding.test.sql; do
             echo "== $f"
             psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
               -f "$f" 2>&1 | tee "/tmp/$(basename "$f").out"
@@ -110,6 +113,8 @@ jobs:
             -f packages/ledger/sql/004_purchases.sql
           psql -h localhost -U xetral -d xetral -v ON_ERROR_STOP=1 \
             -f packages/ledger/sql/005_giftcards.sql
+          psql -h localhost -U xetral -d xetral -v ON_ERROR_STOP=1 \
+            -f packages/ledger/sql/006_funding.sql
 
       - run: npm run typecheck
 

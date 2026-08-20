@@ -14,7 +14,7 @@ no PHP.
 | Line | Provider | Status |
 |---|---|---|
 | NGN wallet — transfer, balances, history | — | **built** |
-| NGN wallet — funding | *needs a bank rail* | blocked |
+| NGN wallet — funding | Bitnob virtual accounts | **built** |
 | Bills, airtime, data | VTpass | **built** |
 | Virtual USD cards | Bitnob | **built** (Bitnob registration under review) |
 | Crypto / USDT / stablecoin | Bitnob | planned |
@@ -69,13 +69,13 @@ apps/
 
 ## Phases
 
-Phases 0–7 are built. Four remain — see [`docs/PHASES.md`](docs/PHASES.md),
+Phases 0–8 are built. Three remain — see [`docs/PHASES.md`](docs/PHASES.md),
 which opens with a status table and what each is blocked on. Each phase lands
 independently.
 
-**Phase 8 is the one that gates real money:** the platform can move, spend and
-reconcile funds it currently has no way to receive, because customer-facing NGN
-funding needs a bank rail and none of the four live providers offers one.
+Customers fund their wallets through a **dedicated Nigerian account number**
+issued by Bitnob, in their own name and permanent. The three remaining phases
+are crypto, FX and the mobile/web clients.
 
 ## Running the tests
 
@@ -98,11 +98,13 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/003_cards.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/004_purchases.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/005_giftcards.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/006_funding.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/003_cards.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/004_purchases.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/005_giftcards.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/006_funding.test.sql
 ```
 
 All 12 ledger tests, 20 identity blocks, 10 card blocks and 11 purchase blocks print `PASS`. Any `TEST FAILED`

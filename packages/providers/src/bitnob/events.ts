@@ -45,6 +45,55 @@ export const BITNOB_EVENTS = {
   cardDeclined: 'card.transaction.declined',
 } as const;
 
+/**
+ * Deposit events on a dedicated Nigerian account.
+ *
+ * CONFIRM BEFORE GO-LIVE alongside the card names above, and settled the same
+ * way — by the first real event. An unrecognised event THROWS and is retried
+ * rather than acknowledged, so a wrong name here is a loud, repeating failure
+ * and never a deposit silently dropped. That property is what makes shipping
+ * with unconfirmed names safe rather than reckless.
+ */
+export const BITNOB_FUNDING_EVENTS = {
+  depositReceived: 'virtualaccount.deposit.completed',
+  depositReversed: 'virtualaccount.deposit.reversed',
+} as const;
+
+export type BitnobFundingEventName =
+  (typeof BITNOB_FUNDING_EVENTS)[keyof typeof BITNOB_FUNDING_EVENTS];
+
+/**
+ * A credit landing on a customer's dedicated account.
+ *
+ * `amount` is `unknown` for the same reason card amounts are: it is narrowed
+ * by the one audited conversion in ngn-amounts.ts, and a schema that accepted
+ * `z.number()` would hand over a value JSON.parse had already rounded.
+ *
+ * The sender fields are PERSONAL DATA from the sending bank. They are recorded
+ * for AML and never logged.
+ */
+export const depositPayload = z.object({
+  id: z.string().min(1),
+  /** Bitnob's id for the account the money landed on. */
+  virtual_account_id: z.string().min(1).optional(),
+  /** The NUBAN, when the payload identifies the account that way instead. */
+  account_number: z.string().min(1).optional(),
+  amount: z.unknown(),
+  currency: z.string().min(1),
+  sender_name: z.string().optional(),
+  sender_bank: z.string().optional(),
+  sender_account_number: z.string().optional(),
+});
+
+export const bitnobDepositEnvelope = z.object({
+  event_id: z.string().min(1),
+  event: z.string().min(1),
+  created_at: z.string().min(1),
+  data: depositPayload,
+});
+
+export type BitnobDepositEnvelope = z.infer<typeof bitnobDepositEnvelope>;
+
 export type BitnobEventName = (typeof BITNOB_EVENTS)[keyof typeof BITNOB_EVENTS];
 
 /**

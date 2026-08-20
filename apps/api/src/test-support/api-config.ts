@@ -65,6 +65,11 @@ export function testApiConfig(databaseUrl: string, overrides: Partial<ApiConfig>
     giftCardHoldDays: 3,
     // The gift card suite drives sweep() directly, so no timer.
     giftCardReleaseIntervalSeconds: undefined,
+    bitnobNgnAmountUnit: 'kobo',
+    // The production default, so the suites exercise the real ceiling rather
+    // than one that never fires.
+    depositCeilingKobo: 1_000_000_00n,
+    depositReconcileIntervalSeconds: undefined,
     ...overrides,
   };
 }

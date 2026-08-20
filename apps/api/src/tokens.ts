@@ -22,6 +22,8 @@ export const CARD_PORT = Symbol('CARD_PORT');
  *  which is a better answer than a placeholder adapter that fails on the
  *  first real call. */
 export const FULFILMENT_PORTS = Symbol('FULFILMENT_PORTS');
+/** The bank rail. One per instance — a customer has one dedicated account. */
+export const FUNDING_PORT = Symbol('FUNDING_PORT');
 export const CLOCK = Symbol('CLOCK');
 
 /** Injected rather than read from Date.now() so expiry and rate-limit windows

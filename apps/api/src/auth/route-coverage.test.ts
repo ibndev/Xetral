@@ -9,6 +9,10 @@ import {
   GiftCardController,
   GiftCardReviewController,
 } from '../giftcards/giftcard.controller.js';
+import {
+  DepositWebhookController,
+  FundingController,
+} from '../funding/funding.controller.js';
 import { METHOD_METADATA, PATH_METADATA, buildRoutePath } from './route-key.js';
 import { buildRoutePolicy } from './routes.js';
 
@@ -36,6 +40,8 @@ const CONTROLLERS = [
   PurchaseController,
   GiftCardController,
   GiftCardReviewController,
+  FundingController,
+  DepositWebhookController,
 ];
 
 const METHOD_NAMES: Partial<Record<RequestMethod, string>> = {
@@ -101,6 +107,7 @@ describe('the public surface is small and justified', () => {
       'POST /v1/auth/login',
       'POST /v1/auth/refresh',
       'POST /v1/webhooks/bitnob',
+      'POST /v1/webhooks/bitnob/deposits',
     ]);
   });
 

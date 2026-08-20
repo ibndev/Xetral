@@ -93,6 +93,21 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
         role: 'giftcard_reviewer',
       })
 
+      // Funding. Issuing an account creates one at the provider, so it is a
+      // POST — but it takes no PIN: receiving money is not spending it, and a
+      // customer should never be blocked from being paid.
+      .authenticated('POST', '/v1/funding/account', { pin: false })
+      .authenticated('GET', '/v1/funding/deposits', { pin: false })
+
+      .public(
+        'POST',
+        '/v1/webhooks/bitnob/deposits',
+        'Bitnob has no session with us; the request is authenticated by an HMAC ' +
+          'signature over the raw body, checked before anything is parsed. This is ' +
+          'the route that creates customer balances, so it is also the one where ' +
+          'verification-before-parsing matters most',
+      )
+
       .public(
         'POST',
         '/v1/webhooks/bitnob',

@@ -32,6 +32,15 @@ import {
 import { GiftCardService } from './giftcards/giftcard.service.js';
 import { GiftCardHoldService } from './giftcards/hold-release.service.js';
 import { StaffService } from './auth/staff.service.js';
+import {
+  DepositWebhookController,
+  FundingController,
+} from './funding/funding.controller.js';
+import { FundingService } from './funding/funding.service.js';
+import { DepositWebhookService } from './funding/deposit-webhook.service.js';
+import { DepositReconciliationService } from './funding/deposit-reconciliation.service.js';
+import { BitnobFundingAdapter } from '@xetral/providers';
+import type { FundingPort } from '@xetral/providers';
 import { LoginRateLimitGuard } from './auth/login-rate-limit.guard.js';
 import { InMemoryRateLimitStore, RedisRateLimitStore } from './auth/rate-limit.js';
 import type { RateLimitStore } from './auth/rate-limit.js';
@@ -44,6 +53,7 @@ import {
   CLOCK,
   DATABASE,
   FULFILMENT_PORTS,
+  FUNDING_PORT,
   LEDGER,
   RATE_LIMIT_STORE,
   ROUTE_POLICY,
@@ -63,6 +73,8 @@ export interface AppModuleOptions {
   readonly cardPort?: CardPort;
   /** Overridden in tests so purchases run without live VTpass/Airalo/Twilio. */
   readonly fulfilmentPorts?: ReadonlyMap<ServiceKind, FulfilmentPort>;
+  /** Overridden in tests so funding runs without a live Bitnob. */
+  readonly fundingPort?: FundingPort;
 }
 
 /**
@@ -187,6 +199,39 @@ export function createFulfilmentPorts(config: ApiConfig): ReadonlyMap<ServiceKin
 }
 
 /**
+ * The bank rail, or a stand-in that refuses.
+ *
+ * Unlike the fulfilment map, this one gets a refusing stand-in rather than an
+ * absent entry: there is exactly one rail, so "not configured" and "funding is
+ * unavailable" really are the same statement, and a customer asking for an
+ * account number deserves a clear refusal rather than a 500.
+ */
+export function createFundingPort(config: ApiConfig): FundingPort {
+  const { bitnobBaseUrl, bitnobApiKey } = config;
+
+  if (bitnobBaseUrl === undefined || bitnobApiKey === undefined) {
+    new Logger('Funding').warn(
+      'BITNOB_BASE_URL or BITNOB_API_KEY is not set: customers CANNOT be issued account ' +
+        'numbers and cannot fund their wallets.',
+    );
+    const refuse = async (): Promise<never> => {
+      throw new ServiceUnavailableException({ error: 'funding_provider_not_configured' });
+    };
+    return {
+      provider: 'bitnob',
+      createVirtualAccount: refuse,
+      getVirtualAccount: refuse,
+      listDeposits: refuse,
+    };
+  }
+
+  return new BitnobFundingAdapter({
+    client: new BitnobClient({ baseUrl: bitnobBaseUrl, apiKey: bitnobApiKey }),
+    amountUnit: config.bitnobNgnAmountUnit,
+  });
+}
+
+/**
  * Chooses the rate-limit backend, and says out loud when it picks the one that
  * only works on a single box.
  *
@@ -244,6 +289,20 @@ export class ReconciliationLifecycle implements OnApplicationBootstrap {
   }
 }
 
+/** Starts the deposit reconciliation sweep — the only thing that notices a
+ *  webhook that never arrived. */
+@Injectable()
+export class DepositLifecycle implements OnApplicationBootstrap {
+  constructor(
+    @Inject(DepositReconciliationService)
+    private readonly deposits: DepositReconciliationService,
+  ) {}
+
+  onApplicationBootstrap(): void {
+    this.deposits.start();
+  }
+}
+
 /** Starts the gift card hold release sweep. Separate from the reconciliation
  *  lifecycle because the two are enabled independently. */
 @Injectable()
@@ -274,6 +333,8 @@ export class AppModule {
         PurchaseController,
         GiftCardController,
         GiftCardReviewController,
+        FundingController,
+        DepositWebhookController,
       ],
       providers: [
         { provide: API_CONFIG, useValue: options.config },
@@ -298,6 +359,10 @@ export class AppModule {
           provide: FULFILMENT_PORTS,
           useValue: options.fulfilmentPorts ?? createFulfilmentPorts(options.config),
         },
+        {
+          provide: FUNDING_PORT,
+          useValue: options.fundingPort ?? createFundingPort(options.config),
+        },
         AuthService,
         PinService,
         WalletService,
@@ -306,6 +371,10 @@ export class AppModule {
         PurchaseService,
         PurchaseOutcome,
         StaffService,
+        FundingService,
+        DepositWebhookService,
+        DepositReconciliationService,
+        DepositLifecycle,
         GiftCardService,
         GiftCardHoldService,
         ReconciliationService,

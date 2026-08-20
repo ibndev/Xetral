@@ -16,14 +16,14 @@ shipped, that is called out explicitly.
 | 5 — Virtual USD cards | ✅ | Bitnob registration under review |
 | 6 — Bills, eSIM, numbers | ✅ | |
 | 7 — Gift cards | ✅ | ships flagged off by design |
-| 8 — NGN funding rail | not built | **choosing a bank-rail provider** |
+| 8 — NGN funding rail | ✅ | |
 | 9 — Crypto / USDT / stablecoin | not built | Bitnob registration under review |
 | 10 — Multi-currency + FX / remittance | not built | Bitnob registration under review |
 | 11 — Mobile and web clients | not built | |
 
-Four phases remain. Phase 8 is the one that gates taking real customer money:
-the platform can currently move, spend and reconcile funds it has no way to
-receive.
+Three phases remain, and the platform can now receive money as well as move it.
+Phases 9 and 10 are implemented-to-the-port work waiting on Bitnob credentials,
+not design work.
 
 ---
 
@@ -660,22 +660,92 @@ is silent and slow: customers are paid and can never spend it.
 
 ---
 
-## Phase 8 — NGN funding rail
+## Phase 8 — NGN funding rail ✅ *(Bitnob dedicated virtual accounts)*
 
-**The one that blocks real deposits.** Everything else assumes money is already
-in a wallet; nothing puts it there. Customer-facing NGN funding needs virtual
-bank accounts, and none of the four live providers offers one — which makes
-choosing the provider a prerequisite rather than an implementation detail, and
-the reason this is a phase of its own rather than a task inside Phase 4.
+**The phase that lets the platform receive money.** Everything before it could
+move, spend and reconcile funds that were already in a wallet; nothing put them
+there. A customer now gets a dedicated Nigerian account number in their own
+name, transfers to it from any bank, and Bitnob tells us. 15 invariant blocks,
+25 provider unit tests, 12 end-to-end.
 
-The accounting is already built and tested: funding is an ordinary journal
-entry, exercised by every e2e suite through a `fund()` helper standing in for
-the webhook. What is missing is the provider, its webhook, and the reconciliation
-of a bank rail — not the ledger.
+| File | What it is |
+|---|---|
+| `packages/ledger/sql/006_funding.sql` | virtual accounts, deposits, the suspense path |
+| `packages/ledger/sql/006_funding.test.sql` | 15 invariant blocks |
+| `packages/providers/src/ports/funding.ts` | the bank-rail port |
+| `packages/providers/src/bitnob/ngn-amounts.ts` | the one NGN conversion, and the ceiling |
+| `packages/providers/src/bitnob/funding-adapter.ts` | `FundingPort` against Bitnob |
+| `packages/providers/src/bitnob/funding-webhooks.ts` | a deposit event into a `LedgerIntent` |
+| `apps/api/src/funding/funding.service.ts` | issuing the account, listing deposits |
+| `apps/api/src/funding/deposit-webhook.service.ts` | verify, resolve, post |
+| `apps/api/src/funding/deposit-reconciliation.service.ts` | the sweep for webhooks that never came |
 
-Note the constraint from Rule 0: Paystack, Anchor and ALAT appear in the
-reference plugin and are out of scope. A new provider means a new adapter behind
-`ports/`, not a resurrection.
+```
+Funding    provider_float -> customer_wallet    the money is now owed to them
+Suspense   provider_float -> suspense           it arrived; we cannot say whose
+```
+
+`wallet_funding` has existed since Phase 1 and every e2e suite has been
+exercising it through a `fund()` helper standing in for exactly this webhook.
+So the accounting is not new. What is new is that the money is real.
+
+**No new provider was introduced.** Bitnob was already live for cards, and
+`provider_customers` — the KYC mapping built in Phase 5 — is the same table
+that gates account issuance here. Rule 0 stays intact: Paystack, Anchor and
+ALAT remain out of scope.
+
+Findings from building it:
+
+1. **This is the only webhook that CREATES money.** Every other inbound event
+   moves funds already ours to move; this one turns a provider's say-so into a
+   spendable balance. That asymmetry is why the amount conversion, the ceiling
+   and the suspense path all exist, and why signature verification happens
+   before a single byte is parsed.
+2. **The amount unit could not be verified, so being wrong was made
+   recoverable instead.** `BITNOB_NGN_AMOUNT_UNIT` is a stated deployment value
+   (default `kobo`) and `DEPOSIT_CEILING_KOBO` refuses to credit anything above
+   it. A factor-of-100 misread on any realistic transfer blows the ceiling, so
+   the FIRST wrong deposit is held in suspense rather than spent. That is a
+   different and stronger claim than "we checked the docs".
+3. **The guard is deliberately asymmetric.** It catches reading an amount too
+   LARGE, because that money is spendable before anyone notices. Reading one
+   too small is not caught and does not need to be: the customer says "I sent
+   more than that" within the hour and a correcting entry fixes it. Guarding
+   both ways would mean a floor, and a floor rejects the small deposits that
+   are most of the traffic.
+4. **An unattributable deposit goes to `suspense`, never nowhere.** The money
+   arrived whatever we can work out about it, and dropping the event because it
+   matched no account is how a real transfer disappears from a real person's
+   life. `suspense` has existed since Phase 1 for exactly this.
+5. **A lost webhook is the failure a bank rail cannot otherwise detect.** The
+   customer transferred, the provider recorded it, the webhook never came — and
+   nothing is retrying, so waiting does not help. The sweep ASKS, and posts
+   under the SAME idempotency key the webhook would have used, so a late
+   delivery is a replay rather than a second credit.
+6. **`ON CONFLICT` cannot target an EXCLUDE constraint.** "One live account per
+   customer" was written as an exclusion constraint and the issuing path could
+   not use it — two racing requests got an error instead of the loser reading
+   the winner's row, on the one request a customer makes when they are trying
+   to give us money. A partial UNIQUE INDEX supports both.
+7. **A dedicated account number is permanent, so its row is immutable.** A
+   customer saves it as a bank beneficiary and pays into it for years. Changing
+   the owner or the number would silently redirect money, including transfers
+   in flight during the UPDATE.
+8. **Issuing an account is gated on KYC, not on asking.** `provider_customers`
+   must already exist — the same rule Phase 5 applies to cards. A Nigerian bank
+   account cannot be issued to an unidentified person, and registering somebody
+   as a side effect of tapping "add money" would hide a regulatory step behind
+   a convenience.
+9. **A forged webhook answers 401, not 500.** A 500 pages somebody over a
+   stranger's probe and tells the sender we are broken rather than that they
+   are unauthorised. Found by booting the built bundle and curling it, not by a
+   test.
+
+**Before taking real deposits, an operator must:** set `BITNOB_BASE_URL`,
+`BITNOB_API_KEY` and `BITNOB_WEBHOOK_SECRET`; set `DEPOSIT_CEILING_KOBO`
+deliberately; set `DEPOSIT_RECONCILE_INTERVAL_SECONDS` on exactly one instance;
+and confirm `BITNOB_NGN_AMOUNT_UNIT` against the first real deposit — which,
+if wrong, will be sitting in suspense rather than in somebody's balance.
 
 ---
 
