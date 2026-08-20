@@ -33,6 +33,17 @@ Every entry kind needs a worked example in a test showing the exact postings and
 that each currency leg sums to zero. Write the failing case too — an entry of that
 kind that *should* be rejected.
 
+## Using the service
+
+`LedgerService.post()` is the only writer. Build a `LedgerIntent` and hand it
+over; do not open your own transaction against `postings`.
+
+- A replay returns the existing entry with `replayed: true`. That is a success.
+- Do not pre-check a balance before posting. The overdraft guard is in the
+  database because the race is in the service layer.
+- Translate `InsufficientFundsError` at the HTTP boundary. The ledger package
+  knows nothing about HTTP on purpose — jobs and webhook handlers use it too.
+
 ## Never
 
 - `UPDATE` or `DELETE` on `journal_entries` or `postings`. Append a reversal.

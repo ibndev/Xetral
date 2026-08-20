@@ -37,9 +37,9 @@ which is not a real failure but will waste your time if you do not expect it.
    and `route-coverage.test.ts` fails the build — so forgetting this is a red
    test, not an open endpoint.
 2. Decide `pin` deliberately. There is no default, because "does this move
-   money?" is the question the route's author must answer. Note that `pin: true`
-   currently **fails closed with a 500**: enforcement is not built, and a route
-   that declares it cannot serve traffic until it is.
+   money?" is the question the route's author must answer. `pin: true` makes
+   `AuthGuard` verify a `transaction_pin` from the body before the handler runs.
+   Reading a balance does not need one; moving money does.
 3. If it must be public, write a real justification. It is listed by
    `publicRouteAudit()`, asserted in `route-coverage.test.ts`, and read in review.
 4. Inject dependencies with an explicit `@Inject(TOKEN)`. esbuild does not emit

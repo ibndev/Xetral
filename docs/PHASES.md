@@ -149,10 +149,10 @@ Findings from wiring it up:
    build, and so does a policy for a route that no longer exists. The second
    direction matters as much: an audit that describes a surface which is not
    there invites the reader to stop trusting it.
-6. **`pin: true` fails closed with a 500, deliberately.** Transaction-PIN
-   enforcement is not built. A money-moving route must not serve traffic while
-   its author believes that flag is protecting it, so such a route cannot
-   respond at all until the check exists.
+6. **`pin: true` fails closed, deliberately.** Transaction-PIN enforcement was
+   not built when this landed, and a money-moving route must not serve traffic
+   while its author believes that flag is protecting it — so such a route could
+   not respond at all. *Closed in Phase 4: the guard now verifies a real PIN.*
 7. **esbuild does not emit `design:paramtypes`.** NestJS's usual constructor
    injection depends on it, so every dependency is named with an explicit
    `@Inject` token. Type-inferred injection compiles and then fails at runtime
@@ -175,9 +175,9 @@ behaves like memory" with two hand-written suites lets them drift into testing
 two different behaviours while both stay green — and the entire reason to run
 Redis is that every instance agrees.
 
-**Known limitation, deliberate:** transaction-PIN enforcement is unbuilt, so no
-route can declare `pin: true` and serve traffic. It lands with the first
-money-moving endpoint in Phase 4.
+**Known limitation at the time, since closed:** transaction-PIN enforcement was
+unbuilt, so no route could declare `pin: true` and serve traffic. It landed in
+Phase 4 with the first money-moving endpoint.
 
 ---
 
@@ -263,9 +263,59 @@ lead time blocks Phase 5 — request it now if it has not been requested.
 
 ---
 
-## Phase 4 — NGN wallet
+## Phase 4 — NGN wallet ✅
 
-Funding, transfers, balances, history. First real money flow end to end.
+Balances, transfers, history, and the ledger service that writes them. The first
+real money flow end to end, and the first route to require a transaction PIN.
+206 unit tests plus 64 end-to-end.
+
+| File | What it is |
+|---|---|
+| `packages/ledger/src/ledger-service.ts` | the only code that writes postings |
+| `packages/ledger/src/intent.ts` | `LedgerIntent` — a request for a journal entry |
+| `packages/ledger/src/errors.ts` | ledger failures, named for what happened |
+| `apps/api/src/auth/pin.service.ts` | transaction-PIN verification and lockout |
+| `apps/api/src/wallet/wallet.service.ts` | balances, transfers, history |
+| `apps/api/src/wallet/wallet.controller.ts` | `GET /v1/wallets`, `POST /v1/wallets/transfers`, history |
+
+Findings from building it:
+
+1. **A replay is a success.** `post()` returns the existing entry with
+   `replayed: true` rather than throwing. A handler that treats a redelivery as
+   a failure keeps failing and the provider keeps retrying, for ever — and the
+   customer's retried transfer would otherwise look broken to them.
+2. **Never pre-check a balance.** Between the check and the write another
+   request can spend the same money, so the service builds the entry and lets
+   the overdraft guard decide. A pre-check is a second, weaker copy of the rule
+   *plus* a race.
+3. **The insufficient-funds error carries no figure.** Returning "you have
+   ₦4,300" to a caller that asked to send ₦5,000 turns a transfer endpoint into
+   a balance oracle for anyone holding a stolen session.
+4. **The PIN is checked after the bearer token.** Verifying a PIN for a caller
+   whose session is forged would spend one of that customer's five attempts on
+   a request they never made — a way to lock anyone out of their own money.
+   There is a test asserting the PIN service is not even called.
+5. **The fee defaults to zero.** A fee nobody configured is money taken from a
+   customer because of a default, and the failure is silent: every transfer just
+   costs slightly more than the product intended.
+6. **History is keyset paginated and shows only the customer's own leg.** A
+   transfer is −₦5,050 to the sender and +₦5,000 to the recipient; neither wants
+   the other's side or the fee leg. `OFFSET` shifts under an active account,
+   producing duplicates and gaps.
+7. **`LedgerIntent` moved from `@xetral/providers` to `@xetral/ledger`.** A
+   wallet transfer is not a provider concern and must not import one to describe
+   an entry. The ledger owns the definition of what it accepts.
+8. **Shared-database e2e suites need synthetic owner ids.** `accounts.owner_id`
+   is polymorphic and unconstrained, so the ledger and provider suites invent
+   owners — but taking `MAX(owner_id) + 1` eventually lands on an id the users
+   sequence will issue, and then a real customer's "empty wallet" already has a
+   balance. Found by running the suites together rather than one at a time.
+
+**The one part of this phase that cannot land yet:** customer-facing NGN
+*funding*. It needs a bank rail — virtual accounts — and none of the four live
+providers offers one. The ledger side is built and tested (funding is an
+ordinary entry), so what is missing is the provider and its webhook, not the
+accounting. Choosing that provider is a prerequisite for taking real deposits.
 
 ## Phase 5 — Virtual USD cards (Bitnob)
 

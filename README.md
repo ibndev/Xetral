@@ -13,7 +13,9 @@ no PHP.
 
 | Line | Provider | Status |
 |---|---|---|
-| NGN wallet — fund, transfer, bills, airtime | VTpass | planned |
+| NGN wallet — transfer, balances, history | — | **built** |
+| NGN wallet — funding | *needs a bank rail* | blocked |
+| Bills, airtime | VTpass | planned |
 | Virtual USD cards | Bitnob | planned |
 | Crypto / USDT / stablecoin | Bitnob | planned |
 | Multi-currency + FX / remittance | Bitnob | planned |
@@ -41,7 +43,7 @@ surface of the six and needs a review queue and hold periods before it is safe.
 ```
 packages/
   shared/     types, money primitives, Zod schemas — imported by API and app
-  ledger/     double-entry core: schema, invariants, posting service
+  ledger/     double-entry core: schema, invariants, the one posting service
   identity/   users, devices, sessions, refresh rotation, PINs, envelopes
   providers/  provider ports and their adapters (Bitnob first)
 apps/
@@ -64,7 +66,8 @@ npm test                                   # every workspace, via turbo
 npm test --workspace @xetral/shared        # 29 money tests
 npm test --workspace @xetral/identity      # 76 auth tests
 npm test --workspace @xetral/api           # 27 guard, routing and rate-limit tests
-npm test --workspace @xetral/providers     # 70 adapter, conversion and webhook tests
+npm test --workspace @xetral/providers     # 60 adapter, conversion and webhook tests
+npm test --workspace @xetral/ledger        # 10 intent-validation tests
 
 # SQL invariants — needs a live PostgreSQL 16. Migrations apply in order, and
 # the test files are not idempotent, so run them against a fresh database.

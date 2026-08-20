@@ -85,6 +85,30 @@ Three things that cost real debugging time. Do not rediscover them:
 Also: journal entries and postings are **append-only**. Correct a mistake with a
 reversing entry. Never `UPDATE` or `DELETE` them.
 
+### The ledger service
+
+`LedgerService.post()` is the only code that writes postings. Everything else
+builds a `LedgerIntent` — a request naming accounts by **role** — and hands it
+over.
+
+- **A replay is a success, not an error.** `post()` returns the existing entry
+  with `replayed: true` when the idempotency key has already been used. A
+  handler that treats the second delivery as a failure keeps failing, and the
+  provider keeps retrying, for ever.
+- **Never pre-check a balance.** Between the check and the write another request
+  can spend the same money. Build the entry, let the overdraft guard decide, and
+  translate the error. A pre-check is a second, weaker copy of the rule plus a
+  race.
+- **`InsufficientFundsError` carries no figure.** Returning "you have ₦4,300" to
+  a caller that asked to send ₦5,000 turns a transfer endpoint into a balance
+  oracle for a stolen session.
+- Account roles resolve to ids inside the service, creating the account if it is
+  the first posting. The two partial unique indexes make that race-safe: the
+  loser of a concurrent create re-reads the winner's row.
+- History is **keyset paginated** on the posting id, and shows only the
+  customer's own leg. `OFFSET` shifts under an active account, producing
+  duplicates and gaps.
+
 ---
 
 ## Identity & auth — non-obvious rules
@@ -132,9 +156,11 @@ Access tokens are **not JWTs**, deliberately — see the header comment in
   `route-coverage.test.ts` fails the build if a controller declares one the
   policy does not (and vice versa, so the audit cannot describe a route that no
   longer exists).
-- A route declaring `pin: true` **fails closed with a 500** — transaction-PIN
-  enforcement is not built, and the one thing that must not happen is a
-  money-moving route going live while its author believes the flag protects it.
+- A route declaring `pin: true` has its transaction PIN verified by `AuthGuard`
+  before the handler runs. The PIN is read from the request body, and the check
+  happens **after** the bearer token — verifying a PIN for a caller whose
+  session is forged would spend one of that customer's five attempts on a
+  request they never made, which is a way to lock anyone out of their own money.
 - Nest's route metadata keys are hardcoded in `route-key.ts`, not imported from
   `@nestjs/common/constants`: that module is unresolvable under native ESM and
   the failure only appears once the bundle starts. A canary test asserts the
@@ -243,6 +269,7 @@ npm test --workspace @xetral/shared     # money primitives (vitest)
 npm test --workspace @xetral/identity   # tokens, PIN, envelopes, policy (vitest)
 npm test --workspace @xetral/api        # guard, route coverage, rate limiting
 npm test --workspace @xetral/providers  # amount conversion, webhooks, card adapter
+npm test --workspace @xetral/ledger     # intent validation (service is e2e-only)
 
 # SQL invariants — needs live PostgreSQL 16. Apply migrations in order; the
 # test files are NOT idempotent, so run them against a freshly created database.
