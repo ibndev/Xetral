@@ -200,26 +200,66 @@ Two details that are not boilerplate:
 
 ---
 
-## Phase 3 — Provider ports + Bitnob adapter
+## Phase 3 — Provider ports + Bitnob adapter ✅
 
-Port interfaces first, then the Bitnob adapter behind one.
+Port interfaces first, then the Bitnob adapter behind one. 70 unit tests, plus
+8 end-to-end against the real ledger schema.
 
-Two Bitnob facts already designed for:
+| File | What it is |
+|---|---|
+| `packages/providers/src/ports/ledger-intent.ts` | what an adapter produces instead of writing postings |
+| `packages/providers/src/ports/card.ts` | the virtual-card port |
+| `packages/providers/src/ports/errors.ts` | provider failures classified by what to do about them |
+| `packages/providers/src/bitnob/amounts.ts` | the one micro-unit conversion boundary |
+| `packages/providers/src/bitnob/webhooks.ts` | signature verification, parsing, two-phase card mapping |
+| `packages/providers/src/bitnob/client.ts` | HTTP boundary, endpoint table |
+| `packages/providers/src/bitnob/card-adapter.ts` | `CardPort` implemented against Bitnob |
 
-1. **Card spend is two events.** Authorization then Settlement, up to 7–14 business
-   days apart, each with its own webhook. Bitnob's own documentation warns that
-   treating them as one produces an incorrect balance. Handled by the
-   `customer_pending` account added in Phase 1.
-2. **Webhook amounts are micro-units — 1 USD = 1,000,000** — with a sibling
-   `display_amount` float. Six decimal places where the ledger uses two, and a
-   float that must never touch ledger maths. The conversion is a single audited
-   boundary inside the adapter, with its own tests.
+An adapter never writes postings. It produces a `LedgerIntent` naming accounts
+by **role**, and the ledger resolves roles to ids — which keeps Rule 1 true
+without every adapter needing to know the account tree.
 
-Also: webhook `event_id` is the natural `idempotency_key` source, and event names
-use the `.completed` suffix (not `.complete`) with snake_case keys.
+Findings from building it:
 
-**Operational:** Bitnob card issuing requires approval before use. That lead time
-blocks Phase 5 — request it now.
+1. **A float cannot be kept out of ledger maths by convention.** `display_amount`
+   is simply absent from the parsed event, so there is no path by which it could
+   reach a posting. A test sends a deliberately wrong one and asserts the
+   posting is unaffected — which is a claim about the code's shape, not about
+   anyone's discipline.
+2. **Six decimal places into two does not always divide.** 1,234,567 micro-units
+   is 123.4567 cents, and a cent is the smallest thing the ledger can represent.
+   The remainder is therefore **recorded, never posted**: writing a whole cent
+   to suspense would invent the other 0.5433 and make the entry a statement
+   about money that does not exist.
+3. **A JSON number past 2^53 has already lost precision.** `parseMicro` rejects
+   an unsafe integer rather than coercing it, and says why — the fix is to have
+   the provider send a string, and no care downstream recovers the lost unit.
+4. **`LedgerIntent` postings are not `Money`-typed**, because `Money` is
+   invariant: a bare `Money` field means `Money<Currency>` and `Money<'USD'>` is
+   not assignable to it, so the field would reject every real caller. An entry
+   spans currencies anyway. `posting()` is generic and is the only sanctioned
+   way to build a leg.
+5. **A timeout is deliberately not retryable.** It means we do not know whether
+   the provider acted, and for "fund this card" the naive retry is exactly how
+   one funding becomes two. The recovery path is reconciliation.
+6. **"Pending with an unchanged balance" is not success.** Bitnob's card funding
+   answers immediately that way, so the port models a distinct `pending` state
+   rather than a boolean a caller could collapse. The adapter also distrusts a
+   claimed success whose balance did not move — the numbers win over the label.
+7. **Only the database can check the enums.** `EntryKind` and `AccountRef` are
+   literal unions in TypeScript and enums in Postgres, and nothing but an
+   insert proves they still agree. The e2e suite writes real intents against
+   `001_ledger.sql`, which is also where replay is proven: the same webhook
+   delivered twice raises a unique violation and the balance does not move a
+   second time.
+
+**CONFIRM BEFORE GO-LIVE.** Two things could not be verified from the
+repository and are each collected in one place so that confirming them is a
+small diff: the webhook signature header and encoding (`bitnob/webhooks.ts`),
+and the endpoint paths (`BITNOB_ENDPOINTS` in `bitnob/client.ts`).
+
+**Still operational:** Bitnob card issuing requires approval before use. That
+lead time blocks Phase 5 — request it now if it has not been requested.
 
 ---
 

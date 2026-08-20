@@ -43,6 +43,7 @@ packages/
   shared/     types, money primitives, Zod schemas — imported by API and app
   ledger/     double-entry core: schema, invariants, posting service
   identity/   users, devices, sessions, refresh rotation, PINs, envelopes
+  providers/  provider ports and their adapters (Bitnob first)
 apps/
   api/        NestJS — deny-by-default guard, login/refresh/logout
   mobile/     Expo (iOS + Android)
@@ -62,7 +63,8 @@ npm test                                   # every workspace, via turbo
 # or one at a time
 npm test --workspace @xetral/shared        # 29 money tests
 npm test --workspace @xetral/identity      # 76 auth tests
-npm test --workspace @xetral/api           # 26 guard, routing and rate-limit tests
+npm test --workspace @xetral/api           # 27 guard, routing and rate-limit tests
+npm test --workspace @xetral/providers     # 70 adapter, conversion and webhook tests
 
 # SQL invariants — needs a live PostgreSQL 16. Migrations apply in order, and
 # the test files are not idempotent, so run them against a fresh database.
@@ -80,9 +82,13 @@ The API's end-to-end suite runs the real login, rotation and reuse-detection
 flows against that database:
 
 ```bash
-DATABASE_URL=postgres://... REDIS_URL=redis://localhost:6379 \
-  npm run test:e2e --workspace @xetral/api
+DATABASE_URL=postgres://... REDIS_URL=redis://localhost:6379 npm run test:e2e
 ```
+
+That covers the API's auth flows and the rate-limiter contract, plus the Bitnob
+adapter's output against the real ledger schema — the only check that its entry
+kinds and account roles exist as enum values rather than merely as TypeScript
+literals.
 
 It is a separate script rather than a skip-when-unavailable block in `npm test`,
 because a suite that quietly skips is a suite that reports green on a machine

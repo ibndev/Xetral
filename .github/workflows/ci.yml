@@ -100,8 +100,13 @@ jobs:
 
       - run: npm test
 
+      # Covers every workspace with an e2e suite: the API's auth flows and the
+      # rate-limiter contract, and the Bitnob adapter's output against the real
+      # ledger schema. The second is the only check that the adapter's entry
+      # kinds and account roles actually exist as enum values -- TypeScript is
+      # perfectly happy with a literal the database has never heard of.
       - name: End-to-end (real Postgres and Redis)
-        run: npm run test:e2e --workspace @xetral/api
+        run: npm run test:e2e
 
       - run: npm run build
 

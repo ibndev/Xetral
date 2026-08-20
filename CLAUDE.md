@@ -182,6 +182,31 @@ the reference plugin and are out of scope.
   snake_case.
 - Card issuing **requires approval** from Bitnob before use.
 
+### Working in `packages/providers`
+
+- An adapter never writes postings. It produces a `LedgerIntent` — a *request*
+  for a journal entry naming accounts by ROLE — and hands it over. Resolving a
+  role to an account id is the ledger's job.
+- `LedgerIntent` postings carry `amountMinor` + `currency` rather than `Money`,
+  because `Money` is invariant: a bare `Money` field means `Money<Currency>` and
+  would reject every real caller. Build legs with `posting()`, which is generic
+  and cannot mix an amount up with the wrong code.
+- All micro-unit conversion lives in `bitnob/amounts.ts` and nowhere else. A
+  second conversion inline at a call site is how a settlement ends up off by a
+  factor of 10,000.
+- `parseMicro` **rejects** a JSON number beyond `MAX_SAFE_INTEGER` rather than
+  coercing it. By then `JSON.parse` has already rounded it and the lost unit is
+  unrecoverable; the fix is to ask the provider for a string.
+- A sub-cent remainder is **recorded, never posted**. A cent is the smallest
+  unit the ledger can hold, so posting a whole one would invent the rest.
+- `ProviderTimeoutError` is deliberately **not** retryable. A timeout means we
+  do not know whether the provider acted, and the naive retry is how one card
+  funding becomes two. Reconcile instead.
+- **CONFIRM BEFORE GO-LIVE**, both collected in one place each: the webhook
+  signature header and encoding (`bitnob/webhooks.ts`) and the endpoint paths
+  (`BITNOB_ENDPOINTS` in `bitnob/client.ts`). Neither could be verified from
+  the repository.
+
 ---
 
 ## Security posture
@@ -217,6 +242,7 @@ npm test                                # all workspaces, via turbo
 npm test --workspace @xetral/shared     # money primitives (vitest)
 npm test --workspace @xetral/identity   # tokens, PIN, envelopes, policy (vitest)
 npm test --workspace @xetral/api        # guard, route coverage, rate limiting
+npm test --workspace @xetral/providers  # amount conversion, webhooks, card adapter
 
 # SQL invariants — needs live PostgreSQL 16. Apply migrations in order; the
 # test files are NOT idempotent, so run them against a freshly created database.
@@ -228,8 +254,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,
 # Redis for the rate-limiter contract.
-DATABASE_URL=postgres://... REDIS_URL=redis://localhost:6379 \
-  npm run test:e2e --workspace @xetral/api
+DATABASE_URL=postgres://... REDIS_URL=redis://localhost:6379 npm run test:e2e
 ```
 
 CI (`.github/workflows/ci.yml`) runs all of the above against Postgres 16 and
