@@ -1,0 +1,344 @@
+/*
+ * One stylesheet, no framework.
+ *
+ * The whole app is about forty screens of forms, tables and figures, and a
+ * utility framework would put its class names into every one of them — which
+ * is a lot of markup to change the day the design does. Semantic classes keep
+ * the decisions here.
+ *
+ * Every layout rule below is written narrow-first. A Nigerian customer is on a
+ * phone; the desktop layout is the special case, and building it the other way
+ * round is how a table ends up scrolling the whole page sideways on the device
+ * most people actually hold.
+ */
+
+:root {
+  --bg: #0b0f14;
+  --panel: #131a22;
+  --panel-2: #0d1218;
+  --line: #223041;
+  --line-soft: #1a2430;
+  --text: #e6edf3;
+  --muted: #8b9bb0;
+  --accent: #2f81f7;
+  --accent-dim: #1f5fb8;
+  --danger: #f85149;
+  --danger-dim: #4a1d1b;
+  --ok: #3fb950;
+  --ok-dim: #16351f;
+  --warn: #d29922;
+  --warn-dim: #3a2f11;
+
+  --radius: 10px;
+  --radius-sm: 7px;
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* The pages are dark. Saying so lets the browser paint form controls,
+   * scrollbars and the address bar to match instead of flashing white. */
+  color-scheme: dark;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* Never let the page itself scroll sideways. Wide things scroll inside their
+ * own container -- see .scroll below. */
+body { overflow-x: hidden; }
+
+/* ------------------------------- layout ------------------------------- */
+
+.shell {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 20px 16px 56px;
+}
+
+.shell.wide { max-width: 1180px; }
+
+@media (min-width: 640px) {
+  .shell { padding: 32px 20px 64px; }
+}
+
+.nav {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 22px;
+  flex-wrap: wrap;
+  /* Room for the thumb on a phone; the links sit close together otherwise and
+   * "Send" is one pixel from "Sign out". */
+  row-gap: 10px;
+}
+.nav strong { font-size: 18px; letter-spacing: -0.01em; }
+.nav .spacer { flex: 1; }
+.nav a { color: var(--muted); }
+.nav a:hover, .nav a.active { color: var(--text); text-decoration: none; }
+.nav a.active { text-shadow: 0 0 0 currentColor; }
+
+@media (max-width: 520px) {
+  /* The brand keeps its own line so the links get the full width rather than
+   * wrapping one at a time under it. */
+  .nav strong { flex-basis: 100%; }
+  .nav .spacer { display: none; }
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 14px;
+}
+
+@media (min-width: 640px) {
+  .panel { padding: 20px; margin-bottom: 16px; }
+}
+
+.grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 1fr;
+}
+@media (min-width: 720px) {
+  .grid.two { grid-template-columns: 1fr 1fr; }
+  .grid.three { grid-template-columns: repeat(3, 1fr); }
+}
+
+/* ------------------------------ typography ---------------------------- */
+
+h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: -0.02em; }
+h2 { font-size: 14px; margin: 0 0 14px; color: var(--muted); font-weight: 600; }
+h3 { font-size: 14px; margin: 18px 0 10px; letter-spacing: -0.01em; }
+
+@media (min-width: 640px) {
+  h1 { font-size: 22px; }
+  h2 { font-size: 15px; }
+}
+
+p.hint { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
+p.lead { color: var(--muted); margin: 0 0 16px; }
+
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.muted { color: var(--muted); }
+.nowrap { white-space: nowrap; }
+
+/* Figures line up only if their digits are the same width. Money in a
+ * proportional font is money a customer has to read twice. */
+.amount, td.amount, .figure {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* ------------------------------- forms -------------------------------- */
+
+label { display: block; margin-bottom: 12px; font-size: 13px; color: var(--muted); }
+
+input, select, textarea {
+  width: 100%;
+  margin-top: 5px;
+  padding: 10px 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  /* 16px on a phone, because anything smaller makes iOS Safari zoom the whole
+   * page on focus and leave the customer looking at half a form. */
+  font: inherit;
+  font-size: 16px;
+}
+@media (min-width: 640px) {
+  input, select, textarea { font-size: 15px; }
+}
+
+input:focus, select:focus, textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+input:disabled, select:disabled, textarea:disabled { opacity: 0.6; }
+
+textarea { min-height: 84px; resize: vertical; }
+
+fieldset { border: 0; padding: 0; margin: 0; }
+
+.field-row { display: grid; gap: 0 12px; grid-template-columns: 1fr; }
+@media (min-width: 560px) {
+  .field-row.two { grid-template-columns: 1fr 1fr; }
+}
+
+button {
+  padding: 11px 18px;
+  background: var(--accent);
+  color: #fff;
+  border: 0;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  /* A 44px target. Anything smaller is a button people miss on a phone, and a
+   * missed "Confirm" on a transfer form is a second tap nobody intended. */
+  min-height: 44px;
+}
+button:disabled { opacity: 0.55; cursor: not-allowed; }
+button.ghost { background: transparent; border: 1px solid var(--line); color: var(--text); }
+button.ghost:hover:not(:disabled) { border-color: var(--muted); }
+button.danger { background: var(--danger); }
+button.small { padding: 7px 12px; min-height: 36px; font-size: 13px; }
+
+.actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+
+/* --------------------------- balances & rows -------------------------- */
+
+.balance {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+.balance:last-child { border-bottom: 0; }
+.balance .amount { font-size: 20px; }
+.balance .pending { color: var(--muted); font-size: 12px; }
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+}
+.row:last-child { border-bottom: 0; }
+
+/* ------------------------------- tables ------------------------------- */
+
+/*
+ * Tables scroll INSIDE this, never by moving the page. A customer or an
+ * operator who has to scroll the whole document sideways to read a column has
+ * lost the navigation, the heading and their place at once.
+ */
+.scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 0 -16px;
+  padding: 0 16px;
+}
+@media (min-width: 640px) {
+  .scroll { margin: 0; padding: 0; }
+}
+
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td {
+  text-align: left;
+  padding: 9px 12px 9px 0;
+  border-bottom: 1px solid var(--line-soft);
+  vertical-align: top;
+}
+th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+tbody tr:last-child td { border-bottom: 0; }
+td.right, th.right { text-align: right; padding-right: 0; }
+
+/* ------------------------------- badges ------------------------------- */
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--line);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.badge.ok      { background: var(--ok-dim);     color: var(--ok); }
+.badge.warn    { background: var(--warn-dim);   color: var(--warn); }
+.badge.danger  { background: var(--danger-dim); color: var(--danger); }
+
+/* ------------------------------ messages ------------------------------ */
+
+.error { color: var(--danger); font-size: 13px; margin: 10px 0 0; }
+.ok    { color: var(--ok);     font-size: 13px; margin: 10px 0 0; }
+
+.notice {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  background: var(--panel-2);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  font-size: 14px;
+  margin-bottom: 14px;
+}
+.notice.warn   { border-left-color: var(--warn); }
+.notice.danger { border-left-color: var(--danger); }
+.notice p { margin: 0; }
+.notice p + p { margin-top: 8px; }
+
+/* -------------------------------- tabs -------------------------------- */
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 18px;
+  /* The scrollbar is noise on a row of six links; the row still scrolls. */
+  scrollbar-width: none;
+}
+.tabs::-webkit-scrollbar { display: none; }
+.tabs a {
+  padding: 9px 12px;
+  color: var(--muted);
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+  font-size: 14px;
+}
+.tabs a:hover { color: var(--text); text-decoration: none; }
+.tabs a.active { color: var(--text); border-bottom-color: var(--accent); }
+
+/* -------------------------------- stats ------------------------------- */
+
+.stats { display: grid; gap: 12px; grid-template-columns: repeat(2, 1fr); }
+@media (min-width: 720px) { .stats { grid-template-columns: repeat(4, 1fr); } }
+
+.stat {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+}
+.stat .label { color: var(--muted); font-size: 12px; }
+.stat .value { font-size: 20px; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.stat.alarm { border-color: var(--danger); }
+.stat.alarm .value { color: var(--danger); }
+
+/* ------------------------------- misc --------------------------------- */
+
+.empty { color: var(--muted); font-size: 14px; padding: 18px 0; text-align: center; }
+
+.spinner { color: var(--muted); font-size: 13px; }
+
+hr { border: 0; border-top: 1px solid var(--line); margin: 18px 0; }
+
+/*
+ * Somebody will read this page with motion reduced, and a fintech has no
+ * business overriding that for decoration.
+ */
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}

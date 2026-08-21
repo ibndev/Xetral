@@ -1,0 +1,24 @@
+{
+  "name": "xetral",
+  "private": true,
+  "packageManager": "npm@10.9.7",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "test:e2e": "turbo run test:e2e --concurrency 1",
+    "typecheck": "turbo run typecheck"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "turbo": "^2.10.11",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

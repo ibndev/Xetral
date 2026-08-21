@@ -1,0 +1,290 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'claude/**']
+  pull_request:
+
+# A superseded run tells you nothing useful, and these jobs hold a database.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      # Pinned to the major version the invariants were written against.
+      # Deferred constraints and trigger ordering are exactly the behaviour that
+      # a silent major upgrade would change underneath them.
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: xetral
+          POSTGRES_PASSWORD: xetral
+          POSTGRES_DB: xetral
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      PGPASSWORD: xetral
+      DATABASE_URL: postgres://xetral:xetral@localhost:5432/xetral
+      REDIS_URL: redis://localhost:6379
+      # The web app refuses to boot without it. Nothing in CI calls the API
+      # through the proxy, so the address only has to exist.
+      XETRAL_API_URL: http://127.0.0.1:3100
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # ------------------------------------------------------------------
+      # SQL invariants, on their own database.
+      #
+      # The test files insert fixtures and are NOT idempotent, so they need a
+      # database nothing else has touched. Keeping them off the one the e2e
+      # suite uses also stops either from explaining a failure in the other.
+      # ------------------------------------------------------------------
+      - name: Apply migrations (invariant database)
+        run: |
+          createdb -h localhost -U xetral xetral_invariants
+          psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
+            -f packages/ledger/sql/001_ledger.sql
+          psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
+            -f packages/identity/sql/002_identity.sql
+          psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
+            -f packages/ledger/sql/003_cards.sql
+          psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
+            -f packages/ledger/sql/004_purchases.sql
+          psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
+            -f packages/ledger/sql/005_giftcards.sql
+          psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
+            -f packages/ledger/sql/006_funding.sql
+          psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
+            -f packages/ledger/sql/007_crypto.sql
+          psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
+            -f packages/ledger/sql/008_fx.sql
+          psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
+            -f packages/ledger/sql/009_admin.sql
+          # The seed too, because 009's invariants assert on the shipped
+          # defaults -- that a 15% fee is refused by the CHECK, that a change
+          # is written to history. There is nothing to refuse without rows.
+          psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
+            -f packages/ledger/sql/009_admin.seed.sql
+
+      - name: Ledger and identity invariants
+        run: |
+          set -o pipefail
+          # ON_ERROR_STOP makes a raised 'TEST FAILED' abort with a non-zero
+          # exit, which covers most blocks. It does NOT cover the reporting
+          # queries -- ledger test 9 prints 'FAIL: n account(s) drifted' from a
+          # SELECT and exits zero -- so the output is scanned as well. A drift
+          # check that cannot fail the build is not a check.
+          for f in packages/ledger/sql/001_ledger.test.sql \
+                   packages/identity/sql/002_identity.test.sql \
+                   packages/ledger/sql/003_cards.test.sql \
+                   packages/ledger/sql/004_purchases.test.sql \
+                   packages/ledger/sql/005_giftcards.test.sql \
+                   packages/ledger/sql/006_funding.test.sql \
+                   packages/ledger/sql/007_crypto.test.sql \
+                   packages/ledger/sql/008_fx.test.sql \
+                   packages/ledger/sql/009_admin.test.sql; do
+            echo "== $f"
+            psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
+              -f "$f" 2>&1 | tee "/tmp/$(basename "$f").out"
+          done
+          # Three patterns, because each catches something the others do not.
+          # 'TEST FAILED' is a raised assertion. '^FAIL' is the drift check,
+          # which reports through a SELECT and exits zero. And 'psql:...ERROR'
+          # is a statement that aborted before its block could assert anything
+          # — a unique violation from a shared platform account looks exactly
+          # like this, and a scan without it depends entirely on ON_ERROR_STOP
+          # rather than being the second, independent check it is meant to be.
+          if grep -qE 'TEST FAILED|^FAIL|^psql:.*(ERROR|FATAL)' /tmp/*.test.sql.out; then
+            echo "::error::an invariant did not hold"
+            grep -hE 'TEST FAILED|^FAIL|^psql:.*(ERROR|FATAL)' /tmp/*.test.sql.out | head -20
+            exit 1
+          fi
+
+      - name: Apply migrations (e2e database)
+        run: |
+          psql -h localhost -U xetral -d xetral -v ON_ERROR_STOP=1 \
+            -f packages/ledger/sql/001_ledger.sql
+          psql -h localhost -U xetral -d xetral -v ON_ERROR_STOP=1 \
+            -f packages/identity/sql/002_identity.sql
+          psql -h localhost -U xetral -d xetral -v ON_ERROR_STOP=1 \
+            -f packages/ledger/sql/003_cards.sql
+          psql -h localhost -U xetral -d xetral -v ON_ERROR_STOP=1 \
+            -f packages/ledger/sql/004_purchases.sql
+          psql -h localhost -U xetral -d xetral -v ON_ERROR_STOP=1 \
+            -f packages/ledger/sql/005_giftcards.sql
+          psql -h localhost -U xetral -d xetral -v ON_ERROR_STOP=1 \
+            -f packages/ledger/sql/006_funding.sql
+          psql -h localhost -U xetral -d xetral -v ON_ERROR_STOP=1 \
+            -f packages/ledger/sql/007_crypto.sql
+          psql -h localhost -U xetral -d xetral -v ON_ERROR_STOP=1 \
+            -f packages/ledger/sql/008_fx.sql
+          psql -h localhost -U xetral -d xetral -v ON_ERROR_STOP=1 \
+            -f packages/ledger/sql/009_admin.sql
+          # The e2e suites need the seed as well: settings are authoritative
+          # over the environment now, so a database with no rows means the
+          # fee, the ceilings and the daily limits all fall back to defaults
+          # the tests do not set and production would not use.
+          psql -h localhost -U xetral -d xetral -v ON_ERROR_STOP=1 \
+            -f packages/ledger/sql/009_admin.seed.sql
+
+      - run: npm run typecheck
+
+      - run: npm test
+
+      # Covers every workspace with an e2e suite: the API's auth flows and the
+      # rate-limiter contract, and the Bitnob adapter's output against the real
+      # ledger schema. The second is the only check that the adapter's entry
+      # kinds and account roles actually exist as enum values -- TypeScript is
+      # perfectly happy with a literal the database has never heard of.
+      - name: End-to-end (real Postgres and Redis)
+        run: npm run test:e2e
+
+      - run: npm run build
+
+      # ------------------------------------------------------------------
+      # Boot the artifact that was just built.
+      #
+      # Three failures in this app were invisible to both the compiler and the
+      # test suite and appeared only when the bundle actually started: esbuild
+      # not emitting decorator metadata, '@nestjs/common/constants' being
+      # unresolvable under native ESM, and NestFactory's lazy platform require.
+      # A green test run is not evidence the thing starts.
+      # ------------------------------------------------------------------
+      - name: Smoke-test the built API
+        run: |
+          ACCESS_TOKEN_KEYS="v1:$(openssl rand -base64 32)" \
+          ACCESS_TOKEN_CURRENT_VERSION=v1 \
+          PORT=3100 \
+          node apps/api/dist/main.js > /tmp/api.log 2>&1 &
+          api_pid=$!
+
+          # No -f here. An unrouted path answers 404, and -f treats that as a
+          # failure, so the probe would never see the server come up and would
+          # burn the full timeout on every run. Any HTTP response means listening.
+          for _ in $(seq 1 60); do
+            curl -s -o /dev/null "http://127.0.0.1:3100/v1/nope" && break
+            sleep 0.5
+          done
+
+          fail=0
+          check() { # name expected url [extra curl args...]
+            name=$1; expected=$2; url=$3; shift 3
+            got=$(curl -s -o /dev/null -w '%{http_code}' "$@" "$url")
+            if [ "$got" != "$expected" ]; then
+              echo "::error::$name: expected $expected, got $got"
+              fail=1
+            else
+              echo "ok: $name -> $got"
+            fi
+          }
+
+          # An authenticated route with no token must answer 401, which proves
+          # the global guard is mounted rather than merely compiled.
+          check "guarded route refuses" 401 http://127.0.0.1:3100/v1/auth/session
+
+          # Liveness must be REACHABLE. 404 here means its controller was
+          # imported and never added to the module's `controllers` array --
+          # which is exactly what had happened to health, KYC and the whole
+          # admin surface, while every test reported full route coverage.
+          check "health is mounted" 200 http://127.0.0.1:3100/health
+
+          # The same claim for the two surfaces that were 404 alongside it. A
+          # guarded route answering 401 proves it is BOTH mounted and gated;
+          # 404 would mean neither.
+          check "admin is mounted and gated" 401 http://127.0.0.1:3100/v1/admin/overview
+          check "kyc is mounted and gated"   401 http://127.0.0.1:3100/v1/kyc
+
+          # A forged webhook is UNAUTHORISED, not broken. A 500 pages somebody
+          # over a stranger's probe, tells the sender we are at fault, and has
+          # a provider retrying for ever. Two of the three webhooks answered
+          # 500 until the built bundle was curled.
+          for hook in bitnob bitnob/deposits bitnob/crypto; do
+            check "forged webhook $hook" 401 "http://127.0.0.1:3100/v1/webhooks/$hook" \
+              -X POST -H 'content-type: application/json' \
+              -H 'x-bitnob-signature: deadbeef' -d '{"event":"probe"}'
+          done
+
+          kill "$api_pid" 2>/dev/null || true
+
+          if [ "$fail" != "0" ]; then
+            cat /tmp/api.log
+            exit 1
+          fi
+          echo "built API booted, mounted every controller and enforced its route policy"
+
+      # ------------------------------------------------------------------
+      # Boot the web app too, and check it can actually run.
+      #
+      # A Content-Security-Policy that blocks Next's own inline bootstrap
+      # produces a page that renders its HTML and never hydrates: every button
+      # inert, every form doing nothing, and a screenshot that looks perfect.
+      # The build passes, the types pass, and the app is dead. The only cheap
+      # proof is to read the served HTML and check the nonce in the header is
+      # actually on the scripts.
+      # ------------------------------------------------------------------
+      - name: Smoke-test the built web app
+        run: |
+          # `npm start` in the workspace, so this runs whatever the app's own
+          # start script is rather than a command that has to be kept in step
+          # with it. XETRAL_API_URL is required at boot and the API is not
+          # running by now; nothing here calls it.
+          XETRAL_API_URL=http://127.0.0.1:3100 \
+          npm start --workspace @xetral/web -- -p 3101 > /tmp/web.log 2>&1 &
+          web_pid=$!
+
+          for _ in $(seq 1 60); do
+            curl -s -o /dev/null "http://127.0.0.1:3101/signin" && break
+            sleep 0.5
+          done
+
+          curl -s -D /tmp/web.headers -o /tmp/web.html http://127.0.0.1:3101/signin
+
+          # `npm start` forks `next start`, so killing the npm process leaves
+          # the server behind — the runner reported it as an orphan on cleanup.
+          # Harmless on a throwaway runner and a port conflict on a reused one.
+          kill "$web_pid" 2>/dev/null || true
+          pkill -f 'next-server' 2>/dev/null || true
+
+          nonce=$(grep -io "nonce-[A-Za-z0-9+/=]*" /tmp/web.headers | head -1 | cut -d- -f2-)
+          if [ -z "$nonce" ]; then
+            echo "::error::no CSP nonce in the response headers"
+            cat /tmp/web.headers
+            exit 1
+          fi
+
+          # Every script tag must carry that nonce. One that does not is one
+          # the browser will refuse, and refusing Next's bootstrap is refusing
+          # the whole application.
+          total=$(grep -o "<script" /tmp/web.html | wc -l)
+          carried=$(grep -o "<script[^>]*nonce=\"$nonce\"" /tmp/web.html | wc -l)
+          if [ "$total" -eq 0 ] || [ "$total" != "$carried" ]; then
+            echo "::error::$carried of $total script tags carry the CSP nonce; the app would not hydrate"
+            exit 1
+          fi
+          echo "built web app booted and served $total scripts under its CSP nonce"

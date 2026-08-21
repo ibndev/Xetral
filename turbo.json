@@ -1,0 +1,38 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "tasks": {
+    "build": {
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "dist/**",
+        ".next/**",
+        "!.next/cache/**"
+      ],
+      "env": [
+        "XETRAL_API_URL",
+        "NODE_ENV"
+      ]
+    },
+    "typecheck": {
+      "dependsOn": [
+        "^build"
+      ]
+    },
+    "test": {
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": []
+    },
+    "test:e2e": {
+      "cache": false,
+      "persistent": false,
+      "passThroughEnv": [
+        "DATABASE_URL",
+        "REDIS_URL"
+      ]
+    }
+  }
+}

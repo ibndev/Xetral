@@ -1,0 +1,33 @@
+node_modules/
+dist/
+build/
+.turbo/
+
+# Secrets. Nothing here should ever reach a commit — a leaked provider key
+# is a leaked customer balance.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Local Postgres data used by the ledger tests
+pgdata/
+
+.DS_Store
+*.log
+.vscode/
+.idea/
+
+# Redis writes this wherever it was started
+dump.rdb
+
+# Next.js build output
+.next/
+out/
+
+# Expo
+.expo/
+
+# TypeScript incremental build state
+*.tsbuildinfo
