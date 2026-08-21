@@ -240,24 +240,69 @@ END $$;
 
 \echo ''
 \echo '=== 14. Liability is computed from POSTINGS, not a cache ==='
+--
+-- TWO THINGS HERE ARE ABOUT THE SHARED DATABASE, not about liability, and both
+-- of them broke this block in CI while it passed when the file was run alone.
+--
+-- 1. `provider_float` is a PLATFORM account: one row per currency for the whole
+--    database, so by the time this file runs the ledger suite has already
+--    created the NGN one. Inserting unconditionally aborts with a unique
+--    violation that reads as an admin bug and is not. Phase 5 recorded exactly
+--    this and gave the card suite a resolve-or-create; this file needed one too.
+--
+-- 2. `admin_liability` sums EVERY customer account in the database, so an
+--    equality against 7,500,000 is a claim about what every earlier suite
+--    happened to leave behind. The assertion is on the DELTA instead — which is
+--    the real claim anyway: that posting 7,500,000 to a wallet moves the view
+--    by exactly that, because the view reads the ledger rather than a cache.
+--
+-- Same shape as the reconciliation worker's counts, which are lower bounds for
+-- the same reason: a suite that demands exact global figures only works on an
+-- empty database, and CI's is never empty by the time it gets here.
+CREATE OR REPLACE FUNCTION admin_test_account(
+    p_kind account_kind, p_owner BIGINT, p_currency TEXT, p_normal TEXT
+) RETURNS BIGINT AS $fn$
+DECLARE v_id BIGINT;
+BEGIN
+    SELECT id INTO v_id FROM accounts
+     WHERE kind = p_kind AND currency = p_currency
+       AND owner_id IS NOT DISTINCT FROM p_owner;
+    IF v_id IS NOT NULL THEN RETURN v_id; END IF;
+
+    INSERT INTO accounts (kind, owner_type, owner_id, currency, normal_balance)
+    VALUES (p_kind,
+            CASE WHEN p_owner IS NULL THEN NULL ELSE 'user' END,
+            p_owner, p_currency, p_normal)
+    RETURNING id INTO v_id;
+    RETURN v_id;
+END;
+$fn$ LANGUAGE plpgsql;
+
 DO $$
-DECLARE v_user BIGINT; v_wallet BIGINT; v_float BIGINT; v_entry BIGINT; v_owed BIGINT;
+DECLARE
+    v_user BIGINT; v_wallet BIGINT; v_float BIGINT; v_entry BIGINT;
+    v_before BIGINT; v_after BIGINT;
 BEGIN
     SELECT id INTO v_user FROM users WHERE email = 'op-customer@example.ng';
 
-    INSERT INTO accounts (kind, owner_type, owner_id, currency, normal_balance)
-    VALUES ('customer_wallet', 'user', v_user, 'NGN', 'credit') RETURNING id INTO v_wallet;
-    INSERT INTO accounts (kind, owner_type, owner_id, currency, normal_balance)
-    VALUES ('provider_float', NULL, NULL, 'NGN', 'debit') RETURNING id INTO v_float;
+    v_wallet := admin_test_account('customer_wallet', v_user, 'NGN', 'credit');
+    v_float  := admin_test_account('provider_float',  NULL,   'NGN', 'debit');
+
+    SELECT COALESCE(total_owed_minor, 0) INTO v_before
+      FROM admin_liability WHERE currency = 'NGN';
+    v_before := COALESCE(v_before, 0);
 
     INSERT INTO journal_entries (idempotency_key, kind, description, occurred_at)
     VALUES ('op:liability', 'wallet_funding', 'test', now()) RETURNING id INTO v_entry;
     INSERT INTO postings (journal_entry_id, account_id, amount_minor, currency)
     VALUES (v_entry, v_wallet, 7500000, 'NGN'), (v_entry, v_float, -7500000, 'NGN');
 
-    SELECT total_owed_minor INTO v_owed FROM admin_liability WHERE currency = 'NGN';
-    IF v_owed <> 7500000 THEN
-        RAISE EXCEPTION 'TEST FAILED: liability reads % rather than 7500000', v_owed;
+    SELECT COALESCE(total_owed_minor, 0) INTO v_after
+      FROM admin_liability WHERE currency = 'NGN';
+
+    IF v_after - v_before <> 7500000 THEN
+        RAISE EXCEPTION 'TEST FAILED: liability moved by % rather than 7500000',
+            v_after - v_before;
     END IF;
     RAISE NOTICE 'PASS: what we owe customers is read from the ledger itself';
 END $$;

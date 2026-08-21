@@ -113,8 +113,16 @@ jobs:
             psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
               -f "$f" 2>&1 | tee "/tmp/$(basename "$f").out"
           done
-          if grep -qE 'TEST FAILED|^FAIL' /tmp/*.test.sql.out; then
+          # Three patterns, because each catches something the others do not.
+          # 'TEST FAILED' is a raised assertion. '^FAIL' is the drift check,
+          # which reports through a SELECT and exits zero. And 'psql:...ERROR'
+          # is a statement that aborted before its block could assert anything
+          # — a unique violation from a shared platform account looks exactly
+          # like this, and a scan without it depends entirely on ON_ERROR_STOP
+          # rather than being the second, independent check it is meant to be.
+          if grep -qE 'TEST FAILED|^FAIL|^psql:.*(ERROR|FATAL)' /tmp/*.test.sql.out; then
             echo "::error::an invariant did not hold"
+            grep -hE 'TEST FAILED|^FAIL|^psql:.*(ERROR|FATAL)' /tmp/*.test.sql.out | head -20
             exit 1
           fi
 

@@ -125,7 +125,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/008_fx.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/009_admin.test.sql
 ```
 
-128 assertions across the nine files print `PASS`; the remaining blocks are
+129 assertions across the nine files print `PASS`; the remaining blocks are
 reporting queries that print a table. Any `TEST FAILED` — or any `FAIL:` from
 the drift check, which reports through a `SELECT` and exits zero — means an
 invariant is not wired up. Do not deploy past it.
