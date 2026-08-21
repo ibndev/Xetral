@@ -223,9 +223,17 @@ export class AdminService {
       // Freezing revokes live sessions. Leaving them means a stolen session
       // keeps working for the rest of its access token's life on an account
       // somebody just decided was compromised.
+      //
+      // TWO THINGS HERE WERE WRONG and both were only visible against a real
+      // database. The table is `auth_sessions`, not `sessions`, so freezing an
+      // account — the most important thing support can do — raised and rolled
+      // back every time. And `revocation_is_complete` requires the reason to
+      // be set whenever `revoked_at` is: a bare timestamp fails the CHECK, so
+      // even the right table name would have failed on the next line.
       if (to !== 'active') {
         await client.query(
-          `UPDATE sessions SET revoked_at = now()
+          `UPDATE auth_sessions
+              SET revoked_at = now(), revoked_reason = 'admin'
             WHERE user_id = $1::bigint AND revoked_at IS NULL`,
           [row.id],
         );

@@ -44,6 +44,9 @@ jobs:
       PGPASSWORD: xetral
       DATABASE_URL: postgres://xetral:xetral@localhost:5432/xetral
       REDIS_URL: redis://localhost:6379
+      # The web app refuses to boot without it. Nothing in CI calls the API
+      # through the proxy, so the address only has to exist.
+      XETRAL_API_URL: http://127.0.0.1:3100
 
     steps:
       - uses: actions/checkout@v4
@@ -81,6 +84,13 @@ jobs:
             -f packages/ledger/sql/007_crypto.sql
           psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
             -f packages/ledger/sql/008_fx.sql
+          psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
+            -f packages/ledger/sql/009_admin.sql
+          # The seed too, because 009's invariants assert on the shipped
+          # defaults -- that a 15% fee is refused by the CHECK, that a change
+          # is written to history. There is nothing to refuse without rows.
+          psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
+            -f packages/ledger/sql/009_admin.seed.sql
 
       - name: Ledger and identity invariants
         run: |
@@ -97,7 +107,8 @@ jobs:
                    packages/ledger/sql/005_giftcards.test.sql \
                    packages/ledger/sql/006_funding.test.sql \
                    packages/ledger/sql/007_crypto.test.sql \
-                   packages/ledger/sql/008_fx.test.sql; do
+                   packages/ledger/sql/008_fx.test.sql \
+                   packages/ledger/sql/009_admin.test.sql; do
             echo "== $f"
             psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
               -f "$f" 2>&1 | tee "/tmp/$(basename "$f").out"
@@ -125,6 +136,14 @@ jobs:
             -f packages/ledger/sql/007_crypto.sql
           psql -h localhost -U xetral -d xetral -v ON_ERROR_STOP=1 \
             -f packages/ledger/sql/008_fx.sql
+          psql -h localhost -U xetral -d xetral -v ON_ERROR_STOP=1 \
+            -f packages/ledger/sql/009_admin.sql
+          # The e2e suites need the seed as well: settings are authoritative
+          # over the environment now, so a database with no rows means the
+          # fee, the ceilings and the daily limits all fall back to defaults
+          # the tests do not set and production would not use.
+          psql -h localhost -U xetral -d xetral -v ON_ERROR_STOP=1 \
+            -f packages/ledger/sql/009_admin.seed.sql
 
       - run: npm run typecheck
 
@@ -165,14 +184,94 @@ jobs:
             sleep 0.5
           done
 
+          fail=0
+          check() { # name expected url [extra curl args...]
+            name=$1; expected=$2; url=$3; shift 3
+            got=$(curl -s -o /dev/null -w '%{http_code}' "$@" "$url")
+            if [ "$got" != "$expected" ]; then
+              echo "::error::$name: expected $expected, got $got"
+              fail=1
+            else
+              echo "ok: $name -> $got"
+            fi
+          }
+
           # An authenticated route with no token must answer 401, which proves
           # the global guard is mounted rather than merely compiled.
-          code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/v1/auth/session)
+          check "guarded route refuses" 401 http://127.0.0.1:3100/v1/auth/session
+
+          # Liveness must be REACHABLE. 404 here means its controller was
+          # imported and never added to the module's `controllers` array --
+          # which is exactly what had happened to health, KYC and the whole
+          # admin surface, while every test reported full route coverage.
+          check "health is mounted" 200 http://127.0.0.1:3100/health
+
+          # The same claim for the two surfaces that were 404 alongside it. A
+          # guarded route answering 401 proves it is BOTH mounted and gated;
+          # 404 would mean neither.
+          check "admin is mounted and gated" 401 http://127.0.0.1:3100/v1/admin/overview
+          check "kyc is mounted and gated"   401 http://127.0.0.1:3100/v1/kyc
+
+          # A forged webhook is UNAUTHORISED, not broken. A 500 pages somebody
+          # over a stranger's probe, tells the sender we are at fault, and has
+          # a provider retrying for ever. Two of the three webhooks answered
+          # 500 until the built bundle was curled.
+          for hook in bitnob bitnob/deposits bitnob/crypto; do
+            check "forged webhook $hook" 401 "http://127.0.0.1:3100/v1/webhooks/$hook" \
+              -X POST -H 'content-type: application/json' \
+              -H 'x-bitnob-signature: deadbeef' -d '{"event":"probe"}'
+          done
+
           kill "$api_pid" 2>/dev/null || true
 
-          if [ "$code" != "401" ]; then
-            echo "::error::expected 401 from a guarded route on the built app, got $code"
+          if [ "$fail" != "0" ]; then
             cat /tmp/api.log
             exit 1
           fi
-          echo "built API booted and enforced its route policy"
+          echo "built API booted, mounted every controller and enforced its route policy"
+
+      # ------------------------------------------------------------------
+      # Boot the web app too, and check it can actually run.
+      #
+      # A Content-Security-Policy that blocks Next's own inline bootstrap
+      # produces a page that renders its HTML and never hydrates: every button
+      # inert, every form doing nothing, and a screenshot that looks perfect.
+      # The build passes, the types pass, and the app is dead. The only cheap
+      # proof is to read the served HTML and check the nonce in the header is
+      # actually on the scripts.
+      # ------------------------------------------------------------------
+      - name: Smoke-test the built web app
+        run: |
+          # `npm start` in the workspace, so this runs whatever the app's own
+          # start script is rather than a command that has to be kept in step
+          # with it. XETRAL_API_URL is required at boot and the API is not
+          # running by now; nothing here calls it.
+          XETRAL_API_URL=http://127.0.0.1:3100 \
+          npm start --workspace @xetral/web -- -p 3101 > /tmp/web.log 2>&1 &
+          web_pid=$!
+
+          for _ in $(seq 1 60); do
+            curl -s -o /dev/null "http://127.0.0.1:3101/signin" && break
+            sleep 0.5
+          done
+
+          curl -s -D /tmp/web.headers -o /tmp/web.html http://127.0.0.1:3101/signin
+          kill "$web_pid" 2>/dev/null || true
+
+          nonce=$(grep -io "nonce-[A-Za-z0-9+/=]*" /tmp/web.headers | head -1 | cut -d- -f2-)
+          if [ -z "$nonce" ]; then
+            echo "::error::no CSP nonce in the response headers"
+            cat /tmp/web.headers
+            exit 1
+          fi
+
+          # Every script tag must carry that nonce. One that does not is one
+          # the browser will refuse, and refusing Next's bootstrap is refusing
+          # the whole application.
+          total=$(grep -o "<script" /tmp/web.html | wc -l)
+          carried=$(grep -o "<script[^>]*nonce=\"$nonce\"" /tmp/web.html | wc -l)
+          if [ "$total" -eq 0 ] || [ "$total" != "$carried" ]; then
+            echo "::error::$carried of $total script tags carry the CSP nonce; the app would not hydrate"
+            exit 1
+          fi
+          echo "built web app booted and served $total scripts under its CSP nonce"
