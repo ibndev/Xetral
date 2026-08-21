@@ -54,12 +54,31 @@ export class KeychainTokenStore implements TokenStore {
   }
 }
 
+/**
+ * Where the API is.
+ *
+ * `EXPO_PUBLIC_API_URL` wins, because a phone talking to a laptop needs that
+ * laptop's address on the local network and that address changes with the
+ * café. Editing a committed `app.json` to run the app is how somebody
+ * eventually commits their home IP.
+ *
+ * `EXPO_PUBLIC_` is Expo's convention for values inlined into the bundle at
+ * build time. Nothing secret may go in one — it ships to the device and can be
+ * read out of the bundle. An API base URL is not secret; an API key would be,
+ * which is why none is here.
+ */
 function apiUrl(): string {
+  const fromEnv = process.env['EXPO_PUBLIC_API_URL'];
+  if (typeof fromEnv === 'string' && fromEnv !== '') return fromEnv.replace(/\/+$/, '');
+
   const configured = Constants.expoConfig?.extra?.['apiUrl'];
   if (typeof configured !== 'string' || configured === '') {
-    throw new Error('expo.extra.apiUrl is not set');
+    throw new Error(
+      'Set EXPO_PUBLIC_API_URL to the API\'s address on your network, e.g. ' +
+        'EXPO_PUBLIC_API_URL=http://192.168.1.20:3100 npx expo start',
+    );
   }
-  return configured;
+  return configured.replace(/\/+$/, '');
 }
 
 let cached: { session: Session; client: XetralClient } | undefined;
