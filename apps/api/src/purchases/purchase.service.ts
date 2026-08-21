@@ -28,6 +28,7 @@ import type { ApiConfig } from '../config.js';
 import type { PurchaseRequestBody } from './dto.js';
 import { ENTRY_KIND, PurchaseOutcome, negate, pending, wallet } from './purchase-outcome.js';
 import type { ReservedPurchase } from './purchase-outcome.js';
+import { SpendingLimitService } from '../wallet/spending-limits.service.js';
 
 /**
  * A catalogue item as it goes over the wire.
@@ -100,6 +101,7 @@ export class PurchaseService {
     @Inject(FULFILMENT_PORTS) private readonly ports: ReadonlyMap<ServiceKind, FulfilmentPort>,
     @Inject(API_CONFIG) private readonly config: ApiConfig,
     @Inject(PurchaseOutcome) private readonly outcomes: PurchaseOutcome,
+    @Inject(SpendingLimitService) private readonly limits: SpendingLimitService,
   ) {}
 
   async catalogue(
@@ -201,19 +203,35 @@ export class PurchaseService {
     amount: Money<Currency>,
     currency: Currency,
   ): Promise<{ purchaseId: string; entryId: string; initiatedAt: Date }> {
+    const idempotencyKey = `purchase-reserve:${reference}`;
+
+    // The daily ceiling is applied to the RESERVE, which is the moment the
+    // money leaves the wallet — before the provider has been asked for
+    // anything. Checking at settlement would be checking after the airtime had
+    // been delivered, which is not a limit but a report.
+    const precondition = await this.limits.precondition({
+      userId,
+      scope: 'purchase',
+      amount,
+      idempotencyKey,
+    });
+
     let entryId: string;
     try {
-      const posted = await this.ledger.post({
-        idempotencyKey: `purchase-reserve:${reference}`,
-        kind: ENTRY_KIND[body.service],
-        occurredAt: new Date(),
-        description: `${body.service} purchase reserved`,
-        metadata: { reference, service: body.service },
-        postings: [
-          posting(wallet(userId, currency), negate(amount)),
-          posting(pending(userId, currency), amount),
-        ],
-      });
+      const posted = await this.ledger.post(
+        {
+          idempotencyKey,
+          kind: ENTRY_KIND[body.service],
+          occurredAt: new Date(),
+          description: `${body.service} purchase reserved`,
+          metadata: { reference, service: body.service },
+          postings: [
+            posting(wallet(userId, currency), negate(amount)),
+            posting(pending(userId, currency), amount),
+          ],
+        },
+        precondition === undefined ? {} : { precondition },
+      );
       entryId = posted.entryId;
     } catch (error) {
       if (error instanceof InsufficientFundsError) {

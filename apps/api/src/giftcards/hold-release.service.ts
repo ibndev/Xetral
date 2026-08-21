@@ -56,6 +56,8 @@ export class GiftCardHoldService implements OnApplicationShutdown {
   ) {}
 
   start(): void {
+    // The flag is read from settings at sweep time, not at boot, so turning
+    // gift cards off stops new releases without a restart.
     if (!this.config.giftCardsEnabled) return;
 
     const everySeconds = this.config.giftCardReleaseIntervalSeconds;

@@ -18,6 +18,7 @@ import { AuthService } from './auth/auth.service.js';
 import { PinService } from './auth/pin.service.js';
 import { WalletController } from './wallet/wallet.controller.js';
 import { WalletService } from './wallet/wallet.service.js';
+import { SpendingLimitService } from './wallet/spending-limits.service.js';
 import { CardController, CardWebhookController } from './cards/card.controller.js';
 import { CardService } from './cards/card.service.js';
 import { CardWebhookService } from './cards/webhook.service.js';
@@ -32,6 +33,13 @@ import {
 import { GiftCardService } from './giftcards/giftcard.service.js';
 import { GiftCardHoldService } from './giftcards/hold-release.service.js';
 import { StaffService } from './auth/staff.service.js';
+import { HealthController } from './health/health.controller.js';
+import { SettingsService } from './settings/settings.service.js';
+import { AuditService } from './admin/audit.service.js';
+import { AdminService } from './admin/admin.service.js';
+import { AdminController } from './admin/admin.controller.js';
+import { KycController } from './kyc/kyc.controller.js';
+import { KycService } from './kyc/kyc.service.js';
 import {
   DepositWebhookController,
   FundingController,
@@ -449,11 +457,16 @@ export class AppModule {
         AuthService,
         PinService,
         WalletService,
+        SpendingLimitService,
         CardService,
         CardWebhookService,
         PurchaseService,
         PurchaseOutcome,
         StaffService,
+        SettingsService,
+        AuditService,
+        AdminService,
+        KycService,
         FundingService,
         DepositWebhookService,
         CryptoService,

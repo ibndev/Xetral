@@ -16,7 +16,7 @@ import { PinService } from './pin.service.js';
 import { setPinSchema } from '../wallet/dto.js';
 import type { SessionSummary, TokenPair } from './auth.service.js';
 import { LoginRateLimitGuard } from './login-rate-limit.guard.js';
-import { loginSchema, refreshSchema } from './dto.js';
+import { loginSchema, registerSchema, refreshSchema } from './dto.js';
 
 /**
  * The controller path and each handler path together form the key that
@@ -37,6 +37,27 @@ export class AuthController {
    * token pair rather than a representation of a created resource, and no
    * Location header would make sense.
    */
+  /**
+   * Opens an account.
+   *
+   * Public, and rate limited by the same guard as login — a registration
+   * endpoint with no limit is a way to fill the users table and to probe which
+   * addresses are taken, at whatever speed the attacker's connection allows.
+   */
+  @Post('register')
+  @HttpCode(201)
+  @UseGuards(LoginRateLimitGuard)
+  async register(@Body() body: unknown): Promise<TokenPair> {
+    const parsed = registerSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException({
+        error: 'invalid_request',
+        fields: parsed.error.issues.map((issue) => issue.path.join('.')),
+      });
+    }
+    return this.auth.register(parsed.data);
+  }
+
   @Post('login')
   @HttpCode(200)
   @UseGuards(LoginRateLimitGuard)

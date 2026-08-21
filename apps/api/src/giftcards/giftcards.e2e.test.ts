@@ -139,11 +139,22 @@ beforeAll(async () => {
   );
   rateCardId = rate.rows[0]?.id ?? '';
 
+  // Gift cards need BOTH switches: the deployment's flag and the stored
+  // setting. `off` has the deployment flag down, which is what "ships flagged
+  // off" means and is why it refuses every route however the database is set.
+  // `app` has it up, so the stored setting decides — and an operator turning
+  // the feature on is exactly this UPDATE.
+  await pool.query(`UPDATE platform_settings SET value = 'true' WHERE key = 'gift_cards_enabled'`);
+
   off = await boot(testApiConfig(DATABASE_URL as string));
   app = await boot(testApiConfig(DATABASE_URL as string, { giftCardsEnabled: true }));
 });
 
 afterAll(async () => {
+  // Back to the shipped default. A suite that leaves the highest-fraud surface
+  // switched on in a shared database has turned a test fixture into a
+  // production setting.
+  await pool.query(`UPDATE platform_settings SET value = 'false' WHERE key = 'gift_cards_enabled'`);
   await off?.close();
   await app?.close();
   await pool?.end();

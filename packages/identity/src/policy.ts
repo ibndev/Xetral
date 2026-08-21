@@ -25,7 +25,16 @@ export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
  * compile error rather than a route nobody can reach — which would look
  * exactly like a permissions bug in production and take an afternoon.
  */
-export type StaffRole = 'giftcard_reviewer' | 'admin';
+export type StaffRole =
+  | 'giftcard_reviewer'
+  /** Reads customer records and the work queues. Cannot change anything. */
+  | 'support'
+  /** Reviews identity documents and freezes accounts. */
+  | 'compliance'
+  /** Moves suspense money, changes fees and limits. */
+  | 'finance'
+  /** All of the above, plus granting roles. */
+  | 'admin';
 
 export type RouteAuth =
   | {

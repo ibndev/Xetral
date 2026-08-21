@@ -295,6 +295,14 @@ describe('transfers', () => {
   });
 
   it('charges a fee when one is configured', async () => {
+    // The fee comes from `platform_settings`, not from the environment. That
+    // is what lets an operator change it without a deploy, and it means this
+    // test has to set it the way production would — an ApiConfig override is
+    // only the fallback for a database whose settings cannot be read.
+    await pool.query(
+      `UPDATE platform_settings SET value = '150' WHERE key = 'transfer_fee_basis_points'`,
+    );
+
     const withFee = await createApp(makeConfig({ transferFeeBasisPoints: 150 }));
     try {
       const alice = await onboard(withFee);
@@ -320,6 +328,12 @@ describe('transfers', () => {
       expect((await balancesOf(alice, withFee))[0]?.spendable).toBe('8985.00');
       expect((await balancesOf(bob, withFee))[0]?.spendable).toBe('1000.00');
     } finally {
+      // Back to zero, or every suite that runs after this one against the same
+      // database pays 1.5% on transfers it never configured a fee for — and a
+      // fee nobody set is money taken from a customer because of a leftover.
+      await pool.query(
+        `UPDATE platform_settings SET value = '0' WHERE key = 'transfer_fee_basis_points'`,
+      );
       await withFee.close();
     }
   });

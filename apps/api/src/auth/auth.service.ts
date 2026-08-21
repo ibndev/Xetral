@@ -1,8 +1,18 @@
 import { createHash } from 'node:crypto';
-import { Inject, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  Logger,
+  UnauthorizedException,
+} from '@nestjs/common';
 import type { Pool, PoolClient } from 'pg';
 import {
+  assertPasswordPolicy,
   dummySecretHash,
+  hashPassword,
   hashRefreshToken,
   isSecurityIncident,
   issueRefreshToken,
@@ -13,7 +23,8 @@ import type { AccessTokenClaims, RotationOutcome } from '@xetral/identity';
 import { API_CONFIG, CLOCK, DATABASE } from '../tokens.js';
 import type { Clock } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
-import type { LoginRequest } from './dto.js';
+import type { LoginRequest, RegisterRequest } from './dto.js';
+import { SettingsService } from '../settings/settings.service.js';
 
 export interface TokenPair {
   readonly access_token: string;
@@ -84,7 +95,87 @@ export class AuthService {
     @Inject(DATABASE) private readonly pool: Pool,
     @Inject(API_CONFIG) private readonly config: ApiConfig,
     @Inject(CLOCK) private readonly clock: Clock,
+    @Inject(SettingsService) private readonly settings: SettingsService,
   ) {}
+
+  /**
+   * Opens an account and signs the customer straight in.
+   *
+   * One transaction: the user, their credential, and the first session. A
+   * failure anywhere leaves no half-made account — which matters because a
+   * user row with no credential cannot be signed into and cannot be
+   * registered again, the email being taken.
+   *
+   * NOTE what this does NOT create: no wallet, no accounts, no provider
+   * customer. Ledger accounts are made on first posting by the ledger service,
+   * and a provider identity is a KYC decision. Creating either here would mean
+   * a signup form quietly performing a regulated step.
+   */
+  async register(input: RegisterRequest): Promise<TokenPair> {
+    if (!(await this.settings.registrationEnabled())) {
+      // A flag rather than a deploy, so an abuse wave can be stopped in
+      // seconds without taking the platform down for existing customers.
+      throw new ForbiddenException({ error: 'registration_closed' });
+    }
+
+    // The policy lives in @xetral/identity and is shared with password
+    // changes, so the rules cannot drift between the two paths.
+    try {
+      assertPasswordPolicy(input.password);
+    } catch (error) {
+      throw new BadRequestException({
+        error: 'weak_password',
+        detail: error instanceof Error ? error.message : undefined,
+      });
+    }
+
+    const passwordHash = await hashPassword(input.password);
+    const client = await this.pool.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      let user: UserRow;
+      try {
+        const created = await client.query<UserRow>(
+          `INSERT INTO users (email, status) VALUES ($1, 'active')
+           RETURNING id, uuid, status, NULL::text AS password_hash`,
+          [input.email],
+        );
+        const row = created.rows[0];
+        if (row === undefined) throw new Error('user insert returned no row');
+        user = row;
+      } catch (error) {
+        if (isUniqueViolation(error)) {
+          // Deliberately the same shape as a successful response would NOT be:
+          // this one tells the caller the address is taken. That is an
+          // enumeration oracle, and it is the accepted trade — a signup form
+          // that cannot say "you already have an account" sends people in
+          // circles, and the same information is available from the password
+          // reset flow of every service on the internet.
+          throw new ConflictException({ error: 'email_taken' });
+        }
+        throw error;
+      }
+
+      await client.query(
+        `INSERT INTO user_credentials (user_id, password_hash) VALUES ($1::bigint, $2)`,
+        [user.id, passwordHash],
+      );
+
+      const device = await this.#resolveDevice(client, user.id, input.device);
+      const pair = await this.#openSession(client, user, device);
+
+      await client.query('COMMIT');
+      this.#logger.log(`account opened: user ${user.uuid}`);
+      return pair;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
 
   async login(input: LoginRequest): Promise<TokenPair> {
     const client = await this.pool.connect();
@@ -290,4 +381,10 @@ export class AuthService {
       expires_in: this.config.accessTokenTtlSeconds,
     };
   }
+}
+
+/** Postgres 23505. Distinguishing it from a real failure is what turns a
+ *  duplicate email into a 409 rather than a 500. */
+function isUniqueViolation(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { code?: string }).code === '23505';
 }

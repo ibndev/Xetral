@@ -22,9 +22,28 @@ export const loginSchema = z.object({
   }),
 });
 
+/**
+ * Opening an account.
+ *
+ * Deliberately minimal: an email, a password, and the device. Name, phone and
+ * BVN belong to KYC, which is a separate, reviewed step — collecting identity
+ * documents on a signup form means holding them for people who never finish
+ * signing up.
+ */
+export const registerSchema = z.object({
+  email: z.string().trim().toLowerCase().email().max(255),
+  password: z.string().min(1).max(512),
+  device: z.object({
+    fingerprint: z.string().min(8).max(512),
+    platform: z.enum(['ios', 'android', 'web']),
+    displayName: z.string().max(120).optional(),
+  }),
+});
+
 export const refreshSchema = z.object({
   refresh_token: z.string().min(1).max(512),
 });
 
 export type LoginRequest = z.infer<typeof loginSchema>;
+export type RegisterRequest = z.infer<typeof registerSchema>;
 export type RefreshRequest = z.infer<typeof refreshSchema>;

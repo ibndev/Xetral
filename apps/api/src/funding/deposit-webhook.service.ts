@@ -12,6 +12,7 @@ import type { BitnobDepositEnvelope, DepositOutcome } from '@xetral/providers';
 import { API_CONFIG, DATABASE, LEDGER } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
 import { FundingService } from './funding.service.js';
+import { SettingsService } from '../settings/settings.service.js';
 
 /**
  * The webhook that creates customer money.
@@ -38,6 +39,7 @@ export class DepositWebhookService {
     @Inject(LEDGER) private readonly ledger: LedgerService,
     @Inject(API_CONFIG) private readonly config: ApiConfig,
     @Inject(FundingService) private readonly funding: FundingService,
+    @Inject(SettingsService) private readonly settings: SettingsService,
   ) {}
 
   async handle(rawBody: string, headers: Record<string, string | undefined>): Promise<void> {
@@ -68,7 +70,9 @@ export class DepositWebhookService {
     try {
       outcome = await handleDepositWebhook(event, {
         amountUnit: this.config.bitnobNgnAmountUnit,
-        ceilingKobo: this.config.depositCeilingKobo,
+        // From settings, so raising the ceiling for a large expected transfer
+        // is an audited change rather than a redeploy.
+        ceilingKobo: await this.settings.depositCeilingKobo(),
         resolve: async (e) => this.#resolve(e),
       });
     } catch (error) {

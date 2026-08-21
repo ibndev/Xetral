@@ -74,6 +74,36 @@ export class Session {
     this.#onSignedOut = options.onSignedOut;
   }
 
+  /**
+   * Opens an account and signs straight into it.
+   *
+   * The response is the same token pair `signIn` returns, so registration ends
+   * with a live session rather than bouncing the customer to a sign-in form
+   * they have just filled in. Identity documents are NOT sent here — KYC is a
+   * separate, reviewed step, and folding it into registration would make a
+   * regulatory decision a side effect of choosing a password.
+   */
+  async register(input: {
+    email: string;
+    password: string;
+    device: { fingerprint: string; platform: string };
+  }): Promise<void> {
+    const response = await this.#fetch(`${this.#baseUrl}/v1/auth/register`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: input.email,
+        password: input.password,
+        device: input.device,
+      }),
+    });
+
+    const body: unknown = await response.json().catch(() => undefined);
+    if (!response.ok) throw toApiError(response.status, body);
+
+    await this.#store.write(this.#toTokens(body));
+  }
+
   async signIn(
     identifier: string,
     password: string,

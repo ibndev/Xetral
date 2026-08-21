@@ -8,25 +8,121 @@
  * reading it out of an error a stolen session could farm.
  */
 
+/**
+ * The codes, ONCE.
+ *
+ * The union and the recognition set are derived from this array rather than
+ * written twice. They were two hand-maintained lists and had already drifted:
+ * the API emits seventy codes and the union named eighteen, so a customer who
+ * chose a weak password, or sent to themselves, or hit a frozen card, saw
+ * "Something went wrong. Please try again." — a sentence that is never true
+ * and never actionable. Adding a code in one place now adds it in both.
+ *
+ * `network`, `rate_limited` and `unknown` are deliberately NOT here. All three
+ * are OURS: `network` is raised when the fetch itself fails, `rate_limited` is
+ * synthesised from a 429 whose body we did not recognise, and `unknown` is the
+ * floor everything else falls to. Putting any of them in this list would let a
+ * server — or a proxy, or an error page — claim one. The API's own limiter
+ * answers `too_many_attempts`, which IS here.
+ */
+const API_ERROR_CODES = [
+  /* session and credentials */
+  'invalid_credentials',
+  'invalid_token',
+  'invalid_grant',
+  'weak_password',
+  'email_taken',
+  'registration_closed',
+  'too_many_attempts',
+
+  /* the transaction PIN */
+  'invalid_pin',
+  'pin_locked',
+  'pin_not_set',
+  'transaction_pin_required',
+  'current_pin_required',
+
+  /* the account itself */
+  'account_not_active',
+  'account_closed',
+  'kyc_required',
+  'below_minimum_age',
+  'provider_customer_not_registered',
+  'forbidden',
+
+  /* money */
+  'insufficient_funds',
+  'invalid_amount',
+  'invalid_address',
+  'invalid_request',
+  'below_minimum',
+  'unsupported_currency',
+
+  /* transfers */
+  'cannot_transfer_to_self',
+  'recipient_is_sender',
+  'recipient_not_found',
+  'recipient_not_active',
+
+  /* purchases */
+  'purchase_failed',
+  'purchase_not_found',
+  'verification_not_supported',
+
+  /* cards */
+  'card_frozen',
+  'card_not_found',
+  'card_terminated',
+  'card_provider_not_configured',
+
+  /* funding */
+  'account_issue_pending',
+  'deposit_not_found',
+  'funding_provider_not_configured',
+
+  /* crypto */
+  'withdrawal_not_found',
+  'unsupported_transport',
+  'fee_moved',
+  'crypto_provider_not_configured',
+
+  /* fx */
+  'pair_not_supported',
+  'same_currency',
+  'rate_moved',
+  'fx_failed',
+  'fx_outcome_unknown',
+  'trade_not_found',
+  'fx_provider_not_configured',
+
+  /* gift cards */
+  'gift_cards_disabled',
+  'no_rate_for_card',
+  'not_clawable',
+  'not_convertible',
+  'payout_would_be_zero',
+  'submission_not_found',
+  'already_reviewed',
+  'cannot_review_own_submission',
+
+  /* operations */
+  'service_not_configured',
+  'setting_not_found',
+  'invalid_setting',
+  'invalid_role',
+  'already_granted',
+  'grant_not_found',
+  'cannot_grant_to_self',
+  'already_in_status',
+  'user_not_found',
+  'not_in_suspense',
+  'daily_limit_exceeded',
+] as const;
+
 export type ApiErrorCode =
-  | 'invalid_credentials'
-  | 'invalid_token'
-  | 'invalid_grant'
-  | 'invalid_pin'
-  | 'pin_locked'
-  | 'pin_not_set'
-  | 'transaction_pin_required'
-  | 'insufficient_funds'
-  | 'invalid_request'
-  | 'invalid_amount'
-  | 'invalid_address'
-  | 'rate_limited'
-  | 'kyc_required'
-  | 'forbidden'
-  | 'account_not_active'
-  | 'gift_cards_disabled'
-  | 'service_not_configured'
+  | (typeof API_ERROR_CODES)[number]
   | 'network'
+  | 'rate_limited'
   | 'unknown';
 
 export class ApiError extends Error {
@@ -50,16 +146,27 @@ export class ApiError extends Error {
    * retry or give up.
    */
   get isUserFixable(): boolean {
-    return (
-      this.code === 'invalid_pin' ||
-      this.code === 'insufficient_funds' ||
-      this.code === 'invalid_amount' ||
-      this.code === 'invalid_address' ||
-      this.code === 'invalid_request' ||
-      this.code === 'invalid_credentials'
-    );
+    return USER_FIXABLE.has(this.code);
   }
 }
+
+const USER_FIXABLE: ReadonlySet<ApiErrorCode> = new Set<ApiErrorCode>([
+  'invalid_pin',
+  'insufficient_funds',
+  'invalid_amount',
+  'invalid_address',
+  'invalid_request',
+  'invalid_credentials',
+  'weak_password',
+  'email_taken',
+  'cannot_transfer_to_self',
+  'recipient_is_sender',
+  'recipient_not_found',
+  'below_minimum',
+  'daily_limit_exceeded',
+  'fee_moved',
+  'rate_moved',
+]);
 
 /** The session is gone and the customer must sign in again. */
 export class SessionExpiredError extends ApiError {
@@ -69,13 +176,7 @@ export class SessionExpiredError extends ApiError {
   }
 }
 
-const KNOWN = new Set<string>([
-  'invalid_credentials', 'invalid_token', 'invalid_grant', 'invalid_pin',
-  'pin_locked', 'pin_not_set', 'transaction_pin_required', 'insufficient_funds',
-  'invalid_request', 'invalid_amount', 'invalid_address', 'rate_limited',
-  'kyc_required', 'forbidden', 'account_not_active', 'gift_cards_disabled',
-  'service_not_configured',
-]);
+const KNOWN: ReadonlySet<string> = new Set(API_ERROR_CODES);
 
 /**
  * Reads an error body without trusting its shape.
@@ -104,4 +205,10 @@ export function toApiError(status: number, body: unknown): ApiError {
   const detail = typeof record['detail'] === 'string' ? record['detail'] : undefined;
 
   return new ApiError(code, status, fields, detail);
+}
+
+/** The codes, for a test that checks the API cannot emit one the client
+ *  silently flattens to `unknown`. Not for switching on — use the type. */
+export function knownErrorCodes(): readonly string[] {
+  return API_ERROR_CODES;
 }

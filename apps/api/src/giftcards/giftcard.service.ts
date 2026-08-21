@@ -18,6 +18,7 @@ import { fromMajor, subtract, toMajor } from '@xetral/shared';
 import type { Currency, Money } from '@xetral/shared';
 import { API_CONFIG, DATABASE, LEDGER } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
+import { SettingsService } from '../settings/settings.service.js';
 import { payoutFor } from './rate-card.js';
 import type { RateCard } from './rate-card.js';
 import type { QuoteBody, SubmitGiftCardBody } from './dto.js';
@@ -94,6 +95,7 @@ export class GiftCardService {
     @Inject(DATABASE) private readonly pool: Pool,
     @Inject(LEDGER) private readonly ledger: LedgerService,
     @Inject(API_CONFIG) private readonly config: ApiConfig,
+    @Inject(SettingsService) private readonly settings: SettingsService,
   ) {}
 
   /**
@@ -105,14 +107,14 @@ export class GiftCardService {
    * code. That is the entire point of shipping it disabled — the risk is off,
    * the code is reviewed.
    */
-  #assertEnabled(): void {
-    if (!this.config.giftCardsEnabled) {
+  async #assertEnabled(): Promise<void> {
+    if (!(await this.settings.giftCardsEnabled())) {
       throw new ServiceUnavailableException({ error: 'gift_cards_disabled' });
     }
   }
 
   async quote(body: QuoteBody): Promise<QuoteView> {
-    this.#assertEnabled();
+    await this.#assertEnabled();
     const faceCurrency = this.#currency(body.face_currency);
     const face = this.#parseAmount(body.face_amount, faceCurrency);
     const rate = await this.#liveRate(body, face.amount);
@@ -122,12 +124,12 @@ export class GiftCardService {
       payout_amount: toMajor(payoutFor(face.amount, rate, payoutCurrency)),
       payout_currency: rate.payout_currency,
       rate_card_id: rate.id,
-      hold_days: this.config.giftCardHoldDays,
+      hold_days: await this.settings.giftCardHoldDays(),
     };
   }
 
   async submit(userUuid: string, body: SubmitGiftCardBody): Promise<GiftCardView> {
-    this.#assertEnabled();
+    await this.#assertEnabled();
     const userId = await this.#activeUserId(userUuid);
 
     const existing = await this.#byKey(userId, body.idempotency_key);
@@ -181,7 +183,7 @@ export class GiftCardService {
   }
 
   async list(userUuid: string): Promise<readonly GiftCardView[]> {
-    this.#assertEnabled();
+    await this.#assertEnabled();
     const userId = await this.#activeUserId(userUuid);
     const rows = await this.pool.query<SubmissionRow>(
       `${SELECT_SUBMISSION} WHERE s.user_id = $1::bigint ORDER BY s.id DESC LIMIT 100`,
@@ -193,7 +195,7 @@ export class GiftCardService {
   /* ----------------------------- review ----------------------------- */
 
   async queue(): Promise<readonly Record<string, unknown>[]> {
-    this.#assertEnabled();
+    await this.#assertEnabled();
     const rows = await this.pool.query(
       `SELECT submission_uuid, brand, country, card_type,
               face_amount_minor::text, face_currency,
@@ -213,7 +215,7 @@ export class GiftCardService {
    * deliberate act against one submission.
    */
   async revealCard(submissionUuid: string, reviewerUuid: string): Promise<{ card_code: string }> {
-    this.#assertEnabled();
+    await this.#assertEnabled();
     const row = await this.#byUuid(submissionUuid);
     if (row.status !== 'pending_review') {
       throw new ConflictException({ error: 'already_reviewed', status: row.status });
@@ -233,7 +235,7 @@ export class GiftCardService {
    * ever detect.
    */
   async approve(submissionUuid: string, reviewerUuid: string): Promise<GiftCardView> {
-    this.#assertEnabled();
+    await this.#assertEnabled();
     const reviewerId = await this.#activeUserId(reviewerUuid);
     const row = await this.#byUuid(submissionUuid);
 
@@ -265,7 +267,8 @@ export class GiftCardService {
       ],
     });
 
-    const holdUntil = new Date(Date.now() + this.config.giftCardHoldDays * 86_400_000);
+    const holdDays = await this.settings.giftCardHoldDays();
+    const holdUntil = new Date(Date.now() + holdDays * 86_400_000);
 
     await this.pool.query(
       `UPDATE giftcard_submissions
@@ -283,7 +286,7 @@ export class GiftCardService {
     reviewerUuid: string,
     reason: string,
   ): Promise<GiftCardView> {
-    this.#assertEnabled();
+    await this.#assertEnabled();
     const reviewerId = await this.#activeUserId(reviewerUuid);
     const row = await this.#byUuid(submissionUuid);
 
@@ -320,7 +323,7 @@ export class GiftCardService {
     reviewerUuid: string,
     reason: string,
   ): Promise<GiftCardView> {
-    this.#assertEnabled();
+    await this.#assertEnabled();
     const row = await this.#byUuid(submissionUuid);
 
     if (row.status !== 'approved') {

@@ -13,6 +13,8 @@ import { applyBasisPoints, fromMajor, subtract, toMajor } from '@xetral/shared';
 import type { Currency, Money } from '@xetral/shared';
 import { API_CONFIG, DATABASE, LEDGER } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
+import { SettingsService } from '../settings/settings.service.js';
+import { SpendingLimitService } from './spending-limits.service.js';
 import type { TransferRequest } from './dto.js';
 
 export interface TransferResult {
@@ -36,6 +38,8 @@ export class WalletService {
     @Inject(DATABASE) private readonly pool: Pool,
     @Inject(LEDGER) private readonly ledger: LedgerService,
     @Inject(API_CONFIG) private readonly config: ApiConfig,
+    @Inject(SettingsService) private readonly settings: SettingsService,
+    @Inject(SpendingLimitService) private readonly limits: SpendingLimitService,
   ) {}
 
   async balances(userUuid: string): Promise<readonly BalanceView[]> {
@@ -101,7 +105,14 @@ export class WalletService {
     // Rounding is stated explicitly at the call site, because every rounding
     // choice moves money to someone and this one moves it to us. 'up' means a
     // sub-minor-unit fee is charged rather than forgone.
-    const fee = applyBasisPoints(amount, this.config.transferFeeBasisPoints, 'up');
+    // From platform_settings, so changing a fee is an audited row rather than
+    // a deploy. The environment value remains the fallback for the moments
+    // before the seed has run on a fresh database.
+    const fee = applyBasisPoints(
+      amount,
+      await this.settings.transferFeeBasisPoints(),
+      'up',
+    );
     const debit = { amount: amount.amount + fee.amount, currency };
 
     const senderWallet: AccountRef = {
@@ -136,9 +147,30 @@ export class WalletService {
     // The ledger package knows nothing about HTTP, deliberately — it is used
     // by webhook handlers and jobs as well as by this controller. Translating
     // its errors is the caller's job, and this is the caller.
+    //
+    // The daily ceiling wraps the posting rather than preceding it, so the
+    // check and the write are serialised for this customer. Note what it
+    // counts: the full DEBIT, fee included, because that is what leaves the
+    // wallet and what a stolen session would drain.
+    //
+    // The daily ceiling is a PRECONDITION on the entry rather than a check
+    // around it, so it runs inside the ledger's transaction and cannot race
+    // the posting it is guarding. Note what it counts: the full DEBIT, fee
+    // included, because that is what leaves the wallet and what a stolen
+    // session would drain.
+    const precondition = await this.limits.precondition({
+      userId: sender.id,
+      scope: 'transfer',
+      amount: debit,
+      idempotencyKey: intent.idempotencyKey,
+    });
+
     let posted;
     try {
-      posted = await this.ledger.post(intent);
+      posted = await this.ledger.post(
+        intent,
+        precondition === undefined ? {} : { precondition },
+      );
     } catch (error) {
       if (error instanceof InsufficientFundsError) {
         // 422, not 400: the request was well-formed and understood, and the

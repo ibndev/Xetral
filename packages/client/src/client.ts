@@ -80,6 +80,62 @@ export interface CryptoAddress {
   readonly memo: string | null;
 }
 
+export interface Card {
+  readonly id: string;
+  readonly status: string;
+  readonly currency: string;
+  readonly last4: string | null;
+  readonly expiry_month: number | null;
+  readonly expiry_year: number | null;
+  readonly balance: string;
+}
+
+export interface Deposit {
+  readonly id: string;
+  readonly amount: string;
+  readonly currency: string;
+  readonly sender_name: string | null;
+  readonly sender_bank: string | null;
+  readonly created_at: string;
+}
+
+export interface Withdrawal {
+  readonly id: string;
+  readonly asset: string;
+  readonly network: string;
+  readonly destination: string;
+  readonly amount: string;
+  readonly fee: string;
+  readonly status: string;
+  readonly tx_hash: string | null;
+  readonly failure_reason: string | null;
+}
+
+export interface CryptoQuote {
+  readonly asset: string;
+  readonly network: string;
+  readonly amount: string;
+  readonly fee: string;
+  readonly total: string;
+  readonly expires_at: string;
+}
+
+/**
+ * Identity verification, as the customer sees it.
+ *
+ * `bvn_last4` and nothing more. The server seals the BVN and never returns it,
+ * so there is no field here to hold one even if a future handler were careless
+ * — the type is the second half of that guarantee.
+ */
+export interface KycStatus {
+  readonly id: string;
+  readonly status: string;
+  readonly full_name: string;
+  readonly bvn_last4: string;
+  readonly rejection_reason: string | null;
+  readonly created_at: string;
+}
+
 export interface XetralClientOptions {
   readonly baseUrl: string;
   readonly session: Session;
@@ -250,6 +306,20 @@ export class XetralClient {
     return this.#post('/v1/crypto/addresses', { asset, network });
   }
 
+  async cryptoQuote(input: {
+    asset: string;
+    network: string;
+    amount: string;
+  }): Promise<CryptoQuote> {
+    const query = new URLSearchParams(input);
+    return this.#get(`/v1/crypto/withdrawals/quote?${query.toString()}`);
+  }
+
+  async withdrawals(): Promise<readonly Withdrawal[]> {
+    const body = await this.#get<{ withdrawals: Withdrawal[] }>('/v1/crypto/withdrawals');
+    return body.withdrawals;
+  }
+
   async withdrawCrypto(input: {
     asset: string;
     network: string;
@@ -258,7 +328,7 @@ export class XetralClient {
     maxFee?: string;
     pin: string;
     idempotencyKey: string;
-  }): Promise<unknown> {
+  }): Promise<Withdrawal> {
     return this.#post('/v1/crypto/withdrawals', {
       asset: input.asset,
       network: input.network,
@@ -268,6 +338,100 @@ export class XetralClient {
       transaction_pin: input.pin,
       idempotency_key: input.idempotencyKey,
     });
+  }
+
+  /* ------------------------------ kyc --------------------------- */
+
+  /** The customer's own verification state, or null if they have never
+   *  submitted. Everything gated on KYC reads this to say WHY it is refusing. */
+  async kyc(): Promise<KycStatus | null> {
+    const body = await this.#get<{ kyc: KycStatus | null }>('/v1/kyc');
+    return body.kyc;
+  }
+
+  async submitKyc(input: {
+    fullName: string;
+    dateOfBirth: string;
+    phone: string;
+    bvn: string;
+    address: string;
+  }): Promise<KycStatus> {
+    return this.#post('/v1/kyc', {
+      full_name: input.fullName,
+      date_of_birth: input.dateOfBirth,
+      phone: input.phone,
+      bvn: input.bvn,
+      address: input.address,
+    });
+  }
+
+  /* ----------------------------- cards -------------------------- */
+
+  async cards(): Promise<readonly Card[]> {
+    const body = await this.#get<{ cards: Card[] }>('/v1/cards');
+    return body.cards;
+  }
+
+  async card(id: string): Promise<Card> {
+    return this.#get(`/v1/cards/${encodeURIComponent(id)}`);
+  }
+
+  async issueCard(input: {
+    nameOnCard: string;
+    initialFunding: string;
+    pin: string;
+    idempotencyKey: string;
+  }): Promise<Card> {
+    return this.#post('/v1/cards', {
+      name_on_card: input.nameOnCard,
+      initial_funding: input.initialFunding,
+      transaction_pin: input.pin,
+      idempotency_key: input.idempotencyKey,
+    });
+  }
+
+  async fundCard(
+    id: string,
+    input: { amount: string; pin: string; idempotencyKey: string },
+  ): Promise<Card> {
+    return this.#post(`/v1/cards/${encodeURIComponent(id)}/fund`, {
+      amount: input.amount,
+      transaction_pin: input.pin,
+      idempotency_key: input.idempotencyKey,
+    });
+  }
+
+  /** No PIN, deliberately — the server does not ask for one either. A customer
+   *  watching fraudulent charges land must be able to stop them without first
+   *  remembering a PIN. Unfreezing and terminating both ask. */
+  async freezeCard(id: string): Promise<Card> {
+    return this.#post(`/v1/cards/${encodeURIComponent(id)}/freeze`, {});
+  }
+
+  async unfreezeCard(id: string, pin: string): Promise<Card> {
+    return this.#post(`/v1/cards/${encodeURIComponent(id)}/unfreeze`, {
+      transaction_pin: pin,
+    });
+  }
+
+  async terminateCard(id: string, pin: string): Promise<Card> {
+    return this.#post(`/v1/cards/${encodeURIComponent(id)}/terminate`, {
+      transaction_pin: pin,
+    });
+  }
+
+  /* ---------------------------- funding ------------------------- */
+
+  async deposits(): Promise<readonly Deposit[]> {
+    const body = await this.#get<{ deposits: Deposit[] }>('/v1/funding/deposits');
+    return body.deposits;
+  }
+
+  /* ------------------------------ fx ---------------------------- */
+
+  async fxTrades(): Promise<readonly FxTrade[]> {
+    const body = await this.#get<{ trades: FxTrade[] }>('/v1/fx/trades');
+    return body.trades;
   }
 
   /* ---------------------------- plumbing ------------------------ */

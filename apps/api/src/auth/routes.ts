@@ -16,6 +16,26 @@ import { RoutePolicyRegistry } from '@xetral/identity';
 export function buildRoutePolicy(): RoutePolicyRegistry {
   return (
     new RoutePolicyRegistry()
+      // Liveness and readiness. Public because a load balancer has no session,
+      // and deliberately carrying no detail about why an instance is not
+      // ready — the endpoint is reachable by anything that can route to it.
+      .public(
+        'GET',
+        '/health',
+        'liveness for the orchestrator; touches nothing and reveals nothing',
+      )
+      .public(
+        'GET',
+        '/ready',
+        'readiness for the load balancer; reports only ready or not ready',
+      )
+
+      .public(
+        'POST',
+        '/v1/auth/register',
+        'opens the first account, so requiring an existing session would be ' +
+          'circular; rate limited by the same guard as login',
+      )
       .public(
         'POST',
         '/v1/auth/login',
@@ -67,6 +87,48 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       .authenticated('POST', '/v1/purchases/verify', { pin: false })
       // Buying spends the customer's wallet balance.
       .authenticated('POST', '/v1/purchases', { pin: true })
+
+      // Identity verification. Submitting is not a money movement, so no PIN;
+      // it is authenticated because the documents attach to a known account.
+      .authenticated('GET', '/v1/kyc', { pin: false })
+      .authenticated('POST', '/v1/kyc', { pin: false })
+
+      // ---- The operations backend -------------------------------------
+      //
+      // Every route below is staff-only, and route-coverage.test.ts fails the
+      // build if any /v1/admin/ route is declared any other way. Reading is
+      // separated from acting by ROLE, so a support operator can look at a
+      // customer without being able to freeze one.
+
+      .staff('GET', '/v1/admin/overview', { pin: false, role: 'support' })
+      .staff('GET', '/v1/admin/drift', { pin: false, role: 'finance' })
+      .staff('GET', '/v1/admin/stuck', { pin: false, role: 'support' })
+
+      .staff('GET', '/v1/admin/users', { pin: false, role: 'support' })
+      .staff('GET', '/v1/admin/users/:id', { pin: false, role: 'support' })
+      // Freezing an account stops a customer's money moving. An operator who
+      // walked away from an unlocked laptop should not have left that behind.
+      .staff('POST', '/v1/admin/users/:id/status', { pin: true, role: 'compliance' })
+
+      .staff('GET', '/v1/admin/kyc', { pin: false, role: 'compliance' })
+      .staff('POST', '/v1/admin/kyc/:id/review', { pin: true, role: 'compliance' })
+
+      .staff('GET', '/v1/admin/suspense', { pin: false, role: 'finance' })
+      // Moves real money to a named customer.
+      .staff('POST', '/v1/admin/suspense/:id/attribute', { pin: true, role: 'finance' })
+
+      .staff('GET', '/v1/admin/settings', { pin: false, role: 'finance' })
+      .staff('GET', '/v1/admin/settings/:key/history', { pin: false, role: 'finance' })
+      // Changing a fee or a limit affects every customer at once.
+      .staff('POST', '/v1/admin/settings/:key', { pin: true, role: 'finance' })
+
+      // Granting a role is the action that creates every other privilege, so
+      // it is the one that needs the highest one.
+      .staff('GET', '/v1/admin/staff', { pin: false, role: 'admin' })
+      .staff('POST', '/v1/admin/staff/grant', { pin: true, role: 'admin' })
+      .staff('POST', '/v1/admin/staff/revoke', { pin: true, role: 'admin' })
+
+      .staff('GET', '/v1/admin/audit', { pin: false, role: 'admin' })
 
       // Gift cards. Every one of these refuses with `gift_cards_disabled`
       // until GIFT_CARDS_ENABLED is set — the policy is declared regardless,

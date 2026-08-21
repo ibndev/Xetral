@@ -75,6 +75,29 @@ function sqlState(error: unknown): string | undefined {
     : undefined;
 }
 
+/**
+ * Extra work to run inside an entry's transaction.
+ *
+ * The `precondition` is for a rule that must be decided ATOMICALLY with the
+ * posting and that the database has no constraint for — today, the daily
+ * spending ceiling, which is a rolling total an operator edits rather than
+ * something a CHECK can express.
+ *
+ * Three things it must not do, and the first is Rule 1:
+ *
+ * 1. It must not write postings or journal entries. It is a read plus,
+ *    usually, a lock. Writing here would be a second route into the ledger
+ *    dressed as a callback, which is the exact thing Rule 1 exists to prevent.
+ * 2. It must not swallow its own failure. Throwing is how it refuses; the
+ *    transaction is rolled back having written nothing, and the caller
+ *    translates the error.
+ * 3. It must not take a connection of its own. It is handed this transaction's
+ *    client precisely so it cannot.
+ */
+export interface PostOptions {
+  readonly precondition?: (client: PoolClient) => Promise<void>;
+}
+
 export class LedgerService {
   constructor(private readonly pool: Pool) {}
 
@@ -84,8 +107,11 @@ export class LedgerService {
    * Everything happens in ONE transaction, so the deferred balance constraint
    * fires at COMMIT with all the postings present. Splitting the postings
    * across transactions would trip it on the first one.
+   *
+   * `precondition` runs INSIDE that transaction, on its client, before
+   * anything is written — see `PostOptions`.
    */
-  async post(intent: LedgerIntent): Promise<PostedEntry> {
+  async post(intent: LedgerIntent, options: PostOptions = {}): Promise<PostedEntry> {
     // Checked here as well as by the database. The database is the authority
     // and stays so, but its check is deferred to COMMIT, by which point the
     // error is a transaction abort several layers from whoever built the bad
@@ -95,6 +121,13 @@ export class LedgerService {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
+
+      // Before the first write, and on the entry's own connection. A caller
+      // that opened its own transaction to do this would need a second pool
+      // connection while holding this one — which deadlocks the pool at
+      // exactly `pool.max` concurrent transfers, and does so under load rather
+      // than in a test.
+      await options.precondition?.(client);
 
       const entry = await client.query<{ id: string; uuid: string }>(
         `INSERT INTO journal_entries

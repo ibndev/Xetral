@@ -13,6 +13,9 @@ import {
   DepositWebhookController,
   FundingController,
 } from '../funding/funding.controller.js';
+import { HealthController } from '../health/health.controller.js';
+import { KycController } from '../kyc/kyc.controller.js';
+import { AdminController } from '../admin/admin.controller.js';
 import {
   CryptoController,
   CryptoWebhookController,
@@ -50,6 +53,9 @@ const CONTROLLERS = [
   CryptoController,
   CryptoWebhookController,
   FxController,
+  HealthController,
+  KycController,
+  AdminController,
 ];
 
 const METHOD_NAMES: Partial<Record<RequestMethod, string>> = {
@@ -112,8 +118,11 @@ describe('the public surface is small and justified', () => {
     // is not friction for its own sake: it forces the addition to be noticed
     // in review rather than merged as one line among forty.
     expect(audit.map((r) => `${r.method} ${r.path}`).sort()).toEqual([
+      'GET /health',
+      'GET /ready',
       'POST /v1/auth/login',
       'POST /v1/auth/refresh',
+      'POST /v1/auth/register',
       'POST /v1/webhooks/bitnob',
       'POST /v1/webhooks/bitnob/crypto',
       'POST /v1/webhooks/bitnob/deposits',
@@ -159,10 +168,27 @@ describe('the privileged surface is declared as privileged', () => {
 
   it('lists exactly the routes only staff can reach', () => {
     expect(staffRoutes.map((r) => `${r.method} ${r.path} (${r.role})`).sort()).toEqual([
+      'GET /v1/admin/audit (admin)',
+      'GET /v1/admin/drift (finance)',
       'GET /v1/admin/giftcards/queue (giftcard_reviewer)',
+      'GET /v1/admin/kyc (compliance)',
+      'GET /v1/admin/overview (support)',
+      'GET /v1/admin/settings (finance)',
+      'GET /v1/admin/settings/:key/history (finance)',
+      'GET /v1/admin/staff (admin)',
+      'GET /v1/admin/stuck (support)',
+      'GET /v1/admin/suspense (finance)',
+      'GET /v1/admin/users (support)',
+      'GET /v1/admin/users/:id (support)',
       'POST /v1/admin/giftcards/:id/clawback (giftcard_reviewer)',
       'POST /v1/admin/giftcards/:id/reveal (giftcard_reviewer)',
       'POST /v1/admin/giftcards/:id/review (giftcard_reviewer)',
+      'POST /v1/admin/kyc/:id/review (compliance)',
+      'POST /v1/admin/settings/:key (finance)',
+      'POST /v1/admin/staff/grant (admin)',
+      'POST /v1/admin/staff/revoke (admin)',
+      'POST /v1/admin/suspense/:id/attribute (finance)',
+      'POST /v1/admin/users/:id/status (compliance)',
     ]);
   });
 });
