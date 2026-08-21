@@ -361,6 +361,52 @@ Reject      (nothing)                                no entry ever existed
 - **The rate IS the FX** — "N1,250.00 per USD of face value" — so this phase
   needs none of Phase 10's machinery.
 
+### Operations, settings and limits — non-obvious rules
+
+Schema: `packages/ledger/sql/009_admin.sql`, seeded by `009_admin.seed.sql`.
+
+- **`platform_settings` is authoritative; the environment is a fallback** for
+  the moments before the table can be read. That is what lets an operator
+  change a fee without a deploy, and it fails silently in the other direction —
+  somebody sets `TRANSFER_FEE_BASIS_POINTS`, restarts, and watches nothing
+  happen. Bootstrap therefore logs a warning naming every environment value the
+  database is overriding.
+- **Bounds are CHECKs, not form validation.** A transfer fee is capped at 500
+  basis points, so `1500` typed where basis points were meant is refused
+  whether it arrives through the dashboard, a script, or psql at 3am.
+- **Gift cards need BOTH switches** — the deployment's flag and the stored
+  setting. Every other setting is decided by the database alone. It is the one
+  flow that pays out against a bearer instrument nobody can verify at the
+  moment of payment, so enabling it takes two deliberate acts; and either
+  switch being off means off, so an incident can be stopped from the dashboard
+  in seconds.
+- **The daily limit is a `precondition` on the ledger's own transaction**, not
+  a check around it. Its first shape held a pool connection and called the
+  ledger from inside, which deadlocks the pool at `pool.max` concurrent
+  transfers. `LedgerService.post(intent, { precondition })` runs it on the
+  entry's connection, inside the entry's transaction, holding a per-customer
+  advisory lock. A precondition must not write, must throw to refuse, and must
+  not take a connection of its own.
+- **A replay skips the limit.** Otherwise a customer near their ceiling whose
+  request timed out is told they hit a limit for a transfer that succeeded.
+- **The limits are published in kobo and apply to naira only.** Applying a
+  kobo ceiling to USDT because both are integers is the same mistake as adding
+  kobo to cents.
+- **"Today" is a Lagos day.** A UTC boundary resets the limit at 1am local —
+  surprising to the customer and an hour a fraudster would learn.
+- **Approving KYC creates `provider_customers`, in the same transaction.** A
+  submission marked approved with no mapping leaves the customer verified on
+  our side and refused by every provider-backed route.
+- **The audit log is append-only by trigger** and destructive actions require a
+  reason by CHECK. A log a privileged user can edit tells you what the last
+  person with access wanted you to believe.
+- **Attributing a suspense deposit APPENDS a correcting entry.** The original
+  posting was a true statement — money arrived and we could not say whose —
+  and editing it would erase the fact that we ever did not know.
+- **Freezing does not touch balances.** It revokes live sessions so it bites
+  immediately, and the money stays owed to the customer. Conflating the two is
+  how a support action becomes a seizure.
+
 ### apps/api
 
 - `AuthGuard` is registered with `APP_GUARD`, so it runs for **every** route. A
@@ -368,6 +414,15 @@ Reject      (nothing)                                no entry ever existed
   `route-coverage.test.ts` fails the build if a controller declares one the
   policy does not (and vice versa, so the audit cannot describe a route that no
   longer exists).
+- **`route-coverage.test.ts` reads the controller list off `AppModule`.** It
+  was a hand-written array with a comment saying it and `app.module.ts` must
+  stay in step; they did not, and three controllers — health, KYC and the whole
+  admin surface — were imported into the module and left out of its
+  `controllers` list. Every one of their routes answered 404 in the built
+  bundle while this test reported full coverage. Do not reintroduce a literal
+  list here.
+- **A route that answers 204 must not be given a body.** The web proxy did
+  exactly that and turned "set your transaction PIN" into a 500.
 - A route declaring `pin: true` has its transaction PIN verified by `AuthGuard`
   before the handler runs. The PIN is read from the request body, and the check
   happens **after** the bearer token — verifying a PIN for a caller whose
@@ -501,6 +556,13 @@ writing another fetch wrapper.
   screen firing several requests on mount replays a refresh token and the
   server correctly revokes the device family. The `Session` must therefore be a
   **singleton** — the latch lives on the instance.
+- **THE WEB NEEDS A SECOND LATCH, on the token store.** `Session.refresh()` is
+  not the only path that rotates: on a fresh page load nothing is in memory, so
+  every caller of `TokenStore.read()` goes to `/api/auth/refresh` to exchange
+  the cookie — and `read()` is what every request calls first. Two components
+  loading on mount sent two refreshes carrying the same cookie and signed the
+  customer out for opening a page. The latch that existed was real, correct,
+  and on the wrong function.
 - **Money is a string on the client and stays one.** `formatAmount` groups
   digits without producing a number, and there is no `toNumber`. `Intl.NumberFormat`
   takes a number and is wrong here.
@@ -522,6 +584,15 @@ writing another fetch wrapper.
   proxy must not be able to inject a code a caller's `switch` handles.
 - Both bundlers need telling that `.js` specifiers mean `.ts` sources — Next
   via `resolve.extensionAlias`, Metro via `resolveRequest`.
+- **The web's Content-Security-Policy lives in `middleware.ts`, not
+  `next.config.mjs`**, because it carries a per-request nonce and a build-time
+  config cannot make one. A static `script-src 'self'` blocks Next's own inline
+  bootstrap, and the page then renders its HTML and never hydrates — every
+  button inert, and a screenshot that looks perfect. Reading the nonce in the
+  root layout is what forces per-request rendering so Next can stamp it.
+- **Every customer-facing screen is behind the shared hooks in `lib/hooks.ts`.**
+  `useIdempotencyKey` belongs to the ATTEMPT — generated when the form mounts,
+  reused across retries, replaced only after a success.
 
 ---
 
@@ -560,6 +631,7 @@ npm test --workspace @xetral/identity   # tokens, PIN, envelopes, policy (vitest
 npm test --workspace @xetral/api        # guard, route coverage, rate limiting
 npm test --workspace @xetral/providers  # conversion, webhooks, card and fulfilment adapters
 npm test --workspace @xetral/ledger     # intent validation (service is e2e-only)
+npm test --workspace @xetral/client     # money formatting, single-flight, error codes
 
 # SQL invariants — needs live PostgreSQL 16. Apply migrations in order; the
 # test files are NOT idempotent, so run them against a freshly created database.
@@ -572,6 +644,8 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/005_giftcards.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/006_funding.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/007_crypto.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/008_fx.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/009_admin.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/009_admin.seed.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/003_cards.test.sql
@@ -580,6 +654,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/005_giftcards.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/006_funding.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/007_crypto.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/008_fx.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/009_admin.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,
 # Redis for the rate-limiter contract.
@@ -587,9 +662,17 @@ DATABASE_URL=postgres://... REDIS_URL=redis://localhost:6379 npm run test:e2e
 ```
 
 CI (`.github/workflows/ci.yml`) runs all of the above against Postgres 16 and
-Redis 7, then boots the built bundle and checks a guarded route answers 401.
-That last step is not ceremony: three failures in this app were invisible to
-both the compiler and the tests and appeared only at startup.
+Redis 7, then **boots both built bundles and probes them**. The API must mount
+health, admin and KYC — a 404 there fails the build, because three controllers
+were once imported and never added to the module — answer 401 on a guarded
+route, and answer 401 rather than 500 to three forged webhooks. The web app is
+served and its HTML is read: every `<script>` must carry the CSP nonce from the
+response header, because a page whose scripts the browser refuses is a page
+that renders perfectly and does nothing.
+
+That step is not ceremony. **Eight** failures in this app have now been
+invisible to both the compiler and the tests and appeared only when something
+was actually started. See `docs/AUDIT.md`.
 
 ## Deployment
 

@@ -63,21 +63,29 @@ packages/
   identity/   users, devices, sessions, refresh rotation, PINs, envelopes
   providers/  provider ports and their adapters (Bitnob, VTpass, Airalo, Twilio)
 apps/
-  api/        NestJS — deny-by-default guard, login/refresh/logout
+  api/        NestJS — deny-by-default guard, every money route, the ops backend
   mobile/     Expo (iOS + Android), tokens in the Keychain/Keystore
-  web/        Next.js — a BFF that keeps the refresh token in an httpOnly cookie
+  web/        Next.js — the customer app and the operations dashboard, behind a
+              BFF that keeps the refresh token in an httpOnly cookie
 ```
 
 ## Phases
 
-All eleven phases are built — see [`docs/PHASES.md`](docs/PHASES.md),
-which opens with a status table and what each is blocked on. Each phase lands
-independently.
+All eleven phases are built, plus a pre-deployment audit — see
+[`docs/PHASES.md`](docs/PHASES.md), which opens with a status table and what
+each is blocked on, and [`docs/AUDIT.md`](docs/AUDIT.md) for what the audit
+found. Each phase lands independently.
 
 Customers fund their wallets through a **dedicated Nigerian account number**
 issued by Bitnob, in their own name and permanent, and can send and receive
 USDT and BTC on-chain, convert between currencies and remit across them —
 through a web app and a mobile app over one shared, tested client package.
+
+Operations run from a dashboard rather than from a deploy: fees, ceilings,
+daily limits and feature flags are database rows an operator edits with their
+transaction PIN, bounded by CHECKs and written to history. Identity review,
+suspense attribution, account freezing, role grants and the audit log all have
+screens.
 
 ## Running the tests
 
@@ -104,6 +112,8 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/005_giftcards.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/006_funding.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/007_crypto.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/008_fx.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/009_admin.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/009_admin.seed.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/003_cards.test.sql
@@ -112,10 +122,13 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/005_giftcards.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/006_funding.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/007_crypto.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/008_fx.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/009_admin.test.sql
 ```
 
-All 12 ledger tests, 20 identity blocks, 10 card blocks and 11 purchase blocks print `PASS`. Any `TEST FAILED`
-means an invariant is not wired up — do not deploy past it.
+128 assertions across the nine files print `PASS`; the remaining blocks are
+reporting queries that print a table. Any `TEST FAILED` — or any `FAIL:` from
+the drift check, which reports through a `SELECT` and exits zero — means an
+invariant is not wired up. Do not deploy past it.
 
 The API's end-to-end suite runs the real login, rotation and reuse-detection
 flows against that database:
@@ -124,11 +137,12 @@ flows against that database:
 DATABASE_URL=postgres://... REDIS_URL=redis://localhost:6379 npm run test:e2e
 ```
 
-That covers the API's auth flows, wallet transfers, cards, purchases and the
-reconciliation sweep that resolves held money, plus the rate-limiter contract
-and the Bitnob adapter's output against the real ledger schema — the only check
-that its entry kinds and account roles exist as enum values rather than merely
-as TypeScript literals.
+That covers the API's auth flows, registration, identity review, wallet
+transfers, daily limits, cards, purchases, crypto, FX, the operations backend
+and the reconciliation sweep that resolves held money — plus the rate-limiter
+contract and the Bitnob adapter's output against the real ledger schema, the
+only check that its entry kinds and account roles exist as enum values rather
+than merely as TypeScript literals.
 
 It is a separate script rather than a skip-when-unavailable block in `npm test`,
 because a suite that quietly skips is a suite that reports green on a machine
@@ -138,8 +152,20 @@ where it never ran.
 
 `.github/workflows/ci.yml` runs the whole of the above on every push and pull
 request, against Postgres 16 and Redis 7 service containers: SQL invariants on a
-dedicated database, typecheck, unit tests, end-to-end tests, build, and finally a
-smoke test that boots the built bundle and checks a guarded route answers 401.
+dedicated database, typecheck, unit tests, end-to-end tests, build, and then it
+**boots both built bundles and probes them**.
+
+The API must mount health, admin and KYC — a 404 there fails the build, because
+three controllers were once imported and never added to the module while every
+test reported full route coverage — answer 401 on a guarded route, and answer
+401 rather than 500 to three forged webhooks. The web app is served and its HTML
+is read: every `<script>` must carry the CSP nonce from the response header,
+because a page whose scripts the browser refuses renders perfectly and does
+nothing.
+
+That step is not ceremony. Eight failures in this app have been invisible to
+both the compiler and the tests and appeared only when something was actually
+started; they are listed in [`docs/AUDIT.md`](docs/AUDIT.md).
 
 The invariant step scans psql's output as well as its exit code. `ON_ERROR_STOP`
 catches a raised `TEST FAILED`, but the drift check reports through a `SELECT`

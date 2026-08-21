@@ -20,10 +20,13 @@ shipped, that is called out explicitly.
 | 9 — Crypto / USDT / stablecoin | ✅ | Bitnob credentials to go live |
 | 10 — Multi-currency + FX / remittance | ✅ | Bitnob credentials to go live |
 | 11 — Mobile and web clients | ✅ | |
+| 12 — Pre-deployment audit | ✅ | Bitnob credentials to go live |
 
-All eleven phases are built. Every money flow has an HTTP surface, a web app
-and a mobile app in front of it; Bitnob's live credentials are the only thing
-between the card, crypto and FX flows and production traffic.
+All eleven phases are built, and a **pre-deployment audit** (Phase 12) closed
+what building them phase by phase had left between the phases. Every money flow
+has an HTTP surface, a customer screen and an operations screen in front of it;
+Bitnob's live credentials are the only thing between the card, crypto and FX
+flows and production traffic.
 
 ---
 
@@ -1058,3 +1061,109 @@ the real ledger.
 Replication is not backup. `deploy/standby/backup.sh` takes nightly base
 backups, because a mistaken `DELETE` replicates to the standby faithfully in
 under a second.
+
+---
+
+## Phase 12 — The pre-deployment audit ✅
+
+Not a feature. A full read of the codebase before first deployment, then a
+full RUN of it — and the second half found things the first could not.
+
+| File | What it is |
+|---|---|
+| `docs/AUDIT.md` | every finding, ordered by what it costs |
+| `packages/ledger/sql/009_admin.sql` | settings, audit log, KYC, status changes, the work-queue views |
+| `packages/ledger/sql/009_admin.seed.sql` | the defaults, all in the safe direction |
+| `packages/ledger/sql/009_admin.test.sql` | 15 invariant blocks |
+| `apps/api/src/settings/settings.service.ts` | database-backed policy, 30s cache, env fallback |
+| `apps/api/src/kyc/kyc.service.ts` | submit, review, and the provider mapping approval creates |
+| `apps/api/src/admin/` | the operations surface and its audit trail |
+| `apps/api/src/health/health.controller.ts` | liveness and readiness |
+| `apps/api/src/wallet/spending-limits.service.ts` | the daily ceiling, as a ledger precondition |
+| `apps/web/src/app/admin/` | eight operations screens |
+| `apps/web/src/app/{signup,kyc,cards,bills,fx,crypto,settings}/` | the six customer flows that had no way in |
+
+**Five things blocked operation entirely**, and the second is the one that
+mattered most: nothing anywhere wrote `provider_customers`, and cards and
+virtual accounts both refuse until that row exists — so every customer was
+permanently `kyc_required` with no path out. There was also no way to become a
+customer (no registration endpoint), no way to set `users.status` (so `frozen`
+was a column no code could write), no exit from `suspense`, and no liveness or
+readiness endpoint.
+
+Findings from the reading pass:
+
+1. **Tests that seed their fixtures cannot see a missing endpoint.** Every
+   suite created users with an `INSERT`, so none of them noticed there was no
+   way to register. The new e2e suite goes through the endpoint deliberately.
+2. **Operational parameters were deploy-time constants**, so changing a fee was
+   a release and turning a feature off during an incident was a release under
+   pressure. They are rows now, with bounds enforced by CHECKs — a 15% fee
+   typed where basis points were meant is refused whether it arrives through
+   the dashboard or through psql.
+3. **The database being authoritative fails silently in the other direction.**
+   Somebody sets `TRANSFER_FEE_BASIS_POINTS`, restarts, and watches nothing
+   happen. Bootstrap now names every environment value being overridden.
+4. **Gift cards need both switches.** Everything else the database decides
+   alone; the one flow that pays out against an unverifiable bearer instrument
+   takes a deployment change AND an operator action, and either being off means
+   off.
+5. **A daily limit cannot be a plain pre-check** — two transfers arriving
+   together each find room and both post. It runs as a `precondition` inside
+   the ledger's own transaction, holding a per-customer advisory lock. Ten
+   concurrent callers against a ₦1,000 ceiling let five through; with the lock
+   removed all ten pass.
+6. **Its first shape deadlocked the connection pool.** It held a pool
+   connection across a call that needed another one, so `pool.max` concurrent
+   transfers wedge the API. Ten callers against a pool of eight found it.
+   Nothing else would have, until production.
+7. **A replay must skip the limit**, or a customer whose request timed out is
+   told they hit a ceiling for a transfer that in fact succeeded.
+8. **The client named 18 of the 70 error codes the API emits**, so a weak
+   password or a frozen card read as "Something went wrong. Please try again."
+   The union and its recognition set are one list now, with a test scanning the
+   API source in both directions.
+
+### Then it was run, and that found eight more ✅
+
+Every one invisible to the compiler, to the unit suites and to the e2e suites
+as they stood. The full list is in `docs/AUDIT.md`; four are worth repeating
+here because they are about how this codebase is tested, not about what it
+does:
+
+9. **Three controllers were imported and never mounted.** Health, KYC and the
+   entire admin surface were absent from `app.module.ts`'s `controllers` array,
+   so every one of their routes answered 404 in the built bundle — while
+   `route-coverage.test.ts` reported full coverage, because it walked its own
+   hand-written list. *The coverage test contained the exact failure it exists
+   to prevent.* It reads the list off the module now.
+10. **Freezing an account raised every time.** `UPDATE sessions` against a
+    table called `auth_sessions` — and the right name alone would still have
+    failed the `revocation_is_complete` CHECK. A SQL string is invisible to
+    TypeScript, and no unit test can hold an opinion about one either.
+11. **Setting a transaction PIN returned 500 on the web.** The proxy answered
+    every upstream 204 with a JSON body, which is a body on a status that
+    forbids one. No web customer could set a PIN, and without a PIN they cannot
+    move money at all.
+12. **The browser token store replayed its own refresh token.** `Session`'s
+    single-flight latch is real, correct, and on the wrong function: on a fresh
+    load every caller of `read()` exchanged the cookie. Two components mounting
+    signed the customer out for opening a page — the precise cost Phase 2
+    accepted and assigned to the client to fix, reintroduced one layer below
+    where the fix was put.
+
+**What changed as a result:** CI boots both bundles and probes them. The API
+must mount health, admin and KYC, answer 401 on a guarded route, and answer 401
+rather than 500 to three forged webhooks. The web app is served and its HTML
+read — every `<script>` must carry the CSP nonce, because a page whose scripts
+the browser refuses renders perfectly and does nothing.
+
+Verified by driving the built stack in Chromium: register, submit identity, set
+a PIN, read a balance; then as staff, approve that identity and watch
+`provider_customers` gain a row, change the transfer fee and watch its history
+record 0 → 125, and find both in the audit log.
+
+**Before taking real traffic, an operator must:** grant `admin` to a real
+person (the first grant has no `admin` to make it, so it is an `INSERT`), then
+grant the narrower roles through the dashboard; review every row in
+`platform_settings`; and set the four worker intervals on exactly one instance.
