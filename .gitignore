@@ -28,3 +28,6 @@ out/
 
 # Expo
 .expo/
+
+# TypeScript incremental build state
+*.tsbuildinfo
