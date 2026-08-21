@@ -34,7 +34,10 @@ export class CryptoWebhookService {
   async handle(rawBody: string, headers: Record<string, string | undefined>): Promise<void> {
     const secret = this.config.bitnobWebhookSecret;
     if (secret === undefined) {
-      throw new Error('BITNOB_WEBHOOK_SECRET is not configured; refusing the crypto webhook');
+      // 401, not a bare throw — see the deposit webhook for why a 500 here is
+      // the wrong answer to an unauthenticated caller.
+      this.#logger.error('BITNOB_WEBHOOK_SECRET is not configured; refusing the crypto webhook');
+      throw new UnauthorizedException({ error: 'invalid_signature' });
     }
 
     try {

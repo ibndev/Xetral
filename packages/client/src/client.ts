@@ -209,6 +209,37 @@ export class XetralClient {
   }
 
   /**
+   * Sets a transaction PIN, or changes one.
+   *
+   * `currentPin` is optional here and REQUIRED by the server once a PIN
+   * exists, because only the server knows whether one does. Making it required
+   * in this signature would mean a first-time caller inventing a value to
+   * satisfy the type.
+   */
+  async setPin(pin: string, currentPin?: string): Promise<void> {
+    await this.#post('/v1/auth/pin', {
+      pin,
+      ...(currentPin === undefined ? {} : { current_pin: currentPin }),
+    });
+  }
+
+  /**
+   * Who this session belongs to, and when it stops working.
+   *
+   * `currentSession`, not `session`, because `session` is already the accessor
+   * returning the `Session` object — and a method that shadowed it would make
+   * `client.session` mean two things depending on whether it was called.
+   */
+  async currentSession(): Promise<{
+    session_id: string;
+    user_id: string;
+    device_id: string;
+    expires_at: string;
+  }> {
+    return this.#get('/v1/auth/session');
+  }
+
+  /**
    * Confirms a transaction PIN without moving money.
    *
    * The server's guard does the verifying, so a 204 here means the PIN is

@@ -127,7 +127,12 @@ export class KycService {
 
   async queue(limit: number): Promise<readonly Record<string, unknown>[]> {
     const rows = await this.pool.query(
-      `SELECT k.uuid, k.full_name, k.bvn_last4, k.phone, k.address,
+      // `uuid AS id`, because every other view this service returns calls it
+      // `id` and a reviewer's Approve button posts to `/kyc/<id>/review`. It
+      // was bare `uuid`, so the id was undefined at the call site and the
+      // request went to a path that matched no route — a queue that listed
+      // submissions perfectly and could not review any of them.
+      `SELECT k.uuid AS id, k.full_name, k.bvn_last4, k.phone, k.address,
               k.date_of_birth, k.created_at, u.email
          FROM kyc_submissions k JOIN users u ON u.id = k.user_id
         WHERE k.status = 'pending'

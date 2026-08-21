@@ -1,0 +1,193 @@
+'use client';
+
+import Link from 'next/link';
+import { formatAmount } from '@xetral/client';
+import { useAdmin, useLoad } from '@/lib/hooks';
+
+/**
+ * The morning screen.
+ *
+ * Ordered by what would hurt most if it were wrong. LEDGER DRIFT is first and
+ * is red when non-empty, because it is the only figure on this page that means
+ * the books disagree with themselves — and until it is empty, nothing else
+ * here is trustworthy. Then the work queues, then what we owe.
+ */
+export default function Overview() {
+  const admin = useAdmin();
+  const overview = useLoad(() => admin.overview(), [admin]);
+  const drift = useLoad(() => admin.drift(), [admin]);
+  const stuck = useLoad(() => admin.stuck(), [admin]);
+
+  const drifted = drift.data ?? [];
+  const queues = overview.data?.queues ?? [];
+  const liability = overview.data?.liability ?? [];
+
+  return (
+    <>
+      {/*
+        A drift check that cannot alarm is not a check. This is deliberately
+        the first thing on the page and deliberately loud: a non-empty result
+        means a materialised balance disagrees with the sum of its own
+        postings, which is either a trigger that did not fire or something that
+        wrote around the ledger.
+      */}
+      {drifted.length > 0 && (
+        <div className="notice danger">
+          <p>
+            <strong>{drifted.length} account(s) have drifted.</strong> A
+            materialised balance disagrees with the sum of its own postings.
+          </p>
+          <p className="hint">
+            Stop and investigate before acting on anything else on this page.
+            Every figure below is computed from the same postings.
+          </p>
+        </div>
+      )}
+
+      <div className="panel">
+        <h1>Overview</h1>
+        <h2>What needs a person today</h2>
+
+        <div className="stats">
+          <div className={drifted.length > 0 ? 'stat alarm' : 'stat'}>
+            <div className="label">Ledger drift</div>
+            <div className="value">{drift.loading ? '—' : drifted.length}</div>
+          </div>
+          <div className="stat">
+            <div className="label">Entries, last 24h</div>
+            <div className="value">{overview.data?.activity.entries_24h ?? '—'}</div>
+          </div>
+          <div className="stat">
+            <div className="label">Entries, last hour</div>
+            <div className="value">{overview.data?.activity.entries_1h ?? '—'}</div>
+          </div>
+          <div className="stat">
+            <div className="label">Held purchases</div>
+            <div className="value">{stuck.data?.purchases.length ?? '—'}</div>
+          </div>
+        </div>
+
+        {overview.error !== undefined && <p className="error">{overview.error}</p>}
+      </div>
+
+      <div className="panel">
+        <h2>Work queues</h2>
+        {overview.loading && <p className="spinner">Loading…</p>}
+        {!overview.loading && queues.length === 0 && (
+          <p className="empty">Nothing waiting.</p>
+        )}
+
+        {queues.length > 0 && (
+          <div className="scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Queue</th>
+                  <th className="right">Waiting</th>
+                  <th className="right">Oldest</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {queues.map((queue) => (
+                  <tr key={queue.queue}>
+                    <td>{queue.queue.replace(/_/g, ' ')}</td>
+                    <td className="right amount">{queue.waiting}</td>
+                    <td className="right muted">
+                      {queue.oldest === null
+                        ? '—'
+                        : new Date(queue.oldest).toLocaleString()}
+                    </td>
+                    <td className="right">
+                      <Link href={queueLink(queue.queue)}>Open</Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="panel">
+        <h2>What we owe customers</h2>
+        <p className="lead">
+          Computed from postings, not from a reported figure. This is the
+          liability side of the ledger.
+        </p>
+
+        {liability.length === 0 && !overview.loading && (
+          <p className="empty">No balances yet.</p>
+        )}
+
+        {liability.length > 0 && (
+          <div className="scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Currency</th>
+                  <th className="right">Wallets</th>
+                  <th className="right">Held</th>
+                  <th className="right">On cards</th>
+                  <th className="right">Suspense</th>
+                  <th className="right">Total owed</th>
+                </tr>
+              </thead>
+              <tbody>
+                {liability.map((row) => (
+                  <tr key={row.currency}>
+                    <td>{row.currency}</td>
+                    <td className="right amount">
+                      {formatAmount(minorToMajor(row.wallets_minor, row.currency), row.currency)}
+                    </td>
+                    <td className="right amount">
+                      {formatAmount(minorToMajor(row.pending_minor, row.currency), row.currency)}
+                    </td>
+                    <td className="right amount">
+                      {formatAmount(minorToMajor(row.cards_minor, row.currency), row.currency)}
+                    </td>
+                    <td className="right amount">
+                      {formatAmount(minorToMajor(row.suspense_minor, row.currency), row.currency)}
+                    </td>
+                    <td className="right amount">
+                      <strong>{formatAmount(row.total_owed, row.currency)}</strong>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+function queueLink(queue: string): string {
+  if (queue.includes('kyc')) return '/admin/kyc';
+  if (queue.includes('suspense')) return '/admin/suspense';
+  if (queue.includes('giftcard')) return '/admin/giftcards';
+  return '/admin';
+}
+
+/**
+ * Minor units to a major-unit string, WITHOUT going through a number.
+ *
+ * The API sends `total_owed` already formatted for exactly this reason, and
+ * these four component columns arrive as minor units because no endpoint had a
+ * reason to format them. So the conversion happens here, on strings — a
+ * `Number(minor) / 100` would be a float in a column labelled "what we owe
+ * customers", and would be wrong for JPY and very wrong for BTC.
+ */
+const EXPONENTS: Readonly<Record<string, number>> = {
+  NGN: 2, USD: 2, GBP: 2, EUR: 2, GHS: 2, KES: 2, JPY: 0, USDT: 6, BTC: 8,
+};
+
+function minorToMajor(minor: string, currency: string): string {
+  const exponent = EXPONENTS[currency] ?? 2;
+  const negative = minor.startsWith('-');
+  const digits = (negative ? minor.slice(1) : minor).padStart(exponent + 1, '0');
+  const whole = digits.slice(0, digits.length - exponent);
+  const fraction = exponent === 0 ? '' : `.${digits.slice(digits.length - exponent)}`;
+  return `${negative ? '-' : ''}${whole}${fraction}`;
+}

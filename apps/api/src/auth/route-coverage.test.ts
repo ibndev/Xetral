@@ -1,26 +1,8 @@
 import 'reflect-metadata';
 import { RequestMethod } from '@nestjs/common';
 import { describe, expect, it } from 'vitest';
-import { AuthController } from './auth.controller.js';
-import { WalletController } from '../wallet/wallet.controller.js';
-import { CardController, CardWebhookController } from '../cards/card.controller.js';
-import { PurchaseController } from '../purchases/purchase.controller.js';
-import {
-  GiftCardController,
-  GiftCardReviewController,
-} from '../giftcards/giftcard.controller.js';
-import {
-  DepositWebhookController,
-  FundingController,
-} from '../funding/funding.controller.js';
-import { HealthController } from '../health/health.controller.js';
-import { KycController } from '../kyc/kyc.controller.js';
-import { AdminController } from '../admin/admin.controller.js';
-import {
-  CryptoController,
-  CryptoWebhookController,
-} from '../crypto/crypto.controller.js';
-import { FxController } from '../fx/fx.controller.js';
+import { AppModule } from '../app.module.js';
+import { testApiConfig } from '../test-support/api-config.js';
 import { METHOD_METADATA, PATH_METADATA, buildRoutePath } from './route-key.js';
 import { buildRoutePolicy } from './routes.js';
 
@@ -37,26 +19,29 @@ import { buildRoutePolicy } from './routes.js';
  * stop reading it.
  */
 
-// Every controller the app mounts. Missing one here would let its routes go
-// undeclared without failing this test -- so app.module.ts and this list are
-// the pair that must stay in step.
-const CONTROLLERS = [
-  AuthController,
-  WalletController,
-  CardController,
-  CardWebhookController,
-  PurchaseController,
-  GiftCardController,
-  GiftCardReviewController,
-  FundingController,
-  DepositWebhookController,
-  CryptoController,
-  CryptoWebhookController,
-  FxController,
-  HealthController,
-  KycController,
-  AdminController,
-];
+/**
+ * The controllers the app ACTUALLY mounts, read off the module.
+ *
+ * This was a hand-written array with a comment saying it and `app.module.ts`
+ * "are the pair that must stay in step". They were not, and nothing noticed:
+ * three controllers — health, KYC and the entire admin dashboard — were
+ * imported into the module and left out of its `controllers` list, so every
+ * one of their routes answered 404 in the built bundle while this file
+ * happily walked them and reported full coverage.
+ *
+ * That is the whole failure mode a coverage test exists to prevent, reproduced
+ * inside the coverage test. Reading the list from the module means the two
+ * cannot disagree: a controller the app does not mount is a controller this
+ * test does not see, and its policy then shows up as an orphan.
+ */
+function mountedControllers(): (new (...args: never[]) => object)[] {
+  const module = AppModule.forRoot({
+    // Never connected to. `forRoot` only needs a config to build the provider
+    // list, and nothing here instantiates anything.
+    config: testApiConfig('postgres://unused/unused'),
+  });
+  return (module.controllers ?? []) as (new (...args: never[]) => object)[];
+}
 
 const METHOD_NAMES: Partial<Record<RequestMethod, string>> = {
   [RequestMethod.GET]: 'GET',
@@ -90,7 +75,7 @@ function routesOf(controller: new (...args: never[]) => object): string[] {
 
 describe('policy covers the router', () => {
   const declared = new Set(buildRoutePolicy().declaredRoutes());
-  const live = CONTROLLERS.flatMap(routesOf);
+  const live = mountedControllers().flatMap(routesOf);
 
   it('finds the routes the controllers actually expose', () => {
     // Guards the walker itself: if this returned nothing, every other

@@ -46,7 +46,15 @@ export class DepositWebhookService {
     const secret = this.config.bitnobWebhookSecret;
     if (secret === undefined) {
       // Refusing beats processing an unverifiable instruction to create money.
-      throw new Error('BITNOB_WEBHOOK_SECRET is not configured; refusing the deposit webhook');
+      //
+      // 401 and not a bare throw. A bare Error becomes a 500, which pages
+      // somebody over a stranger's probe and tells the sender we are broken
+      // rather than that they are unauthorised — and a provider reading 500
+      // retries, for ever. Phase 8 recorded this and fixed the card webhook;
+      // this one and the crypto one kept the old shape until the built bundle
+      // was curled.
+      this.#logger.error('BITNOB_WEBHOOK_SECRET is not configured; refusing the deposit webhook');
+      throw new UnauthorizedException({ error: 'invalid_signature' });
     }
 
     try {

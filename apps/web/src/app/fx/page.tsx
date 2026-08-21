@@ -1,0 +1,198 @@
+'use client';
+
+import { useState } from 'react';
+import { formatAmount } from '@xetral/client';
+import type { FxQuote } from '@xetral/client';
+import { Nav } from '@/lib/nav';
+import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/lib/hooks';
+
+const CURRENCIES = ['NGN', 'USD', 'USDT'] as const;
+
+/**
+ * Converting between currencies, and sending across them.
+ *
+ * One form for both, because a remittance IS a conversion with a recipient —
+ * and on the server it is ONE journal entry for exactly that reason. Two
+ * screens would suggest two operations, and two operations would leave a
+ * window where a crash strands the money in a wallet the sender never meant to
+ * hold.
+ */
+export default function Fx() {
+  const client = useXetral();
+  const [from, setFrom] = useState<string>('NGN');
+  const [to, setTo] = useState<string>('USD');
+  const [amount, setAmount] = useState('');
+  const [recipient, setRecipient] = useState('');
+  const [pin, setPin] = useState('');
+  const [quote, setQuote] = useState<FxQuote | undefined>();
+  const attempt = useIdempotencyKey();
+  const { busy, error, done, run } = useSubmit();
+  const trades = useLoad(() => client.fxTrades(), [client]);
+
+  return (
+    <main className="shell">
+      <Nav />
+
+      <form
+        className="panel"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void run(async () => {
+            const trade = await client.convert({
+              from,
+              to,
+              amount,
+              // What the customer agreed to receive. Rates move between the
+              // quote and the request, and without this the difference is
+              // simply absorbed by whoever is not looking — which is the
+              // customer.
+              ...(quote === undefined ? {} : { minReceived: quote.receives }),
+              ...(recipient === '' ? {} : { recipient }),
+              pin,
+              idempotencyKey: attempt.key,
+            });
+            attempt.next();
+            setPin('');
+            setQuote(undefined);
+            trades.reload();
+            return `Received ${formatAmount(trade.received, trade.to)}.`;
+          });
+        }}
+      >
+        <h1>Convert</h1>
+        <h2>Between your own balances, or straight to someone else</h2>
+
+        <div className="field-row two">
+          <label>
+            From
+            <select
+              value={from}
+              onChange={(e) => {
+                setFrom(e.target.value);
+                setQuote(undefined);
+              }}
+            >
+              {CURRENCIES.map((c) => (
+                <option key={c}>{c}</option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            To
+            <select
+              value={to}
+              onChange={(e) => {
+                setTo(e.target.value);
+                setQuote(undefined);
+              }}
+            >
+              {CURRENCIES.map((c) => (
+                <option key={c}>{c}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <label>
+          Amount
+          <input
+            inputMode="decimal"
+            value={amount}
+            onChange={(e) => {
+              setAmount(e.target.value);
+              setQuote(undefined);
+            }}
+            required
+          />
+        </label>
+
+        <div className="actions" style={{ marginBottom: 14 }}>
+          <button
+            type="button"
+            className="ghost small"
+            disabled={amount === '' || from === to}
+            onClick={() =>
+              void run(async () => {
+                setQuote(await client.fxQuote(from, to, amount));
+                return undefined;
+              })
+            }
+          >
+            Get a rate
+          </button>
+        </div>
+
+        {quote !== undefined && (
+          <div className="notice">
+            <p>
+              You send <strong className="amount">{formatAmount(quote.amount, quote.from)}</strong>{' '}
+              and receive{' '}
+              <strong className="amount">{formatAmount(quote.receives, quote.to)}</strong>.
+            </p>
+            {/*
+              The spread is shown as its own line, not folded into the rate. A
+              customer comparing us against a bureau de change is comparing the
+              number they receive, and hiding our margin inside the rate would
+              make that comparison quietly dishonest.
+            */}
+            <p className="hint">
+              Rate {quote.rate} · our fee {formatAmount(quote.spread, quote.from)} · this rate
+              holds until {new Date(quote.expires_at).toLocaleTimeString()}
+            </p>
+          </div>
+        )}
+
+        <label>
+          Send to someone else (optional)
+          <input
+            value={recipient}
+            onChange={(e) => setRecipient(e.target.value)}
+            placeholder="Their email or phone — leave empty to convert your own balance"
+          />
+        </label>
+
+        <label>
+          Transaction PIN
+          <input
+            type="password"
+            inputMode="numeric"
+            autoComplete="off"
+            value={pin}
+            onChange={(e) => setPin(e.target.value)}
+            required
+          />
+        </label>
+
+        <button type="submit" disabled={busy || from === to || amount === ''}>
+          {busy ? 'Converting…' : recipient === '' ? 'Convert' : 'Convert and send'}
+        </button>
+
+        {from === to && <p className="hint">Pick two different currencies.</p>}
+        {error !== undefined && <p className="error">{error}</p>}
+        {done !== undefined && <p className="ok">{done}</p>}
+      </form>
+
+      <div className="panel">
+        <h2>Past conversions</h2>
+        {trades.loading && <p className="spinner">Loading…</p>}
+        {trades.data !== undefined && trades.data.length === 0 && (
+          <p className="empty">Nothing yet.</p>
+        )}
+        {trades.data?.map((trade) => (
+          <div className="row" key={trade.id}>
+            <span>
+              {new Date(trade.created_at).toLocaleDateString()}
+              {trade.recipient !== null && (
+                <div className="hint">to {trade.recipient}</div>
+              )}
+            </span>
+            <span className="nowrap amount">
+              {formatAmount(trade.amount, trade.from)} → {formatAmount(trade.received, trade.to)}
+            </span>
+          </div>
+        ))}
+      </div>
+    </main>
+  );
+}

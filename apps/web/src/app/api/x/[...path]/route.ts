@@ -21,14 +21,37 @@ async function forward(request: Request, path: string[]): Promise<NextResponse> 
   const authorization = request.headers.get('authorization');
   const body = request.method === 'GET' ? undefined : await request.text();
 
-  const upstream = await fetch(target, {
-    method: request.method,
-    headers: {
-      'content-type': 'application/json',
-      ...(authorization === null ? {} : { authorization }),
-    },
-    ...(body === undefined || body === '' ? {} : { body }),
-  });
+  // An unreachable API is a 502 with a code the client understands, not Next's
+  // error page with a stack and this deployment's internal address on it.
+  let upstream: Response;
+  try {
+    upstream = await fetch(target, {
+      method: request.method,
+      headers: {
+        'content-type': 'application/json',
+        ...(authorization === null ? {} : { authorization }),
+      },
+      ...(body === undefined || body === '' ? {} : { body }),
+    });
+  } catch {
+    return NextResponse.json({ error: 'unknown' }, { status: 502 });
+  }
+
+  /*
+   * A 204 CARRIES NO BODY, and saying otherwise throws.
+   *
+   * `NextResponse.json(x, { status: 204 })` is a response with a body and a
+   * status that forbids one, which fails inside the runtime and surfaces as a
+   * 500 from this proxy — for a request the API answered perfectly.
+   *
+   * Three endpoints answer 204: sign-out, SET TRANSACTION PIN, and VERIFY
+   * TRANSACTION PIN. So on the web app a customer could not set a PIN, and
+   * without a PIN they cannot move any money at all. Every type checked and
+   * every test passed; it took driving the built app in a browser to see it.
+   */
+  if (upstream.status === 204 || upstream.status === 205) {
+    return new NextResponse(null, { status: upstream.status });
+  }
 
   const payload: unknown = await upstream.json().catch(() => undefined);
   return NextResponse.json(payload ?? {}, { status: upstream.status });

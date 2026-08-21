@@ -418,6 +418,9 @@ export class AppModule {
         CryptoController,
         CryptoWebhookController,
         FxController,
+        HealthController,
+        KycController,
+        AdminController,
       ],
       providers: [
         { provide: API_CONFIG, useValue: options.config },

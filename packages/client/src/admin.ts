@@ -49,18 +49,20 @@ export interface AdminUserDetail {
   readonly status_history: readonly Record<string, unknown>[];
 }
 
+/** Mirrors `SettingView` on the server, field for field. It did not, once:
+ *  `value_type`/`min_value`/`max_value` here against `type`/`min`/`max` there
+ *  rendered every bound as "min undefined" and every boolean as a text box. */
 export interface AdminSetting {
   readonly key: string;
   readonly value: string;
-  readonly value_type: string;
+  readonly type: string;
+  readonly min: string | null;
+  readonly max: string | null;
   readonly label: string;
   readonly description: string;
   readonly category: string;
-  readonly min_value: string | null;
-  readonly max_value: string | null;
   readonly sensitive: boolean;
   readonly updated_at: string;
-  readonly updated_by: string | null;
 }
 
 export interface AdminSuspenseDeposit {
