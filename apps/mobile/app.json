@@ -7,9 +7,26 @@
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
-    "ios": { "supportsTablet": false, "bundleIdentifier": "ng.xetral.app" },
-    "android": { "package": "ng.xetral.app" },
-    "plugins": ["expo-router", "expo-secure-store"],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "ng.xetral.app",
+      "infoPlist": {
+        "NSFaceIDUsageDescription": "Xetral uses Face ID to unlock your transaction PIN."
+      }
+    },
+    "android": {
+      "package": "ng.xetral.app"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Xetral uses Face ID to unlock your transaction PIN."
+        }
+      ]
+    ],
     "extra": {
       "apiUrl": "https://api.xetral.ng"
     }

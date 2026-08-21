@@ -508,6 +508,12 @@ writing another fetch wrapper.
   httpOnly `SameSite=strict` cookie on web (set by the app's own route
   handlers), the Keychain/Keystore on mobile. Never `localStorage`, never
   `AsyncStorage`.
+- **Biometrics unlock the PIN; they do not replace it.** Mobile stores the real
+  PIN in the Keychain behind `requireAuthentication: true` and sends it to the
+  server exactly as if typed. No endpoint accepts "passed Face ID" in place of
+  a PIN, and `002_identity.sql` refuses enrolment for a user with no PIN.
+  Enrolment confirms the PIN via `POST /v1/auth/pin/verify` first, so a wrong
+  one is never stored to be discovered on a real transfer. Sign-out forgets it.
 - **The web app proxies the API same-origin** through `/api/x/*`, so there is
   no CORS policy and the API's address is never published to the page.
 - **An idempotency key belongs to the attempt**, generated when a form mounts
@@ -587,7 +593,20 @@ both the compiler and the tests and appeared only at startup.
 
 ## Deployment
 
-Coolify (self-hosted) on Hetzner, Cloudflare free tier in front, GitHub Actions CI,
-EAS for mobile builds. A single box is fine now and is **not** an acceptable
-production topology for a licensed fintech — split app and database onto separate
-nodes with streaming replication before taking real deposit volume.
+Configuration is in `deploy/`. Coolify on Hetzner, Cloudflare in front, GitHub
+Actions CI, EAS for mobile builds.
+
+**Three nodes**: `app` (API, web, Redis — the only public address),
+`db-primary`, `db-standby`, on a private network with streaming replication.
+Never collapse these onto one box: a single disk failure would end the records
+of a business holding customer deposits, and the database would be one firewall
+mistake from the internet.
+
+- **Promotion refuses to run** until an operator confirms the old primary is
+  stopped. Two databases both accepting writes give two divergent sets of
+  postings and no way to say which is real.
+- **Replication is not backup.** A mistaken `DELETE` replicates faithfully in
+  under a second; `deploy/standby/backup.sh` is what survives it.
+- **The single-instance workers** (`RECONCILE_INTERVAL_SECONDS`,
+  `DEPOSIT_RECONCILE_INTERVAL_SECONDS`, `CRYPTO_RECONCILE_INTERVAL_SECONDS`,
+  `GIFTCARD_RELEASE_INTERVAL_SECONDS`) go on exactly one instance.

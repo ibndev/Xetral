@@ -33,7 +33,9 @@ class BrowserTokenStore implements TokenStore {
 
     const tokens: Tokens = {
       accessToken: body.access_token,
-      refreshToken: '',
+      // A placeholder. The real one is in the httpOnly cookie, which is the
+      // point — see browserAuthFetch below.
+      refreshToken: 'held-in-an-httponly-cookie',
       expiresAt: Math.floor(Date.now() / 1000) + (body.expires_in ?? 900),
     };
     await this.#memory.write(tokens);
@@ -77,15 +79,37 @@ export function xetral(onSignedOut?: () => void): { session: Session; client: Xe
 }
 
 /**
- * Routes the session's auth calls at THIS app's handlers rather than the API.
+ * Routes the session's auth calls at THIS app's handlers rather than the API,
+ * and puts back the one field they deliberately withhold.
  *
- * `Session` speaks the API's auth shape, and the handlers speak the same shape
- * back — so the only difference is where the refresh token is kept, which is
- * exactly the substitution this app exists to make.
+ * `Session` is written against the API, where a login response carries a
+ * refresh token. Here it must not: the whole point of the route handlers is
+ * that the refresh token goes into an httpOnly cookie and never reaches the
+ * page. So the response is missing a field `Session` requires.
+ *
+ * The placeholder is substituted HERE rather than making the field optional in
+ * `Session`, because on mobile it genuinely is required — the Keychain is the
+ * only place it lives. Weakening the shared type to fit one platform would
+ * remove a real guarantee from the other. The value is never sent anywhere:
+ * `/api/auth/refresh` reads the cookie and ignores its body.
  */
+const COOKIE_HELD = 'held-in-an-httponly-cookie';
+
 async function browserAuthFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const path = String(input).replace('/api/x-auth/v1/auth/', '/api/auth/');
-  return fetch(path, init);
+  const response = await fetch(path, init);
+
+  if (!response.ok || !path.includes('/api/auth/')) return response;
+
+  const body = (await response.json().catch(() => undefined)) as
+    | Record<string, unknown>
+    | undefined;
+  if (body === undefined) return response;
+
+  return new Response(JSON.stringify({ ...body, refresh_token: COOKIE_HELD }), {
+    status: response.status,
+    headers: { 'content-type': 'application/json' },
+  });
 }
 
 /** Forgets the cached client, so the next sign-in starts clean rather than

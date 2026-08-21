@@ -28,10 +28,10 @@ export default function Wallet() {
         // correctly read the second as a replay.
         const [loaded, ngn] = await Promise.all([
           client.balances(),
-          client.transactions('NGN').catch(() => []),
+          client.transactions('NGN').catch(() => ({ entries: [], nextCursor: null })),
         ]);
         setBalances(loaded);
-        setHistory(ngn);
+        setHistory(ngn.entries);
       } catch (cause) {
         setError(messageFor(cause));
       } finally {

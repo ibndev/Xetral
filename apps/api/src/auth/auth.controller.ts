@@ -101,6 +101,26 @@ export class AuthController {
     await this.pins.set(claims.sub, parsed.data.pin, parsed.data.current_pin);
   }
 
+  /**
+   * Confirms a transaction PIN and does nothing else.
+   *
+   * The handler is empty on purpose: `AuthGuard` verifies the PIN because this
+   * route declares `pin: true`, so reaching the body at all IS the answer.
+   * Nothing here re-implements the check, and nothing bypasses the five-attempt
+   * lockout that protects every other money-moving route.
+   *
+   * It exists for biometric enrolment on mobile. The phone stores the PIN
+   * behind the OS's biometric gate, and it must not store a WRONG one — the
+   * alternative is discovering the mistake on a real transfer, which spends one
+   * of the customer's five attempts on a request they did not intend to make.
+   */
+  @Post('pin/verify')
+  @HttpCode(204)
+  async verifyPin(@Req() request: AuthenticatedRequest): Promise<void> {
+    const claims = request.auth;
+    if (claims === undefined) throw new Error('verifyPin reached without verified claims');
+  }
+
   @Get('session')
   async session(@Req() request: AuthenticatedRequest): Promise<SessionSummary> {
     const claims = request.auth;

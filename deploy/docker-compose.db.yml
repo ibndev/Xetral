@@ -1,0 +1,51 @@
+# The DATABASE node. No public address; reachable only on the private network.
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: always
+    # Bound to the PRIVATE interface only. Binding to 0.0.0.0 here is one
+    # firewall mistake away from a customer ledger on the public internet.
+    ports:
+      - '${PRIVATE_IP}:5432:5432'
+    environment:
+      POSTGRES_DB: xetral
+      POSTGRES_USER: xetral
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      # Explicit rather than inherited: scram-sha-256, never md5.
+      POSTGRES_INITDB_ARGS: '--auth-host=scram-sha-256 --data-checksums'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/primary.conf:/etc/postgresql/primary.conf:ro
+      - ./postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - wal_archive:/var/lib/postgresql/archive
+    command: >
+      postgres
+      -c config_file=/etc/postgresql/primary.conf
+      -c hba_file=/etc/postgresql/pg_hba.conf
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U xetral -d xetral']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    stop_grace_period: 1m
+
+  # Nightly base backups, kept off this machine. Replication protects against
+  # a node dying; it does NOT protect against somebody dropping a table, which
+  # replicates faithfully to the standby in under a second.
+  backup:
+    image: postgres:16-alpine
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - ./standby/backup.sh:/backup.sh:ro
+      - backups:/backups
+    entrypoint: ['/bin/sh', '/backup.sh']
+
+volumes:
+  pgdata:
+  wal_archive:
+  backups:

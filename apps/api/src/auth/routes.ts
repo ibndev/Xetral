@@ -33,6 +33,10 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // and that is enforced in PinService because only it knows whether a PIN
       // already exists.
       .authenticated('POST', '/v1/auth/pin', { pin: false })
+      // Confirms a PIN without moving money. `pin: true` means the guard does
+      // the work and the handler is empty — and the same lockout applies, so
+      // this is not a cheaper place to guess than a transfer is.
+      .authenticated('POST', '/v1/auth/pin/verify', { pin: true })
 
       .authenticated('GET', '/v1/wallets', { pin: false })
       .authenticated('GET', '/v1/wallets/transactions', { pin: false })

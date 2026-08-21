@@ -986,19 +986,75 @@ an `HttpOnly; SameSite=strict; Secure` cookie and returns a body containing
 token; and replaying the previous cookie answers `401 invalid_grant` — Phase
 2's reuse detection firing through the whole web stack.
 
+### Biometric unlock ✅
+
+Landed after the rest of the phase.
+
+| File | What it is |
+|---|---|
+| `apps/mobile/src/biometrics.ts` | the Keychain gate, and what it will not do |
+| `apps/mobile/app/security.tsx` | enrolling, which confirms the PIN first |
+| `apps/api/src/auth/auth.controller.ts` | `POST /v1/auth/pin/verify` |
+
+**Face ID unlocks the PIN. It does not replace it**, and the implementation is
+shaped entirely by that sentence — which `002_identity.sql` has enforced from
+the other side since Phase 2, by a trigger that refuses enrolment for a user
+with no PIN.
+
+The customer's real transaction PIN is stored in the Keychain behind
+`requireAuthentication: true`, so the OS refuses to return it without a face, a
+finger or the device passcode. A successful scan hands the PIN back and the app
+sends it to the server exactly as if it had been typed. **The server is
+unchanged**: it verifies a scrypt hash and counts a wrong PIN toward the
+five-attempt lockout. There is no endpoint anywhere that accepts "the user
+passed Face ID" in place of a PIN.
+
+1. **A new endpoint exists so enrolment cannot store a WRONG PIN.**
+   `POST /v1/auth/pin/verify` declares `pin: true`, so `AuthGuard` does the
+   verifying and the handler is empty — reaching the body *is* the answer.
+   Without it, a mistyped PIN is discovered on a real transfer, which spends
+   one of the customer's five attempts on a request they never intended.
+2. **The gate is the OS's, not ours.** `expo-local-authentication` reports what
+   the device supports; the actual refusal comes from the Keychain declining to
+   return the value. The app never sees biometric data, only whether the
+   Keychain agreed.
+3. **A cancelled scan sends nothing.** Customers dismiss the sheet to type the
+   PIN instead, and every screen keeps manual entry available. Falling back to
+   "send it anyway" would be a payment nobody approved.
+4. **Signing out forgets the stored PIN.** Leaving it means a face on that
+   phone still unlocks the PIN of an account nobody is signed in to — which is
+   precisely the case a customer handing over their device was guarding
+   against.
+
 **Not built, and deliberately:** the mobile app has not been run on a simulator
 or a device from here, so it is typechecked and configured rather than
-demonstrated. Biometric unlock is also absent: `002_identity.sql` supports it
-and enrolment requires an existing PIN, but wiring `expo-local-authentication`
-to that flow is its own piece of work with its own failure modes.
+demonstrated. Biometrics in particular cannot be exercised without hardware.
 
 ---
 
 ## Deployment
 
-Coolify (self-hosted, Apache-2.0) on Hetzner, Cloudflare free tier in front, GitHub
-Actions for CI, EAS for mobile builds.
+Configuration lives in [`deploy/`](../deploy). Coolify (self-hosted, Apache-2.0)
+on Hetzner, Cloudflare in front, GitHub Actions for CI, EAS for mobile builds.
 
-A single box is fine to start and is **not** an acceptable production topology for
-a licensed fintech. Split app and database onto separate nodes with streaming
-replication before taking real deposit volume.
+**Three nodes, not one**: `app`, `db-primary`, `db-standby`, on a private
+network, with only `app` publicly addressable and streaming replication between
+the two databases.
+
+That used to be a warning in this file rather than a configuration, and the
+warning was the weaker thing. A single box means a single disk failure ends the
+records of a business holding customer deposits; it means an out-of-memory
+application process competes with Postgres and the OOM killer picks; and it
+means the database is one firewall mistake from the public internet.
+
+`deploy/` contains the compose files for each node, a primary config whose every
+setting is a decision rather than a copied number, `pg_hba.conf` with no `trust`
+line and no `0.0.0.0/0`, a script that turns a fresh node into a streaming
+standby, and a promotion script that refuses to run until the operator has
+confirmed the old primary is stopped — because two databases that both accept
+writes give two divergent sets of postings and no way afterwards to say which is
+the real ledger.
+
+Replication is not backup. `deploy/standby/backup.sh` takes nightly base
+backups, because a mistaken `DELETE` replicates to the standby faithfully in
+under a second.

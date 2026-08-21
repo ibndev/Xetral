@@ -1,0 +1,59 @@
+# The APPLICATION node. The only machine with a public address, and Cloudflare
+# sits in front of it.
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.api
+    restart: always
+    env_file: .env
+    ports:
+      - '127.0.0.1:3000:3000'
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # A guarded route answering 401 proves the global guard is mounted, not
+      # merely compiled. Three failures in this app were invisible to both the
+      # compiler and the tests and appeared only at startup.
+      test:
+        - CMD-SHELL
+        - >-
+          wget -qS -O /dev/null http://127.0.0.1:3000/v1/auth/session 2>&1
+          | grep -q "401"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.web
+    restart: always
+    env_file: .env
+    environment:
+      # Server-side only. The browser never learns the API's address.
+      XETRAL_API_URL: http://api:3000
+    ports:
+      - '127.0.0.1:3001:3000'
+    depends_on:
+      - api
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    # Persistence on, because the rate limiter's windows are the only thing
+    # standing between a stolen password list and every account on the
+    # platform. Losing them on a restart resets every attacker's budget.
+    command: redis-server --appendonly yes --maxmemory-policy noeviction
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  redisdata:

@@ -108,13 +108,24 @@ export class XetralClient {
     return body.balances;
   }
 
-  async transactions(currency: string, before?: string): Promise<readonly Transaction[]> {
+  /**
+   * History, keyset paginated.
+   *
+   * `next_cursor` rather than a page number, because the API pages on the
+   * posting id: an `OFFSET` shifts under an active account and produces
+   * duplicates and gaps. Pass the cursor back as `before` for the next page.
+   */
+  async transactions(
+    currency: string,
+    before?: string,
+  ): Promise<{ entries: readonly Transaction[]; nextCursor: string | null }> {
     const query = new URLSearchParams({ currency });
     if (before !== undefined) query.set('before', before);
-    const body = await this.#get<{ transactions: Transaction[] }>(
+
+    const body = await this.#get<{ entries: Transaction[]; next_cursor: string | null }>(
       `/v1/wallets/transactions?${query.toString()}`,
     );
-    return body.transactions;
+    return { entries: body.entries, nextCursor: body.next_cursor };
   }
 
   /**
@@ -139,6 +150,18 @@ export class XetralClient {
       transaction_pin: input.pin,
       idempotency_key: input.idempotencyKey,
     });
+  }
+
+  /**
+   * Confirms a transaction PIN without moving money.
+   *
+   * The server's guard does the verifying, so a 204 here means the PIN is
+   * right. Used before storing it behind a phone's biometric gate: storing a
+   * wrong one means finding out on a real transfer, which spends one of the
+   * customer's five attempts.
+   */
+  async verifyPin(pin: string): Promise<void> {
+    await this.#post('/v1/auth/pin/verify', { transaction_pin: pin });
   }
 
   /* --------------------------- funding -------------------------- */
