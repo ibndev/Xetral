@@ -264,7 +264,12 @@ jobs:
           done
 
           curl -s -D /tmp/web.headers -o /tmp/web.html http://127.0.0.1:3101/signin
+
+          # `npm start` forks `next start`, so killing the npm process leaves
+          # the server behind — the runner reported it as an orphan on cleanup.
+          # Harmless on a throwaway runner and a port conflict on a reused one.
           kill "$web_pid" 2>/dev/null || true
+          pkill -f 'next-server' 2>/dev/null || true
 
           nonce=$(grep -io "nonce-[A-Za-z0-9+/=]*" /tmp/web.headers | head -1 | cut -d- -f2-)
           if [ -z "$nonce" ]; then
