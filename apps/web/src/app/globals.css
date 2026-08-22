@@ -262,6 +262,33 @@ h3 { font-size: 16px; }
   letter-spacing: -0.02em;
 }
 
+/* The operations header: the mark, then a quiet qualifier.
+
+   "operations" is set in the BODY face at normal weight, deliberately unlike
+   the mark beside it. Setting it in the display face would read as part of
+   the brand — the product is Xetral, and this is one view of it. */
+.admin-brand {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--brand);
+  text-decoration: none;
+  min-width: 0;
+}
+.admin-brand-suffix {
+  font-family: var(--font-sans);
+  font-weight: 500;
+  font-size: 14px;
+  color: var(--text-muted);
+  letter-spacing: 0.01em;
+}
+/* Below 560px the qualifier goes and the mark alone carries the header —
+   there is no room for it beside two actions, and dropping the actions
+   instead would hide the way out of the dashboard. */
+@media (max-width: 559px) {
+  .admin-brand-suffix { display: none; }
+}
+
 /* A round, 44px tap target for every bare icon in the header. */
 .icon-btn {
   display: grid;
@@ -911,3 +938,89 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
   color: var(--text-3);
   font-size: 12.5px;
 }
+
+/* ═════════════════ section wrappers used by the admin pages ═════════════════
+
+   These six class names were written into the pages and never into a
+   stylesheet, so every one of them was inert: `.panel` sections had no card
+   around them, `.row` label/value lines ran together as inline text, and the
+   operations header had its brand, its wallet link and its sign-out button
+   touching. Nothing errors on an undefined class — the page renders, it just
+   renders as unstyled markup — which is why this survived a whole migration
+   and a visual pass. A build-time check would have caught it; the check now
+   in `class-coverage.test.ts` is that check.
+
+   They are defined here rather than rewritten at each call site because the
+   markup was already saying the right thing. What was missing was the rules.
+*/
+
+/* A section of the operations dashboard: the same card the customer app uses,
+   with the vertical rhythm a page of stacked sections needs. */
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 18px;
+  box-shadow: var(--shadow-sm);
+  margin-bottom: 16px;
+}
+@media (min-width: 720px) { .panel { padding: 22px; } }
+.panel > h1 { font-size: 22px; margin: 0 0 2px; }
+.panel > h2 { font-size: 14px; font-weight: 500; color: var(--text-muted); margin: 0 0 14px; }
+.panel > h2 a { color: var(--link); text-decoration: none; }
+.panel > h2 a:hover { text-decoration: underline; }
+.panel > :last-child { margin-bottom: 0; }
+
+/* A label/value line. The label holds its width and the value takes the rest,
+   right-aligned — an operator scanning a column of ids and amounts reads down
+   the right edge, and a value that starts wherever its label happened to end
+   makes that impossible. */
+.row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+}
+.row:last-child { border-bottom: 0; }
+.row > :first-child { flex-shrink: 0; }
+.row > :last-child {
+  text-align: right;
+  min-width: 0;
+  /* An id or a provider reference is long and must not push the row wide
+     enough to scroll the page sideways. */
+  overflow-wrap: anywhere;
+}
+
+/* The headline block of a record: the figure on the left, its status on the
+   right. Wraps rather than crushes on a narrow screen. */
+.balance {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+/* Secondary text under a figure. Named for where it started — under a pending
+   balance — and used anywhere a line needs to sit quieter than its heading. */
+.pending {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-top: 3px;
+}
+
+/* The bar on the error, not-found and stand-alone nav screens. Those pages
+   render outside the app shell, so they cannot use `.appbar`'s sticky
+   positioning — a sticky header on a page with no scroll just adds a blur. */
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: var(--header-h);
+  margin-bottom: 8px;
+}
+.nav .spacer { flex: 1; }

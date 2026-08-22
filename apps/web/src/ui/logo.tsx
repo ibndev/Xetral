@@ -1,34 +1,30 @@
 /**
  * The Xetral mark, in ONE place.
  *
- * Two mitred chevrons facing each other — the left half of the X points
- * right, the right half points left, and they meet at a narrow notch on the
- * centre line rather than crossing. That notch is the mark's signature and
- * the first thing lost if anyone redraws this as two crossing strokes.
+ * THE PATH DATA BELOW IS THE SUPPLIED GEOMETRIC TRACE, VERBATIM. Two closed
+ * polygons, straight segments only, no curves — copied from
+ * `xetrallogogeometry.html` rather than redrawn. Earlier versions of this
+ * file were traced by eye from a raster and were wrong twice over: the first
+ * welded the halves into a solid X, the second separated them into "> <".
+ * Do not "clean up" or re-round these coordinates; the notched waist on the
+ * left chevron and the gap down the middle are the mark, not artefacts.
  *
- * TRACED FROM THE SUPPLIED ARTWORK. If a vertex is off, this file is the only
- * place to correct it: every mark in both apps renders through here — the
- * header, the sidebar, the tab bar, sign-in, sign-up — so there is no second
- * copy to drift.
+ * Every mark in both apps renders through here — header, sidebar, tab bar,
+ * sign-in, sign-up — so there is no second copy to drift. The mobile file
+ * carries the same two strings and must change with this one.
  */
 
-/** The artwork's own proportions. Slightly wider than tall. */
-const VB_W = 259;
-const VB_H = 223;
+const VB_W = 539;
+const VB_H = 474;
 
-/**
- * The left chevron, pointing right.
- *
- * Clockwise from the top-left: out along the upper arm to the centre notch,
- * back down the lower arm to the bottom-left, then up the inner faces to the
- * shallow V that separates the two arms at the left edge.
- */
-const LEFT =
-  'M0 0 L46 0 L122 98 C125 102 126 105 126 111.5 C126 118 125 121 122 125 L46 223 L0 223 L80 118 C83 114.5 83 108.5 80 105 Z';
+const RIGHT_CHEVRON =
+  'M539 459l-162 -199l-14 -19l1 -10l5 -7l130 -153h-110l-6 2l-4 2l-13 14l-124 142' +
+  'l-4 8v13l2 5l150 185l11 12l12 5z';
 
-/** The right chevron: the same geometry mirrored about the centre line. */
-const RIGHT =
-  'M259 0 L213 0 L137 98 C134 102 133 105 133 111.5 C133 118 134 121 137 125 L213 223 L259 223 L179 118 C176 114.5 176 108.5 179 105 Z';
+const LEFT_CHEVRON =
+  'M0 1l158 197l2 1l29 38v8l-5 8l-95 115l-69 86l-2 1l-14 19l5 -1h131l4 -1l7 -3' +
+  'l8 -7l105 -132v-7l-2 -4l-2 -1l-6 -9l-33 -40l-5 -10l-2 -9v-9l3 -12l7 -12l49 -59' +
+  'l5 -7v-5l-15 -21l-69 -86l-22 -27l-8 -7l-13 -5h-143l-1 1l-5 -1z';
 
 export interface LogoProps {
   /** Height of the mark in px. The wordmark is scaled from it. */
@@ -39,7 +35,7 @@ export interface LogoProps {
   readonly className?: string;
 }
 
-function fill(tone: NonNullable<LogoProps['tone']>): string {
+function colourOf(tone: NonNullable<LogoProps['tone']>): string {
   return tone === 'inverse' ? '#FFFFFF' : tone === 'current' ? 'currentColor' : 'var(--brand)';
 }
 
@@ -50,13 +46,13 @@ export function LogoMark({ size = 28, tone = 'brand' }: Omit<LogoProps, 'wordmar
       width={(size * VB_W) / VB_H}
       height={size}
       viewBox={`0 0 ${VB_W} ${VB_H}`}
-      fill={fill(tone)}
+      fill={colourOf(tone)}
       aria-hidden="true"
       focusable="false"
       style={{ display: 'block', flexShrink: 0 }}
     >
-      <path d={LEFT} />
-      <path d={RIGHT} />
+      <path d={RIGHT_CHEVRON} />
+      <path d={LEFT_CHEVRON} />
     </svg>
   );
 }
@@ -64,26 +60,24 @@ export function LogoMark({ size = 28, tone = 'brand' }: Omit<LogoProps, 'wordmar
 /**
  * The lockup: the mark AS the letter X, followed by "etral".
  *
- * IT WAS "[X] Xetral" AND THAT WAS WRONG — the mark and the word both start
- * with an X, so the brand read with the letter twice. The mark is the X now
- * and the word continues from it, which is what the artwork is for.
+ * It used to draw the mark beside the full word, so the brand read with the
+ * letter twice — "X Xetral". Three things make this read as one word instead
+ * of a logo next to a word, and all three live here because doing them at
+ * each call site is how it ends up right on one screen and wrong on five:
  *
- * Three things make it read as one word rather than a logo next to a word:
- *
- *  1. The gap is a HAIRLINE, sized from the wordmark's own tracking rather
- *     than picked — a normal icon gap would leave "X etral".
- *  2. The mark is set to the wordmark's CAP height, not its line box. A line
- *     box carries descender space nothing in "etral" uses, so matching one
- *     leaves the mark visibly oversized.
- *  3. The whole thing is labelled "Xetral" for assistive tech, and the "etral"
- *     is hidden from it — otherwise a screen reader announces the brand as
- *     "etral", which is worse than a duplicated letter.
+ *  1. The gap is a HAIRLINE sized from the wordmark's own tracking. A normal
+ *     icon gap would leave "X etral".
+ *  2. The mark is set to the wordmark's CAP height, so the word is drawn at
+ *     size/0.72 — Bricolage's cap height. Matching the line box instead makes
+ *     the mark look oversized, because a line box carries descender space
+ *     that nothing in "etral" uses.
+ *  3. The whole thing is labelled "Xetral" for assistive tech and the visible
+ *     "etral" is hidden from it. A screen reader announcing the brand as
+ *     "etral" would be a worse bug than the duplicate letter was.
  */
 export function Logo({ size = 28, wordmark = true, tone = 'brand', className }: LogoProps) {
   if (!wordmark) return <LogoMark size={size} tone={tone} />;
 
-  // Bricolage's cap height is ~0.72em, so a mark at `size` needs the word set
-  // larger for their capitals to match.
   const fontSize = Math.round(size / 0.72);
 
   return (
@@ -101,11 +95,13 @@ export function Logo({ size = 28, wordmark = true, tone = 'brand', className }: 
           fontWeight: 800,
           fontSize,
           letterSpacing: '-0.03em',
-          color: fill(tone),
-          // A hairline, proportional to the type — not an icon gap.
-          marginLeft: size * 0.09,
-          // The mark's own optical centre sits a shade above the cap line.
-          transform: `translateY(${size * 0.012}px)`,
+          color: colourOf(tone),
+          // Negative: the mark's right edge is a WEDGE, not a flat side — the
+          // chevron's arms reach the full width only at the very top and
+          // bottom, so a zero gap still reads as "X etral". The 'e' is tucked
+          // into that notch. Measured across 28/40/64px against the real
+          // Bricolage file; -0.08 begins to collide at display sizes.
+          marginLeft: size * -0.05,
         }}
       >
         etral

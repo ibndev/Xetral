@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Xetral">
+  <!--
+    The MASKABLE variant. Android crops a maskable icon to whatever shape the
+    launcher uses, and the guaranteed-visible area is a circle of 80% of the
+    width — so what matters is the mark's half-DIAGONAL, not its width. The
+    chevron tips sit at the corners of its bounding box, which at the tab
+    icon's 0.62 scale reach 222px from centre against a 204.8px safe radius:
+    a circular launcher would shave both tips off. 0.55 puts them at 197px.
+
+    Same two paths as icon.svg and src/ui/logo.tsx; the tile is full-bleed
+    with no rounding, because the launcher supplies the corner shape.
+  -->
+  <rect width="512" height="512" fill="#0D1B3E"/>
+  <g transform="translate(108 126) scale(0.55)" fill="#FFFFFF">
+    <path d="M539 459l-162 -199l-14 -19l1 -10l5 -7l130 -153h-110l-6 2l-4 2l-13 14l-124 142l-4 8v13l2 5l150 185l11 12l12 5z"/>
+    <path d="M0 1l158 197l2 1l29 38v8l-5 8l-95 115l-69 86l-2 1l-14 19l5 -1h131l4 -1l7 -3l8 -7l105 -132v-7l-2 -4l-2 -1l-6 -9l-33 -40l-5 -10l-2 -9v-9l3 -12l7 -12l49 -59l5 -7v-5l-15 -21l-69 -86l-22 -27l-8 -7l-13 -5h-143l-1 1l-5 -1z"/>
+  </g>
+</svg>
