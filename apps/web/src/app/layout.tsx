@@ -1,15 +1,51 @@
 import './globals.css';
+import localFont from 'next/font/local';
 import { headers } from 'next/headers';
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 
+/*
+ * The three families from the approved design, SELF-HOSTED.
+ *
+ * Not Google Fonts, for two reasons that both matter here. The app's CSP is
+ * `font-src 'self'`, and widening it to a third party to fetch a typeface is
+ * a poor trade on a page that shows somebody's balance. And a request to
+ * fonts.gstatic.com tells that third party which of our customers loaded a
+ * page and when — which is exactly the kind of quiet leak a bank should not
+ * have.
+ *
+ * All three are VARIABLE fonts, so one file per family covers every weight
+ * the product uses: 140KB for the whole type system.
+ */
+const bricolage = localFont({
+  src: './fonts/BricolageGrotesque.woff2',
+  variable: '--font-bricolage',
+  display: 'swap',
+  weight: '200 800',
+});
+
+const instrument = localFont({
+  src: './fonts/InstrumentSans.woff2',
+  variable: '--font-instrument',
+  display: 'swap',
+  weight: '400 700',
+});
+
+const spline = localFont({
+  src: './fonts/SplineSansMono.woff2',
+  variable: '--font-spline',
+  display: 'swap',
+  weight: '300 700',
+});
+
 export const metadata: Metadata = {
   title: 'Xetral',
-  description: 'Multi-currency wallet',
+  description: 'Multi-currency wallet — naira, dollars, and everything between',
   // No indexing. Every page behind sign-in is a customer's money, and the
   // sign-in page itself in a search index is a phishing target's template.
   robots: { index: false, follow: false },
   formatDetection: { telephone: false },
+  appleWebApp: { capable: true, title: 'Xetral', statusBarStyle: 'default' },
 };
 
 export const viewport: Viewport = {
@@ -17,29 +53,47 @@ export const viewport: Viewport = {
   initialScale: 1,
   // NOT `maximumScale: 1`. Locking zoom is the usual way apps stop iOS
   // resizing on focus, and it also stops anyone who needs to enlarge an
-  // account number from doing so. The form inputs are 16px instead, which
-  // fixes the zoom without taking the control away.
-  themeColor: '#0b0f14',
+  // account number from doing so. The inputs are 16px instead, which fixes
+  // the zoom without taking the control away.
+  viewportFit: 'cover',
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#F2F4F8' },
+    { media: '(prefers-color-scheme: dark)', color: '#080D1A' },
+  ],
 };
 
-/**
- * `async` and reading headers, deliberately.
+/*
+ * Reads the stored theme BEFORE first paint.
  *
- * Touching `headers()` opts the whole tree into per-request rendering, and
- * that is what makes the Content-Security-Policy nonce work: Next stamps the
- * nonce onto its own inline bootstrap scripts as it renders them, and there is
- * nothing to stamp if the HTML was generated at build time.
- *
- * Prerendering these pages and serving them under a nonce CSP produced a page
- * that renders and never hydrates — every button inert, and a screenshot that
- * looks perfect. There is nothing to prerender here in any case: every screen
- * is behind a sign-in and shows live money.
+ * Without this the page renders light, then swaps to dark once React
+ * hydrates — a white flash in a dark room, on the screen where somebody
+ * checks their balance at night. It has to be inline and synchronous, which
+ * is why it carries the CSP nonce.
  */
+const THEME_BOOTSTRAP = `
+(function(){try{
+  var t = localStorage.getItem('xetral-theme');
+  if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  document.documentElement.dataset.theme = t;
+}catch(e){}})();
+`;
+
 export default async function RootLayout({ children }: { children: ReactNode }) {
-  await headers();
+  // Touching headers() opts the tree into per-request rendering, which is what
+  // lets Next stamp the CSP nonce onto its own inline scripts. Prerendered
+  // HTML has nothing to stamp, and the page then renders and never hydrates.
+  const nonce = (await headers()).get('x-nonce') ?? undefined;
 
   return (
-    <html lang="en">
+    <html
+      lang="en"
+      data-theme="light"
+      className={`${bricolage.variable} ${instrument.variable} ${spline.variable}`}
+      suppressHydrationWarning
+    >
+      <head>
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP }} />
+      </head>
       <body>{children}</body>
     </html>
   );

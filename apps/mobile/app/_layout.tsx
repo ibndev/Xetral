@@ -8,7 +8,7 @@ export default function Layout() {
       <StatusBar style="light" />
       <Stack
         screenOptions={{
-          headerStyle: { backgroundColor: colors.panel },
+          headerStyle: { backgroundColor: colors.surface },
           headerTintColor: colors.text,
           contentStyle: { backgroundColor: colors.bg },
         }}

@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import type { KycStatus } from '@xetral/client';
-import { Nav } from '@/lib/nav';
+import { Shell } from '@/ui/shell';
+import { Icon } from '@/ui/icon';
 import { useLoad, useSubmit, useXetral } from '@/lib/hooks';
 
 /**
@@ -47,22 +48,20 @@ export default function Kyc() {
 
   if (loading) {
     return (
-      <main className="shell">
-        <Nav />
-        <div className="panel">
+      <Shell>
+        <div className="card">
           <p className="spinner">Loading…</p>
         </div>
-      </main>
+      </Shell>
     );
   }
 
   if (data !== null && data !== undefined) return <Submitted status={data} />;
 
   return (
-    <main className="shell">
-      <Nav />
+    <Shell>
 
-      <form className="panel" onSubmit={submit}>
+      <form className="card" onSubmit={submit}>
         <h1>Verify your identity</h1>
         <h2>Required before you can be issued an account number or a card</h2>
 
@@ -117,7 +116,7 @@ export default function Kyc() {
 
         {error !== undefined && <p className="error">{error}</p>}
       </form>
-    </main>
+    </Shell>
   );
 }
 
@@ -130,10 +129,9 @@ function Submitted({ status }: { status: KycStatus }) {
         : { badge: 'warn', title: 'Under review' };
 
   return (
-    <main className="shell">
-      <Nav />
+    <Shell>
 
-      <div className="panel">
+      <div className="card">
         <h1>{state.title}</h1>
         <h2>
           <span className={`badge ${state.badge}`}>{status.status}</span>
@@ -168,6 +166,6 @@ function Submitted({ status }: { status: KycStatus }) {
           </div>
         )}
       </div>
-    </main>
+    </Shell>
   );
 }

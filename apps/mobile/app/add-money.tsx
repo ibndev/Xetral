@@ -26,7 +26,7 @@ export default function AddMoney() {
 
   return (
     <View style={styles.screen}>
-      <View style={styles.panel}>
+      <View style={styles.card}>
         <Text style={styles.h1}>Add money</Text>
         <Text style={styles.h2}>Transfer from any Nigerian bank</Text>
 

@@ -1,26 +1,20 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { resetXetral, xetral } from '@/lib/session';
+import { deviceFingerprint } from '@/lib/device';
 import { messageFor } from '@/lib/errors';
-
-/** A stable-ish per-browser device fingerprint. Not a security control — the
- *  server binds sessions to it, so it only needs to be consistent. */
-function deviceFingerprint(): string {
-  const key = 'xetral_device';
-  let value = window.localStorage.getItem(key);
-  if (value === null) {
-    value = crypto.randomUUID();
-    window.localStorage.setItem(key, value);
-  }
-  return value;
-}
+import { Logo } from '@/ui/logo';
+import { Icon } from '@/ui/icon';
+import { ThemeToggle } from '@/ui/theme-toggle';
 
 export default function SignIn() {
   const router = useRouter();
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
+  const [show, setShow] = useState(false);
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
 
@@ -28,11 +22,9 @@ export default function SignIn() {
     event.preventDefault();
     setBusy(true);
     setError(undefined);
-
     try {
       resetXetral();
-      const { session } = xetral();
-      await session.signIn(identifier, password, {
+      await xetral().session.signIn(identifier, password, {
         fingerprint: deviceFingerprint(),
         platform: 'web',
       });
@@ -45,43 +37,74 @@ export default function SignIn() {
   }
 
   return (
-    <main className="shell">
-      <div className="nav">
-        <strong>Xetral</strong>
+    <main className="auth">
+      <div style={{ position: 'absolute', top: 12, right: 12 }}>
+        <ThemeToggle />
       </div>
 
-      <form className="panel" onSubmit={submit}>
-        <h1>Sign in</h1>
-        <h2>Multi-currency wallet</h2>
+      <div className="auth-brand animate-in">
+        <Logo size={36} />
+      </div>
 
-        <label>
-          Email
+      <div className="auth-head animate-in d1">
+        <h1>Welcome back</h1>
+        <p>Sign in to your Xetral account</p>
+      </div>
+
+      <form className="auth-card animate-in d2" onSubmit={submit}>
+        <div className="field">
+          <label htmlFor="identifier">Email address</label>
           <input
+            id="identifier"
             type="email"
+            inputMode="email"
+            placeholder="you@example.com"
             value={identifier}
             autoComplete="username"
             onChange={(e) => setIdentifier(e.target.value)}
             required
           />
-        </label>
+        </div>
 
-        <label>
-          Password
-          <input
-            type="password"
-            value={password}
-            autoComplete="current-password"
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
-        </label>
+        <div className="field">
+          <label htmlFor="password">Password</label>
+          <div className="input-affix">
+            <input
+              id="password"
+              type={show ? 'text' : 'password'}
+              placeholder="••••••••••"
+              value={password}
+              autoComplete="current-password"
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
+            <button
+              type="button"
+              className="affix"
+              onClick={() => setShow((s) => !s)}
+              aria-label={show ? 'Hide password' : 'Show password'}
+            >
+              <Icon name={show ? 'eyeOff' : 'eye'} size={19} />
+            </button>
+          </div>
+        </div>
 
-        <button type="submit" disabled={busy}>
+        <button type="submit" className="block" disabled={busy}>
           {busy ? 'Signing in…' : 'Sign in'}
         </button>
 
-        {error !== undefined && <p className="error">{error}</p>}
+        {error !== undefined && (
+          <p className="error"><Icon name="alert" size={16} /> {error}</p>
+        )}
       </form>
+
+      <p className="auth-foot animate-in d3">
+        New to Xetral? <Link href="/signup">Create an account</Link>
+      </p>
+
+      <p className="auth-trust animate-in d3">
+        <Icon name="lock" size={14} /> Your session is encrypted end to end
+      </p>
     </main>
   );
 }

@@ -58,7 +58,7 @@ export default function Security() {
 
   return (
     <View style={styles.screen}>
-      <View style={styles.panel}>
+      <View style={styles.card}>
         <Text style={styles.h1}>Security</Text>
         <Text style={styles.h2}>How you approve payments</Text>
 

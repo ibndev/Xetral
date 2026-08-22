@@ -3,7 +3,8 @@
 import { useState } from 'react';
 import { formatAmount } from '@xetral/client';
 import type { Card } from '@xetral/client';
-import { Nav } from '@/lib/nav';
+import { Shell } from '@/ui/shell';
+import { Icon } from '@/ui/icon';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/lib/hooks';
 
 /**
@@ -19,10 +20,9 @@ export default function Cards() {
   const { data, loading, error, reload } = useLoad(() => client.cards(), [client]);
 
   return (
-    <main className="shell">
-      <Nav />
+    <Shell>
 
-      <div className="panel">
+      <div className="card">
         <h1>Cards</h1>
         <h2>Virtual dollar cards, funded from your wallet</h2>
 
@@ -39,7 +39,7 @@ export default function Cards() {
       </div>
 
       <Issue onIssued={reload} />
-    </main>
+    </Shell>
   );
 }
 
@@ -55,7 +55,7 @@ function CardRow({ card, onChange }: { card: Card; onChange: () => void }) {
     card.status === 'active' ? 'ok' : card.status === 'frozen' ? 'warn' : 'danger';
 
   return (
-    <div className="panel" style={{ background: 'var(--panel-2)' }}>
+    <div className="card" style={{ background: 'var(--surface-2)' }}>
       <div className="balance">
         <div>
           <div className="amount">{formatAmount(card.balance, card.currency)}</div>
@@ -183,7 +183,7 @@ function Issue({ onIssued }: { onIssued: () => void }) {
 
   return (
     <form
-      className="panel"
+      className="card"
       onSubmit={(event) => {
         event.preventDefault();
         void run(async () => {

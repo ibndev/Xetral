@@ -5,7 +5,8 @@ import { useCallback, useMemo, useState } from 'react';
 import { exponentFor, formatAmount, isValidAmount } from '@xetral/client';
 import { xetral } from '@/lib/session';
 import { messageFor } from '@/lib/errors';
-import { Nav } from '@/lib/nav';
+import { Shell } from '@/ui/shell';
+import { Icon } from '@/ui/icon';
 
 export default function Transfer() {
   const router = useRouter();
@@ -62,10 +63,9 @@ export default function Transfer() {
   }
 
   return (
-    <main className="shell">
-      <Nav />
+    <Shell>
 
-      <form className="panel" onSubmit={submit}>
+      <form className="card" onSubmit={submit}>
         <h1>Send money</h1>
         <h2>To another Xetral account</h2>
 
@@ -127,6 +127,6 @@ export default function Transfer() {
         {error !== undefined && <p className="error">{error}</p>}
         {done !== undefined && <p className="ok">{done}</p>}
       </form>
-    </main>
+    </Shell>
   );
 }

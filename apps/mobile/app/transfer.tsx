@@ -55,7 +55,7 @@ export default function Transfer() {
 
   return (
     <View style={styles.screen}>
-      <View style={styles.panel}>
+      <View style={styles.card}>
         <Text style={styles.h1}>Send money</Text>
         <Text style={styles.h2}>To another Xetral account</Text>
 

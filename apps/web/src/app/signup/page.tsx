@@ -6,6 +6,9 @@ import { useState } from 'react';
 import { resetXetral, xetral } from '@/lib/session';
 import { deviceFingerprint } from '@/lib/device';
 import { useSubmit } from '@/lib/hooks';
+import { Logo } from '@/ui/logo';
+import { Icon } from '@/ui/icon';
+import { ThemeToggle } from '@/ui/theme-toggle';
 
 /**
  * Opening an account.
@@ -50,66 +53,84 @@ export default function SignUp() {
   }
 
   return (
-    <main className="shell">
-      <div className="nav">
-        <strong>Xetral</strong>
+    <main className="auth">
+      <div style={{ position: 'absolute', top: 12, right: 12 }}>
+        <ThemeToggle />
       </div>
 
-      <form className="panel" onSubmit={submit}>
-        <h1>Open an account</h1>
-        <h2>Naira, dollars, and everything in between</h2>
+      <div className="auth-brand animate-in">
+        <Logo size={36} />
+      </div>
 
-        <label>
-          Email
+      <div className="auth-head animate-in d1">
+        <h1>Create your account</h1>
+        <p>Naira, dollars, and everything in between</p>
+      </div>
+
+      <form className="auth-card animate-in d2" onSubmit={submit}>
+        <div className="field">
+          <label htmlFor="email">Email address</label>
           <input
+            id="email"
             type="email"
+            inputMode="email"
+            placeholder="you@example.com"
             value={email}
             autoComplete="email"
             onChange={(e) => setEmail(e.target.value)}
             required
           />
-        </label>
+        </div>
 
-        <label>
-          Password
+        <div className="field">
+          <label htmlFor="password">Password</label>
           <input
+            id="password"
             type="password"
+            placeholder="At least 10 characters"
             value={password}
             autoComplete="new-password"
             onChange={(e) => setPassword(e.target.value)}
             required
           />
-          <span className="hint">At least 12 characters. Length beats punctuation.</span>
-        </label>
+          <p className="hint">Length beats punctuation — a phrase you remember is stronger than P@ssw0rd.</p>
+        </div>
 
-        <label>
-          Confirm password
+        <div className="field">
+          <label htmlFor="confirm">Confirm password</label>
           <input
+            id="confirm"
             type="password"
+            placeholder="Type it again"
             value={confirm}
             autoComplete="new-password"
             onChange={(e) => setConfirm(e.target.value)}
             required
           />
-        </label>
+        </div>
 
-        <button type="submit" disabled={busy}>
+        <button type="submit" className="block" disabled={busy}>
           {busy ? 'Creating your account…' : 'Create account'}
         </button>
 
-        {mismatch && <p className="error">Those two passwords are not the same.</p>}
-        {error !== undefined && <p className="error">{error}</p>}
-
-        <p className="hint">
-          Already have an account? <Link href="/signin">Sign in</Link>
-        </p>
+        {mismatch && (
+          <p className="error"><Icon name="alert" size={16} /> Those two passwords are not the same.</p>
+        )}
+        {error !== undefined && (
+          <p className="error"><Icon name="alert" size={16} /> {error}</p>
+        )}
       </form>
 
-      <div className="notice">
+      <p className="auth-foot animate-in d3">
+        Already have an account? <Link href="/signin">Sign in</Link>
+      </p>
+
+      <div className="notice animate-in d3" style={{ marginTop: 20 }}>
+        <span className="notice-icon"><Icon name="shield" size={19} /></span>
         <p>
-          You will be asked to verify your identity before you can be issued a
-          bank account number or a card. That is a legal requirement in Nigeria,
-          not a formality we could skip.
+          You will verify your identity before you can be issued a bank account
+          number or a card. That is a legal requirement in Nigeria, not a step
+          we could skip.
         </p>
       </div>
     </main>

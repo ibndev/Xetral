@@ -33,7 +33,7 @@ export default function Wallet() {
 
   return (
     <ScrollView style={styles.screen}>
-      <View style={styles.nav}>
+      <View style={styles.rowBetween}>
         <Link href="/transfer" style={styles.link}>
           Send
         </Link>
@@ -42,7 +42,7 @@ export default function Wallet() {
         </Link>
       </View>
 
-      <View style={styles.panel}>
+      <View style={styles.card}>
         <Text style={styles.h1}>Balances</Text>
         <Text style={styles.h2}>What you can spend right now</Text>
 
@@ -52,7 +52,7 @@ export default function Wallet() {
         )}
 
         {balances.map((balance) => (
-          <View key={balance.currency} style={[styles.divider, styles.rowBetween]}>
+          <View key={balance.currency} style={[styles.row, styles.rowBetween]}>
             <View>
               {/* Formatted from the string the API sent. Nothing here goes
                   through a float — a BTC balance has eight decimals and that
@@ -74,7 +74,7 @@ export default function Wallet() {
       </View>
 
       <Pressable onPress={signOut}>
-        <Text style={{ color: colors.muted, textAlign: 'center', paddingVertical: 12 }}>
+        <Text style={{ color: colors.text3, textAlign: 'center', paddingVertical: 12 }}>
           Sign out
         </Text>
       </Pressable>

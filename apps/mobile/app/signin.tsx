@@ -43,7 +43,7 @@ export default function SignIn() {
 
   return (
     <View style={styles.screen}>
-      <View style={styles.panel}>
+      <View style={styles.card}>
         <Text style={styles.h1}>Welcome back</Text>
         <Text style={styles.h2}>Sign in to your wallet</Text>
 
