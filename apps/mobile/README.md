@@ -10,8 +10,7 @@ actually catches people out, because a phone cannot reach `localhost`.
 ## Once, on your laptop
 
 ```bash
-git clone <this repo> && cd Xetral
-git checkout claude/xetral-project-setup-byygew
+git clone https://github.com/ibndev/Xetral && cd Xetral
 npm install
 
 # Postgres 16, with the migrations applied IN ORDER.
@@ -23,10 +22,17 @@ for f in packages/ledger/sql/001_ledger.sql \
          packages/ledger/sql/005_giftcards.sql \
          packages/ledger/sql/006_funding.sql \
          packages/ledger/sql/007_crypto.sql \
-         packages/ledger/sql/008_fx.sql; do
+         packages/ledger/sql/008_fx.sql \
+         packages/ledger/sql/009_admin.sql \
+         packages/ledger/sql/009_admin.seed.sql; do
   psql -d xetral -v ON_ERROR_STOP=1 -f "$f"
 done
 ```
+
+`009_admin.seed.sql` is not optional. Fees, ceilings, daily limits and the
+feature flags are rows in `platform_settings`, and the API treats that table
+as authoritative — without it every one of them falls back to a default the
+app was not configured with.
 
 Install **Expo Go** on the phone, from the Play Store.
 
