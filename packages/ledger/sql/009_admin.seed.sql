@@ -72,7 +72,7 @@ VALUES
    'never auto-reversed: by then both remaining answers can be wrong.',
    'operations', FALSE),
 
-  ('support_email', 'support@xetral.ng', 'text', NULL, NULL,
+  ('support_email', 'support@xetral.com', 'text', NULL, NULL,
    'Support email',
    'Shown to customers on error screens and in receipts.',
    'operations', FALSE)

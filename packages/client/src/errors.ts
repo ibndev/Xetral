@@ -39,6 +39,7 @@ const API_ERROR_CODES = [
   'invalid_pin',
   'pin_locked',
   'pin_not_set',
+  'weak_pin',
   'transaction_pin_required',
   'current_pin_required',
 
@@ -158,6 +159,7 @@ const USER_FIXABLE: ReadonlySet<ApiErrorCode> = new Set<ApiErrorCode>([
   'invalid_request',
   'invalid_credentials',
   'weak_password',
+  'weak_pin',
   'email_taken',
   'cannot_transfer_to_self',
   'recipient_is_sender',

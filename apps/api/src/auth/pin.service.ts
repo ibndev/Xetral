@@ -1,8 +1,16 @@
-import { HttpException, HttpStatus, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  HttpException,
+  HttpStatus,
+  Inject,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import type { Pool } from 'pg';
 import {
   MAX_PIN_ATTEMPTS,
   PIN_LOCKOUT_MINUTES,
+  WeakPinError,
   hashPin,
   needsRehash,
   verifyPin,
@@ -128,7 +136,33 @@ export class PinService {
       await this.assertValid(userUuid, currentPin);
     }
 
-    const hash = await hashPin(pin);
+    /*
+     * The PIN policy is enforced in @xetral/identity and its refusal has to be
+     * TRANSLATED here, exactly as `register()` translates WeakPasswordError.
+     *
+     * It was not, and the consequence was worse than the password case: the
+     * zod schema only checks `min(1).max(32)`, so every real violation — five
+     * digits, seven digits, 111111, 123456 — reached this line and escaped as
+     * an unhandled error. A customer setting their first PIN got a bare 500,
+     * on the one step they must complete before they can move any money at
+     * all, with nothing on screen telling them what was wrong with it.
+     *
+     * Found by typing a wrong-length PIN by hand, not by a test: every suite
+     * used a valid PIN, so nothing ever reached the failing branch.
+     */
+    let hash: string;
+    try {
+      hash = await hashPin(pin);
+    } catch (error) {
+      if (error instanceof WeakPinError) {
+        // The detail IS safe to return and is the whole point: "must be
+        // exactly 6 digits" is what lets someone fix it. It describes the
+        // rule, never the value.
+        throw new BadRequestException({ error: 'weak_pin', detail: error.message });
+      }
+      throw error;
+    }
+
     await this.pool.query(
       `INSERT INTO transaction_pins (user_id, pin_hash)
        VALUES ($1::bigint, $2)

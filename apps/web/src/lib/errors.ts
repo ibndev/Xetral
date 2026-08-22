@@ -20,6 +20,11 @@ export function messageFor(error: unknown): string {
       return 'Your PIN is locked after too many attempts. Try again in 15 minutes.';
     case 'pin_not_set':
       return 'Set a transaction PIN before moving money.';
+    case 'weak_pin':
+      // The server's detail names the rule that was broken — six digits, not
+      // a repeated digit, not a run — and that is exactly what someone needs
+      // in order to pick another. It describes the policy, never the PIN.
+      return error.detail ?? 'That PIN is not allowed. Use six digits that are not a simple pattern.';
     case 'transaction_pin_required':
       return 'Enter your transaction PIN.';
     case 'insufficient_funds':
