@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation';
 import type { XetralClient } from '@xetral/client';
 import { AdminClient } from '@xetral/client';
 import { xetral } from '@/lib/session';
-import { messageFor } from '@/lib/errors';
+import { codeOf, messageFor } from '@/lib/errors';
+import type { ApiErrorCode } from '@xetral/client';
 
 /**
  * The client, wired to send the customer to sign-in when the session ends.
@@ -64,11 +65,21 @@ export function useLoad<T>(
 ): {
   data: T | undefined;
   error: string | undefined;
+  /**
+   * The API's code for that error, when there was one.
+   *
+   * Carried alongside the sentence because some refusals need a whole screen
+   * rather than a line of red text — `kyc_required` is one, and a hook that
+   * flattened everything to a string forced every caller to either show a
+   * dead end or re-parse the message it had just been handed.
+   */
+  code: ApiErrorCode | undefined;
   loading: boolean;
   reload: () => void;
 } {
   const [data, setData] = useState<T | undefined>();
   const [error, setError] = useState<string | undefined>();
+  const [code, setCode] = useState<ApiErrorCode | undefined>();
   const [loading, setLoading] = useState(true);
   const [nonce, setNonce] = useState(0);
   const latest = useRef(load);
@@ -78,13 +89,17 @@ export function useLoad<T>(
     let cancelled = false;
     setLoading(true);
     setError(undefined);
+    setCode(undefined);
 
     void (async () => {
       try {
         const result = await latest.current();
         if (!cancelled) setData(result);
       } catch (cause) {
-        if (!cancelled) setError(messageFor(cause));
+        if (!cancelled) {
+          setError(messageFor(cause));
+          setCode(codeOf(cause));
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -96,7 +111,7 @@ export function useLoad<T>(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nonce, ...deps]);
 
-  return { data, error, loading, reload: useCallback(() => setNonce((n) => n + 1), []) };
+  return { data, error, code, loading, reload: useCallback(() => setNonce((n) => n + 1), []) };
 }
 
 /**
@@ -109,22 +124,27 @@ export function useLoad<T>(
 export function useSubmit(): {
   busy: boolean;
   error: string | undefined;
+  /** See `useLoad` — some refusals need a screen, not a line of red text. */
+  code: ApiErrorCode | undefined;
   done: string | undefined;
   run: (action: () => Promise<string | undefined>) => Promise<void>;
   clear: () => void;
 } {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
+  const [code, setCode] = useState<ApiErrorCode | undefined>();
   const [done, setDone] = useState<string | undefined>();
 
   const run = useCallback(async (action: () => Promise<string | undefined>) => {
     setBusy(true);
     setError(undefined);
+    setCode(undefined);
     setDone(undefined);
     try {
       setDone(await action());
     } catch (cause) {
       setError(messageFor(cause));
+      setCode(codeOf(cause));
     } finally {
       setBusy(false);
     }
@@ -133,6 +153,7 @@ export function useSubmit(): {
   return {
     busy,
     error,
+    code,
     done,
     run,
     clear: useCallback(() => {

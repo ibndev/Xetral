@@ -5,6 +5,7 @@ import {
   Get,
   HttpCode,
   Inject,
+  Param,
   Post,
   Req,
   UnauthorizedException,
@@ -16,7 +17,9 @@ import { PinService } from './pin.service.js';
 import { setPinSchema } from '../wallet/dto.js';
 import type { SessionSummary, TokenPair } from './auth.service.js';
 import { LoginRateLimitGuard } from './login-rate-limit.guard.js';
-import { loginSchema, registerSchema, refreshSchema } from './dto.js';
+import { changePasswordSchema, loginSchema, registerSchema, refreshSchema } from './dto.js';
+import { AccountSecurityService } from './account-security.service.js';
+import type { DeviceView } from './account-security.service.js';
 
 /**
  * The controller path and each handler path together form the key that
@@ -30,6 +33,7 @@ export class AuthController {
   constructor(
     @Inject(AuthService) private readonly auth: AuthService,
     @Inject(PinService) private readonly pins: PinService,
+    @Inject(AccountSecurityService) private readonly security: AccountSecurityService,
   ) {}
 
   /**
@@ -147,5 +151,80 @@ export class AuthController {
     const claims = request.auth;
     if (claims === undefined) throw new Error('session reached without verified claims');
     return this.auth.describeSession(claims);
+  }
+
+  /**
+   * Every device that has held a session on this account.
+   *
+   * Deliberately readable without a PIN. This is the screen where a customer
+   * FINDS OUT they have been compromised, and putting a PIN in front of
+   * looking would mean the one control that requires noticing is behind the
+   * factor they may be about to discover has been used.
+   */
+  @Get('devices')
+  async devices(@Req() request: AuthenticatedRequest): Promise<readonly DeviceView[]> {
+    const claims = request.auth;
+    if (claims === undefined) throw new Error('devices reached without verified claims');
+    return this.security.devices(claims.sub, claims.did);
+  }
+
+  /**
+   * Signs one device out, and every session on it.
+   *
+   * Takes the PIN. The endpoint is reachable with a stolen access token, so
+   * without it a thief could evict the real owner using the session they took
+   * — turning a recovery control into an attack.
+   */
+  @Post('devices/:id/revoke')
+  @HttpCode(204)
+  async revokeDevice(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') deviceId: string,
+  ): Promise<void> {
+    const claims = request.auth;
+    if (claims === undefined) throw new Error('revokeDevice reached without verified claims');
+    await this.security.revokeDevice(claims.sub, deviceId, 'customer request');
+  }
+
+  /** Signs out everywhere except here. See the service for why not here too. */
+  @Post('devices/revoke-others')
+  async revokeOtherDevices(
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ signed_out_devices: number }> {
+    const claims = request.auth;
+    if (claims === undefined) throw new Error('revokeOthers reached without verified claims');
+    return { signed_out_devices: await this.security.revokeOtherDevices(claims.sub, claims.did) };
+  }
+
+  /**
+   * Changes the password and signs every other device out.
+   *
+   * The revocation is the point rather than a courtesy: a password change that
+   * leaves the attacker's session live changes nothing about their access —
+   * they are already past the password — while telling the customer they have
+   * fixed it, so they stop looking.
+   */
+  @Post('password')
+  async changePassword(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: unknown,
+  ): Promise<{ signed_out_devices: number }> {
+    const claims = request.auth;
+    if (claims === undefined) throw new Error('changePassword reached without verified claims');
+
+    const parsed = changePasswordSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException({
+        error: 'invalid_request',
+        fields: parsed.error.issues.map((issue) => issue.path.join('.')),
+      });
+    }
+
+    return this.security.changePassword(
+      claims.sub,
+      claims.did,
+      parsed.data.current_password,
+      parsed.data.new_password,
+    );
   }
 }

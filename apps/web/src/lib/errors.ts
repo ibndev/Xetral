@@ -1,4 +1,5 @@
 import { ApiError } from '@xetral/client';
+import type { ApiErrorCode } from '@xetral/client';
 
 /**
  * What to actually put on the screen.
@@ -20,6 +21,11 @@ export function messageFor(error: unknown): string {
       return 'Your PIN is locked after too many attempts. Try again in 15 minutes.';
     case 'pin_not_set':
       return 'Set a transaction PIN before moving money.';
+    case 'weak_pin':
+      // The server's detail names the rule that was broken — six digits, not
+      // a repeated digit, not a run — and that is exactly what someone needs
+      // in order to pick another. It describes the policy, never the PIN.
+      return error.detail ?? 'That PIN is not allowed. Use six digits that are not a simple pattern.';
     case 'transaction_pin_required':
       return 'Enter your transaction PIN.';
     case 'insufficient_funds':
@@ -31,7 +37,15 @@ export function messageFor(error: unknown): string {
     case 'rate_limited':
       return 'Too many attempts. Wait a moment and try again.';
     case 'kyc_required':
-      return 'Finish identity verification first.';
+      // The server's detail names the PRODUCT the customer was reaching for
+      // — "Identity verification is required for a USD card." A bare "finish
+      // verification first" is a dead end: it does not say why, for what, or
+      // that most of the product works without it. Screens that can should
+      // render <VerifyPrompt> instead of this string, because this one still
+      // cannot offer a way forward.
+      return error.detail ?? 'Verify your identity to use this.';
+    case 'device_not_found':
+      return 'That device is not on your account.';
     case 'account_not_active':
       return 'This account cannot make transactions right now.';
     case 'gift_cards_disabled':
@@ -49,4 +63,17 @@ export function messageFor(error: unknown): string {
     default:
       return 'Something went wrong. Please try again.';
   }
+}
+
+/**
+ * The API's code for an error, or undefined if it did not come from the API.
+ *
+ * Paired with `messageFor`: the sentence is what a customer reads, the code is
+ * what a screen branches on. Some refusals are not a line of red text —
+ * `kyc_required` wants a whole panel with a way forward — and without the code
+ * a caller would have to match on the message it was just handed, which breaks
+ * the moment anyone rewords it.
+ */
+export function codeOf(error: unknown): ApiErrorCode | undefined {
+  return error instanceof ApiError ? error.code : undefined;
 }

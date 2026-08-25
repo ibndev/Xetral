@@ -22,6 +22,7 @@ import { SettingsService } from '../settings/settings.service.js';
 import { payoutFor } from './rate-card.js';
 import type { RateCard } from './rate-card.js';
 import type { QuoteBody, SubmitGiftCardBody } from './dto.js';
+import { KycGateService } from '../kyc/kyc-gate.service.js';
 
 /**
  * Buying gift cards from customers.
@@ -96,6 +97,7 @@ export class GiftCardService {
     @Inject(LEDGER) private readonly ledger: LedgerService,
     @Inject(API_CONFIG) private readonly config: ApiConfig,
     @Inject(SettingsService) private readonly settings: SettingsService,
+    @Inject(KycGateService) private readonly kycGate: KycGateService,
   ) {}
 
   /**
@@ -131,6 +133,14 @@ export class GiftCardService {
   async submit(userUuid: string, body: SubmitGiftCardBody): Promise<GiftCardView> {
     await this.#assertEnabled();
     const userId = await this.#activeUserId(userUuid);
+
+    // Of everything gated on identity this is the one where an anonymous
+    // counterparty IS the fraud model: we pay out cash against a bearer
+    // instrument whose value cannot be verified at the moment we pay, and the
+    // only recourse after a clawback window closes is knowing who was paid.
+    // This gate was missing — a customer with no verified identity could sell
+    // us gift cards and be paid for them.
+    await this.kycGate.assertVerified(userId, 'giftcard');
 
     const existing = await this.#byKey(userId, body.idempotency_key);
     if (existing !== undefined) return this.#toView(existing);

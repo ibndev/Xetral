@@ -68,6 +68,18 @@ async function onboard(instance: INestApplication = app): Promise<Customer> {
     await hashPassword(PASSWORD),
   ]);
 
+  // Gift card trading is gated on a verified identity, and the mapping a
+  // reviewer's approval creates is what the gate reads. Seeded here as
+  // onboarding would, exactly as the card suite does — the service refuses to
+  // create it silently, because registering somebody with a provider means
+  // sending identity documents and that is not a side effect of selling a
+  // gift card.
+  await pool.query(
+    `INSERT INTO provider_customers (user_id, provider, provider_customer_id)
+     VALUES ($1, 'bitnob', $2)`,
+    [row.id, `cus_${randomUUID()}`],
+  );
+
   const login = await request(instance.getHttpServer())
     .post('/v1/auth/login')
     .send({
@@ -270,6 +282,67 @@ describe('submitting', () => {
     );
     expect(stored.rows[0]?.card_sealed).toMatch(/^v1:/);
     expect(stored.rows[0]?.card_sealed).not.toContain('AMZN');
+  });
+
+  it('refuses a customer who has not verified their identity', async () => {
+    // The gate that made this suite fail when it was added, and the reason it
+    // exists: of everything gated on identity, gift cards are the one flow
+    // where an anonymous counterparty IS the fraud model — we pay out cash
+    // against a bearer instrument whose value cannot be checked at the moment
+    // we pay, and after the clawback window the only recourse is knowing who
+    // was paid.
+    //
+    // Asserted with a customer built WITHOUT the provider mapping, because
+    // `onboard` now seeds it: without this test the gate could be deleted and
+    // every other block here would stay green.
+    const identifier = `gc-unverified-${randomUUID()}@example.ng`;
+    const inserted = await pool.query<{ id: string }>(
+      `INSERT INTO users (email, status) VALUES ($1, 'active') RETURNING id`,
+      [identifier],
+    );
+    const userId = inserted.rows[0]?.id;
+    if (userId === undefined) throw new Error('failed to seed user');
+
+    await pool.query(`INSERT INTO user_credentials (user_id, password_hash) VALUES ($1, $2)`, [
+      userId,
+      await hashPassword(PASSWORD),
+    ]);
+
+    const login = await request(app.getHttpServer())
+      .post('/v1/auth/login')
+      .send({
+        identifier,
+        password: PASSWORD,
+        device: { fingerprint: `fp-${randomUUID()}`, platform: 'ios' },
+      })
+      .expect(200);
+    const token = login.body.access_token as string;
+
+    await request(app.getHttpServer())
+      .post('/v1/auth/pin')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ pin: PIN })
+      .expect(204);
+
+    const refused = await request(app.getHttpServer())
+      .post('/v1/giftcards')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        brand: 'amazon',
+        country: 'US',
+        card_type: 'ecode',
+        face_amount: '50.00',
+        face_currency: 'USD',
+        card_code: CARD_CODE,
+        transaction_pin: PIN,
+        idempotency_key: randomUUID(),
+      })
+      .expect(409);
+
+    expect(refused.body.error).toBe('kyc_required');
+    // Names what they were reaching for, so the screen can say "verify your
+    // identity for gift card trading" rather than a bare code.
+    expect(refused.body.product).toBe('giftcard');
   });
 
   it('needs a transaction PIN', async () => {

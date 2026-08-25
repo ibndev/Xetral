@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { resetXetral, xetral } from '@/lib/session';
+import { Logo } from '@/ui/logo';
 
 const TABS = [
   { href: '/admin', label: 'Overview' },
@@ -27,11 +28,23 @@ export function AdminNav() {
 
   return (
     <>
-      <nav className="nav">
-        <strong>Xetral operations</strong>
+      {/*
+        `.appbar`, the same header the customer app uses. This was `.nav` with
+        a `.spacer` — two class names that exist in no stylesheet, so the
+        operations header had been rendering as bare inline text with the
+        brand, the wallet link and the sign-out button touching each other.
+        It looked deliberate enough in a diff to survive a migration.
+      */}
+      <nav className="appbar">
+        <Link href="/admin" className="admin-brand" aria-label="Xetral operations">
+          <Logo size={22} />
+          <span className="admin-brand-suffix">operations</span>
+        </Link>
         <span className="spacer" />
-        <Link href="/wallet">My wallet</Link>
-        <button className="ghost small" onClick={signOut}>
+        <Link href="/wallet" className="btn ghost small">
+          My wallet
+        </Link>
+        <button className="btn ghost small" onClick={signOut}>
           Sign out
         </button>
       </nav>

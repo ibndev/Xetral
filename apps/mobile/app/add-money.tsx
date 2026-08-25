@@ -4,9 +4,10 @@ import { router } from 'expo-router';
 import type { VirtualAccount } from '@xetral/client';
 import { xetral } from '@/session';
 import { messageFor } from '@/errors';
-import { styles } from '@/theme';
+import { useStyles } from '@/theme';
 
 export default function AddMoney() {
+  const styles = useStyles();
   const [account, setAccount] = useState<VirtualAccount | undefined>();
   const [error, setError] = useState<string | undefined>();
   const [loading, setLoading] = useState(true);
@@ -26,7 +27,7 @@ export default function AddMoney() {
 
   return (
     <View style={styles.screen}>
-      <View style={styles.panel}>
+      <View style={styles.card}>
         <Text style={styles.h1}>Add money</Text>
         <Text style={styles.h2}>Transfer from any Nigerian bank</Text>
 

@@ -4,7 +4,7 @@ import { router } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { resetXetral, xetral } from '@/session';
 import { messageFor } from '@/errors';
-import { styles } from '@/theme';
+import { useStyles } from '@/theme';
 
 /** A per-install identifier the server binds sessions to. Kept in the Keychain
  *  with everything else so it survives an app update but not a reinstall. */
@@ -19,6 +19,7 @@ async function deviceFingerprint(): Promise<string> {
 }
 
 export default function SignIn() {
+  const styles = useStyles();
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | undefined>();
@@ -43,7 +44,7 @@ export default function SignIn() {
 
   return (
     <View style={styles.screen}>
-      <View style={styles.panel}>
+      <View style={styles.card}>
         <Text style={styles.h1}>Welcome back</Text>
         <Text style={styles.h2}>Sign in to your wallet</Text>
 

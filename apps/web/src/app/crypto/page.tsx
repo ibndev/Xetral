@@ -3,8 +3,10 @@
 import { useState } from 'react';
 import { formatAmount } from '@xetral/client';
 import type { CryptoAddress, CryptoQuote } from '@xetral/client';
-import { Nav } from '@/lib/nav';
+import { Shell } from '@/ui/shell';
+import { Icon } from '@/ui/icon';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/lib/hooks';
+import { VerifyPrompt } from '@/ui/verify-prompt';
 
 /**
  * Deposits and withdrawals on chain.
@@ -25,13 +27,23 @@ export default function Crypto() {
   const client = useXetral();
   const withdrawals = useLoad(() => client.withdrawals(), [client]);
 
+  // The address request is what trips the identity gate first, so its refusal
+  // is the one that decides whether this whole screen is usable. Shown as an
+  // invitation at the top rather than as red text buried in one panel.
+  if (withdrawals.code === 'kyc_required') {
+    return (
+      <Shell>
+        <VerifyPrompt what="crypto" detail={withdrawals.error} />
+      </Shell>
+    );
+  }
+
   return (
-    <main className="shell">
-      <Nav />
+    <Shell>
       <Receive />
       <Send onSent={withdrawals.reload} />
 
-      <div className="panel">
+      <div className="card">
         <h2>Withdrawals</h2>
         {withdrawals.loading && <p className="spinner">Loading…</p>}
         {withdrawals.data !== undefined && withdrawals.data.length === 0 && (
@@ -62,7 +74,7 @@ export default function Crypto() {
           </div>
         ))}
       </div>
-    </main>
+    </Shell>
   );
 }
 
@@ -74,7 +86,7 @@ function Receive() {
   const selected = ASSETS[choice];
 
   return (
-    <div className="panel">
+    <div className="card">
       <h1>Receive</h1>
       <h2>An address of your own, for one asset on one network</h2>
 
@@ -152,7 +164,7 @@ function Send({ onSent }: { onSent: () => void }) {
 
   return (
     <form
-      className="panel"
+      className="card"
       onSubmit={(event) => {
         event.preventDefault();
         void run(async () => {

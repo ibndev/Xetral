@@ -646,6 +646,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/007_crypto.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/008_fx.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/009_admin.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/009_admin.seed.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/010_card_protection.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/003_cards.test.sql
@@ -655,6 +656,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/006_funding.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/007_crypto.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/008_fx.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/009_admin.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/010_card_protection.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,
 # Redis for the rate-limiter contract.

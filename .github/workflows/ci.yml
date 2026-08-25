@@ -90,7 +90,8 @@ jobs:
           # defaults -- that a 15% fee is refused by the CHECK, that a change
           # is written to history. There is nothing to refuse without rows.
           psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
-            -f packages/ledger/sql/009_admin.seed.sql
+            -f packages/ledger/sql/009_admin.seed.sql \
+            -f packages/ledger/sql/010_card_protection.sql
 
       - name: Ledger and identity invariants
         run: |
@@ -108,7 +109,8 @@ jobs:
                    packages/ledger/sql/006_funding.test.sql \
                    packages/ledger/sql/007_crypto.test.sql \
                    packages/ledger/sql/008_fx.test.sql \
-                   packages/ledger/sql/009_admin.test.sql; do
+                   packages/ledger/sql/009_admin.test.sql \
+                   packages/ledger/sql/010_card_protection.test.sql; do
             echo "== $f"
             psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
               -f "$f" 2>&1 | tee "/tmp/$(basename "$f").out"
@@ -151,7 +153,8 @@ jobs:
           # fee, the ceilings and the daily limits all fall back to defaults
           # the tests do not set and production would not use.
           psql -h localhost -U xetral -d xetral -v ON_ERROR_STOP=1 \
-            -f packages/ledger/sql/009_admin.seed.sql
+            -f packages/ledger/sql/009_admin.seed.sql \
+            -f packages/ledger/sql/010_card_protection.sql
 
       - run: npm run typecheck
 

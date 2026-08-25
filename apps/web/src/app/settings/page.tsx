@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { Nav } from '@/lib/nav';
+import { Shell } from '@/ui/shell';
+import { Icon } from '@/ui/icon';
 import { useLoad, useSubmit, useXetral } from '@/lib/hooks';
 
 /**
@@ -20,10 +21,9 @@ export default function Settings() {
   const kyc = useLoad(() => client.kyc(), [client]);
 
   return (
-    <main className="shell">
-      <Nav />
+    <Shell>
 
-      <div className="panel">
+      <div className="card">
         <h1>Your account</h1>
         <h2>Session and verification</h2>
 
@@ -66,7 +66,7 @@ export default function Settings() {
       </div>
 
       <SetPin />
-    </main>
+    </Shell>
   );
 }
 
@@ -80,7 +80,7 @@ function SetPin() {
 
   return (
     <form
-      className="panel"
+      className="card"
       onSubmit={(event) => {
         event.preventDefault();
         if (pin !== confirm) {

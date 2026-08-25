@@ -4,9 +4,10 @@ import { router } from 'expo-router';
 import { exponentFor, formatAmount, isValidAmount } from '@xetral/client';
 import { xetral } from '@/session';
 import { messageFor } from '@/errors';
-import { styles } from '@/theme';
+import { useStyles } from '@/theme';
 
 export default function Transfer() {
+  const styles = useStyles();
   const [recipient, setRecipient] = useState('');
   const [amount, setAmount] = useState('');
   const [pin, setPin] = useState('');
@@ -55,7 +56,7 @@ export default function Transfer() {
 
   return (
     <View style={styles.screen}>
-      <View style={styles.panel}>
+      <View style={styles.card}>
         <Text style={styles.h1}>Send money</Text>
         <Text style={styles.h2}>To another Xetral account</Text>
 

@@ -3,8 +3,10 @@
 import { useState } from 'react';
 import { formatAmount } from '@xetral/client';
 import type { Card } from '@xetral/client';
-import { Nav } from '@/lib/nav';
+import { Shell } from '@/ui/shell';
+import { Icon } from '@/ui/icon';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/lib/hooks';
+import { VerifyPrompt } from '@/ui/verify-prompt';
 
 /**
  * Virtual USD cards.
@@ -16,18 +18,22 @@ import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/lib/hooks';
  */
 export default function Cards() {
   const client = useXetral();
-  const { data, loading, error, reload } = useLoad(() => client.cards(), [client]);
+  const { data, loading, error, code, reload } = useLoad(() => client.cards(), [client]);
 
   return (
-    <main className="shell">
-      <Nav />
+    <Shell>
 
-      <div className="panel">
+      <div className="card">
         <h1>Cards</h1>
         <h2>Virtual dollar cards, funded from your wallet</h2>
 
         {loading && <p className="spinner">Loading…</p>}
-        {error !== undefined && <p className="error">{error}</p>}
+        {error !== undefined &&
+          (code === 'kyc_required' ? (
+            <VerifyPrompt what="a USD card" detail={error} />
+          ) : (
+            <p className="error">{error}</p>
+          ))}
 
         {data !== undefined && data.length === 0 && (
           <p className="empty">No cards yet.</p>
@@ -39,7 +45,7 @@ export default function Cards() {
       </div>
 
       <Issue onIssued={reload} />
-    </main>
+    </Shell>
   );
 }
 
@@ -55,7 +61,7 @@ function CardRow({ card, onChange }: { card: Card; onChange: () => void }) {
     card.status === 'active' ? 'ok' : card.status === 'frozen' ? 'warn' : 'danger';
 
   return (
-    <div className="panel" style={{ background: 'var(--panel-2)' }}>
+    <div className="card" style={{ background: 'var(--surface-2)' }}>
       <div className="balance">
         <div>
           <div className="amount">{formatAmount(card.balance, card.currency)}</div>
@@ -183,7 +189,7 @@ function Issue({ onIssued }: { onIssued: () => void }) {
 
   return (
     <form
-      className="panel"
+      className="card"
       onSubmit={(event) => {
         event.preventDefault();
         void run(async () => {

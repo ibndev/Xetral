@@ -5,7 +5,7 @@ import { xetral } from '@/session';
 import { messageFor } from '@/errors';
 import { biometricName, biometricSupport, enrol, forget, isEnrolled } from '@/biometrics';
 import type { BiometricSupport } from '@/biometrics';
-import { colors, styles } from '@/theme';
+import { useStyles, useTheme } from '@/theme';
 
 /**
  * Turning biometric unlock on and off.
@@ -16,6 +16,8 @@ import { colors, styles } from '@/theme';
  * locking the customer out of their own money.
  */
 export default function Security() {
+  const styles = useStyles();
+  const colors = useTheme();
   const [support, setSupport] = useState<BiometricSupport | undefined>();
   const [enrolled, setEnrolled] = useState(false);
   const [pin, setPin] = useState('');
@@ -58,7 +60,7 @@ export default function Security() {
 
   return (
     <View style={styles.screen}>
-      <View style={styles.panel}>
+      <View style={styles.card}>
         <Text style={styles.h1}>Security</Text>
         <Text style={styles.h2}>How you approve payments</Text>
 

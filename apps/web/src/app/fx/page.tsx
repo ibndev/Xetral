@@ -3,7 +3,8 @@
 import { useState } from 'react';
 import { formatAmount } from '@xetral/client';
 import type { FxQuote } from '@xetral/client';
-import { Nav } from '@/lib/nav';
+import { Shell } from '@/ui/shell';
+import { Icon } from '@/ui/icon';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/lib/hooks';
 
 const CURRENCIES = ['NGN', 'USD', 'USDT'] as const;
@@ -30,11 +31,10 @@ export default function Fx() {
   const trades = useLoad(() => client.fxTrades(), [client]);
 
   return (
-    <main className="shell">
-      <Nav />
+    <Shell>
 
       <form
-        className="panel"
+        className="card"
         onSubmit={(event) => {
           event.preventDefault();
           void run(async () => {
@@ -173,7 +173,7 @@ export default function Fx() {
         {done !== undefined && <p className="ok">{done}</p>}
       </form>
 
-      <div className="panel">
+      <div className="card">
         <h2>Past conversions</h2>
         {trades.loading && <p className="spinner">Loading…</p>}
         {trades.data !== undefined && trades.data.length === 0 && (
@@ -193,6 +193,6 @@ export default function Fx() {
           </div>
         ))}
       </div>
-    </main>
+    </Shell>
   );
 }

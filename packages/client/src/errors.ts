@@ -39,6 +39,7 @@ const API_ERROR_CODES = [
   'invalid_pin',
   'pin_locked',
   'pin_not_set',
+  'weak_pin',
   'transaction_pin_required',
   'current_pin_required',
 
@@ -46,8 +47,8 @@ const API_ERROR_CODES = [
   'account_not_active',
   'account_closed',
   'kyc_required',
+  'device_not_found',
   'below_minimum_age',
-  'provider_customer_not_registered',
   'forbidden',
 
   /* money */
@@ -158,6 +159,7 @@ const USER_FIXABLE: ReadonlySet<ApiErrorCode> = new Set<ApiErrorCode>([
   'invalid_request',
   'invalid_credentials',
   'weak_password',
+  'weak_pin',
   'email_taken',
   'cannot_transfer_to_self',
   'recipient_is_sender',

@@ -175,6 +175,48 @@ describe('opening an account', () => {
   });
 });
 
+describe('setting a transaction PIN', () => {
+  /*
+   * EVERY suite before this one used a valid PIN, so nothing ever reached the
+   * policy's failing branch — and it turned out to escape as an unhandled
+   * error, giving a bare 500 on the one step a customer must complete before
+   * they can move any money. Found by typing a wrong-length PIN by hand.
+   */
+  const REJECTED: readonly [string, string][] = [
+    ['12345', 'five digits'],
+    ['1234567', 'seven digits'],
+    ['111111', 'the same digit repeated'],
+    ['123456', 'a run of consecutive digits'],
+  ];
+
+  for (const [pin, why] of REJECTED) {
+    it(`refuses ${why} with a reason, not a 500`, async () => {
+      const person = await register();
+
+      const res = await request(app.getHttpServer())
+        .post('/v1/auth/pin')
+        .set('Authorization', `Bearer ${person.token}`)
+        .send({ pin, current_pin: PIN });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('weak_pin');
+      // The detail names the RULE, which is what lets somebody pick another
+      // PIN. It must never quote the PIN back.
+      expect(typeof res.body.detail).toBe('string');
+      expect(JSON.stringify(res.body)).not.toContain(pin);
+    });
+  }
+
+  it('accepts a PIN that satisfies the policy', async () => {
+    const person = await register();
+    await request(app.getHttpServer())
+      .post('/v1/auth/pin')
+      .set('Authorization', `Bearer ${person.token}`)
+      .send({ pin: '571394', current_pin: PIN })
+      .expect(204);
+  });
+});
+
 describe('liveness and readiness', () => {
   it('answers liveness without touching anything', async () => {
     const res = await request(app.getHttpServer()).get('/health').expect(200);

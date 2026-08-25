@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react';
 import { formatAmount } from '@xetral/client';
 import type { CatalogueItem, Purchase } from '@xetral/client';
-import { Nav } from '@/lib/nav';
+import { Shell } from '@/ui/shell';
+import { Icon } from '@/ui/icon';
 import { messageFor } from '@/lib/errors';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/lib/hooks';
 
@@ -32,8 +33,7 @@ export default function Bills() {
   const history = useLoad(() => client.purchases(), [client]);
 
   return (
-    <main className="shell">
-      <Nav />
+    <Shell>
 
       <div className="tabs">
         {SERVICES.map((s) => (
@@ -53,7 +53,7 @@ export default function Bills() {
 
       <Buy service={service} onBought={history.reload} />
 
-      <div className="panel">
+      <div className="card">
         <h2>Recent purchases</h2>
         {history.loading && <p className="spinner">Loading…</p>}
         {history.data !== undefined && history.data.length === 0 && (
@@ -63,7 +63,7 @@ export default function Bills() {
           <PurchaseRow key={purchase.id} purchase={purchase} />
         ))}
       </div>
-    </main>
+    </Shell>
   );
 }
 
@@ -115,7 +115,7 @@ function Buy({ service, onBought }: { service: ServiceCode; onBought: () => void
 
   return (
     <form
-      className="panel"
+      className="card"
       onSubmit={(event) => {
         event.preventDefault();
         void run(async () => {

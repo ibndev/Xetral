@@ -5,7 +5,8 @@ import { useCallback, useEffect, useState } from 'react';
 import type { VirtualAccount } from '@xetral/client';
 import { xetral } from '@/lib/session';
 import { messageFor } from '@/lib/errors';
-import { Nav } from '@/lib/nav';
+import { Shell } from '@/ui/shell';
+import { Icon } from '@/ui/icon';
 
 export default function AddMoney() {
   const router = useRouter();
@@ -32,10 +33,9 @@ export default function AddMoney() {
   }, [signedOut]);
 
   return (
-    <main className="shell">
-      <Nav />
+    <Shell>
 
-      <div className="panel">
+      <div className="card">
         <h1>Add money</h1>
         <h2>Transfer from any Nigerian bank</h2>
 
@@ -66,6 +66,6 @@ export default function AddMoney() {
 
         {error !== undefined && <p className="error">{error}</p>}
       </div>
-    </main>
+    </Shell>
   );
 }
