@@ -25,6 +25,7 @@ import { CardWebhookService } from './cards/webhook.service.js';
 import { CardProtectionService } from './cards/card-protection.service.js';
 import { AffordabilityService } from './wallet/affordability.service.js';
 import { KycGateService } from './kyc/kyc-gate.service.js';
+import { AccountSecurityService } from './auth/account-security.service.js';
 import { PurchaseController } from './purchases/purchase.controller.js';
 import { PurchaseService } from './purchases/purchase.service.js';
 import { PurchaseOutcome } from './purchases/purchase-outcome.js';
@@ -62,7 +63,11 @@ import { CryptoReconciliationService } from './crypto/crypto-reconciliation.serv
 import { FxController } from './fx/fx.controller.js';
 import { FxService } from './fx/fx.service.js';
 import { LoginRateLimitGuard } from './auth/login-rate-limit.guard.js';
-import { InMemoryRateLimitStore, RedisRateLimitStore } from './auth/rate-limit.js';
+import {
+  InMemoryRateLimitStore,
+  RedisRateLimitStore,
+  ResilientRateLimitStore,
+} from './auth/rate-limit.js';
 import type { RateLimitStore } from './auth/rate-limit.js';
 import { buildRoutePolicy } from './auth/routes.js';
 import { createPool } from './database.js';
@@ -322,7 +327,25 @@ export function createRateLimitStore(config: ApiConfig): RateLimitStore {
   }
 
   logger.log('login rate limiting is shared through Redis');
-  return new RedisRateLimitStore(new Redis(config.redisUrl));
+
+  // Wrapped, so a Redis outage degrades to per-instance counting instead of
+  // answering 500 to every login. Without the wrapper the limiter throws and
+  // takes the request with it: a cache being down locks every customer out of
+  // their own money, and knocking over one Redis becomes a denial of service
+  // against authentication itself. See ResilientRateLimitStore.
+  //
+  // `maxRetriesPerRequest` is left at ioredis's default rather than raised:
+  // the point is to fail fast to the fallback, not to hold a login open while
+  // a dead connection is retried twenty times.
+  const redis = new Redis(config.redisUrl);
+
+  // ioredis emits `error` on every failed reconnect. Unhandled, those become
+  // unhandled 'error' events on an EventEmitter, which crashes the process —
+  // so an outage would take the instance down before the fallback could do
+  // anything about it.
+  redis.on('error', () => undefined);
+
+  return new ResilientRateLimitStore(new RedisRateLimitStore(redis));
 }
 
 /**
@@ -337,7 +360,11 @@ export class RateLimitLifecycle implements OnApplicationShutdown {
   constructor(@Inject(RATE_LIMIT_STORE) private readonly store: RateLimitStore) {}
 
   async onApplicationShutdown(): Promise<void> {
-    if (this.store instanceof RedisRateLimitStore) await this.store.close();
+    // Unwrapped: the resilient store holds the Redis one, and closing has to
+    // reach through to the connection or the process hangs on shutdown
+    // waiting for a socket nobody owns any more.
+    const inner = this.store instanceof ResilientRateLimitStore ? this.store.primary : this.store;
+    if (inner instanceof RedisRateLimitStore) await inner.close();
   }
 }
 
@@ -469,6 +496,7 @@ export class AppModule {
         CardProtectionService,
         AffordabilityService,
         KycGateService,
+        AccountSecurityService,
         PurchaseService,
         PurchaseOutcome,
         StaffService,

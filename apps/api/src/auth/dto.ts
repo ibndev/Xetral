@@ -47,3 +47,20 @@ export const refreshSchema = z.object({
 export type LoginRequest = z.infer<typeof loginSchema>;
 export type RegisterRequest = z.infer<typeof registerSchema>;
 export type RefreshRequest = z.infer<typeof refreshSchema>;
+
+/**
+ * Changing a password.
+ *
+ * The current one is required even though the caller is already
+ * authenticated: this endpoint is reachable with a stolen access token, and
+ * without it a thief could lock the real owner out using the session they
+ * took. `max(512)` rather than the policy's maximum because the policy is
+ * enforced in one place — @xetral/identity — and a second, looser copy here
+ * is how the two drift.
+ */
+export const changePasswordSchema = z.object({
+  current_password: z.string().min(1).max(512),
+  new_password: z.string().min(1).max(512),
+});
+
+export type ChangePasswordRequest = z.infer<typeof changePasswordSchema>;

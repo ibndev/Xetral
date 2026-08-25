@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 /**
  * Rate limiting for the login path.
  *
@@ -209,5 +210,91 @@ export class RedisRateLimitStore implements RateLimitStore {
 
   async close(): Promise<void> {
     await this.#redis.quit();
+  }
+}
+
+/**
+ * A Redis store that falls back to counting in this process when Redis is
+ * unreachable.
+ *
+ * WHY THIS EXISTS. Without it, a Redis outage answers 500 to every login and
+ * every registration, because the limiter throws and the request dies with
+ * it. That is not a rate limiter failing safe — it is the whole platform
+ * failing: every customer locked out of their own money for as long as a cache
+ * is down, and a denial of service against one Redis is a denial of service
+ * against authentication. Found by stopping Redis and curling the login
+ * endpoint, which is the only way it shows: it typechecks, and every test
+ * either has a Redis or has none.
+ *
+ * The choice on a Redis error is between three things, and only one of them
+ * is defensible:
+ *
+ *   Fail closed   Nobody logs in. An attacker who can knock over a cache can
+ *                 take the platform off the air; a routine failover does the
+ *                 same by accident.
+ *   Fail open     Everybody logs in, unlimited. A brute-force window that
+ *                 opens exactly when nobody is watching the graphs.
+ *   Fall back     Keep counting, in this process. The limit becomes
+ *                 per-instance rather than global — weaker by the number of
+ *                 instances, and still a limit.
+ *
+ * The third is strictly better than either: a customer can still sign in, and
+ * an attacker still hits a ceiling. The cost is that with N instances the
+ * effective limit is N times the configured one FOR THE DURATION OF THE
+ * OUTAGE, which is the same limitation the in-memory store has always
+ * carried and is why the fallback is loud.
+ */
+export class ResilientRateLimitStore implements RateLimitStore {
+  readonly #logger = new Logger(ResilientRateLimitStore.name);
+  readonly #primary: RateLimitStore;
+  readonly #fallback: RateLimitStore;
+  #degradedSince: number | undefined;
+
+  constructor(primary: RateLimitStore, fallback: RateLimitStore = new InMemoryRateLimitStore()) {
+    this.#primary = primary;
+    this.#fallback = fallback;
+  }
+
+  async hit(
+    key: string,
+    max: number,
+    windowSeconds: number,
+    nowMs: number,
+  ): Promise<RateLimitDecision> {
+    try {
+      const decision = await this.#primary.hit(key, max, windowSeconds, nowMs);
+      if (this.#degradedSince !== undefined) {
+        this.#logger.log(
+          `rate limiting is back on Redis after ${Math.round(
+            (nowMs - this.#degradedSince) / 1000,
+          )}s degraded`,
+        );
+        this.#degradedSince = undefined;
+      }
+      return decision;
+    } catch (error) {
+      // Logged once per outage, not once per request. A Redis outage means
+      // every login logs, and a million identical lines is how the one line
+      // that matters gets lost.
+      if (this.#degradedSince === undefined) {
+        this.#degradedSince = nowMs;
+        this.#logger.error(
+          `Redis is unreachable; rate limiting has DEGRADED to per-instance counting. ` +
+            `The effective limit is now multiplied by the number of running instances. ` +
+            `Reason: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      return this.#fallback.hit(key, max, windowSeconds, nowMs);
+    }
+  }
+
+  /** True while Redis is unreachable. Read by the readiness probe. */
+  get degraded(): boolean {
+    return this.#degradedSince !== undefined;
+  }
+
+  /** The wrapped store, so shutdown can reach the Redis connection. */
+  get primary(): RateLimitStore {
+    return this.#primary;
   }
 }

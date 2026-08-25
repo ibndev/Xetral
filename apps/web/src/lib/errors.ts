@@ -44,6 +44,8 @@ export function messageFor(error: unknown): string {
       // render <VerifyPrompt> instead of this string, because this one still
       // cannot offer a way forward.
       return error.detail ?? 'Verify your identity to use this.';
+    case 'device_not_found':
+      return 'That device is not on your account.';
     case 'account_not_active':
       return 'This account cannot make transactions right now.';
     case 'gift_cards_disabled':

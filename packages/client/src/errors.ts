@@ -47,6 +47,7 @@ const API_ERROR_CODES = [
   'account_not_active',
   'account_closed',
   'kyc_required',
+  'device_not_found',
   'below_minimum_age',
   'forbidden',
 

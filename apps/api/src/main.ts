@@ -1,6 +1,7 @@
 import 'reflect-metadata';
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import type { ServerResponse } from 'node:http';
 import { ExpressAdapter } from '@nestjs/platform-express';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module.js';
@@ -26,11 +27,52 @@ async function bootstrap(): Promise<void> {
     { rawBody: true },
   );
 
+  // A CEILING ON REQUEST BODIES.
+  //
+  // Express defaults to 100kb, which is already sane, but `rawBody: true`
+  // means every request is buffered in full before any handler sees it — so
+  // the limit is what stands between one process and a stream of 50MB bodies
+  // from an unauthenticated caller. Nothing this API accepts is close to
+  // 64kb: the largest is a KYC submission, which is a handful of text fields.
+  //
+  // Set explicitly rather than left to the default, because the default is a
+  // property of a dependency and this is a decision about the service.
+  app.useBodyParser('json', { limit: '64kb' });
+  app.useBodyParser('urlencoded', { limit: '64kb', extended: false });
+
   // Without this, req.ip is the proxy's address and per-IP rate limiting
   // throttles every customer through one bucket. With it set too high, a client
   // can forge X-Forwarded-For and dodge the limit entirely — which is why the
   // hop count is configuration rather than a blanket `true`.
   app.set('trust proxy', config.trustProxyHops);
+
+  /*
+   * Response headers, on every answer this API gives.
+   *
+   * The web app sets its own in middleware.ts, with a per-request CSP nonce.
+   * These are the API's, and it needs its own set because it is a separate
+   * origin that a browser can be pointed at directly — an error page or a
+   * JSON body rendered as HTML is the whole of an XSS on this host.
+   *
+   * `X-Powered-By` goes because announcing the framework and version to
+   * everyone is free reconnaissance for whoever is scanning for the next
+   * Express advisory.
+   */
+  app.disable('x-powered-by');
+  app.use((_request: unknown, response: ServerResponse, next: () => void) => {
+    // Never let a browser guess that a JSON body is HTML.
+    response.setHeader('X-Content-Type-Options', 'nosniff');
+    // This API renders nothing and should never be in a frame.
+    response.setHeader('X-Frame-Options', 'DENY');
+    response.setHeader('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'");
+    // Referrers leak account and transaction ids in paths to whatever a
+    // customer navigates to next.
+    response.setHeader('Referrer-Policy', 'no-referrer');
+    // Every response here is about one customer's money. A shared cache
+    // holding one is a shared cache serving it to somebody else.
+    response.setHeader('Cache-Control', 'no-store');
+    next();
+  });
 
   // Without this Nest never calls onApplicationShutdown, and the Redis
   // connection is left for the runtime to tear down on SIGTERM.

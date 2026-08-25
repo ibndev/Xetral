@@ -58,6 +58,18 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // this is not a cheaper place to guess than a transfer is.
       .authenticated('POST', '/v1/auth/pin/verify', { pin: true })
 
+      // Account recovery, for a customer who thinks somebody else is in their
+      // account. Reading the device list takes NO pin: this is where they find
+      // out, and putting a PIN in front of looking would hide the discovery
+      // behind the factor they may be about to learn has been used.
+      .authenticated('GET', '/v1/auth/devices', { pin: false })
+      // Acting on it does. All three are reachable with a stolen access token,
+      // so without the PIN a thief could evict the real owner with the session
+      // they took — turning a recovery control into an attack.
+      .authenticated('POST', '/v1/auth/devices/:id/revoke', { pin: true })
+      .authenticated('POST', '/v1/auth/devices/revoke-others', { pin: true })
+      .authenticated('POST', '/v1/auth/password', { pin: true })
+
       .authenticated('GET', '/v1/wallets', { pin: false })
       .authenticated('GET', '/v1/wallets/transactions', { pin: false })
       // The first route in the platform to declare pin: true, and the reason
