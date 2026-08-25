@@ -24,7 +24,17 @@ for f in packages/ledger/sql/001_ledger.sql \
          packages/ledger/sql/007_crypto.sql \
          packages/ledger/sql/008_fx.sql \
          packages/ledger/sql/009_admin.sql \
-         packages/ledger/sql/009_admin.seed.sql; do
+         packages/ledger/sql/009_admin.seed.sql \
+         packages/ledger/sql/010_card_protection.sql \
+         packages/ledger/sql/011_ledger_immutability.sql \
+         packages/identity/sql/012_notifications.sql \
+         packages/identity/sql/013_password_reset.sql \
+         packages/identity/sql/014_staff_totp.sql \
+         packages/ledger/sql/015_error_events.sql \
+         packages/ledger/sql/016_card_reveals.sql \
+         packages/ledger/sql/017_transfer_velocity.sql \
+         packages/ledger/sql/018_disputes.sql \
+         packages/ledger/sql/019_retention.sql; do
   psql -d xetral -v ON_ERROR_STOP=1 -f "$f"
 done
 ```
@@ -121,3 +131,103 @@ npx expo run:android    # phone plugged in, USB debugging on
    into. That is the whole design — biometrics unlock the PIN, they do not
    replace it.
 5. Sign out, then check the Security screen again. The stored PIN is gone.
+
+---
+
+# Installing a built APK on an Android phone
+
+For testing the app on a phone with no laptop attached to it. The APK is built
+by the **Android APK** workflow in GitHub Actions, because building one needs
+the Android SDK and the SDK is only distributed from `dl.google.com` — a host
+many sandboxed environments cannot reach at all. A GitHub runner has the whole
+toolchain already.
+
+## 1. Give the phone something to talk to
+
+Do this first. It is the step that decides whether the APK is worth building,
+because **the API address is compiled into the bundle** and cannot be changed
+afterwards — `EXPO_PUBLIC_API_URL` is inlined by Metro at build time.
+
+The address has to be one the PHONE can reach. `localhost` inside an APK is the
+handset itself, and the workflow refuses that input rather than letting you find
+out after installing.
+
+Two ways that work:
+
+**A laptop on the same Wi-Fi.** Find its address (`ipconfig getifaddr en0` on a
+Mac, `hostname -I` on Linux) and start the API bound to every interface:
+
+```bash
+DATABASE_URL=postgres://localhost/xetral \
+REDIS_URL=redis://localhost:6379 \
+XETRAL_ENVIRONMENT=development \
+ACCESS_TOKEN_KEYS="v1:$(openssl rand -base64 32)" \
+ACCESS_TOKEN_CURRENT_VERSION=v1 \
+PORT=3100 \
+node apps/api/dist/main.js
+```
+
+There is no `HOST` to set: `app.listen(port)` binds every interface already,
+which was checked rather than assumed — the API answers on the machine's LAN
+address with nothing else configured.
+
+Then the address is `http://192.168.x.x:3100`. **Open it from the phone's
+browser before building**: `/health` should answer `{"status":"ok",...}`. If it
+does not, the problem is a firewall on the laptop or a Wi-Fi network that
+isolates clients from each other, and no APK will fix either.
+
+**A tunnel**, if the phone is on mobile data or the Wi-Fi isolates clients.
+`cloudflared tunnel --url http://localhost:3100` gives an `https://` address
+that works anywhere.
+
+> **Why the scheme matters.** Android has refused plaintext HTTP by default
+> since Android 9. A release APK built against an `http://` address would
+> install, open, render every screen — and fail every request, which looks
+> exactly like a broken app. `plugins/with-lan-cleartext.js` adds an exception
+> for the ONE host the build was made for, and for nothing else. An `https`
+> build gets no exception at all.
+
+## 2. Build it
+
+In GitHub → **Actions** → **Android APK** → **Run workflow**:
+
+| Input | What to put |
+|---|---|
+| `api_url` | the address from step 1, e.g. `http://192.168.1.20:3100` |
+| `variant` | `release` — it bundles the JavaScript and runs on its own. `debug` needs a Metro server on your machine. |
+
+It takes about ten minutes.
+
+## 3. Install it
+
+Open the finished run, download the APK from **Artifacts**, and open the file on
+the phone. Android will ask you to allow installs from your browser or files
+app; that prompt is normal for anything not from the Play Store.
+
+The APK is signed with Android's standard **debug key**, which ships in Expo's
+template. That is deliberate for a test build: the signature is identical on
+every machine and every run, so a new build installs over the old one instead of
+being refused. It is also a publicly known key, so this APK must never be what
+goes to the Play Store — a real release needs its own keystore.
+
+## What you can exercise, and what you cannot
+
+Working end to end against a local API: **register, sign in, set a transaction
+PIN, verify it, biometric enrolment** (on a device with a fingerprint or face
+enrolled — not on an emulator), **read balances, transfer between two accounts
+you create, transaction history, daily and velocity limits, disputes, KYC
+submission, the theme following the device**, and every error path.
+
+Not working without provider credentials, and refusing clearly rather than
+crashing: **cards, crypto, FX, bills and eSIMs, and NGN funding**. All of those
+call Bitnob, VTpass, Airalo or Twilio, and the routes answer with a specific
+code when the provider is unconfigured. Seeing that refusal IS the correct
+behaviour to test.
+
+**Email is silent** unless `RESEND_API_KEY` and `NOTIFICATION_FROM` are set, so
+password reset will accept the request and send nothing. That is by design — the
+endpoint answers 204 for every identifier so it cannot be used to discover who
+has an account — but it means you cannot test the reset link without a provider.
+
+To give an account money without a bank rail, post a funding entry directly
+through the ledger; `scripts/seed-demo-user.mjs` does this.

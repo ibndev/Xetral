@@ -31,3 +31,13 @@ out/
 
 # TypeScript incremental build state
 *.tsbuildinfo
+
+# Generated native projects.
+#
+# `expo prebuild` writes these from app.json, so app.json is the source of
+# truth and a committed copy is a second one that drifts. The APK workflow
+# regenerates them on every run; a change to icons, permissions or the bundle
+# identifier therefore takes effect without anybody remembering to re-run
+# prebuild by hand.
+apps/mobile/android/
+apps/mobile/ios/

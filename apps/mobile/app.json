@@ -5,7 +5,7 @@
     "scheme": "xetral",
     "version": "0.1.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "dark",
+    "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": false,
@@ -25,7 +25,8 @@
         {
           "faceIDPermission": "Xetral uses Face ID to unlock your transaction PIN."
         }
-      ]
+      ],
+      "./plugins/with-lan-cleartext"
     ],
     "extra": {
       "apiUrl": "https://api.xetral.com"
