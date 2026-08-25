@@ -98,7 +98,8 @@ jobs:
             -f packages/identity/sql/014_staff_totp.sql \
             -f packages/ledger/sql/015_error_events.sql \
             -f packages/ledger/sql/016_card_reveals.sql \
-            -f packages/ledger/sql/017_transfer_velocity.sql
+            -f packages/ledger/sql/017_transfer_velocity.sql \
+            -f packages/ledger/sql/018_disputes.sql
 
       - name: Ledger and identity invariants
         run: |
@@ -124,7 +125,8 @@ jobs:
                    packages/identity/sql/014_staff_totp.test.sql \
                    packages/ledger/sql/015_error_events.test.sql \
                    packages/ledger/sql/016_card_reveals.test.sql \
-                   packages/ledger/sql/017_transfer_velocity.test.sql; do
+                   packages/ledger/sql/017_transfer_velocity.test.sql \
+                   packages/ledger/sql/018_disputes.test.sql; do
             echo "== $f"
             psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
               -f "$f" 2>&1 | tee "/tmp/$(basename "$f").out"
@@ -175,7 +177,8 @@ jobs:
             -f packages/identity/sql/014_staff_totp.sql \
             -f packages/ledger/sql/015_error_events.sql \
             -f packages/ledger/sql/016_card_reveals.sql \
-            -f packages/ledger/sql/017_transfer_velocity.sql
+            -f packages/ledger/sql/017_transfer_velocity.sql \
+            -f packages/ledger/sql/018_disputes.sql
 
       - run: npm run typecheck
 

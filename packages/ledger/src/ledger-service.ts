@@ -433,6 +433,8 @@ function normalBalanceFor(kind: AccountRef['kind']): 'debit' | 'credit' {
       return 'credit';
     case 'provider_float':
     case 'expense_provider_cost':
+    // A dispute we upheld is money we spent, the same as a provider's bill.
+    case 'expense_dispute_loss':
     // A gift card we have bought and not yet resold is an asset we hold, the
     // same as a float balance at a provider — and separate from one because a
     // code sitting in inventory is not money at a provider, and reconciling

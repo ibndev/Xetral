@@ -213,6 +213,26 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
         role: 'giftcard_reviewer',
       })
 
+      // Disputes. NO PIN on raising or withdrawing one: a dispute moves no
+      // money, and the customer most likely to raise one has just discovered
+      // that somebody else is using their account — which is exactly when
+      // demanding the factor that person may already have is worst. The same
+      // reasoning freezes a card without a PIN and asks for one to unfreeze.
+      .authenticated('POST', '/v1/disputes', { pin: false })
+      .authenticated('GET', '/v1/disputes', { pin: false })
+      .authenticated('POST', '/v1/disputes/:id/withdraw', { pin: false })
+
+      // The reviewer's side. Its own role rather than borrowing the gift card
+      // reviewer's: a dispute is a different job with a different risk, and
+      // somebody holding both should be a staffing decision.
+      .staff('GET', '/v1/admin/disputes', { pin: false, role: 'dispute_reviewer' })
+      // Upholding one pays money out of our own account, so it takes the PIN
+      // and — through the guard — a fresh second factor.
+      .staff('POST', '/v1/admin/disputes/:id/resolve', {
+        pin: true,
+        role: 'dispute_reviewer',
+      })
+
       // Funding. Issuing an account creates one at the provider, so it is a
       // POST — but it takes no PIN: receiving money is not spending it, and a
       // customer should never be blocked from being paid.

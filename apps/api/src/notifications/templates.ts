@@ -85,6 +85,19 @@ export type NotificationRequest =
       readonly reason: 'too_many_transfers' | 'too_many_new_recipients';
     }
   /**
+   * Where a dispute stands.
+   *
+   * Three states, one template. It carries the REFERENCE and the DEADLINE and
+   * never the amount or the outcome's reasoning: an email is not a secure
+   * channel, and "we have refunded you N50,000" in an inbox is a target.
+   */
+  | {
+      readonly kind: 'dispute_update';
+      readonly state: 'raised' | 'accepted' | 'rejected';
+      readonly reference: string;
+      readonly dueAt: string;
+    }
+  /**
    * The one message not addressed to a customer.
    *
    * It goes to the operations address, and it is `security` class so it is
@@ -120,6 +133,7 @@ const CLASS_OF: Record<NotificationKind, NotificationClass> = {
   crypto_withdrawal_sent: 'transactional',
   card_frozen: 'transactional',
   transfer_blocked: 'security',
+  dispute_update: 'transactional',
   operations_alert: 'security',
 };
 
@@ -321,6 +335,31 @@ ${SECURITY_FOOTER}`,
             `If it was not, somebody else may be signed in as you — change your ` +
             `password and sign out your other devices now.</p>`,
           SECURITY_FOOTER,
+        ),
+      };
+    }
+
+    case 'dispute_update': {
+      const line =
+        request.state === 'raised'
+          ? 'We have your dispute and are looking into it.'
+          : request.state === 'accepted'
+            ? 'Your dispute was upheld. The refund is in your wallet.'
+            : 'Your dispute was not upheld. Contact support if you disagree.';
+      return {
+        subject: 'An update on your dispute',
+        text:
+          `${line}\n\nReference: ${request.reference}\n` +
+          (request.state === 'raised' ? `We will answer by: ${request.dueAt}\n` : ''),
+        html: shell(
+          'An update on your dispute',
+          h`<p style="margin:0 0 12px;">${line}</p>` +
+            `<table role="presentation" cellpadding="0" cellspacing="0" style="font-size:14px;color:#33363d;">` +
+            h`<tr><td style="padding:3px 16px 3px 0;color:#7c8089;">Reference</td><td>${request.reference}</td></tr>` +
+            (request.state === 'raised'
+              ? h`<tr><td style="padding:3px 16px 3px 0;color:#7c8089;">We will answer by</td><td>${request.dueAt}</td></tr>`
+              : '') +
+            `</table>`,
         ),
       };
     }

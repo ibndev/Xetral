@@ -162,6 +162,16 @@ const API_ERROR_CODES = [
      neither needs to be told that somebody else may be signed in as them. */
   'too_many_new_recipients',
   'too_many_transfers',
+
+  /* Disputes. `entry_not_found` is deliberately the answer BOTH when an entry
+     does not exist and when it belongs to somebody else — distinguishing them
+     would turn the complaints form into a way to discover which transactions
+     are real. */
+  'entry_not_found',
+  'dispute_not_found',
+  'dispute_already_open',
+  'dispute_not_open',
+  'dispute_window_closed',
 ] as const;
 
 export type ApiErrorCode =
@@ -212,6 +222,10 @@ const USER_FIXABLE: ReadonlySet<ApiErrorCode> = new Set<ApiErrorCode>([
   'daily_limit_exceeded',
   'too_many_new_recipients',
   'too_many_transfers',
+  /* A customer can act on both: raise it against the right entry, or open a
+     new dispute rather than a second one against the same entry. */
+  'dispute_already_open',
+  'dispute_window_closed',
   'fee_moved',
   'rate_moved',
   'totp_required',

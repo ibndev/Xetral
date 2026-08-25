@@ -12,6 +12,7 @@ const ALL_KINDS: readonly NotificationKind[] = [
   'crypto_withdrawal_sent',
   'card_frozen',
   'transfer_blocked',
+  'dispute_update',
   'operations_alert',
 ];
 
@@ -40,6 +41,8 @@ function example(kind: NotificationKind, injected: string): NotificationRequest 
     // stolen session cannot use our own alerting to confirm what it attempted.
     case 'transfer_blocked':
       return { kind, reason: 'too_many_new_recipients' };
+    case 'dispute_update':
+      return { kind, state: 'raised', reference: injected, dueAt: injected };
     case 'operations_alert':
       return {
         kind,

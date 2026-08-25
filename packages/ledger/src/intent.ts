@@ -44,6 +44,10 @@ export type EntryKind =
   | 'crypto_withdrawal'
   | 'fee'
   | 'reversal'
+  /* A dispute upheld. An APPENDED refund, never an edit of the entry disputed
+     — that entry stays a true statement about what happened whatever we later
+     decide about who should bear it. */
+  | 'dispute_refund'
   | 'adjustment';
 
 /** Mirrors `account_kind`. Customer roles carry an owner; platform roles do not. */
@@ -54,6 +58,10 @@ export type AccountRef =
   | { readonly kind: 'revenue_fees'; readonly currency: Currency }
   | { readonly kind: 'revenue_fx_spread'; readonly currency: Currency }
   | { readonly kind: 'expense_provider_cost'; readonly currency: Currency }
+  /* What upholding disputes has cost us. Its own expense account rather than
+     netted against revenue, so it is a number somebody has to look at — a
+     fraud rate nobody can see is a fraud rate nobody manages. */
+  | { readonly kind: 'expense_dispute_loss'; readonly currency: Currency }
   | { readonly kind: 'provider_float'; readonly currency: Currency }
   | { readonly kind: 'asset_giftcard_inventory'; readonly currency: Currency }
   | { readonly kind: 'liability_customer_funds'; readonly currency: Currency }

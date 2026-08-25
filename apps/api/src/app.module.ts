@@ -74,6 +74,8 @@ import { ResendNotificationAdapter } from '@xetral/providers';
 import type { NotificationPort } from '@xetral/providers';
 import { LoginRateLimitGuard, PasswordResetRateLimitGuard } from './auth/login-rate-limit.guard.js';
 import { RequestRateLimiter } from './auth/request-rate-limit.service.js';
+import { AdminDisputeController, DisputeController } from './disputes/dispute.controller.js';
+import { DisputeService } from './disputes/dispute.service.js';
 import {
   InMemoryRateLimitStore,
   RedisRateLimitStore,
@@ -543,6 +545,8 @@ export class AppModule {
         HealthController,
         KycController,
         AdminController,
+        DisputeController,
+        AdminDisputeController,
       ],
       providers: [
         { provide: API_CONFIG, useValue: options.config },
@@ -629,6 +633,7 @@ export class AppModule {
         // count against) and before the PIN (so a flood cannot spend scrypt).
         // Guard ordering cannot express "in the middle of that one".
         RequestRateLimiter,
+        DisputeService,
         PasswordResetService,
 
         // Registered globally, so it runs for every route including one whose

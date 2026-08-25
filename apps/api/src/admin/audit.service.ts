@@ -27,14 +27,25 @@ export type AdminAction =
   | 'staff.revoke'
   | 'giftcard.approve'
   | 'giftcard.reject'
-  | 'giftcard.clawback';
+  | 'giftcard.clawback'
+  /* A dispute resolved. Recorded whichever way it went: an upheld one moved
+     money, and a rejected one is a decision a customer may come back about. */
+  | 'dispute.accept'
+  | 'dispute.reject';
 
 export interface AuditEntry {
   /** The actor's UUID, as it appears in an access token. Resolved to the
    *  numeric id inside the INSERT, so no caller has to carry both. */
   readonly actorId: string;
   readonly action: AdminAction;
-  readonly subjectType: 'user' | 'deposit' | 'setting' | 'giftcard' | 'kyc' | 'staff';
+  readonly subjectType:
+    | 'user'
+    | 'deposit'
+    | 'setting'
+    | 'giftcard'
+    | 'kyc'
+    | 'staff'
+    | 'dispute';
   readonly subjectId: string;
   readonly detail?: Record<string, unknown>;
   readonly reason?: string;
