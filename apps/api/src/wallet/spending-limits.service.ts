@@ -101,6 +101,18 @@ export interface LimitCheck<C extends Currency> {
    * transaction, so it cannot race the posting it is asking about.
    */
   readonly idempotencyKey: string;
+  /**
+   * Who is being paid, for the velocity rules. Absent for a purchase, which
+   * has no recipient customer — a bill goes to a provider float.
+   *
+   * Not read from the intent's metadata, deliberately. The velocity rules are
+   * computed from POSTINGS for the same reason `spentToday` is: metadata is a
+   * blob our own code fills in, and a control that depends on a key some flow
+   * remembered to set is a control that switches itself off silently. This is
+   * the one value the caller must state, and the query verifies everything
+   * else against the money that actually moved.
+   */
+  readonly recipientId?: string;
 }
 
 @Injectable()
@@ -118,16 +130,42 @@ export class SpendingLimitService {
   async precondition<C extends Currency>(
     check: LimitCheck<C>,
   ): Promise<((client: PoolClient) => Promise<void>) | undefined> {
-    if (check.amount.currency !== LIMITED_CURRENCY) return undefined;
+    /*
+     * TWO RULES WITH DIFFERENT SCOPES, and the difference is the point.
+     *
+     * The AMOUNT ceiling is published in kobo, so it is a statement about naira
+     * and about nothing else — applying it to USDT because both are integers is
+     * the same mistake as adding kobo to cents. It is skipped outright in any
+     * other currency.
+     *
+     * The VELOCITY rules are COUNTS. A count carries no units, so there is
+     * nothing to mis-apply and no reason to exempt a currency: a drain
+     * denominated in USDT is a drain.
+     */
+    const amountLimit =
+      check.amount.currency === LIMITED_CURRENCY
+        ? check.scope === 'transfer'
+          ? // Read OUTSIDE the transaction, deliberately. It is a cached
+            // settings lookup that may itself hit the database, and doing it
+            // while holding the ledger's transaction open would lengthen every
+            // transfer's transaction for a value that changes a few times a
+            // year.
+            await this.settings.transferDailyLimitKobo()
+          : await this.settings.purchaseDailyLimitKobo()
+        : undefined;
 
-    // Read OUTSIDE the transaction, deliberately. It is a cached settings
-    // lookup that may itself hit the database, and doing it while holding the
-    // ledger's transaction open would lengthen every transfer's transaction
-    // for a value that changes a few times a year.
-    const limit =
+    const velocity =
       check.scope === 'transfer'
-        ? await this.settings.transferDailyLimitKobo()
-        : await this.settings.purchaseDailyLimitKobo();
+        ? {
+            newRecipientsDaily: await this.settings.transferNewRecipientsDaily(),
+            countHourly: await this.settings.transferCountHourly(),
+          }
+        : undefined;
+
+    // Nothing to enforce: the caller passes no precondition at all rather than
+    // one that does nothing. A hook that always runs and sometimes decides not
+    // to is a hook somebody later adds a side effect to.
+    if (amountLimit === undefined && velocity === undefined) return undefined;
 
     return async (client: PoolClient): Promise<void> => {
       await client.query(`SELECT pg_advisory_xact_lock($1::int, $2::int)`, [
@@ -139,15 +177,40 @@ export class SpendingLimitService {
         Number(BigInt(check.userId) % 2147483647n),
       ]);
 
+      // A replay skips EVERY rule, not just the amount one. A customer whose
+      // request timed out and retried has already had this transfer counted
+      // against all of them; re-checking would refuse the retry of a transfer
+      // that succeeded, and tell them so.
       if (await alreadyPosted(client, check.idempotencyKey)) return;
 
-      const spent = await spentToday(client, check.userId, check.scope);
-      if (spent + check.amount.amount > limit) {
-        // 422 and no figure, for the same reason `InsufficientFundsError`
-        // carries none: "₦412,000 of your ₦5,000,000 left today" is a report on
-        // the customer's activity, and a stolen session must not be able to
-        // farm one out of an error body.
-        throw new UnprocessableEntityException({ error: 'daily_limit_exceeded' });
+      if (amountLimit !== undefined) {
+        const spent = await spentToday(client, check.userId, check.scope);
+        if (spent + check.amount.amount > amountLimit) {
+          // 422 and no figure, for the same reason `InsufficientFundsError`
+          // carries none: "₦412,000 of your ₦5,000,000 left today" is a report
+          // on the customer's activity, and a stolen session must not be able
+          // to farm one out of an error body.
+          throw new UnprocessableEntityException({ error: 'daily_limit_exceeded' });
+        }
+      }
+
+      if (velocity !== undefined) {
+        const sentThisHour = await transfersInLastHour(client, check.userId);
+        if (sentThisHour + 1 > velocity.countHourly) {
+          throw new UnprocessableEntityException({ error: 'too_many_transfers' });
+        }
+
+        if (check.recipientId !== undefined) {
+          const recipients = await recipientHistory(client, check.userId, check.recipientId);
+          // Somebody already paid is not a new recipient however many times
+          // they are paid again, so the ceiling only bites on strangers.
+          if (
+            !recipients.alreadyPaid &&
+            recipients.newToday + 1 > velocity.newRecipientsDaily
+          ) {
+            throw new UnprocessableEntityException({ error: 'too_many_new_recipients' });
+          }
+        }
       }
     };
   }
@@ -197,4 +260,89 @@ async function spentToday(
     [userId, LIMITED_CURRENCY, COUNTED[scope]],
   );
   return BigInt(result.rows[0]?.spent ?? '0');
+}
+
+/**
+ * How many transfers this customer has sent in the last hour, in any currency.
+ *
+ * Counted from the SENDER'S OWN DEBIT LEG, so a transfer counts once however
+ * many postings the entry carries — a fee leg would otherwise make every
+ * charged transfer count twice, and the ceiling would halve itself the day a
+ * fee was configured.
+ */
+async function transfersInLastHour(client: PoolClient, userId: string): Promise<number> {
+  const result = await client.query<{ sent: string }>(
+    `SELECT count(*)::text AS sent
+       FROM postings p
+       JOIN accounts a        ON a.id = p.account_id
+       JOIN journal_entries e ON e.id = p.journal_entry_id
+      WHERE a.kind       = 'customer_wallet'
+        AND a.owner_type = 'user'
+        AND a.owner_id   = $1::bigint
+        AND p.amount_minor < 0
+        AND e.kind = 'wallet_transfer'
+        AND p.created_at > now() - INTERVAL '1 hour'`,
+    [userId],
+  );
+  return Number(result.rows[0]?.sent ?? '0');
+}
+
+/**
+ * Who this customer has paid before, and how many of them they met today.
+ *
+ * READ FROM POSTINGS, never from the entry's metadata. The metadata carries a
+ * `recipient_id` our own code writes, which would make this far simpler — and
+ * would mean a flow that forgot the key silently disabled the only control
+ * that sees an account takeover. The postings are what actually moved, so a
+ * recipient can only be missing here if they were never paid.
+ *
+ * A recipient is "new today" when the FIRST time this customer ever paid them
+ * falls inside the current Lagos day. That is a stronger question than "did
+ * they pay them today": somebody paid every month for a year is not a stranger
+ * because this month's rent happens to have gone out this morning.
+ *
+ * "Today" is a Lagos day, the same as the amount ceiling. A UTC boundary would
+ * reset this at 1am local — surprising to a customer and an hour a fraudster
+ * would learn.
+ */
+async function recipientHistory(
+  client: PoolClient,
+  userId: string,
+  recipientId: string,
+): Promise<{ readonly alreadyPaid: boolean; readonly newToday: number }> {
+  const result = await client.query<{ new_today: string; already_paid: boolean | null }>(
+    `WITH paid AS (
+       SELECT credit_account.owner_id       AS recipient_id,
+              MIN(credit.created_at)        AS first_paid_at
+         FROM journal_entries e
+         JOIN postings debit           ON debit.journal_entry_id = e.id
+                                      AND debit.amount_minor < 0
+         JOIN accounts debit_account   ON debit_account.id         = debit.account_id
+                                      AND debit_account.kind       = 'customer_wallet'
+                                      AND debit_account.owner_type = 'user'
+                                      AND debit_account.owner_id   = $1::bigint
+         JOIN postings credit          ON credit.journal_entry_id = e.id
+                                      AND credit.amount_minor > 0
+         JOIN accounts credit_account  ON credit_account.id         = credit.account_id
+                                      AND credit_account.kind       = 'customer_wallet'
+                                      AND credit_account.owner_type = 'user'
+        WHERE e.kind = 'wallet_transfer'
+        GROUP BY credit_account.owner_id
+     )
+     SELECT count(*) FILTER (
+              WHERE first_paid_at >= (date_trunc('day', now() AT TIME ZONE 'Africa/Lagos')
+                                        AT TIME ZONE 'Africa/Lagos')
+            )::text                                     AS new_today,
+            bool_or(recipient_id = $2::bigint)          AS already_paid
+       FROM paid`,
+    [userId, recipientId],
+  );
+
+  const row = result.rows[0];
+  return {
+    // NULL when this customer has never sent a transfer at all, which is not
+    // the same as false and must not be read as one by accident.
+    alreadyPaid: row?.already_paid === true,
+    newToday: Number(row?.new_today ?? '0'),
+  };
 }

@@ -154,6 +154,14 @@ const API_ERROR_CODES = [
   'user_not_found',
   'not_in_suspense',
   'daily_limit_exceeded',
+  /* The velocity rules, which are about COUNT rather than amount: how many
+     people a customer is paying for the first time today, and how many
+     transfers they have sent in the last hour. Distinct codes because they
+     want different words — "you have paid a lot of new people today" is
+     actionable, "you hit a limit" is not — and because a customer who caused
+     neither needs to be told that somebody else may be signed in as them. */
+  'too_many_new_recipients',
+  'too_many_transfers',
 ] as const;
 
 export type ApiErrorCode =
@@ -202,6 +210,8 @@ const USER_FIXABLE: ReadonlySet<ApiErrorCode> = new Set<ApiErrorCode>([
   'recipient_not_found',
   'below_minimum',
   'daily_limit_exceeded',
+  'too_many_new_recipients',
+  'too_many_transfers',
   'fee_moved',
   'rate_moved',
   'totp_required',

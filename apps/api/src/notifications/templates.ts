@@ -68,6 +68,23 @@ export type NotificationRequest =
     }
   | { readonly kind: 'card_frozen'; readonly last4: string; readonly reason: string }
   /**
+   * A transfer a velocity rule refused.
+   *
+   * `security` class rather than transactional, and that is the whole reason
+   * the message exists: to the customer who genuinely hit a ceiling it is an
+   * explanation, and to the customer who did not it is the first evidence that
+   * somebody else is signed in as them. The second reading is the one worth
+   * delivering ahead of a receipt when the queue is behind.
+   *
+   * It carries the RULE, never the amount or the recipient. A stolen session
+   * must not be able to use our own alerting to confirm what it managed to
+   * attempt.
+   */
+  | {
+      readonly kind: 'transfer_blocked';
+      readonly reason: 'too_many_transfers' | 'too_many_new_recipients';
+    }
+  /**
    * The one message not addressed to a customer.
    *
    * It goes to the operations address, and it is `security` class so it is
@@ -102,6 +119,7 @@ const CLASS_OF: Record<NotificationKind, NotificationClass> = {
   transfer_sent: 'transactional',
   crypto_withdrawal_sent: 'transactional',
   card_frozen: 'transactional',
+  transfer_blocked: 'security',
   operations_alert: 'security',
 };
 
@@ -275,6 +293,37 @@ export function render(request: NotificationRequest): RenderedNotification {
           SECURITY_FOOTER,
         ),
       };
+
+    case 'transfer_blocked': {
+      const why =
+        request.reason === 'too_many_new_recipients'
+          ? 'it would have been to more people you have not paid before than we allow in one day'
+          : 'too many transfers have been sent from your account in the last hour';
+      return {
+        subject: 'A transfer from your account was stopped',
+        text:
+          `We stopped a transfer from your Xetral account because ${why}.
+
+` +
+          `No money has left your wallet.
+
+` +
+          `If this was you, try again later or contact support. IF IT WAS NOT, ` +
+          `somebody else may be signed in as you: change your password and sign ` +
+          `out your other devices now.
+
+${SECURITY_FOOTER}`,
+        html: shell(
+          'A transfer from your account was stopped',
+          h`<p style="margin:0 0 12px;">We stopped a transfer from your account because ${why}.</p>` +
+            `<p style="margin:0 0 12px;"><strong>No money has left your wallet.</strong></p>` +
+            `<p style="margin:0;">If this was you, try again later or contact support. ` +
+            `If it was not, somebody else may be signed in as you — change your ` +
+            `password and sign out your other devices now.</p>`,
+          SECURITY_FOOTER,
+        ),
+      };
+    }
 
     case 'devices_revoked':
       return {

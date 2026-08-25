@@ -165,6 +165,10 @@ export class WalletService {
       scope: 'transfer',
       amount: debit,
       idempotencyKey: intent.idempotencyKey,
+      // For the velocity rules. Stated by the caller rather than read out of
+      // the intent's metadata, so the control cannot be switched off by a flow
+      // that forgets a key.
+      recipientId: recipient.id,
     });
 
     // The receipt is enqueued on the ENTRY'S OWN transaction, so a receipt
@@ -205,6 +209,7 @@ export class WalletService {
         // InsufficientFundsError.
         throw new UnprocessableEntityException({ error: 'insufficient_funds' });
       }
+      await this.#alertOnVelocityRefusal(sender, error);
       throw error;
     }
 
@@ -215,6 +220,39 @@ export class WalletService {
       currency,
       replayed: posted.replayed,
     };
+  }
+
+  /**
+   * Tells the customer when a velocity rule refused a transfer.
+   *
+   * THIS IS THE POINT OF THE CONTROL, not a courtesy on top of it. A refusal a
+   * customer did not cause is the first evidence they will get that somebody
+   * else is signed in as them, and the rule stopping the money is worth much
+   * less if nobody is told it fired.
+   *
+   * DETACHED, and it has to be. The precondition threw, so the ledger's
+   * transaction is being rolled back — a message enqueued on that client would
+   * be rolled back with it, and the alert about a blocked transfer would exist
+   * only in the case where nothing was blocked.
+   *
+   * Keyed on the customer and the Lagos day, so an attacker hammering a
+   * refused transfer sends the customer ONE email rather than turning our own
+   * alerting into a mail bomb aimed at the person we are protecting.
+   */
+  async #alertOnVelocityRefusal(
+    sender: { readonly id: string; readonly email: string | null },
+    error: unknown,
+  ): Promise<void> {
+    if (sender.email === null) return;
+    const code = velocityCodeOf(error);
+    if (code === undefined) return;
+
+    await this.notifications.enqueueDetached({
+      userId: sender.id,
+      recipient: sender.email,
+      idempotencyKey: `velocity:${sender.id}:${code}:${lagosDay()}`,
+      request: { kind: 'transfer_blocked', reason: code },
+    });
   }
 
   #parseAmount(raw: string, currency: Currency): Money<Currency> {
@@ -293,4 +331,41 @@ function maskIdentifier(identifier: string): string {
     return `${local.slice(0, 2)}***@${domain}`;
   }
   return `***${identifier.slice(-4)}`;
+}
+
+/**
+ * The velocity code inside a refusal, or undefined if this was something else.
+ *
+ * Matched on the codes rather than on the exception class, because the
+ * precondition throws from inside the ledger's transaction and only the body
+ * says which rule fired. Anything unrecognised returns undefined and nobody is
+ * emailed — a refusal for insufficient funds is the customer's own doing and
+ * telling them somebody may be in their account would be a false alarm, which
+ * is the one thing a security alert cannot afford to be.
+ */
+function velocityCodeOf(error: unknown): 'too_many_transfers' | 'too_many_new_recipients' | undefined {
+  if (!(error instanceof UnprocessableEntityException)) return undefined;
+  const response: unknown = error.getResponse();
+  const code =
+    typeof response === 'object' && response !== null && 'error' in response
+      ? (response as { error?: unknown }).error
+      : undefined;
+
+  return code === 'too_many_transfers' || code === 'too_many_new_recipients' ? code : undefined;
+}
+
+/**
+ * Today, in Lagos, as `YYYY-MM-DD`.
+ *
+ * The same day boundary the limits themselves use. An alert keyed on a UTC day
+ * would let a second email through at 1am local, which is exactly when a drain
+ * is running and exactly when a second identical email helps nobody.
+ */
+function lagosDay(): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Lagos',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
 }

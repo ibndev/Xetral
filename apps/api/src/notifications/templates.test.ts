@@ -11,6 +11,7 @@ const ALL_KINDS: readonly NotificationKind[] = [
   'transfer_sent',
   'crypto_withdrawal_sent',
   'card_frozen',
+  'transfer_blocked',
   'operations_alert',
 ];
 
@@ -34,6 +35,11 @@ function example(kind: NotificationKind, injected: string): NotificationRequest 
       return { kind, amount: '25.00', asset: 'USDT', address: injected, network: 'tron' };
     case 'card_frozen':
       return { kind, last4: '4242', reason: injected };
+    // No injected value: this template deliberately carries NO
+    // outside-controlled text — not the amount, not the recipient — so a
+    // stolen session cannot use our own alerting to confirm what it attempted.
+    case 'transfer_blocked':
+      return { kind, reason: 'too_many_new_recipients' };
     case 'operations_alert':
       return {
         kind,

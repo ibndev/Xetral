@@ -226,6 +226,22 @@ export class SettingsService implements OnApplicationBootstrap {
   }
 
   /**
+   * How many people a customer may pay for the FIRST time in one Lagos day.
+   *
+   * A COUNT, so it carries no units and applies in every currency — unlike the
+   * daily ceilings above, which are published in kobo and are therefore
+   * statements about naira and nothing else.
+   */
+  async transferNewRecipientsDaily(): Promise<number> {
+    return this.integer('transfer_new_recipients_daily', 10);
+  }
+
+  /** How many transfers a customer may send in a rolling hour, any currency. */
+  async transferCountHourly(): Promise<number> {
+    return this.integer('transfer_count_hourly', 20);
+  }
+
+  /**
    * Gift cards need BOTH keys turned: the deployment's own flag AND the stored
    * setting. Every other setting is decided by the database alone.
    *
