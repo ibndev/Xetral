@@ -6,7 +6,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { InsufficientFundsError, LedgerService, posting } from '@xetral/ledger';
 import type { AccountRef, LedgerIntent } from '@xetral/ledger';
 import { applyBasisPoints, fromMajor, subtract, toMajor } from '@xetral/shared';
@@ -15,6 +15,7 @@ import { API_CONFIG, DATABASE, LEDGER } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { SpendingLimitService } from './spending-limits.service.js';
+import { NotificationService } from '../notifications/notification.service.js';
 import type { TransferRequest } from './dto.js';
 
 export interface TransferResult {
@@ -40,6 +41,7 @@ export class WalletService {
     @Inject(API_CONFIG) private readonly config: ApiConfig,
     @Inject(SettingsService) private readonly settings: SettingsService,
     @Inject(SpendingLimitService) private readonly limits: SpendingLimitService,
+    @Inject(NotificationService) private readonly notifications: NotificationService,
   ) {}
 
   async balances(userUuid: string): Promise<readonly BalanceView[]> {
@@ -165,11 +167,35 @@ export class WalletService {
       idempotencyKey: intent.idempotencyKey,
     });
 
+    // The receipt is enqueued on the ENTRY'S OWN transaction, so a receipt
+    // cannot exist for money that did not move and money cannot move without
+    // one being owed. `onEntry` is deliberately not called on a replay, which
+    // is exactly right here: a customer retrying a timed-out transfer must not
+    // be told twice that they sent money once.
+    const onEntry = async (client: PoolClient): Promise<void> => {
+      if (sender.email === null) return;
+      await this.notifications.enqueueBestEffort(client, {
+        userId: sender.id,
+        recipient: sender.email,
+        // The ledger key, reused. It is already unique per transfer and
+        // already survives a retry — inventing a second identity for the same
+        // event is how the two drift apart under exactly the conditions that
+        // make idempotency matter.
+        idempotencyKey: `receipt:${intent.idempotencyKey}`,
+        request: {
+          kind: 'transfer_sent',
+          amount: toMajor(amount),
+          currency,
+          reference: request.idempotency_key,
+        },
+      });
+    };
+
     let posted;
     try {
       posted = await this.ledger.post(
         intent,
-        precondition === undefined ? {} : { precondition },
+        precondition === undefined ? { onEntry } : { precondition, onEntry },
       );
     } catch (error) {
       if (error instanceof InsufficientFundsError) {
@@ -223,9 +249,9 @@ export class WalletService {
    * it expires; freezing has to bite before the money moves, not at the next
    * refresh.
    */
-  async #activeUser(uuid: string): Promise<{ id: string }> {
-    const result = await this.pool.query<{ id: string; status: string }>(
-      `SELECT id, status FROM users WHERE uuid = $1`,
+  async #activeUser(uuid: string): Promise<{ id: string; email: string | null }> {
+    const result = await this.pool.query<{ id: string; status: string; email: string | null }>(
+      `SELECT id, status, email FROM users WHERE uuid = $1`,
       [uuid],
     );
     const row = result.rows[0];
@@ -233,7 +259,7 @@ export class WalletService {
     if (row.status !== 'active') {
       throw new ForbiddenException({ error: 'account_not_active', status: row.status });
     }
-    return { id: row.id };
+    return { id: row.id, email: row.email };
   }
 
   async #recipientByIdentifier(identifier: string): Promise<{ id: string }> {

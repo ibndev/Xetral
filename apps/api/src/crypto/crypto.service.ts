@@ -21,6 +21,7 @@ import type { ApiConfig } from '../config.js';
 import type { CryptoQuoteBody, WithdrawBody } from './dto.js';
 import { AffordabilityService } from '../wallet/affordability.service.js';
 import { SettingsService } from '../settings/settings.service.js';
+import { NotificationService } from '../notifications/notification.service.js';
 
 /**
  * On-chain deposits and withdrawals.
@@ -93,6 +94,7 @@ export class CryptoService {
     @Inject(API_CONFIG) private readonly config: ApiConfig,
     @Inject(AffordabilityService) private readonly affordability: AffordabilityService,
     @Inject(SettingsService) private readonly settings: SettingsService,
+    @Inject(NotificationService) private readonly notifications: NotificationService,
   ) {}
 
   /** The customer's deposit address, issued once and returned for ever after. */
@@ -301,13 +303,7 @@ export class CryptoService {
 
     if (receipt.state === 'broadcast') {
       // On a chain and unrecallable. The money stays held until it confirms.
-      await this.pool.query(
-        `UPDATE crypto_withdrawals
-            SET status = 'broadcast', tx_hash = COALESCE(tx_hash, $2),
-                provider_reference = COALESCE(provider_reference, $3)
-          WHERE id = $1::bigint AND status = 'reserved'`,
-        [row.id, receipt.txHash ?? null, receipt.providerReference],
-      );
+      await this.#markBroadcast(row, receipt);
       return;
     }
 
@@ -327,19 +323,59 @@ export class CryptoService {
       ],
     });
 
-    await this.pool.query(
-      `UPDATE crypto_withdrawals
-          SET status = 'broadcast', tx_hash = COALESCE(tx_hash, $2),
-              provider_reference = COALESCE(provider_reference, $3)
-        WHERE id = $1::bigint AND status = 'reserved'`,
-      [row.id, receipt.txHash ?? null, receipt.providerReference],
-    );
+    await this.#markBroadcast(row, receipt);
     await this.pool.query(
       `UPDATE crypto_withdrawals
           SET status = 'confirmed', settle_entry_id = $2::bigint
         WHERE id = $1::bigint AND status = 'broadcast'`,
       [row.id, posted.entryId],
     );
+  }
+
+  /**
+   * Moves a withdrawal to `broadcast`, and tells the customer once.
+   *
+   * Both paths into this state go through here — the provider answering
+   * "broadcast" and the provider answering "confirmed" without ever having
+   * reported the intermediate step — so there is one place that decides what
+   * broadcasting means and one place that alerts on it.
+   *
+   * The alert fires on the TRANSITION, which is what `rowCount` reports: the
+   * UPDATE is guarded on `status = 'reserved'`, so a redelivered receipt for a
+   * withdrawal already broadcast changes no rows and mails nothing. This is
+   * the one outbound money movement that cannot be recalled by anybody, so it
+   * is the one a customer most needs to hear about while it is happening.
+   */
+  async #markBroadcast(row: WithdrawalRow, receipt: WithdrawalReceipt): Promise<void> {
+    const updated = await this.pool.query(
+      `UPDATE crypto_withdrawals
+          SET status = 'broadcast', tx_hash = COALESCE(tx_hash, $2),
+              provider_reference = COALESCE(provider_reference, $3)
+        WHERE id = $1::bigint AND status = 'reserved'`,
+      [row.id, receipt.txHash ?? null, receipt.providerReference],
+    );
+    if ((updated.rowCount ?? 0) === 0) return;
+
+    const target = await this.pool.query<{ email: string | null }>(
+      `SELECT email FROM users WHERE id = $1::bigint`,
+      [row.user_id],
+    );
+    const email = target.rows[0]?.email;
+    if (email === null || email === undefined) return;
+
+    const asset = row.asset as Currency;
+    await this.notifications.enqueueDetached({
+      userId: row.user_id,
+      recipient: email,
+      idempotencyKey: `receipt:crypto_withdrawal:${row.reference}`,
+      request: {
+        kind: 'crypto_withdrawal_sent',
+        amount: toMajor(money(BigInt(row.amount_minor), asset)),
+        asset: row.asset,
+        address: row.destination,
+        network: row.network,
+      },
+    });
   }
 
   /* ------------------------------------------------------------------ */

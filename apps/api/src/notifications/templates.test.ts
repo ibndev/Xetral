@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classOf, escapeHtml, render } from './templates.js';
+import { classOf, escapeHtml, groupDigits, render } from './templates.js';
 import type { NotificationKind, NotificationRequest } from './templates.js';
 
 const ALL_KINDS: readonly NotificationKind[] = [
@@ -124,5 +124,41 @@ describe('what the templates deliberately do NOT say', () => {
       expiresInMinutes: 30,
     });
     expect(text).toContain('your password has not changed');
+  });
+});
+
+describe('grouping digits without a float', () => {
+  it('groups in threes and changes no digit', () => {
+    expect(groupDigits('1234.56')).toBe('1,234.56');
+    expect(groupDigits('1000000.00')).toBe('1,000,000.00');
+    expect(groupDigits('999.99')).toBe('999.99');
+    expect(groupDigits('-2500.00')).toBe('-2,500.00');
+    expect(groupDigits('0.00000001')).toBe('0.00000001');
+  });
+
+  it('keeps every digit of a value a float would round', () => {
+    // Past MAX_SAFE_INTEGER. Any implementation that went through a number
+    // would lose the tail here — in the digits a customer reads to decide
+    // whether they have been paid the right amount.
+    const huge = '9007199254740993.01';
+    expect(groupDigits(huge)).toBe('9,007,199,254,740,993.01');
+    expect(groupDigits(huge).replace(/,/g, '')).toBe(huge);
+  });
+
+  it('returns anything it does not recognise untouched', () => {
+    // Rendering runs on a message that has already been decided on. A
+    // formatting nicety must never be the reason a security email fails.
+    expect(groupDigits('not-a-number')).toBe('not-a-number');
+    expect(groupDigits('')).toBe('');
+  });
+
+  it('reaches the money templates', () => {
+    const { subject } = render({
+      kind: 'transfer_sent',
+      amount: '1234567.89',
+      currency: 'NGN',
+      reference: 'r1',
+    });
+    expect(subject).toBe('You sent NGN 1,234,567.89');
   });
 });

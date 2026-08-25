@@ -13,6 +13,8 @@ import { API_CONFIG, DATABASE, LEDGER } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
 import { FundingService } from './funding.service.js';
 import { SettingsService } from '../settings/settings.service.js';
+import { NotificationService } from '../notifications/notification.service.js';
+import { money, toMajor } from '@xetral/shared';
 
 /**
  * The webhook that creates customer money.
@@ -40,6 +42,7 @@ export class DepositWebhookService {
     @Inject(API_CONFIG) private readonly config: ApiConfig,
     @Inject(FundingService) private readonly funding: FundingService,
     @Inject(SettingsService) private readonly settings: SettingsService,
+    @Inject(NotificationService) private readonly notifications: NotificationService,
   ) {}
 
   async handle(rawBody: string, headers: Record<string, string | undefined>): Promise<void> {
@@ -164,7 +167,48 @@ export class DepositWebhookService {
         `UNATTRIBUTED DEPOSIT ${outcome.providerReference} of ${outcome.amountKobo} kobo ` +
           `is held in suspense: ${outcome.suspenseReason}. A person must resolve it.`,
       );
+      // And NO receipt. There is nobody to send one to — that is the whole
+      // meaning of suspense — and guessing a recipient here would tell the
+      // wrong customer that money had arrived.
+      return;
     }
+
+    await this.#receipt(outcome);
+  }
+
+  /**
+   * Tell the customer their money arrived.
+   *
+   * Detached rather than joined to a transaction, because the ledger entry has
+   * already committed by the time we get here and the deposit row is written
+   * on the pool. It is best-effort by construction: a webhook that answered
+   * non-2xx because a receipt could not be queued would have Bitnob redeliver
+   * a deposit that was already credited, which the ledger would correctly
+   * refuse — turning a missing email into a permanently retrying webhook.
+   */
+  async #receipt(outcome: DepositOutcome): Promise<void> {
+    if (outcome.ownerId === undefined) return;
+
+    const target = await this.pool.query<{ email: string | null }>(
+      `SELECT email FROM users WHERE id = $1::bigint`,
+      [outcome.ownerId],
+    );
+    const email = target.rows[0]?.email;
+    if (email === null || email === undefined) return;
+
+    await this.notifications.enqueueDetached({
+      userId: outcome.ownerId,
+      recipient: email,
+      // The provider's own reference, so a redelivery that somehow reached
+      // this far still cannot produce a second email.
+      idempotencyKey: `receipt:deposit:${outcome.providerReference}`,
+      request: {
+        kind: 'deposit_credited',
+        amount: toMajor(money(outcome.amountKobo, 'NGN')),
+        currency: 'NGN',
+        reference: outcome.providerReference,
+      },
+    });
   }
 
   /**

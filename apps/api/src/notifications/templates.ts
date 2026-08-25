@@ -99,6 +99,38 @@ export interface RenderedNotification {
   readonly html: string;
 }
 
+/**
+ * Groups the digits of a decimal amount, WITHOUT going through a number.
+ *
+ * The same rule the client holds to, applied here because a receipt is read by
+ * the same person for the same reason. `toMajor` produces "1234567.89", and an
+ * email that says "NGN 1234567.89" is one a customer has to count digits in to
+ * decide whether they have been overcharged — which is exactly the moment they
+ * should not have to.
+ *
+ * `Intl.NumberFormat` is deliberately not used: it takes a number, and a BTC
+ * amount with eight decimals or a large naira figure is precisely where a
+ * float starts lying. Nothing here converts to a number, and no digit is
+ * changed — only separators are inserted.
+ *
+ * A value that is not a decimal string is returned UNTOUCHED rather than
+ * throwing. This runs while rendering a message that has already been decided
+ * on, and a formatting nicety must never be the reason a security email fails
+ * to render.
+ */
+export function groupDigits(amount: string): string {
+  const match = /^(-?)([0-9]+)(\.[0-9]+)?$/.exec(amount.trim());
+  if (match === null) return amount;
+
+  const [, sign = '', whole = '', fraction = ''] = match;
+  let grouped = '';
+  for (let i = 0; i < whole.length; i += 1) {
+    if (i > 0 && (whole.length - i) % 3 === 0) grouped += ',';
+    grouped += whole[i];
+  }
+  return `${sign}${grouped}${fraction}`;
+}
+
 export function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -232,43 +264,47 @@ export function render(request: NotificationRequest): RenderedNotification {
         ),
       };
 
-    case 'deposit_credited':
+    case 'deposit_credited': {
+      const amount = `${request.currency} ${groupDigits(request.amount)}`;
       return {
-        subject: `You received ${request.currency} ${request.amount}`,
+        subject: `You received ${amount}`,
         text:
-          `${request.currency} ${request.amount} has been added to your Xetral wallet.\n\n` +
+          `${amount} has been added to your Xetral wallet.\n\n` +
           `Reference: ${request.reference}`,
         html: shell(
-          `You received ${request.currency} ${request.amount}`,
-          h`<p style="margin:0 0 8px;">${request.currency} ${request.amount} has been added to your wallet.</p>` +
+          `You received ${amount}`,
+          h`<p style="margin:0 0 8px;">${amount} has been added to your wallet.</p>` +
             h`<p style="margin:0;font-size:13px;color:#7c8089;">Reference ${request.reference}</p>`,
         ),
       };
+    }
 
-    case 'transfer_sent':
+    case 'transfer_sent': {
+      const amount = `${request.currency} ${groupDigits(request.amount)}`;
       return {
-        subject: `You sent ${request.currency} ${request.amount}`,
+        subject: `You sent ${amount}`,
         text:
-          `${request.currency} ${request.amount} was sent from your Xetral wallet.\n\n` +
+          `${amount} was sent from your Xetral wallet.\n\n` +
           `Reference: ${request.reference}`,
         html: shell(
-          `You sent ${request.currency} ${request.amount}`,
-          h`<p style="margin:0 0 8px;">${request.currency} ${request.amount} was sent from your wallet.</p>` +
+          `You sent ${amount}`,
+          h`<p style="margin:0 0 8px;">${amount} was sent from your wallet.</p>` +
             h`<p style="margin:0;font-size:13px;color:#7c8089;">Reference ${request.reference}</p>`,
         ),
       };
+    }
 
     case 'crypto_withdrawal_sent':
       return {
-        subject: `You sent ${request.amount} ${request.asset}`,
+        subject: `You sent ${groupDigits(request.amount)} ${request.asset}`,
         text:
-          `${request.amount} ${request.asset} was sent on ${request.network}.\n\n` +
+          `${groupDigits(request.amount)} ${request.asset} was sent on ${request.network}.\n\n` +
           `To: ${request.address}\n\n` +
           `An on-chain transaction cannot be recalled. If you did not make this ` +
           `withdrawal, contact support immediately.`,
         html: shell(
-          `You sent ${request.amount} ${request.asset}`,
-          h`<p style="margin:0 0 8px;">${request.amount} ${request.asset} was sent on ${request.network}.</p>` +
+          `You sent ${groupDigits(request.amount)} ${request.asset}`,
+          h`<p style="margin:0 0 8px;">${groupDigits(request.amount)} ${request.asset} was sent on ${request.network}.</p>` +
             h`<p style="margin:0;font-size:13px;color:#7c8089;word-break:break-all;">To ${request.address}</p>`,
           'An on-chain transaction cannot be recalled. If you did not make this ' +
             'withdrawal, contact support immediately.',

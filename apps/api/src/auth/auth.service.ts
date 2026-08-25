@@ -25,6 +25,8 @@ import type { Clock } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
 import type { LoginRequest, RegisterRequest } from './dto.js';
 import { SettingsService } from '../settings/settings.service.js';
+import { NotificationService } from '../notifications/notification.service.js';
+import { lagosTime } from './password-reset.service.js';
 
 export interface TokenPair {
   readonly access_token: string;
@@ -59,6 +61,9 @@ interface UserRow {
   id: string;
   uuid: string;
   status: string;
+  /** Nullable: an account can be opened on a phone number. Nothing can be
+   *  mailed to such a customer, and the alert is skipped rather than faked. */
+  email: string | null;
   password_hash: string | null;
 }
 
@@ -96,6 +101,7 @@ export class AuthService {
     @Inject(API_CONFIG) private readonly config: ApiConfig,
     @Inject(CLOCK) private readonly clock: Clock,
     @Inject(SettingsService) private readonly settings: SettingsService,
+    @Inject(NotificationService) private readonly notifications: NotificationService,
   ) {}
 
   /**
@@ -177,7 +183,12 @@ export class AuthService {
     }
   }
 
-  async login(input: LoginRequest): Promise<TokenPair> {
+  /**
+   * `ipAddress` is only ever used to describe the sign-in in an alert email.
+   * It is not an authorisation input and must not become one: it arrives
+   * through the proxy chain and is only as trustworthy as `trustProxyHops`.
+   */
+  async login(input: LoginRequest, ipAddress?: string): Promise<TokenPair> {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
@@ -206,6 +217,36 @@ export class AuthService {
       const device = await this.#resolveDevice(client, user.id, input.device);
       const pair = await this.#openSession(client, user, device);
 
+      // A sign-in from a device this customer has never used is the single
+      // most useful thing to tell them about: it is what account takeover
+      // looks like from the outside, and it is the moment they can still do
+      // something about it.
+      //
+      // Enqueued INSIDE the login transaction, so the alert and the device row
+      // that justifies it commit together — a device recorded with no alert
+      // owed is the failure that matters, and it is silent. `enqueueBestEffort`
+      // takes a SAVEPOINT so a queueing failure cannot take the login down
+      // with it; being unable to send an email is not a reason to refuse
+      // somebody entry to their own account.
+      //
+      // Deliberately NOT sent from `register`: the first device on a new
+      // account is the one the customer is holding.
+      if (device.firstSeen && user.email !== null) {
+        await this.notifications.enqueueBestEffort(client, {
+          userId: user.id,
+          recipient: user.email,
+          // Keyed on the DEVICE, so a retried login cannot mail twice and a
+          // genuinely new device always gets its own alert.
+          idempotencyKey: `new_device:${device.id}`,
+          request: {
+            kind: 'new_device',
+            platform: input.device.displayName ?? input.device.platform,
+            at: lagosTime(),
+            ...(ipAddress === undefined ? {} : { ipAddress }),
+          },
+        });
+      }
+
       await client.query('COMMIT');
       return pair;
     } catch (error) {
@@ -218,7 +259,7 @@ export class AuthService {
 
   async #findUser(client: PoolClient, identifier: string): Promise<UserRow | undefined> {
     const result = await client.query<UserRow>(
-      `SELECT u.id, u.uuid, u.status, c.password_hash
+      `SELECT u.id, u.uuid, u.status, u.email, c.password_hash
          FROM users u
          LEFT JOIN user_credentials c ON c.user_id = u.id
         WHERE lower(u.email) = lower($1) OR u.phone = $1
@@ -232,7 +273,7 @@ export class AuthService {
     client: PoolClient,
     userId: string,
     device: LoginRequest['device'],
-  ): Promise<DeviceRow> {
+  ): Promise<DeviceRow & { firstSeen: boolean }> {
     const hashedFingerprint = fingerprintHash(device.fingerprint);
 
     const existing = await client.query<DeviceRow>(
@@ -250,7 +291,12 @@ export class AuthService {
       );
       const row = created.rows[0];
       if (row === undefined) throw new Error('device insert returned no row');
-      return row;
+      // `firstSeen` is what the new-device alert keys on. It has to be
+      // reported from HERE rather than inferred by the caller comparing
+      // timestamps: a device created microseconds ago and one seen last week
+      // differ only by a row that already exists, and a caller re-querying
+      // for it would race its own insert.
+      return { ...row, firstSeen: true };
     }
 
     // A revoked device stays revoked. This is the "lost phone" action, and it
@@ -264,7 +310,7 @@ export class AuthService {
     }
 
     await client.query(`UPDATE devices SET last_seen_at = now() WHERE id = $1`, [found.id]);
-    return found;
+    return { ...found, firstSeen: false };
   }
 
   async #openSession(client: PoolClient, user: UserRow, device: DeviceRow): Promise<TokenPair> {

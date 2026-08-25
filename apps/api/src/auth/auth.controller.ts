@@ -74,7 +74,7 @@ export class AuthController {
   @Post('login')
   @HttpCode(200)
   @UseGuards(LoginRateLimitGuard)
-  async login(@Body() body: unknown): Promise<TokenPair> {
+  async login(@Body() body: unknown, @Req() request: AuthenticatedRequest): Promise<TokenPair> {
     const parsed = loginSchema.safeParse(body);
     if (!parsed.success) {
       // The validation detail is safe to return — it describes the request
@@ -85,7 +85,7 @@ export class AuthController {
         fields: parsed.error.issues.map((issue) => issue.path.join('.')),
       });
     }
-    return this.auth.login(parsed.data);
+    return this.auth.login(parsed.data, request.ip);
   }
 
   @Post('refresh')
