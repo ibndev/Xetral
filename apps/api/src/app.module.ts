@@ -153,6 +153,7 @@ function unconfiguredCardPort(): CardPort {
     unfreeze: refuse,
     terminate: refuse,
     get: refuse,
+    reveal: refuse,
   };
 }
 

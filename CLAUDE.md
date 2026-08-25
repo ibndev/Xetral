@@ -153,6 +153,27 @@ Access tokens are **not JWTs**, deliberately — see the header comment in
 
 Schema: `packages/ledger/sql/003_cards.sql`.
 
+- **A card number is a PASS-THROUGH and is never stored.** `003_cards.sql` has
+  no column that could hold one, which is what makes that structural. The
+  reveal fetches from the provider, hands the value to a customer who proved a
+  PIN, and drops it; `card_reveals` records THAT it happened, never what it
+  showed. Every card issued since Phase 5 was unusable until this existed.
+- **`CardSecrets` is a separate type from `VirtualCard`, deliberately.** As
+  optional members of the card view a PAN would ride along in every listing and
+  every log line that serialises a card — and nothing would fail on the day it
+  did.
+- **The reveal is rate limited by ROWS, not by memory**, per card and per
+  customer. An attacker's loop outlives a pod restart; an in-process counter
+  does not. The per-customer ceiling is what catches a stolen session walking
+  through every card on an account, which a per-card limit never sees.
+- **A frozen card can still be revealed; a terminated one cannot.** Freezing
+  stops spending, not looking. A terminated card's number is dead at the
+  provider, so revealing it hands a customer something that cannot work.
+- **Bitnob's card response shape is NOT settled.** Their SDK reads
+  `cardNumber`, `cvv2` and a single `expiry`; this adapter's schema required
+  `last4`, `expiry_month` and `expiry_year`, and the SDK-shaped payload threw.
+  The read accepts both, because being tolerant on a read costs nothing and
+  being wrong costs every card.
 - The card's balance shown to a customer comes from the **ledger**, not from
   asking Bitnob. A provider figure can lag a settlement by days; reconciliation
   compares the two deliberately.
@@ -756,6 +777,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/012_notifications.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/013_password_reset.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/014_staff_totp.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/015_error_events.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/016_card_reveals.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/003_cards.test.sql
@@ -771,6 +793,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/012_notifications.tes
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/013_password_reset.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/014_staff_totp.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/015_error_events.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/016_card_reveals.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,
 # Redis for the rate-limiter contract.

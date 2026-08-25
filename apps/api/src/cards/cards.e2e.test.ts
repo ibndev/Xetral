@@ -10,7 +10,7 @@ import { hashPassword } from '@xetral/identity';
 import { LedgerService, posting } from '@xetral/ledger';
 import type { AccountRef } from '@xetral/ledger';
 import { BITNOB_EVENTS } from '@xetral/providers';
-import type { CardPort, OperationOutcome, VirtualCard } from '@xetral/providers';
+import type { CardPort, CardSecrets, OperationOutcome, VirtualCard } from '@xetral/providers';
 import { usd } from '@xetral/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { AppModule } from '../app.module.js';
@@ -75,6 +75,17 @@ class FakeCardPort implements CardPort {
     this.calls.push('fund');
     this.#maybeFail();
     return this.fundOutcome;
+  }
+  async reveal(): Promise<CardSecrets> {
+    this.calls.push('reveal');
+    this.#maybeFail();
+    return {
+      pan: '4242424242424242',
+      cvv: '123',
+      expiryMonth: 11,
+      expiryYear: 2030,
+      nameOnCard: 'A Customer',
+    };
   }
   async freeze(id: string): Promise<VirtualCard> {
     this.calls.push('freeze');
@@ -646,5 +657,172 @@ describe('the auth/settlement webhooks', () => {
   it('leaves no drift behind', async () => {
     const drift = await pool.query(`SELECT COUNT(*)::int AS n FROM ledger_drift`);
     expect(drift.rows[0]?.n).toBe(0);
+  });
+});
+
+describe('revealing a card', () => {
+  const reveal = (customer: Customer, cardId: string, body: Record<string, unknown> = {}) =>
+    request(app.getHttpServer())
+      .post(`/v1/cards/${cardId}/reveal`)
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send({ transaction_pin: PIN, ...body });
+
+  it('returns the number, the CVV and the expiry', async () => {
+    // The gap this closes: `003_cards.sql` stores `last4` and an expiry and
+    // nothing else, so every card issued since Phase 5 was unusable — there
+    // was no way for a customer to read the number.
+    const customer = await onboard();
+    await fundWallet(customer.userId, 100_00);
+    const card = await issueCard(customer, '10.00');
+
+    const res = await reveal(customer, card.id).expect(200);
+
+    expect(res.body.pan).toBe('4242424242424242');
+    expect(res.body.cvv).toBe('123');
+    expect(res.body.expiry_month).toBe(11);
+    expect(res.body.expiry_year).toBe(2030);
+  });
+
+  it('asks for the PIN', async () => {
+    // A card number, a CVV and an expiry together are everything needed to
+    // spend online, and unlike a transfer there is no ledger entry afterwards
+    // for anybody to notice.
+    const customer = await onboard();
+    await fundWallet(customer.userId, 100_00);
+    const card = await issueCard(customer, '10.00');
+
+    const res = await request(app.getHttpServer())
+      .post(`/v1/cards/${card.id}/reveal`)
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send({});
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('transaction_pin_required');
+  });
+
+  it('refuses another customer card', async () => {
+    const owner = await onboard();
+    const stranger = await onboard();
+    await fundWallet(owner.userId, 100_00);
+    const card = await issueCard(owner, '10.00');
+
+    const res = await reveal(stranger, card.id);
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe('card_not_found');
+  });
+
+  it('STORES NOTHING — the number is nowhere in the database', async () => {
+    // The whole design in one assertion. The reveal is a pass-through: the
+    // schema has no column that could hold a PAN, so this is a property of
+    // the database rather than a rule somebody has to keep.
+    const customer = await onboard();
+    await fundWallet(customer.userId, 100_00);
+    const card = await issueCard(customer, '10.00');
+    await reveal(customer, card.id).expect(200);
+
+    const cardRow = await pool.query<Record<string, unknown>>(
+      `SELECT * FROM cards WHERE uuid = $1`,
+      [card.id],
+    );
+    const revealRow = await pool.query<Record<string, unknown>>(
+      `SELECT * FROM card_reveals WHERE card_id = (SELECT id FROM cards WHERE uuid = $1)`,
+      [card.id],
+    );
+
+    const everything = JSON.stringify([cardRow.rows, revealRow.rows]);
+    expect(everything).not.toContain('4242424242424242');
+    expect(everything).not.toContain('"123"');
+    // And the record of the reveal DOES exist — the fact, never the contents.
+    expect(revealRow.rows).toHaveLength(1);
+  });
+
+  it('records who asked, so an investigator can answer when it was last shown', async () => {
+    const customer = await onboard();
+    await fundWallet(customer.userId, 100_00);
+    const card = await issueCard(customer, '10.00');
+    await reveal(customer, card.id).expect(200);
+
+    const row = await pool.query<{ user_id: string; revealed_at: Date }>(
+      `SELECT user_id, revealed_at FROM card_reveals
+        WHERE card_id = (SELECT id FROM cards WHERE uuid = $1)`,
+      [card.id],
+    );
+    expect(row.rows[0]?.user_id).toBe(customer.userId);
+    expect(row.rows[0]?.revealed_at).toBeInstanceOf(Date);
+  });
+
+  it('stops after five reveals of one card', async () => {
+    // A reveal endpoint is a PAN oracle for anybody holding a stolen session.
+    // The ceiling counts ROWS rather than an in-memory counter, because an
+    // attacker's loop outlives a pod restart and a counter does not.
+    const customer = await onboard();
+    await fundWallet(customer.userId, 100_00);
+    const card = await issueCard(customer, '10.00');
+
+    for (let i = 0; i < 5; i += 1) {
+      await reveal(customer, card.id).expect(200);
+    }
+
+    const blocked = await reveal(customer, card.id);
+    expect(blocked.status).toBe(429);
+    expect(blocked.body.error).toBe('too_many_reveals');
+  });
+
+  it('stops a session walking through every card on the account', async () => {
+    // The per-card ceiling would never see this: five reveals each across
+    // three cards is fifteen numbers and no single card over its limit.
+    const customer = await onboard();
+    await fundWallet(customer.userId, 500_00);
+
+    const cards = [
+      await issueCard(customer, '10.00'),
+      await issueCard(customer, '10.00'),
+      await issueCard(customer, '10.00'),
+    ];
+
+    let refusals = 0;
+    for (const card of cards) {
+      for (let i = 0; i < 5; i += 1) {
+        const res = await reveal(customer, card.id);
+        if (res.status === 429) refusals += 1;
+      }
+    }
+    expect(refusals).toBeGreaterThan(0);
+  });
+
+  it('refuses a terminated card', async () => {
+    // Its number is dead at the provider, so revealing would either fail or
+    // hand back something that no longer works — and a customer would spend an
+    // afternoon trying to use it.
+    const customer = await onboard();
+    await fundWallet(customer.userId, 100_00);
+    const card = await issueCard(customer, '10.00');
+
+    await request(app.getHttpServer())
+      .post(`/v1/cards/${card.id}/terminate`)
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send({ transaction_pin: PIN })
+      .expect(200);
+
+    const res = await reveal(customer, card.id);
+    expect(res.status).toBe(422);
+    expect(res.body.error).toBe('card_terminated');
+  });
+
+  it('still reveals a FROZEN card', async () => {
+    // Freezing stops spending, not looking. Refusing would push a customer to
+    // unfreeze the card just to read it, which is the opposite of what the
+    // freeze was for.
+    const customer = await onboard();
+    await fundWallet(customer.userId, 100_00);
+    const card = await issueCard(customer, '10.00');
+
+    await request(app.getHttpServer())
+      .post(`/v1/cards/${card.id}/freeze`)
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send({})
+      .expect(200);
+
+    await reveal(customer, card.id).expect(200);
   });
 });

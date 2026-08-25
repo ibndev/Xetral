@@ -96,7 +96,8 @@ jobs:
             -f packages/identity/sql/012_notifications.sql \
             -f packages/identity/sql/013_password_reset.sql \
             -f packages/identity/sql/014_staff_totp.sql \
-            -f packages/ledger/sql/015_error_events.sql
+            -f packages/ledger/sql/015_error_events.sql \
+            -f packages/ledger/sql/016_card_reveals.sql
 
       - name: Ledger and identity invariants
         run: |
@@ -120,7 +121,8 @@ jobs:
                    packages/identity/sql/012_notifications.test.sql \
                    packages/identity/sql/013_password_reset.test.sql \
                    packages/identity/sql/014_staff_totp.test.sql \
-                   packages/ledger/sql/015_error_events.test.sql; do
+                   packages/ledger/sql/015_error_events.test.sql \
+                   packages/ledger/sql/016_card_reveals.test.sql; do
             echo "== $f"
             psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
               -f "$f" 2>&1 | tee "/tmp/$(basename "$f").out"
@@ -169,7 +171,8 @@ jobs:
             -f packages/identity/sql/012_notifications.sql \
             -f packages/identity/sql/013_password_reset.sql \
             -f packages/identity/sql/014_staff_totp.sql \
-            -f packages/ledger/sql/015_error_events.sql
+            -f packages/ledger/sql/015_error_events.sql \
+            -f packages/ledger/sql/016_card_reveals.sql
 
       - run: npm run typecheck
 
@@ -265,6 +268,11 @@ jobs:
           # routes added since the audit.
           check "totp enrolment is mounted" 401 http://127.0.0.1:3100/v1/auth/totp/enrol -X POST
           check "errors surface is mounted" 401 http://127.0.0.1:3100/v1/admin/errors
+
+          # Reading a card number. Guarded, so 401 rather than 404 — and this
+          # is the route whose ABSENCE was the bug: every card issued since
+          # Phase 5 was unusable because nothing could show its number.
+          check "card reveal is mounted" 401 http://127.0.0.1:3100/v1/cards/x/reveal -X POST
 
           kill "$api_pid" 2>/dev/null || true
 

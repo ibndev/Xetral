@@ -54,6 +54,11 @@ const API_ERROR_CODES = [
      it, and the honest thing to show is that it was our fault. */
   'internal_error',
 
+  /* Reading a card number too often. User-fixable in the sense that waiting
+     clears it — and the customer is told to wait rather than told nothing,
+     because the alternative is somebody concluding their card is broken. */
+  'too_many_reveals',
+
   /* the transaction PIN */
   'invalid_pin',
   'pin_locked',
@@ -195,6 +200,7 @@ const USER_FIXABLE: ReadonlySet<ApiErrorCode> = new Set<ApiErrorCode>([
   'rate_moved',
   'totp_required',
   'invalid_totp',
+  'too_many_reveals',
 ]);
 
 /** The session is gone and the customer must sign in again. */

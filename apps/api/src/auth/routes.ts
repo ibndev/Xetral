@@ -114,6 +114,11 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // Freezing is the PROTECTIVE action and takes no PIN: a customer watching
       // fraudulent charges land should not have to remember one first.
       // Unfreezing re-enables spending, so it does.
+      // Reading the number needs a PIN. A card number, a CVV and an expiry
+      // together are everything needed to spend online, and unlike a transfer
+      // there is no ledger entry afterwards for anybody to notice — so a
+      // stolen session must not be able to do it.
+      .authenticated('POST', '/v1/cards/:id/reveal', { pin: true })
       .authenticated('POST', '/v1/cards/:id/freeze', { pin: false })
       .authenticated('POST', '/v1/cards/:id/unfreeze', { pin: true })
       .authenticated('POST', '/v1/cards/:id/terminate', { pin: true })

@@ -5,6 +5,8 @@ import {
   Inject,
   Injectable,
   Logger,
+  HttpException,
+  HttpStatus,
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
@@ -19,6 +21,37 @@ import { CardProtectionService } from './card-protection.service.js';
 import { SettingsService } from '../settings/settings.service.js';
 
 const PROVIDER = 'bitnob';
+
+/**
+ * How many reveals are allowed, and over what window.
+ *
+ * Two ceilings because they catch different things: per CARD stops somebody
+ * harvesting one number, per CUSTOMER stops somebody walking a stolen session
+ * through every card on an account — which the per-card limit would never see.
+ *
+ * The numbers are deliberately generous for a real customer (who reads a
+ * number once when they save it somewhere, and occasionally again) and useless
+ * to a script.
+ */
+const REVEAL_WINDOW_MINUTES = 60;
+const REVEALS_PER_CARD = 5;
+const REVEALS_PER_CUSTOMER = 10;
+
+/**
+ * What a reveal returns. Deliberately NOT part of `CardView`.
+ *
+ * If these were optional members of the ordinary card view, every listing and
+ * every log line that serialises a card would carry a PAN whenever one
+ * happened to be present — and the day it did, nothing would fail. A separate
+ * type means the number can only travel through code that named it.
+ */
+export interface CardSecretsView {
+  readonly pan: string;
+  readonly cvv: string;
+  readonly expiry_month: number;
+  readonly expiry_year: number;
+  readonly name_on_card?: string;
+}
 
 export interface CardView {
   readonly id: string;
@@ -178,6 +211,103 @@ export class CardService {
     }
 
     return this.get(userUuid, cardUuid);
+  }
+
+  /**
+   * The card number, the CVV and the expiry.
+   *
+   * A PASS-THROUGH, and every decision here follows from that. The details are
+   * fetched from the provider, handed to the customer, and dropped: nothing is
+   * written, nothing is cached, and `003_cards.sql` has no column that could
+   * hold them. "Never stored" is a property of the schema rather than a rule
+   * somebody has to remember.
+   *
+   * WHY THIS NEEDS THE SAME CARE AS MOVING MONEY. A reveal endpoint is a PAN
+   * oracle for anybody holding a stolen session — a card number, a CVV and an
+   * expiry together are everything needed to spend online, and unlike a
+   * transfer there is no ledger entry afterwards to notice. So it takes a PIN,
+   * it is rate limited by rows that outlive a restart, and every call leaves a
+   * record naming who asked and from where.
+   *
+   * The kill switch is deliberately NOT consulted. Pausing cards stops new
+   * commitments; a customer standing at a checkout with a card they already
+   * hold must still be able to read it. Same reasoning that leaves freezing
+   * available while cards are paused.
+   */
+  async reveal(
+    userUuid: string,
+    cardUuid: string,
+    ipAddress: string | undefined,
+  ): Promise<CardSecretsView> {
+    const { userId, row } = await this.#ownedCard(userUuid, cardUuid);
+
+    if (row.status === 'terminated') {
+      // Refused here as well as by the trigger. The database is what makes it
+      // true; this is what makes the customer's error legible.
+      throw new UnprocessableEntityException({ error: 'card_terminated' });
+    }
+
+    await this.#assertRevealAllowed(row.id, userId);
+
+    const secrets = await this.cards.reveal(row.provider_card_id);
+
+    // Recorded AFTER the provider answered, so a failed fetch does not spend
+    // the customer's allowance — and BEFORE the value is returned, so a reveal
+    // the customer received always has a record. The order is the one that
+    // errs towards recording too much rather than too little.
+    await this.pool.query(
+      `INSERT INTO card_reveals (card_id, user_id, ip_address)
+       VALUES ($1::bigint, $2::bigint, $3)`,
+      [row.id, userId, ipAddress ?? null],
+    );
+
+    this.#logger.warn(`card ${row.uuid} was revealed to its owner`);
+
+    return {
+      // The only place in this codebase where a PAN crosses a service
+      // boundary. It goes straight out in the response and is referenced
+      // nowhere else — not logged, not in the audit detail, not in an error.
+      pan: secrets.pan,
+      cvv: secrets.cvv,
+      expiry_month: secrets.expiryMonth,
+      expiry_year: secrets.expiryYear,
+      ...(secrets.nameOnCard === undefined ? {} : { name_on_card: secrets.nameOnCard }),
+    };
+  }
+
+  /**
+   * The ceiling on reveals, counted from rows rather than memory.
+   *
+   * An attacker's loop outlives a pod restart and an in-process counter does
+   * not, so the limit is a count over `card_reveals` — which is also the table
+   * an investigator reads, so the limit and the evidence cannot disagree.
+   *
+   * Two ceilings, because they catch different things. Per CARD catches
+   * somebody harvesting one number; per CUSTOMER catches somebody walking a
+   * stolen session through every card on the account, which the per-card limit
+   * would never see.
+   */
+  async #assertRevealAllowed(cardId: string, userId: string): Promise<void> {
+    const counts = await this.pool.query<{ for_card: string; for_user: string }>(
+      `SELECT
+         count(*) FILTER (WHERE card_id = $1::bigint)::text AS for_card,
+         count(*)::text                                      AS for_user
+         FROM card_reveals
+        WHERE user_id = $2::bigint
+          AND revealed_at > now() - make_interval(mins => $3::int)`,
+      [cardId, userId, REVEAL_WINDOW_MINUTES],
+    );
+
+    const forCard = Number(counts.rows[0]?.for_card ?? '0');
+    const forUser = Number(counts.rows[0]?.for_user ?? '0');
+
+    if (forCard >= REVEALS_PER_CARD || forUser >= REVEALS_PER_CUSTOMER) {
+      this.#logger.error(
+        `reveal refused for user ${userId}: ${forCard} for this card and ${forUser} ` +
+          `across their cards in the last ${REVEAL_WINDOW_MINUTES} minutes`,
+      );
+      throw new HttpException({ error: 'too_many_reveals' }, HttpStatus.TOO_MANY_REQUESTS);
+    }
   }
 
   async freeze(userUuid: string, cardUuid: string): Promise<CardView> {

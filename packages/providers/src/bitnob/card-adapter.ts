@@ -4,6 +4,7 @@ import { BITNOB_ENDPOINTS, BitnobClient } from './client.js';
 import { ProviderContractError } from '../ports/errors.js';
 import type {
   CardPort,
+  CardSecrets,
   CardStatus,
   FundCardRequest,
   IssueCardRequest,
@@ -24,13 +25,94 @@ const cardResponse = z.object({
   data: z.object({
     id: z.string().min(1),
     status: z.string().min(1),
-    last4: z.string().length(4),
-    expiry_month: z.union([z.number(), z.string()]),
-    expiry_year: z.union([z.number(), z.string()]),
+
+    // ------------------------------------------------------------------
+    // TWO SHAPES, BOTH OPTIONAL, AND THAT IS DELIBERATE.
+    //
+    // This schema originally required `last4`, `expiry_month` and
+    // `expiry_year`. Bitnob's own Node SDK reads NONE of those three from a
+    // card response — it reads `cardNumber`, `cvv2` and a single `expiry`
+    // (`lib/virtual_card.ts`, `generateVirtualCardObject`). Feeding this
+    // adapter the SDK-shaped object throws `unexpected card shape`, which
+    // means that if the SDK is right, issuing a card failed on the FIRST REAL
+    // CALL and every test passed because the tests were written from the same
+    // assumption as the schema.
+    //
+    // That is the failure this provider already produced once, recorded in
+    // Phase 3: a table of plausible constants, tests agreeing with it because
+    // the same person wrote both, and every path wrong.
+    //
+    // Which shape is correct cannot be settled from here — the SDK is 1.0.4,
+    // its card model has visible copy-paste bugs, and Bitnob's documentation
+    // is not reachable. So this READ accepts either. Being tolerant on a read
+    // costs nothing; being wrong costs every card. `toCard` below refuses only
+    // when NEITHER shape is present, which is the honest failure.
+    // ------------------------------------------------------------------
+    last4: z.string().length(4).optional(),
+    expiry_month: z.union([z.number(), z.string()]).optional(),
+    expiry_year: z.union([z.number(), z.string()]).optional(),
+
+    /** The SDK's names for the same information. */
+    cardNumber: z.string().min(4).optional(),
+    cvv2: z.string().min(3).optional(),
+    /** A single field — "11/30", "2030-11", "11/2030". */
+    expiry: z.string().min(4).optional(),
+    cardName: z.string().optional(),
+
     /** Micro-units, like every other amount they send. */
     balance: z.unknown(),
   }),
 });
+
+type CardBody = z.infer<typeof cardResponse>['data'];
+
+/**
+ * The last four digits, from whichever field carries them.
+ *
+ * When only the full number is present it is TRUNCATED HERE and the rest
+ * discarded. This is the one place in the adapter where a PAN exists on the
+ * ordinary read path, and it exists for the length of this expression — the
+ * value returned is four characters, so nothing downstream can leak what it
+ * never received.
+ */
+function readLast4(card: CardBody): string | undefined {
+  if (card.last4 !== undefined) return card.last4;
+  if (card.cardNumber !== undefined) return card.cardNumber.slice(-4);
+  return undefined;
+}
+
+/**
+ * Month and year, from either the split fields or the combined one.
+ *
+ * The combined form is ambiguous about order and about century, so each
+ * accepted layout is matched explicitly rather than guessed at with a split.
+ * A two-digit year is read as 20xx: these are cards, not history.
+ */
+function readExpiry(card: CardBody): { month: number; year: number } | undefined {
+  if (card.expiry_month !== undefined && card.expiry_year !== undefined) {
+    return {
+      month: toInt(card.expiry_month, 'expiry_month'),
+      year: toInt(card.expiry_year, 'expiry_year'),
+    };
+  }
+
+  if (card.expiry === undefined) return undefined;
+  const raw = card.expiry.trim();
+
+  // MM/YY or MM/YYYY
+  const slash = /^(\d{1,2})\s*\/\s*(\d{2}|\d{4})$/.exec(raw);
+  if (slash !== null) {
+    const month = Number(slash[1]);
+    const yearPart = slash[2] as string;
+    return { month, year: yearPart.length === 2 ? 2000 + Number(yearPart) : Number(yearPart) };
+  }
+
+  // YYYY-MM
+  const dashed = /^(\d{4})-(\d{1,2})$/.exec(raw);
+  if (dashed !== null) return { month: Number(dashed[2]), year: Number(dashed[1]) };
+
+  return undefined;
+}
 
 const fundResponse = z.object({
   data: z.object({
@@ -175,13 +257,76 @@ export class BitnobCardAdapter implements CardPort {
     // ledger; the ledger's balance comes from postings.
     const { amount } = microToUsd(parseMicro(card.balance));
 
+    const last4 = readLast4(card);
+    const expiry = readExpiry(card);
+    if (last4 === undefined || expiry === undefined) {
+      // Neither shape. Loud, and it names both, so whoever reads this can see
+      // that two field sets were tried rather than wondering which one we
+      // expected.
+      throw new ProviderContractError(
+        PROVIDER,
+        'a card response carried neither last4/expiry_month/expiry_year nor ' +
+          'cardNumber/expiry; the response shape has changed again',
+      );
+    }
+
     return {
       providerCardId: card.id,
       status: toCardStatus(card.status),
-      last4: card.last4,
-      expiryMonth: toInt(card.expiry_month, 'expiry_month'),
-      expiryYear: toInt(card.expiry_year, 'expiry_year'),
+      last4,
+      expiryMonth: expiry.month,
+      expiryYear: expiry.year,
       balance: amount,
+    };
+  }
+
+  /**
+   * The number, the CVV and the expiry — fetched, returned, never kept.
+   *
+   * The SAME endpoint as `get`, because that is what Bitnob offers: their SDK
+   * has no separate reveal call, and `fetchCard` is where `cardNumber` and
+   * `cvv2` appear. The two are kept apart at the PORT anyway, so that
+   * reconciliation and card listings — which call `get` constantly — never
+   * handle a PAN they did not ask for.
+   *
+   * Throws when the fields are absent rather than returning a partial. A
+   * customer shown half a card number has no idea whether the problem is
+   * theirs, and would try again; an error tells the truth and pages somebody.
+   */
+  async reveal(providerCardId: string): Promise<CardSecrets> {
+    const payload = await this.client.request(
+      'GET',
+      BITNOB_ENDPOINTS.getCard(providerCardId),
+    );
+
+    const parsed = cardResponse.safeParse(payload);
+    if (!parsed.success) {
+      // Deliberately does NOT echo the payload. Every other parse failure in
+      // this adapter names the offending fields, and doing that here would put
+      // a card number in a log line the moment the shape shifted.
+      throw new ProviderContractError(
+        PROVIDER,
+        `unexpected card shape while revealing card ${providerCardId}`,
+      );
+    }
+
+    const card = parsed.data.data;
+    const expiry = readExpiry(card);
+
+    if (card.cardNumber === undefined || card.cvv2 === undefined || expiry === undefined) {
+      throw new ProviderContractError(
+        PROVIDER,
+        'the provider returned a card without a number, a CVV or an expiry, so ' +
+          'there is nothing to reveal',
+      );
+    }
+
+    return {
+      pan: card.cardNumber,
+      cvv: card.cvv2,
+      expiryMonth: expiry.month,
+      expiryYear: expiry.year,
+      ...(card.cardName === undefined ? {} : { nameOnCard: card.cardName }),
     };
   }
 }

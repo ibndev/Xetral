@@ -90,6 +90,26 @@ export interface Card {
   readonly balance: string;
 }
 
+/**
+ * What a reveal returns. A SEPARATE type from `Card`, deliberately.
+ *
+ * If these were optional members of `Card`, every list render, every cached
+ * response and every debug log that stringifies a card would carry a PAN
+ * whenever one happened to be present — and nothing would fail on the day it
+ * was. Two types means a card number can only reach code that named it.
+ *
+ * Nothing in this package stores one. It is returned from the call and that is
+ * the end of its life here; a caller that puts it in state is making that
+ * decision visibly.
+ */
+export interface CardSecrets {
+  readonly pan: string;
+  readonly cvv: string;
+  readonly expiry_month: number;
+  readonly expiry_year: number;
+  readonly name_on_card?: string;
+}
+
 export interface Deposit {
   readonly id: string;
   readonly amount: string;
@@ -437,6 +457,24 @@ export class XetralClient {
    *  remembering a PIN. Unfreezing and terminating both ask. */
   async freezeCard(id: string): Promise<Card> {
     return this.#post(`/v1/cards/${encodeURIComponent(id)}/freeze`, {});
+  }
+
+  /**
+   * The card number, the CVV and the expiry.
+   *
+   * Takes a PIN because the server does: a number, a CVV and an expiry
+   * together are everything needed to spend online, and unlike a transfer
+   * there is no ledger entry afterwards for anyone to notice.
+   *
+   * The result is deliberately not cached anywhere in this client. Every
+   * reveal is a fresh call that the server records and counts, which is what
+   * makes "when was this number last shown?" answerable — and a cached copy
+   * would quietly make the answer wrong.
+   */
+  async revealCard(id: string, pin: string): Promise<CardSecrets> {
+    return this.#post(`/v1/cards/${encodeURIComponent(id)}/reveal`, {
+      transaction_pin: pin,
+    });
   }
 
   async unfreezeCard(id: string, pin: string): Promise<Card> {

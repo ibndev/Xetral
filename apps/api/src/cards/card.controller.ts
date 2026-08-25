@@ -12,7 +12,7 @@ import {
 import type { Request } from 'express';
 import type { AuthenticatedRequest } from '../auth/auth.guard.js';
 import { CardService } from './card.service.js';
-import type { CardView } from './card.service.js';
+import type { CardSecretsView, CardView } from './card.service.js';
 import { CardWebhookService } from './webhook.service.js';
 import type { WebhookOutcome } from './webhook.service.js';
 import { fundCardSchema, issueCardSchema } from './dto.js';
@@ -61,6 +61,29 @@ export class CardController {
       amount: parsed.data.amount,
       idempotencyKey: parsed.data.idempotency_key,
     });
+  }
+
+  /**
+   * The card number, the CVV and the expiry.
+   *
+   * POST rather than GET, and not for REST tidiness. A GET puts the card id in
+   * access logs, browser history and `Referer` headers, is prefetched by
+   * browsers and cached by intermediaries — none of which is acceptable for
+   * the request that returns a PAN. It also could not carry the PIN, which
+   * travels in the body so `redactPayload` scrubs it from anything that logs
+   * one.
+   *
+   * The response is the only place in this API where a full card number
+   * appears. It is not stored, not logged, and not repeated in the audit
+   * detail: `card_reveals` records THAT it happened, never what it showed.
+   */
+  @Post(':id/reveal')
+  @HttpCode(200)
+  async reveal(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+  ): Promise<CardSecretsView> {
+    return this.cards.reveal(subjectOf(request), id, request.ip);
   }
 
   /** No PIN. Freezing is the protective action, and a customer watching
