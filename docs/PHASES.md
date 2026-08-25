@@ -21,12 +21,12 @@ shipped, that is called out explicitly.
 | 10 — Multi-currency + FX / remittance | ✅ | Bitnob credentials to go live |
 | 11 — Mobile and web clients | ✅ | |
 | 12 — Pre-deployment audit | ✅ | Bitnob credentials to go live |
-| 13 — Closing the audit's findings | 🚧 | tiers 1–3 landed; tier 4 open |
+| 13 — Closing the audit's findings | ✅ | all four tiers landed |
 
 All eleven phases are built, a **pre-deployment audit** (Phase 12) closed what
 building them phase by phase had left between the phases, and **Phase 13** is
 working through what that audit found, in the order the findings would cost
-money. Every money flow
+money — all four tiers are now closed. Every money flow
 has an HTTP surface, a customer screen and an operations screen in front of it;
 Bitnob's live credentials are the only thing between the card, crypto and FX
 flows and production traffic.
@@ -1173,7 +1173,7 @@ grant the narrower roles through the dashboard; review every row in
 
 ---
 
-## Phase 13 — Closing the audit's findings 🚧
+## Phase 13 — Closing the audit's findings ✅
 
 Not a feature. The pre-deployment audit produced a list; this is that list
 being worked through, sequenced by what each gap would cost rather than by
@@ -1344,6 +1344,106 @@ Findings from building it:
    two negative tests passed, because the allowlist check runs before
    decryption. A green pair either side of a broken one.
 
-**Still open — tier 4:** general (non-login) rate limiting, disputes and
-chargebacks, the velocity limits that exist for cards but not for transfers,
-dependency scanning, data retention, and a privacy policy.
+### Tier 4 — the gaps that were nobody's emergency ✅
+
+| File | What it is |
+|---|---|
+| `apps/api/src/auth/request-rate-limit.service.ts` | a ceiling on every route, derived not declared |
+| `apps/web/src/lib/forwarded.ts` | the header without which every web customer is one client |
+| `packages/ledger/sql/017_transfer_velocity.sql` | what an account takeover looks like |
+| `packages/ledger/sql/018_disputes.sql` | somewhere to say "I did not do this" |
+| `packages/ledger/sql/019_retention.sql` | the only job here whose purpose is deletion |
+| `apps/web/src/app/legal/` | the notice, rendered from the schema |
+| `.github/dependabot.yml` | knowing about a package before the news does |
+
+Nothing here was on fire, which is why it was last. Each item is a control the
+platform was operating without and would have missed on a specific bad day.
+
+Findings from building it:
+
+1. **Only three endpoints had a rate limit, and the limit on one of them was a
+   denial of service against our own customers.** Login, registration and
+   password reset were capped; every other route — history, card details,
+   transfers — was unbounded, so a stolen session could read an account as fast
+   as the network allowed. Worse, the web app reached the API over a
+   server-side `fetch` and forwarded no client address, so its per-IP bucket
+   was ONE bucket for every web customer at once. Probed against the built
+   bundle: three logins with three different `x-forwarded-for` values each got
+   their own bucket; three carrying none — what the app was sending — shared
+   one, and the third was refused. At the production default the thirty-first
+   sign-in from the whole web app in any fifteen minutes was being turned away.
+2. **The rate class is DERIVED from the policy, not declared per route**, and
+   the asymmetry is the argument. A forgotten authorisation declaration gives a
+   403 somebody fixes that morning; a forgotten rate limit gives nothing at all
+   until the day it is abused. Forgetting fails open, so it has to be
+   impossible rather than discouraged.
+3. **It is keyed on the customer, and that is a Nigeria-specific decision.**
+   Carriers here put whole subscriber pools behind a handful of addresses, so a
+   per-address ceiling tight enough to stop one stolen session refuses a
+   network, and one loose enough not to is not a ceiling.
+4. **A daily total is blind to the shape of a takeover.** It does not look like
+   one large transfer; it looks like several ordinary ones to people the
+   customer has never paid, minutes apart, each fitting under the ceiling until
+   the account is empty. The velocity rules count instead of measuring — which
+   also means they need no currency, unlike the kobo limit.
+5. **Velocity REFUSES rather than freezing, and that is the difference from
+   the card protections rather than an inconsistency.** A card authorization is
+   a notification: the network approved it before we heard, so only the next
+   one can be protected. A transfer has not happened yet, so the correct action
+   is to not do it.
+6. **A dispute posts nothing when raised.** A claim is an assertion about a
+   fact, not a fact. Crediting on the strength of one makes "dispute
+   everything" a free withdrawal, and reversing that credit later takes money
+   from a customer who has spent it — the same line the gift card flow draws
+   between an offer and a transaction.
+7. **There is no clawback from the recipient, and its absence is a decision.**
+   A bank can reach into the other side because both sides sit in one regulated
+   system with a process behind it. We cannot, so an upheld dispute is our
+   loss, posted to its own expense account rather than netted against revenue —
+   which means somebody has to look at the number.
+8. **Retention is two laws pulling opposite ways.** AML says keep five years;
+   the NDPA says do not keep longer than needed. `retention_coverage` lists
+   every table against its decision and the invariant suite fails on an
+   UNDECIDED row, in both directions — because a deletion job is a list of what
+   somebody thought of, and the tables nobody thought of are the ones that
+   accumulate customer data for years.
+9. **Two append-only triggers refused the sweep and were right in different
+   ways.** `staff_totp_used_steps` grows without bound for no purpose, so its
+   trigger now permits deleting a row older than the window in which a code
+   could still be presented — and nothing else. `card_reveals` was going to be
+   purged and is not: a trail a scheduled job can delete from is one an
+   intruder can prune, and the way to hold less there is to store less.
+10. **The privacy notice is rendered from the schema.** A notice written once
+    from a template describes what somebody intended, and the gap opens
+    silently because nothing checks a paragraph. A test reads
+    `019_retention.sql` and fails the build if any period the page quotes
+    disagrees with the setting the sweep reads.
+11. **The dependency scan found a real one on its first run.** `apps/web` was
+    on Next 15.1.3, carrying an authorization-bypass-in-middleware advisory —
+    and this app's CSP, with the nonce that makes the page hydrate, lives in
+    middleware. Every 15.x release is in the affected range, so it was an
+    upgrade to 16.
+12. **Next 16 defaults to Turbopack, which cannot resolve this repo's `.js`
+    specifiers.** `resolveExtensions` appends to a bare specifier and does
+    nothing for one already carrying `.js`; `experimental.extensionAlias` is
+    accepted, printed as active, and ignored. The first failure was `Call
+    retries were exceeded`, which says nothing about module resolution. The
+    build declares `--webpack`, because dropping the extensions would fix the
+    web build by breaking every other workspace. The same trap
+    `@nestjs/common/constants` and `@noble/hashes/sha3` set, in a third place.
+13. **The gate is scoped to what serves customer traffic, and the exclusion is
+    written down.** A repo-wide audit reports thirty findings, nearly all in
+    the Expo and Metro toolchain, and failing on those trains everybody to skip
+    the step. `apps/mobile` is named in the workflow as deliberately excluded
+    rather than left as a gap.
+14. **Two tests passed for the wrong reason and were rewritten.** A dispute
+    invariant asserted the deadline was immutable while updating zero rows,
+    because an earlier block had resolved the only open one. A retention test
+    ran two sweeps with `Promise.all` and found no contention, because a sweep
+    finishes in milliseconds — the lock is now genuinely held by another
+    connection while the sweep is asked to run.
+
+**Before publishing, an operator must:** replace the bracketed company name,
+registered address, DPO address and NDPC reference in `apps/web/src/app/legal/`,
+have the terms reviewed by a Nigerian lawyer, grant `dispute_reviewer` to real
+people, and set `RETENTION_INTERVAL_SECONDS` on exactly one instance.

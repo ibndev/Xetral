@@ -428,6 +428,107 @@ Schema: `packages/ledger/sql/009_admin.sql`, seeded by `009_admin.seed.sql`.
   immediately, and the money stays owed to the customer. Conflating the two is
   how a support action becomes a seizure.
 
+### Rate limiting and transfer velocity — non-obvious rules
+
+Schema: `packages/ledger/sql/017_transfer_velocity.sql`. Limiter in
+`apps/api/src/auth/request-rate-limit.service.ts`.
+
+- **The rate class is DERIVED from the route's policy, never declared.** A
+  forgotten authorisation declaration gives a 403 somebody fixes that morning;
+  a forgotten rate limit gives nothing at all until the day it is abused.
+  Forgetting fails open, so it must be impossible rather than discouraged.
+- **Authenticated requests are counted per CUSTOMER, not per address.**
+  Nigerian carriers put whole subscriber pools behind a handful of addresses,
+  so a per-address ceiling tight enough to stop a stolen session refuses a
+  network. The tight limits on public routes are the per-identifier buckets in
+  `login-rate-limit.guard.ts`, which NAT does not blur.
+- **The limiter runs after the bearer check and BEFORE the PIN.** A PIN is
+  verified with scrypt, deliberately slowly; a flood reaching it would spend
+  that cost on every request and the limiter would be what brought the box down.
+- **`/health` and `/ready` are unmetered.** What polls them hardest is the load
+  balancer deciding whether this instance lives.
+- **The web edge must forward `x-forwarded-for`, COPIED not appended.** Without
+  it every web customer is one client to the limiter. Appending would make the
+  header one hop longer than a mobile request's, and `TRUST_PROXY_HOPS` cannot
+  be right for both.
+- **Transfer velocity counts, it does not measure.** How many strangers a
+  customer is paying today, and how many transfers in the last hour. A count
+  carries no units, so both apply in EVERY currency — unlike the daily kobo
+  ceiling, which is a statement about naira alone.
+- **It refuses; it does not freeze.** A card authorization already happened
+  when we hear about it, so only the next one can be protected. A transfer has
+  not, so the correct action is to not do it.
+- **Read from POSTINGS, never from an entry's metadata.** A control that
+  depends on a key some flow remembered to set is a control that switches
+  itself off silently.
+- A recipient is **new today** when the FIRST time they were ever paid falls
+  inside the current Lagos day — somebody paid monthly for a year is not a
+  stranger because this month's rent went out this morning.
+
+### Disputes — non-obvious rules
+
+Schema: `packages/ledger/sql/018_disputes.sql`.
+
+```
+Raise     (nothing)                            a claim, not a transaction
+Accept    expense_dispute_loss -> wallet       we bear it; APPENDED
+Reject    (nothing)                            no entry ever existed
+Withdraw  (nothing)                            the customer changed their mind
+```
+
+- **Raising posts nothing.** A claim is an assertion about a fact, not a fact.
+  Crediting on one makes "dispute everything" a free withdrawal, and reversing
+  that credit later takes money from a customer who has spent it.
+- **There is NO clawback from the recipient**, and its absence is a decision. A
+  bank can reach into the other side because both sides sit inside one
+  regulated system; we cannot, and debiting our own customer on our own say-so
+  would overdraw somebody who may have done nothing wrong. An upheld dispute is
+  our loss, posted to its own expense account rather than netted against
+  revenue — so somebody has to look at the number.
+- **A customer cannot dispute an entry they have no leg in**, enforced by
+  trigger and read from postings. The API answers the SAME 404 for "not yours"
+  and "does not exist": distinguishing them turns the complaints form into a
+  way to enumerate other people's transactions.
+- **The deadline is the database's clock**, cannot be supplied and cannot be
+  moved. A process that can push its own deadline out has no deadline.
+- **An outcome is final.** Reopening an accepted dispute pays the refund twice;
+  reopening a rejected one erases that it was refused. New evidence raises a
+  NEW dispute — which the partial unique index deliberately permits.
+- **Raising and withdrawing take NO transaction PIN.** The customer most likely
+  to raise one has just discovered somebody else is in their account, and
+  demanding the factor that person may already have is worst exactly then.
+- `/v1/admin/disputes` uses its **own** `dispute_reviewer` role, not the gift
+  card reviewer's.
+
+### Data retention — non-obvious rules
+
+Schema: `packages/ledger/sql/019_retention.sql`. Worker in
+`apps/api/src/retention/retention.service.ts`.
+
+- **Two laws pull opposite ways.** AML requires records of a relationship for
+  five years after it ends; the NDPA forbids keeping personal data longer than
+  needed. A policy implementing one is the one that gets a licence looked at.
+- **This is the only scheduled job whose purpose is to destroy data**, so the
+  ledger is protected structurally: `apply_retention()` does not NAME a ledger
+  table, and there is no dynamic SQL, because a deletion job whose behaviour is
+  changed by an INSERT is changed by an INSERT.
+- **`retention_coverage` lists every table against its decision**, and the
+  invariant suite fails on an UNDECIDED row in both directions. A deletion job
+  is a list of what somebody thought of; the tables nobody thought of are the
+  ones that accumulate customer data for years.
+- **Never delete a PENDING notification or a LIVE token.** The first drops a
+  password reset somebody is waiting on; the second signs a customer out for
+  housekeeping. Both have tests.
+- **`card_reveals` is kept, deliberately.** A trail a scheduled job can delete
+  from is one an intruder can prune. The way to hold less there is to store
+  less, which it already does.
+- **`staff_totp_used_steps` is the one relaxation of an append-only rule**, and
+  only for rows older than the window in which a code could still be presented.
+  An UPDATE stays refused outright at any age.
+- **The privacy notice is rendered from this schema.** `retention-table.test.ts`
+  fails the build if a period the page quotes disagrees with the setting the
+  sweep reads. A notice nothing checks describes what somebody intended.
+
 ### Notifications — non-obvious rules
 
 Schema: `packages/identity/sql/012_notifications.sql`. The outbox, the port
