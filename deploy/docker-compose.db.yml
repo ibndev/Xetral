@@ -33,17 +33,36 @@ services:
   # a node dying; it does NOT protect against somebody dropping a table, which
   # replicates faithfully to the standby in under a second.
   backup:
-    image: postgres:16-alpine
+    # Built rather than pulled: the stock image has `pg_basebackup` and neither
+    # of the two things that turn a local tarball into a backup — something to
+    # encrypt with and something to ship with.
+    build:
+      context: ./standby
+      dockerfile: Dockerfile.backup
     restart: always
     depends_on:
       postgres:
         condition: service_healthy
     environment:
       PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      # The PUBLIC half of an age keypair. The private half must never be
+      # copied onto this host: encrypting to a public key is what makes a
+      # compromise of the database node yield the backups without their
+      # contents, and that is the entire point. The container REFUSES TO START
+      # without this rather than writing an unencrypted customer ledger.
+      BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT:?set BACKUP_AGE_RECIPIENT}
+      # Object storage in a DIFFERENT region. Without it the archives stay on
+      # this disk, which protects against a mistaken DELETE and against nothing
+      # else — not the disk, not the node, not the provider account.
+      BACKUP_REMOTE: ${BACKUP_REMOTE:-}
+      RCLONE_CONFIG_REMOTE_TYPE: ${RCLONE_CONFIG_REMOTE_TYPE:-}
+      RCLONE_CONFIG_REMOTE_PROVIDER: ${RCLONE_CONFIG_REMOTE_PROVIDER:-}
+      RCLONE_CONFIG_REMOTE_ACCESS_KEY_ID: ${RCLONE_CONFIG_REMOTE_ACCESS_KEY_ID:-}
+      RCLONE_CONFIG_REMOTE_SECRET_ACCESS_KEY: ${RCLONE_CONFIG_REMOTE_SECRET_ACCESS_KEY:-}
+      RCLONE_CONFIG_REMOTE_ENDPOINT: ${RCLONE_CONFIG_REMOTE_ENDPOINT:-}
+      RCLONE_CONFIG_REMOTE_REGION: ${RCLONE_CONFIG_REMOTE_REGION:-}
     volumes:
-      - ./standby/backup.sh:/backup.sh:ro
       - backups:/backups
-    entrypoint: ['/bin/sh', '/backup.sh']
 
 volumes:
   pgdata:
