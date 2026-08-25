@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { apiBaseUrl, COOKIE_OPTIONS, REFRESH_COOKIE } from '@/lib/config';
+import { forwardedFor } from '@/lib/forwarded';
 
 /**
  * Calls an API endpoint that mints a token pair, and keeps the refresh token
@@ -20,6 +21,10 @@ import { apiBaseUrl, COOKIE_OPTIONS, REFRESH_COOKIE } from '@/lib/config';
 export async function exchangeForCookie(
   path: string,
   body: unknown,
+  // REQUIRED, so the compiler refuses a call site that forgot it. An optional
+  // one would let the address-forwarding this function depends on be dropped
+  // silently, which is exactly how it came to be missing in the first place.
+  request: Request,
 ): Promise<NextResponse> {
   /*
    * A failed fetch is an OUTAGE, not a bad request.
@@ -33,7 +38,13 @@ export async function exchangeForCookie(
   try {
     upstream = await fetch(`${apiBaseUrl()}${path}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        // THE MOST IMPORTANT HEADER ON THIS PATH. Sign-in is the endpoint whose
+        // per-IP bucket is tightest, so it is the one that lumps every web
+        // customer together hardest. See `forwardedFor`.
+        ...forwardedFor(request),
+      },
       body: JSON.stringify(body),
     });
   } catch {

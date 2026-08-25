@@ -14,6 +14,9 @@ import { AuthGuard } from './auth.guard.js';
 import { PinService } from './pin.service.js';
 import { StaffService } from './staff.service.js';
 import { StaffTotpService } from './staff-totp.service.js';
+import { RequestRateLimiter } from './request-rate-limit.service.js';
+import { InMemoryRateLimitStore } from './rate-limit.js';
+import { RATE_LIMIT_STORE } from '../tokens.js';
 import { API_CONFIG, CLOCK, ROUTE_POLICY } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
 
@@ -29,9 +32,24 @@ const key = { version: 'v1', secret: randomBytes(32) };
 const keyring: AccessTokenKeyring = { current: key, accepted: [key] };
 const NOW = 1_700_000_000;
 
+/**
+ * Deliberately far above anything these tests send. What is under test in this
+ * file is the guard's ORDERING, and a realistic ceiling would make an unrelated
+ * case fail on the twelfth request rather than on the thing it asserts. The
+ * limiter's own behaviour is exercised by a second app at the bottom of this
+ * file, with real numbers.
+ */
 const config = {
   accessTokenKeyring: keyring,
   accessTokenTtlSeconds: 900,
+  requestRateLimit: {
+    windowSeconds: 60,
+    publicMax: 10_000,
+    readMax: 10_000,
+    writeMax: 10_000,
+    moneyMax: 10_000,
+    staffMax: 10_000,
+  },
 } as unknown as ApiConfig;
 
 @Controller('v1/probe')
@@ -112,6 +130,12 @@ const policy = new RoutePolicyRegistry()
     // exercised end to end against real rows.
     { provide: StaffService, useValue: staff },
     { provide: StaffTotpService, useValue: totp },
+    // The REAL limiter over a real in-memory store. A stand-in here would
+    // assert that a mock matches the guard's expectations rather than that the
+    // limiter runs where the guard puts it — and where it runs is the whole
+    // claim being made about it.
+    { provide: RATE_LIMIT_STORE, useValue: new InMemoryRateLimitStore() },
+    RequestRateLimiter,
     { provide: APP_GUARD, useClass: AuthGuard },
   ],
 })
@@ -400,5 +424,191 @@ describe('the staff second factor', () => {
       .expect(201);
 
     expect(totpCalls).toEqual([]);
+  });
+});
+
+/**
+ * The general request ceiling, through the guard rather than around it.
+ *
+ * A separate application with REAL numbers, because the app above deliberately
+ * runs with limits nothing can reach. What is asserted here is not that a
+ * sliding window counts — `rate-limit.test.ts` and the shared contract suite
+ * cover that against both backends — but the three things only the wiring can
+ * be wrong about: that the ceiling applies to ordinary routes at all, that it
+ * counts the CUSTOMER rather than the address, and that it refuses before the
+ * PIN is ever looked at.
+ */
+describe('the general request ceiling', () => {
+  const tightConfig = {
+    accessTokenKeyring: keyring,
+    accessTokenTtlSeconds: 900,
+    requestRateLimit: {
+      windowSeconds: 60,
+      publicMax: 3,
+      readMax: 3,
+      writeMax: 3,
+      moneyMax: 2,
+      staffMax: 3,
+    },
+  } as unknown as ApiConfig;
+
+  const tightPinCalls: string[] = [];
+  const tightPins = {
+    async assertValid(sub: string): Promise<void> {
+      tightPinCalls.push(sub);
+    },
+  } as unknown as PinService;
+
+  @Module({
+    controllers: [ProbeController],
+    providers: [
+      { provide: API_CONFIG, useValue: tightConfig },
+      { provide: ROUTE_POLICY, useValue: policy },
+      { provide: CLOCK, useValue: { nowMs: () => NOW * 1000, nowSeconds: () => NOW } },
+      { provide: PinService, useValue: tightPins },
+      { provide: StaffService, useValue: staff },
+      { provide: StaffTotpService, useValue: totp },
+      { provide: RATE_LIMIT_STORE, useValue: new InMemoryRateLimitStore() },
+      RequestRateLimiter,
+      { provide: APP_GUARD, useClass: AuthGuard },
+    ],
+  })
+  class TightModule {}
+
+  let tight: INestApplication;
+
+  beforeAll(async () => {
+    const mod = await Test.createTestingModule({ imports: [TightModule] }).compile();
+    tight = mod.createNestApplication(new ExpressAdapter());
+    await tight.init();
+  });
+
+  afterAll(async () => {
+    await tight.close();
+  });
+
+  const tokenFor = (sub: string): string =>
+    signAccessToken({ sub, sid: 's', did: 'd' }, keyring, NOW, 900);
+
+  it('refuses an ordinary read once the ceiling is reached', async () => {
+    // The gap this closes: before it existed, only login, registration and
+    // password reset had any ceiling, so a stolen session could read a
+    // customer's whole history as fast as the network allowed.
+    const token = tokenFor('reader');
+    for (let i = 0; i < 3; i += 1) {
+      await request(tight.getHttpServer())
+        .get('/v1/probe/closed')
+        .set('authorization', `Bearer ${token}`)
+        .expect(200);
+    }
+
+    const blocked = await request(tight.getHttpServer())
+      .get('/v1/probe/closed')
+      .set('authorization', `Bearer ${token}`)
+      .expect(429);
+
+    // A DISTINCT code from the credential limiter's `too_many_attempts`: one
+    // means "too fast", the other "we have stopped accepting guesses at this
+    // account", and a client showing the same words for both would tell a
+    // customer their sign-in was blocked when it was not.
+    expect(blocked.body.error).toBe('too_many_requests');
+    expect(blocked.body.retry_after_seconds).toBeGreaterThan(0);
+  });
+
+  it('counts the CUSTOMER, not the address', async () => {
+    // THE NIGERIA-SPECIFIC CASE. Both customers here arrive from the same
+    // address, which is what carrier-grade NAT does to a whole MTN or Airtel
+    // subscriber pool. Keyed on the address, the second customer would be
+    // refused for what the first one did.
+    const first = tokenFor('nat-one');
+    const second = tokenFor('nat-two');
+
+    for (let i = 0; i < 3; i += 1) {
+      await request(tight.getHttpServer())
+        .get('/v1/probe/closed')
+        .set('authorization', `Bearer ${first}`)
+        .expect(200);
+    }
+    await request(tight.getHttpServer())
+      .get('/v1/probe/closed')
+      .set('authorization', `Bearer ${first}`)
+      .expect(429);
+
+    // Same socket, different account, unaffected.
+    await request(tight.getHttpServer())
+      .get('/v1/probe/closed')
+      .set('authorization', `Bearer ${second}`)
+      .expect(200);
+  });
+
+  it('refuses BEFORE the PIN is verified', async () => {
+    /*
+     * The ordering claim, and the reason it matters is cost rather than
+     * neatness. A PIN is verified with scrypt, which is deliberately slow —
+     * that slowness is what makes five attempts meaningful. If the ceiling ran
+     * after it, a flood would spend that cost on every request before being
+     * refused, and the limiter would be what brought the instance down.
+     */
+    const token = tokenFor('spender');
+    for (let i = 0; i < 2; i += 1) {
+      await request(tight.getHttpServer())
+        .post('/v1/probe/money')
+        .set('authorization', `Bearer ${token}`)
+        .send({ transaction_pin: '1234' })
+        // 201, because Nest answers a POST that way by default.
+        .expect(201);
+    }
+    expect(tightPinCalls.filter((s) => s === 'spender')).toHaveLength(2);
+
+    await request(tight.getHttpServer())
+      .post('/v1/probe/money')
+      .set('authorization', `Bearer ${token}`)
+      .send({ transaction_pin: '1234' })
+      .expect(429);
+
+    // Still two. The refused request never reached scrypt.
+    expect(tightPinCalls.filter((s) => s === 'spender')).toHaveLength(2);
+  });
+
+  it('gives money routes a tighter ceiling than reads', async () => {
+    // Two classes, derived from the policy each route already declares rather
+    // than from a second list somebody has to remember to fill in.
+    const token = tokenFor('classes');
+    for (let i = 0; i < 3; i += 1) {
+      await request(tight.getHttpServer())
+        .get('/v1/probe/closed')
+        .set('authorization', `Bearer ${token}`)
+        .expect(200);
+    }
+    // The read bucket is now full; the money bucket is untouched and smaller.
+    for (let i = 0; i < 2; i += 1) {
+      await request(tight.getHttpServer())
+        .post('/v1/probe/money')
+        .set('authorization', `Bearer ${token}`)
+        .send({ transaction_pin: '1234' })
+        // 201, because Nest answers a POST that way by default.
+        .expect(201);
+    }
+    await request(tight.getHttpServer())
+      .post('/v1/probe/money')
+      .set('authorization', `Bearer ${token}`)
+      .send({ transaction_pin: '1234' })
+      .expect(429);
+  });
+
+  it('does not spend a bucket on a request with no valid token', async () => {
+    // The ceiling sits after the bearer check, so an unauthenticated caller
+    // cannot fill a real customer's bucket by guessing their id.
+    for (let i = 0; i < 10; i += 1) {
+      await request(tight.getHttpServer())
+        .get('/v1/probe/closed')
+        .set('authorization', 'Bearer forged')
+        .expect(401);
+    }
+
+    await request(tight.getHttpServer())
+      .get('/v1/probe/closed')
+      .set('authorization', `Bearer ${tokenFor('untouched')}`)
+      .expect(200);
   });
 });

@@ -34,6 +34,12 @@ const API_ERROR_CODES = [
   'email_taken',
   'registration_closed',
   'too_many_attempts',
+  /* The general ceiling on request rate, distinct from `too_many_attempts` and
+     deliberately so: one means "we have stopped accepting guesses at this
+     account", the other means "you are going too fast". A client that showed
+     the same words for both would tell a customer whose app retried eagerly
+     that their sign-in had been blocked. */
+  'too_many_requests',
   /* Password reset is refused as a whole when the deployment has no email
      provider. NOT user-fixable: nothing the customer types changes it, and
      telling them to try again would send them round a loop that cannot end. */
@@ -201,6 +207,8 @@ const USER_FIXABLE: ReadonlySet<ApiErrorCode> = new Set<ApiErrorCode>([
   'totp_required',
   'invalid_totp',
   'too_many_reveals',
+  /* Waiting clears it, and the screen says so. */
+  'too_many_requests',
 ]);
 
 /** The session is gone and the customer must sign in again. */

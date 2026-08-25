@@ -73,6 +73,7 @@ import { NotificationWorker } from './notifications/notification.worker.js';
 import { ResendNotificationAdapter } from '@xetral/providers';
 import type { NotificationPort } from '@xetral/providers';
 import { LoginRateLimitGuard, PasswordResetRateLimitGuard } from './auth/login-rate-limit.guard.js';
+import { RequestRateLimiter } from './auth/request-rate-limit.service.js';
 import {
   InMemoryRateLimitStore,
   RedisRateLimitStore,
@@ -623,6 +624,11 @@ export class AppModule {
         GiftCardLifecycle,
         LoginRateLimitGuard,
         PasswordResetRateLimitGuard,
+        // Injected into AuthGuard rather than registered as a second global
+        // guard: it has to run after the bearer check (so it has an account to
+        // count against) and before the PIN (so a flood cannot spend scrypt).
+        // Guard ordering cannot express "in the middle of that one".
+        RequestRateLimiter,
         PasswordResetService,
 
         // Registered globally, so it runs for every route including one whose

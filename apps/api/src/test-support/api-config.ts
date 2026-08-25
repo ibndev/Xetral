@@ -31,6 +31,18 @@ export function testApiConfig(databaseUrl: string, overrides: Partial<ApiConfig>
       perIdentifier: { max: 1000, windowSeconds: 900 },
       perIp: { max: 1000, windowSeconds: 900 },
     },
+    // Deliberately high, for the same reason the login limits are: every e2e
+    // suite drives dozens of requests as one customer, and a realistic ceiling
+    // would fail the flow tests rather than the limiter. The suite that tests
+    // this builds its own app with real numbers.
+    requestRateLimit: {
+      windowSeconds: 60,
+      publicMax: 100_000,
+      readMax: 100_000,
+      writeMax: 100_000,
+      moneyMax: 100_000,
+      staffMax: 100_000,
+    },
     trustProxyHops: 0,
     // The suites pin the in-process limiter: each app instance then gets its
     // own bucket, so rate-limit cases cannot leak into flow cases.

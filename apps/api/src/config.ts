@@ -239,6 +239,22 @@ export interface ApiConfig {
    * it. Without the per-identifier bucket the endpoint is a mail bomb aimed at
    * any address, delivered by our own sending domain.
    */
+  /**
+   * The ceiling on how fast any route may be called.
+   *
+   * One window, five maximums, because the classes differ in what a burst
+   * COSTS rather than in how a burst should be measured. Zero on a class
+   * disables it — which is how liveness stays unmetered.
+   */
+  readonly requestRateLimit: {
+    readonly windowSeconds: number;
+    readonly publicMax: number;
+    readonly readMax: number;
+    readonly writeMax: number;
+    readonly moneyMax: number;
+    readonly staffMax: number;
+  };
+
   readonly passwordResetRateLimit: {
     readonly perIdentifier: RateLimitRule;
     readonly perIp: RateLimitRule;
@@ -631,6 +647,27 @@ export function loadConfig(env: Env): ApiConfig {
       env,
       'CRYPTO_DEPOSIT_RECONCILE_INTERVAL_SECONDS',
     ),
+    requestRateLimit: {
+      windowSeconds: integer(env, 'REQUEST_RATE_LIMIT_WINDOW_SECONDS', 60),
+      // Generous, because an unauthenticated request has only an address to
+      // key on and Nigerian mobile traffic shares addresses across a whole
+      // carrier. The tight ceilings on these routes are the per-identifier
+      // buckets in login-rate-limit.guard.ts, which NAT does not blur.
+      publicMax: integer(env, 'REQUEST_RATE_LIMIT_PUBLIC', 120),
+      // A screen opening fires several reads at once, and a customer pulling
+      // to refresh does it again. Loose enough not to be felt by anybody using
+      // the app, tight enough that harvesting an account takes hours.
+      readMax: integer(env, 'REQUEST_RATE_LIMIT_READ', 120),
+      writeMax: integer(env, 'REQUEST_RATE_LIMIT_WRITE', 30),
+      // A customer sending twelve transfers in a minute is doing something
+      // they will remember; a stolen session emptying an account does exactly
+      // this. Deliberately the tightest class.
+      moneyMax: integer(env, 'REQUEST_RATE_LIMIT_MONEY', 12),
+      // Higher than a customer's, because a reviewer working a queue is a
+      // person clicking as fast as they can read, and refusing them mid-queue
+      // is how a backlog becomes a shared login.
+      staffMax: integer(env, 'REQUEST_RATE_LIMIT_STAFF', 90),
+    },
     passwordResetRateLimit: {
       // Three per hour per address. Enough for a customer whose first email
       // went to spam to try again twice; not enough to be a weapon.

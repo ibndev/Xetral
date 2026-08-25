@@ -11,5 +11,5 @@ import { exchangeForCookie } from '@/lib/auth-exchange';
  */
 export async function POST(request: Request): Promise<NextResponse> {
   const body: unknown = await request.json().catch(() => undefined);
-  return exchangeForCookie('/v1/auth/login', body);
+  return exchangeForCookie('/v1/auth/login', body, request);
 }
