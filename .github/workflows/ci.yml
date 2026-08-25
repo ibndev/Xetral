@@ -92,7 +92,11 @@ jobs:
           psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
             -f packages/ledger/sql/009_admin.seed.sql \
             -f packages/ledger/sql/010_card_protection.sql \
-            -f packages/ledger/sql/011_ledger_immutability.sql
+            -f packages/ledger/sql/011_ledger_immutability.sql \
+            -f packages/identity/sql/012_notifications.sql \
+            -f packages/identity/sql/013_password_reset.sql \
+            -f packages/identity/sql/014_staff_totp.sql \
+            -f packages/ledger/sql/015_error_events.sql
 
       - name: Ledger and identity invariants
         run: |
@@ -112,7 +116,11 @@ jobs:
                    packages/ledger/sql/008_fx.test.sql \
                    packages/ledger/sql/009_admin.test.sql \
                    packages/ledger/sql/010_card_protection.test.sql \
-                   packages/ledger/sql/011_ledger_immutability.test.sql; do
+                   packages/ledger/sql/011_ledger_immutability.test.sql \
+                   packages/identity/sql/012_notifications.test.sql \
+                   packages/identity/sql/013_password_reset.test.sql \
+                   packages/identity/sql/014_staff_totp.test.sql \
+                   packages/ledger/sql/015_error_events.test.sql; do
             echo "== $f"
             psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
               -f "$f" 2>&1 | tee "/tmp/$(basename "$f").out"
@@ -157,7 +165,11 @@ jobs:
           psql -h localhost -U xetral -d xetral -v ON_ERROR_STOP=1 \
             -f packages/ledger/sql/009_admin.seed.sql \
             -f packages/ledger/sql/010_card_protection.sql \
-            -f packages/ledger/sql/011_ledger_immutability.sql
+            -f packages/ledger/sql/011_ledger_immutability.sql \
+            -f packages/identity/sql/012_notifications.sql \
+            -f packages/identity/sql/013_password_reset.sql \
+            -f packages/identity/sql/014_staff_totp.sql \
+            -f packages/ledger/sql/015_error_events.sql
 
       - run: npm run typecheck
 
@@ -235,6 +247,24 @@ jobs:
               -X POST -H 'content-type: application/json' \
               -H 'x-bitnob-signature: deadbeef' -d '{"event":"probe"}'
           done
+
+          # Account recovery. Both are PUBLIC by necessity — a customer who has
+          # lost their password has no session — so a 404 here means the one
+          # route a locked-out customer can reach is not mounted, and they have
+          # no way back to their money. This instance has no email provider, so
+          # `forgot` refuses honestly with 503 rather than promising a message
+          # nothing would send.
+          check "password reset is mounted" 503 http://127.0.0.1:3100/v1/auth/password/forgot \
+            -X POST -H 'content-type: application/json' -d '{"identifier":"probe@example.ng"}'
+          check "reset consumption is mounted" 401 http://127.0.0.1:3100/v1/auth/password/reset \
+            -X POST -H 'content-type: application/json' \
+            -d '{"token":"not-real","new_password":"a-long-enough-password"}'
+
+          # The staff second factor, and the errors surface. Guarded, so 401
+          # proves each is both mounted and gated — the same claim, for the
+          # routes added since the audit.
+          check "totp enrolment is mounted" 401 http://127.0.0.1:3100/v1/auth/totp/enrol -X POST
+          check "errors surface is mounted" 401 http://127.0.0.1:3100/v1/admin/errors
 
           kill "$api_pid" 2>/dev/null || true
 

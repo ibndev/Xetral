@@ -407,6 +407,109 @@ Schema: `packages/ledger/sql/009_admin.sql`, seeded by `009_admin.seed.sql`.
   immediately, and the money stays owed to the customer. Conflating the two is
   how a support action becomes a seizure.
 
+### Notifications — non-obvious rules
+
+Schema: `packages/identity/sql/012_notifications.sql`. The outbox, the port
+(`ports/notification.ts`) and the Resend adapter.
+
+- **Nothing sends inline.** A message is a ROW written in the SAME transaction
+  as the event that owed it. Sending inside the transaction mails receipts for
+  money that then rolls back; sending after it loses messages when the process
+  dies in the gap; either way a slow provider becomes a slow login.
+- **The body is SEALED** (`^v[0-9]+:` CHECK) and a delivered message has its
+  body ERASED. A rendered password reset email contains a live bearer token, so
+  an unsealed outbox is a list of account-takeover links; the safest place for a
+  spent secret is nowhere.
+- **A notification timeout IS retryable** — the only place in this codebase
+  where that is true. For money, not knowing whether the provider acted means
+  do nothing and reconcile. Here, not sending is worse than sending twice, and
+  the provider's idempotency key makes asking again safe. Written down twice
+  because the rest of the codebase trains the opposite instinct.
+- **`enqueueBestEffort` uses a SAVEPOINT**, and that is what makes it
+  best-effort. Any error inside a Postgres transaction poisons it, so a
+  try/catch around the insert takes the customer's transfer down with the
+  receipt reporting it.
+- **`available` is not `deliverable`.** The first asks whether a message can be
+  enqueued (a keyring); the second whether anything will send it (a provider). A
+  flow whose whole purpose is the message must ask the second — password reset
+  asked the first and told locked-out customers to check an inbox nothing would
+  reach.
+- **Every template escapes every interpolated value.** A device platform string
+  or a withdrawal address is outside-controlled, and unescaped it is a script
+  tag in a message the customer has every reason to trust.
+- **Money is grouped by `groupDigits`, never `Intl.NumberFormat`** — the
+  client's rule, in the other place a customer reads an amount.
+- **`coverage.test.ts` fails the build on a template nothing enqueues.** A
+  `new_device` template nobody calls is an account-takeover alert that will
+  never fire.
+
+### Password reset — non-obvious rules
+
+Schema: `packages/identity/sql/013_password_reset.sql`.
+
+- **Consumption is a database function**, for the same reason rotation is:
+  SELECT-then-UPDATE lets two requests carrying one stolen token both reset the
+  password, and the second locks the customer out of the account they just
+  recovered.
+- **Only the hash is stored**, `^[0-9a-f]{64}$`, same as refresh tokens.
+- **Using a token revokes EVERY live session.** Finishing a reset while an
+  intruder is still signed in is theatre.
+- **`/forgot` answers 204 for every valid identifier**, real or not, and mints
+  and hashes a token either way so the two paths do not differ in timing. An
+  endpoint that answers differently turns any address list into a customer list.
+- **`/reset` issues NO tokens.** A leaked link grants a password that can be
+  used, not a live session.
+- **Rate limited on its OWN bucket**, far tighter than login: each accepted
+  request mails somebody who did not ask for it, and a shared counter would stop
+  a customer who mistyped their password from asking for a reset.
+- **The reset link's origin is configuration, never a request header.** A `Host`
+  an attacker controls turns our own email into a credential harvester.
+
+### The staff second factor — non-obvious rules
+
+Schema: `packages/identity/sql/014_staff_totp.sql`. TOTP in
+`packages/identity/src/totp.ts`, verified against RFC 6238's own vectors.
+
+- **Hand-written, and that is not a contradiction.** The rule about crypto is
+  never write the PRIMITIVE and never trust an implementation no published
+  vector has judged. This is a construction over Node's HMAC-SHA1 with six
+  published vectors in the test file. SHA-1 is correct here and only here.
+- **The replay table is the point.** A code is valid for 90 seconds — ample time
+  to read six digits off somebody's screen. The counter value is recorded and a
+  UNIQUE constraint refuses the second attempt.
+- **A CONFIRMED secret cannot be swapped in place.** The quiet attack is a stolen
+  session re-enrolling the factor onto the attacker's authenticator; nothing in
+  the audit log looks odd, because changing phones is normal. Replacing one is an
+  administrator's action.
+- **A verified code ELEVATES THE SESSION for ten minutes.** Demanding a fresh
+  code per action is unusable — codes are single-use and change every thirty
+  seconds, so a reviewer working a queue is refused on their second approval, and
+  the outcome is a shared authenticator on a desk. The PIN is still required on
+  every acting request inside the window.
+- **Enrolment is required on EVERY staff route, reads included.** Gating only the
+  acting half leaves the customer database behind one password.
+- **`claims.sub` is a UUID, not the numeric id.** Every query here resolves it.
+
+### Error capture — non-obvious rules
+
+Schema: `packages/ledger/sql/015_error_events.sql`.
+
+- **The fingerprint is the design.** Errors name what they failed on, so without
+  normalising identifiers out, one bug is a thousand rows and the table is a log.
+  Too coarse and two bugs share a row; neither failure is visible from a green
+  test run.
+- **A 4xx is not an error.** A wrong PIN is the system working, and recording it
+  buries the row that matters.
+- **Recording can never fail the request.** `record_error` is one
+  `ON CONFLICT DO UPDATE`, and the service swallows everything and holds a
+  re-entry guard so a broken database cannot recurse through its own reporter.
+- **The route PATTERN is stored, never the resolved path** — otherwise every
+  customer gets their own fingerprint and their id lands in a table read by
+  everyone on call.
+- **Alerting speaks twice only**: an unseen fingerprint, or one an order of
+  magnitude worse than when we last spoke. "It happened again" is true of every
+  open bug, and a rule people mute is worse than none.
+
 ### apps/api
 
 - `AuthGuard` is registered with `APP_GUARD`, so it runs for **every** route. A
@@ -453,7 +556,8 @@ Schema: `packages/ledger/sql/009_admin.sql`, seeded by `009_admin.seed.sql`.
 
 Live set: **Bitnob** (NGN virtual accounts, crypto, USDT, stablecoin, virtual
 USD cards, FX),
-**VTpass** (airtime, data, bills), **Airalo** (eSIM), **Twilio** (virtual numbers).
+**VTpass** (airtime, data, bills), **Airalo** (eSIM), **Twilio** (virtual
+numbers), **Resend** (email).
 
 Do **not** reintroduce Reloadly, Maplerad, Anchor, Paystack or ALAT. They appear in
 the reference plugin and are out of scope.
@@ -648,6 +752,10 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/009_admin.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/009_admin.seed.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/010_card_protection.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/011_ledger_immutability.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/012_notifications.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/013_password_reset.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/014_staff_totp.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/015_error_events.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/003_cards.test.sql
@@ -659,6 +767,10 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/008_fx.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/009_admin.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/010_card_protection.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/011_ledger_immutability.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/012_notifications.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/013_password_reset.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/014_staff_totp.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/015_error_events.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,
 # Redis for the rate-limiter contract.
@@ -696,4 +808,17 @@ mistake from the internet.
   under a second; `deploy/standby/backup.sh` is what survives it.
 - **The single-instance workers** (`RECONCILE_INTERVAL_SECONDS`,
   `DEPOSIT_RECONCILE_INTERVAL_SECONDS`, `CRYPTO_RECONCILE_INTERVAL_SECONDS`,
-  `GIFTCARD_RELEASE_INTERVAL_SECONDS`) go on exactly one instance.
+  `CRYPTO_DEPOSIT_RECONCILE_INTERVAL_SECONDS`,
+  `GIFTCARD_RELEASE_INTERVAL_SECONDS`, `NOTIFICATION_INTERVAL_SECONDS`,
+  `ERROR_ALERT_INTERVAL_SECONDS`) go on exactly one instance —
+  `docker-compose.app.yml` does this by blanking them on `api` and setting them
+  on `worker`. `NOTIFICATION_INTERVAL_SECONDS` is the one whose absence is
+  silent in the worst way: rows accumulate, the API answers "check your email",
+  and nothing is ever sent.
+- **Backups are encrypted to a PUBLIC key** the database host cannot decrypt,
+  shipped off the box, and **restored by `standby/restore-drill.sh`** on a
+  schedule. The drill does not stop at "Postgres started" — a truncated copy
+  starts perfectly and is missing a week — it runs `verify-restore.sql`, which
+  asks whether every entry still sums to zero per currency and whether the
+  materialised balances still agree with the postings. An untested backup is a
+  hope with a cron entry.

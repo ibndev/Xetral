@@ -21,9 +21,12 @@ shipped, that is called out explicitly.
 | 10 — Multi-currency + FX / remittance | ✅ | Bitnob credentials to go live |
 | 11 — Mobile and web clients | ✅ | |
 | 12 — Pre-deployment audit | ✅ | Bitnob credentials to go live |
+| 13 — Closing the audit's findings | 🚧 | tiers 1–2 landed; 3–4 open |
 
-All eleven phases are built, and a **pre-deployment audit** (Phase 12) closed
-what building them phase by phase had left between the phases. Every money flow
+All eleven phases are built, a **pre-deployment audit** (Phase 12) closed what
+building them phase by phase had left between the phases, and **Phase 13** is
+working through what that audit found, in the order the findings would cost
+money. Every money flow
 has an HTTP surface, a customer screen and an operations screen in front of it;
 Bitnob's live credentials are the only thing between the card, crypto and FX
 flows and production traffic.
@@ -1167,3 +1170,116 @@ record 0 → 125, and find both in the audit log.
 person (the first grant has no `admin` to make it, so it is an `INSERT`), then
 grant the narrower roles through the dashboard; review every row in
 `platform_settings`; and set the four worker intervals on exactly one instance.
+
+---
+
+## Phase 13 — Closing the audit's findings 🚧
+
+Not a feature. The pre-deployment audit produced a list; this is that list
+being worked through, sequenced by what each gap would cost rather than by
+what it would take to build.
+
+### Tier 1 — the holes that were open right now ✅
+
+| File | What it is |
+|---|---|
+| `packages/ledger/sql/011_ledger_immutability.sql` | the append-only rule, finally enforced |
+| `apps/api/src/settings/kill-switches.test.ts` | proof that a switch does something |
+| `apps/api/src/crypto/crypto-deposit-reconciliation.service.ts` | the sweep deposits never had |
+| `deploy/docker-compose.app.yml` | the workers, on one instance |
+
+1. **`001_ledger.sql` has said "no UPDATE, no DELETE, ever" in a comment since
+   Phase 1, and nothing enforced it.** The audit ran the UPDATE against a live
+   database and moved ₦5,000 into a wallet out of nowhere. `apply_posting_to_balance`
+   fires on INSERT only, so the materialised balance did not follow and the
+   books silently disagreed with themselves. Every OTHER append-only rule in
+   this schema had a trigger; the ledger was the one relying on convention.
+2. **`crypto_enabled` and `fx_enabled` were rows nothing read.** An operator
+   could switch crypto off during a provider incident, watch the dashboard
+   confirm it, and withdrawals would keep going out. Worse than no switch,
+   because it is trusted exactly when it matters. Nothing in the type system
+   catches an unused accessor, so a scanner test does.
+3. **Withdrawals had a reconciliation sweep from the day they shipped and
+   deposits did not.** A lost deposit webhook was money on a chain that would
+   never reach a balance, with nothing retrying.
+4. **And a double credit, found on the way.** The funding webhook keyed its
+   idempotency on `event_id` — which identifies a DELIVERY — while the
+   reconciliation sweep only ever learns `data.id`, which identifies the
+   MONEY. A sweep beating a delayed redelivery credited the customer twice.
+   An existing test claimed to cover this and passed: its "late webhook" had
+   no `account_number`, so it resolved to no owner and landed in suspense.
+   Both paths key on `data.id` now.
+
+### Tier 2 — the platform could not be operated without these ✅
+
+| File | What it is |
+|---|---|
+| `packages/providers/src/ports/notification.ts` | the email port, and the retry rule it inverts |
+| `packages/identity/sql/012_notifications.sql` | the outbox, sealed and append-only |
+| `packages/identity/sql/013_password_reset.sql` | the way back into an account |
+| `packages/identity/src/totp.ts` | RFC 6238, against its own vectors |
+| `packages/identity/sql/014_staff_totp.sql` | the second factor, and the replay guard |
+| `packages/ledger/sql/015_error_events.sql` | knowing something is broken |
+| `deploy/standby/verify-restore.sql` | proof that a backup is a ledger |
+
+**There was no email of any kind.** No provider, no port, no template — and
+therefore no password reset, so a customer who forgot their password had no
+route back to their money at all. That is the gap the whole tier hangs off.
+
+Findings from building it:
+
+1. **A transactional outbox, because email is both the least reliable
+   component and the carrier of the most dangerous credential.** Sending inside
+   the transaction mails receipts for money that then rolls back; sending after
+   it loses messages when the process dies in the gap. A row written in the
+   same transaction has neither problem.
+2. **The outbox would otherwise be a list of live account-takeover links.** A
+   rendered reset email contains a bearer token, so the body is sealed under
+   the same `^v[0-9]+:` CHECK that guards electricity tokens — and a DELIVERED
+   message has its body erased.
+3. **One rule is inverted for this port alone: a notification timeout IS
+   retryable.** Everywhere else a timeout means do nothing and reconcile,
+   because we cannot tell whether the provider acted. Here, not sending is
+   worse than sending twice.
+4. **`enqueueBestEffort` needs a SAVEPOINT, not a try/catch.** Any error inside
+   a Postgres transaction poisons it, so the obvious "a receipt is worth less
+   than the transfer" implementation takes the transfer down with it.
+5. **`available` is not `deliverable`, and only booting found it.** With a
+   keyring but no provider, enqueueing succeeds and nothing drains it — so
+   `/password/forgot` answered 204 and told a locked-out customer to check an
+   inbox nothing would reach.
+6. **TOTP is hand-written, which is allowed here and was not for Keccak.** The
+   rule is never write the primitive and never trust an implementation no
+   published vector has judged; RFC 6238 ships six vectors and the suite runs
+   all of them.
+7. **Demanding a fresh code per action is unusable, and the tests are what
+   showed it.** Codes are single-use and change every thirty seconds, so a
+   reviewer working a queue is refused on their second approval — and the
+   predictable outcome is a shared authenticator on somebody's desk, which is
+   worse than no second factor because it looks like control. A verified code
+   elevates the SESSION for ten minutes; the PIN is still required throughout.
+8. **`claims.sub` is a UUID and the new queries cast it to bigint**, so the
+   entire staff surface answered 500. A SQL string is invisible to TypeScript —
+   the same shape as the freeze that wrote to a table called `sessions`.
+9. **The TypeScript union and the Postgres enum drifted, and only an insert
+   proved it.** `operations_alert` typechecked, passed every unit test, and
+   failed on the first real enqueue. Phase 3's finding about `EntryKind`, in a
+   new place; there is a test that writes every declared kind now.
+10. **Sixteen guard tests were SKIPPING rather than failing.** The guard gained
+    a dependency the probe module did not provide, `beforeAll` threw, and
+    vitest reported the suite as skipped. A green summary line with a smaller
+    number in it.
+11. **A backup nobody has restored is a hope with a cron entry.** The drill was
+    run for real — a genuine base backup, encrypted, decrypted, recovered into
+    a live instance — and then deliberately broken. With one posting deleted,
+    every structural check still passed: "204 entries, 423 postings" reads as
+    entirely plausible. Only the per-currency balance check caught it.
+12. **`pg_basebackup` does not copy the configuration on a Debian layout**,
+    because it lives outside PGDATA. The restore fails with an error that reads
+    like a corrupt archive. Worth knowing before an incident rather than during
+    one.
+
+**Still open — tier 3 and 4:** Bitnob's card reveal, a staging environment,
+general (non-login) rate limiting, disputes and chargebacks, the velocity
+limits that exist for cards but not for transfers, dependency scanning, data
+retention, and a privacy policy.
