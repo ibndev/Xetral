@@ -246,6 +246,15 @@ export interface ApiConfig {
    * COSTS rather than in how a burst should be measured. Zero on a class
    * disables it — which is how liveness stays unmetered.
    */
+  /**
+   * How often to delete aged data, on exactly one instance.
+   *
+   * Undefined means never, and unlike the other workers that is not dangerous
+   * — nothing is lost, data simply accumulates. It is still wrong: the NDPA
+   * does not permit keeping personal data indefinitely.
+   */
+  readonly retentionIntervalSeconds: number | undefined;
+
   readonly requestRateLimit: {
     readonly windowSeconds: number;
     readonly publicMax: number;
@@ -647,6 +656,7 @@ export function loadConfig(env: Env): ApiConfig {
       env,
       'CRYPTO_DEPOSIT_RECONCILE_INTERVAL_SECONDS',
     ),
+    retentionIntervalSeconds: optionalInteger(env, 'RETENTION_INTERVAL_SECONDS'),
     requestRateLimit: {
       windowSeconds: integer(env, 'REQUEST_RATE_LIMIT_WINDOW_SECONDS', 60),
       // Generous, because an unauthenticated request has only an address to

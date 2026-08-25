@@ -76,6 +76,7 @@ import { LoginRateLimitGuard, PasswordResetRateLimitGuard } from './auth/login-r
 import { RequestRateLimiter } from './auth/request-rate-limit.service.js';
 import { AdminDisputeController, DisputeController } from './disputes/dispute.controller.js';
 import { DisputeService } from './disputes/dispute.service.js';
+import { RetentionService } from './retention/retention.service.js';
 import {
   InMemoryRateLimitStore,
   RedisRateLimitStore,
@@ -507,6 +508,22 @@ export class ErrorAlertLifecycle implements OnApplicationBootstrap {
   }
 }
 
+/**
+ * Starts the retention sweep.
+ *
+ * Its own lifecycle rather than sharing one, for the same reason every other
+ * sweep has its own: they are enabled independently, and the one whose job is
+ * to delete data should be the easiest of all to switch off on its own.
+ */
+@Injectable()
+export class RetentionLifecycle implements OnApplicationBootstrap {
+  constructor(@Inject(RetentionService) private readonly retention: RetentionService) {}
+
+  onApplicationBootstrap(): void {
+    this.retention.start();
+  }
+}
+
 /** Starts the gift card hold release sweep. Separate from the reconciliation
  *  lifecycle because the two are enabled independently. */
 @Injectable()
@@ -634,6 +651,8 @@ export class AppModule {
         // Guard ordering cannot express "in the middle of that one".
         RequestRateLimiter,
         DisputeService,
+        RetentionService,
+        RetentionLifecycle,
         PasswordResetService,
 
         // Registered globally, so it runs for every route including one whose

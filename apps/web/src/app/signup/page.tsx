@@ -127,6 +127,15 @@ export default function SignUp() {
           />
         </div>
 
+        {/* Above the button, not below it. Consent has to be readable BEFORE
+            the account exists — a link under the control that creates one is a
+            link nobody reads, and this is the only moment the notice is for. */}
+        <p className="hint" style={{ margin: '0 0 14px' }}>
+          By creating an account you agree to our{' '}
+          <Link href="/legal/terms">terms</Link> and{' '}
+          <Link href="/legal/privacy">privacy notice</Link>.
+        </p>
+
         <button type="submit" className="block" disabled={busy}>
           {busy ? 'Creating your account…' : 'Create account'}
         </button>

@@ -68,6 +68,10 @@ export function testApiConfig(databaseUrl: string, overrides: Partial<ApiConfig>
     twilioNumberPriceCents: undefined,
     // No timer in tests: the reconciliation suite drives `sweep()` directly, so
     // a background one would race it and resolve rows out from under it.
+    // No timer in tests: the retention suite drives `sweep()` directly, and a
+    // background one deleting rows under another suite is the worst possible
+    // shape of flake.
+    retentionIntervalSeconds: undefined,
     reconcileIntervalSeconds: undefined,
     // No grace either — a test that had to wait two minutes for a row to become
     // eligible is a test nobody runs. Zero rather than undefined, which would

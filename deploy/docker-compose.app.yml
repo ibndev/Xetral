@@ -28,6 +28,7 @@ services:
       GIFTCARD_RELEASE_INTERVAL_SECONDS: ''
       NOTIFICATION_INTERVAL_SECONDS: ''
       ERROR_ALERT_INTERVAL_SECONDS: ''
+      RETENTION_INTERVAL_SECONDS: ''
     ports:
       - '127.0.0.1:3000:3000'
     depends_on:
@@ -66,6 +67,10 @@ services:
     env_file: .env
     environment:
       XETRAL_ENVIRONMENT: production
+      # Read from .env for every other worker; named here too because this is
+      # the one that DELETES, and the blank on `api` above is what stops a
+      # scaled API running it from four processes at once.
+      RETENTION_INTERVAL_SECONDS: '${RETENTION_INTERVAL_SECONDS:-86400}'
     deploy:
       replicas: 1
     depends_on:
