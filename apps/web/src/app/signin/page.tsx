@@ -9,6 +9,7 @@ import { messageFor } from '@/lib/errors';
 import { Logo } from '@/ui/logo';
 import { Icon } from '@/ui/icon';
 import { ThemeToggle } from '@/ui/theme-toggle';
+import { AuthAside } from '@/ui/auth-aside';
 
 export default function SignIn() {
   const router = useRouter();
@@ -38,12 +39,16 @@ export default function SignIn() {
 
   return (
     <main className="auth">
-      <div style={{ position: 'absolute', top: 12, right: 12 }}>
-        <ThemeToggle />
-      </div>
+      <AuthAside />
 
+      <div className="auth-main">
+        <div className="auth-toggle">
+          <ThemeToggle />
+        </div>
+
+        <div className="auth-inner">
       <div className="auth-brand animate-in">
-        <Logo size={36} />
+        <Logo size={32} />
       </div>
 
       <div className="auth-head animate-in d1">
@@ -105,6 +110,8 @@ export default function SignIn() {
       <p className="auth-trust animate-in d3">
         <Icon name="lock" size={14} /> Your session is encrypted end to end
       </p>
+        </div>
+      </div>
     </main>
   );
 }

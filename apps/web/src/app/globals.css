@@ -517,11 +517,26 @@ h3 { font-size: 16px; }
   overflow-x: auto;
   scroll-snap-type: x mandatory;
   scrollbar-width: none;
+  /* Bleeds to the viewport edge so a card can be half-visible and say "there
+     is more", then puts the inset back so the first one lines up with the
+     content above it. */
   margin: 0 -16px;
   padding: 2px 16px 6px;
+  /* WITHOUT THIS the first card sits at x=0, out of line with every other
+     block on the page by exactly the shell's inset.
+
+     Scroll-snap aligns a child's start edge to the SCROLLPORT's start, and
+     the scrollport ignores the container's padding — so the browser silently
+     scrolls the rail 16px to satisfy the snap, eating the padding that was
+     there to align it. `scroll-padding` is what moves the snap line inwards
+     to match. Measured in the browser, not guessed: the rail reported 16px of
+     left padding while its first child reported left: 0. */
+  scroll-padding-left: 16px;
 }
 .promo-rail::-webkit-scrollbar { display: none; }
-@media (min-width: 720px) { .promo-rail { margin: 0; padding: 2px 0 6px; } }
+@media (min-width: 720px) {
+  .promo-rail { margin: 0; padding: 2px 0 6px; scroll-padding-left: 0; }
+}
 
 .promo {
   scroll-snap-align: start;
@@ -927,42 +942,157 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
  */
 .auth {
   min-height: 100dvh;
+  display: grid;
+  /* Narrow-first: one column, the form only. The brand panel is decorative
+     and a phone has no room to spend on decoration. */
+  grid-template-columns: 1fr;
+}
+
+/* The brand panel. Only from 900px, where there is width to give away. */
+.auth-aside { display: none; }
+
+@media (min-width: 900px) {
+  .auth {
+    /* Not 50/50. The form is the job; the panel is the frame around it, and
+       an equal split makes the page look like a choice between two things. */
+    grid-template-columns: 42fr 58fr;
+  }
+  .auth-aside {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 48px 44px;
+    position: relative;
+    overflow: hidden;
+    /* BLACK IN BOTH THEMES, deliberately. It is a surface rather than a
+       background, so it does not follow the page — and it means the brushed
+       metal mark is what a customer meets on the light theme too, instead of
+       the metal only ever existing for people who happen to prefer dark. */
+    background:
+      radial-gradient(120% 90% at 12% 0%, #16181D 0%, transparent 60%),
+      radial-gradient(90% 70% at 100% 100%, #101216 0%, transparent 55%),
+      #000000;
+    color: #FFFFFF;
+  }
+  /* A single hairline of light along the seam, so the panel reads as a
+     material edge rather than a div that ran out. */
+  .auth-aside::after {
+    content: '';
+    position: absolute;
+    inset: 0 0 0 auto;
+    width: 1px;
+    background: linear-gradient(180deg, transparent, rgba(255,255,255,.14), transparent);
+  }
+}
+
+.auth-aside-mark { margin-bottom: auto; }
+
+.auth-pitch h2 {
+  font-size: 30px;
+  line-height: 1.18;
+  letter-spacing: -0.02em;
+  margin: 0 0 14px;
+  color: #FFFFFF;
+  max-width: 15ch;
+}
+.auth-points { list-style: none; margin: 26px 0 0; padding: 0; display: grid; gap: 14px; }
+.auth-points li {
+  display: flex;
+  gap: 11px;
+  align-items: flex-start;
+  font-size: 14px;
+  color: rgba(255,255,255,.72);
+}
+.auth-points svg { flex-shrink: 0; margin-top: 1px; color: rgba(255,255,255,.5); }
+/* space-between puts this hard against the bottom of the pitch block, so it
+   needs its own clearance rather than relying on the gap. */
+.auth-legal { font-size: 12.5px; color: rgba(255,255,255,.38); margin: 28px 0 0; }
+
+/* The form column. */
+.auth-main {
   display: flex;
   flex-direction: column;
-  padding: 24px 20px 40px;
-  max-width: 460px;
-  margin: 0 auto;
+  justify-content: center;
+  padding: 28px 20px 40px;
+  position: relative;
 }
-@media (min-width: 720px) {
-  .auth { justify-content: center; padding: 40px 20px; }
+@media (min-width: 900px) { .auth-main { padding: 48px 56px; } }
+
+.auth-inner { width: 100%; max-width: 400px; margin: 0 auto; }
+
+/* On a phone the mark leads the page; on desktop the panel already carries it
+   and a second one would be the brand twice on one screen. */
+.auth-brand { display: flex; margin-bottom: 30px; }
+@media (min-width: 900px) { .auth-brand { display: none; } }
+
+.auth-head { margin-bottom: 26px; }
+.auth-head h1 { font-size: 30px; letter-spacing: -0.025em; margin: 0; }
+.auth-head p { color: var(--text-2); margin-top: 9px; font-size: 15px; }
+
+/*
+ * THE FORM IS NOT A CARD.
+ *
+ * It used to be a white box with a border and a shadow, centred on a grey
+ * page — the arrangement every banking site had in 2016, and it reads as one.
+ * It also stopped making any sense once the page went pure white: a white
+ * card on a white background is a rectangle of shadow around nothing.
+ *
+ * The form now sits directly on the page. What separates the fields is their
+ * own fill, not a container drawn around all of them, which is both quieter
+ * and one less edge for the eye to cross on the way to the button.
+ */
+.auth-card { display: grid; gap: 18px; }
+
+/* Filled, borderless inputs. A 1px outline around every field is a lot of
+   lines for a form with two of them; the fill does the same work and leaves
+   the focus ring as the only thing that draws a border, which is exactly when
+   a border means something. */
+.auth-card .field input,
+.auth-card .input-affix input {
+  background: var(--surface-2);
+  border: 1px solid transparent;
+  border-radius: var(--r);
+  min-height: 54px;
+  font-size: 16px;
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
 }
-
-.auth-brand { display: flex; justify-content: center; margin-bottom: 28px; }
-.auth-head { text-align: center; margin-bottom: 26px; }
-.auth-head h1 { font-size: 28px; }
-.auth-head p { color: var(--text-2); margin-top: 8px; }
-
-.auth-card {
+.auth-card .field input:hover:not(:focus) { border-color: var(--line); }
+.auth-card .field input:focus,
+.auth-card .input-affix input:focus {
   background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
-  padding: 24px 20px;
-  box-shadow: var(--shadow);
+  border-color: var(--link);
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--link) 18%, transparent);
 }
-@media (min-width: 480px) { .auth-card { padding: 28px; } }
+.auth-card .field label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+  letter-spacing: 0.01em;
+}
+.auth-card button[type='submit'] {
+  min-height: 54px;
+  font-size: 16px;
+  border-radius: var(--r);
+  margin-top: 4px;
+}
 
-.auth-foot { text-align: center; margin-top: 20px; color: var(--text-2); font-size: 14.5px; }
+.auth-foot { margin-top: 24px; color: var(--text-2); font-size: 14.5px; }
 
 /* The reassurance line under a sign-in form. Small, quiet, and true. */
 .auth-trust {
   display: flex;
   align-items: center;
-  justify-content: center;
   gap: 7px;
-  margin-top: 22px;
+  margin-top: 18px;
   color: var(--text-3);
   font-size: 12.5px;
 }
+
+/* The theme toggle sits over the form column, never over the black panel —
+   a sun icon on a permanently black surface would suggest the panel is what
+   the toggle changes. */
+.auth-toggle { position: absolute; top: 14px; right: 14px; z-index: 2; }
 
 /* ═════════════════ section wrappers used by the admin pages ═════════════════
 
@@ -1079,6 +1209,26 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
   fill: url(#xetral-metal);
 }
 [data-theme='dark'] .logo-word.logo-auto {
+  background-image: var(--metal-css);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Always metal, whatever the theme.
+
+   For a mark sitting on a surface that is black in BOTH themes — the sign-in
+   panel is the only one — where `auto` would render a black mark on black
+   half the time. It is what puts the brushed metal in front of customers who
+   use the light theme, instead of the metal existing only for people who
+   happen to prefer dark. */
+.logo-mark.logo-metal path,
+[data-theme='dark'] .logo-mark.logo-metal path {
+  fill: #FFFFFF;
+  fill: url(#xetral-metal);
+}
+.logo-word.logo-metal,
+[data-theme='dark'] .logo-word.logo-metal {
   background-image: var(--metal-css);
   -webkit-background-clip: text;
   background-clip: text;

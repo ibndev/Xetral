@@ -9,6 +9,7 @@ import { useSubmit } from '@/lib/hooks';
 import { Logo } from '@/ui/logo';
 import { Icon } from '@/ui/icon';
 import { ThemeToggle } from '@/ui/theme-toggle';
+import { AuthAside } from '@/ui/auth-aside';
 
 /**
  * Opening an account.
@@ -67,12 +68,16 @@ export default function SignUp() {
 
   return (
     <main className="auth">
-      <div style={{ position: 'absolute', top: 12, right: 12 }}>
-        <ThemeToggle />
-      </div>
+      <AuthAside />
 
+      <div className="auth-main">
+        <div className="auth-toggle">
+          <ThemeToggle />
+        </div>
+
+        <div className="auth-inner">
       <div className="auth-brand animate-in">
-        <Logo size={36} />
+        <Logo size={32} />
       </div>
 
       <div className="auth-head animate-in d1">
@@ -138,13 +143,20 @@ export default function SignUp() {
         Already have an account? <Link href="/signin">Sign in</Link>
       </p>
 
+      {/*
+        Says what identity is for and WHEN, rather than implying it is a step
+        between here and using the product. Most of Xetral works the moment
+        this form is submitted.
+      */}
       <div className="notice animate-in d3" style={{ marginTop: 20 }}>
         <span className="notice-icon"><Icon name="shield" size={19} /></span>
         <p>
-          You will verify your identity before you can be issued a bank account
-          number or a card. That is a legal requirement in Nigeria, not a step
-          we could skip.
+          Your wallet, transfers, airtime, data and bills work straight away.
+          A card, crypto or a Nigerian account number needs identity
+          verification first — a legal requirement here, not a step we chose.
         </p>
+      </div>
+        </div>
       </div>
     </main>
   );

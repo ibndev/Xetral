@@ -105,11 +105,13 @@ export interface LogoProps {
   readonly wordmark?: boolean;
   /**
    * `auto` — black on the light theme, brushed metal on the dark one.
+   * `metal` — always brushed metal, for a surface that is black in BOTH
+   *   themes, where `auto` would draw a black mark on black half the time.
    * `inverse` — solid white, for a mark sitting on a coloured surface where
    *   the page theme is not what decides legibility.
    * `current` — inherit `color`, for a mark inside a button or a link.
    */
-  readonly tone?: 'auto' | 'inverse' | 'current';
+  readonly tone?: 'auto' | 'metal' | 'inverse' | 'current';
   readonly className?: string;
 }
 
