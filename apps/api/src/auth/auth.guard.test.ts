@@ -8,11 +8,12 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { RoutePolicyRegistry, signAccessToken } from '@xetral/identity';
 import type { AccessTokenKeyring } from '@xetral/identity';
-import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { afterAll, beforeEach, beforeAll, describe, expect, it } from 'vitest';
 import { AuthGuard } from './auth.guard.js';
 import { PinService } from './pin.service.js';
 import { StaffService } from './staff.service.js';
+import { StaffTotpService } from './staff-totp.service.js';
 import { API_CONFIG, CLOCK, ROUTE_POLICY } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
 
@@ -69,6 +70,29 @@ const staff = {
   },
 } as unknown as StaffService;
 
+/**
+ * Stands in for StaffTotpService, which needs a database and a keyring.
+ *
+ * Same reasoning as the other two stand-ins: what is under test here is the
+ * guard's ORDERING and its refusals, not the TOTP arithmetic — that is covered
+ * against RFC 6238's own vectors in `@xetral/identity`, and against real rows
+ * in the e2e suite.
+ */
+let totpEnrolled = true;
+let totpAccepts = true;
+const totpCalls: string[] = [];
+const totp = {
+  assertEnrolled: async (sub: string) => {
+    totpCalls.push(`enrolled:${sub}`);
+    if (!totpEnrolled) throw new ForbiddenException({ error: 'totp_not_enrolled' });
+  },
+  assertElevated: async (sub: string, sid: string, code: string | undefined) => {
+    totpCalls.push(`elevate:${sub}:${sid}:${code ?? 'none'}`);
+    if (code === undefined) throw new BadRequestException({ error: 'totp_required' });
+    if (!totpAccepts) throw new UnauthorizedException({ error: 'invalid_totp' });
+  },
+} as unknown as StaffTotpService;
+
 const policy = new RoutePolicyRegistry()
   .public('GET', '/v1/probe/open', 'a probe with no customer data, for these tests')
   .authenticated('GET', '/v1/probe/closed', { pin: false })
@@ -87,6 +111,7 @@ const policy = new RoutePolicyRegistry()
     // bearer token and before the PIN -- not the role lookup itself, which is
     // exercised end to end against real rows.
     { provide: StaffService, useValue: staff },
+    { provide: StaffTotpService, useValue: totp },
     { provide: APP_GUARD, useClass: AuthGuard },
   ],
 })
@@ -108,6 +133,9 @@ beforeEach(() => {
   pinAccepts = true;
   staffCalls.length = 0;
   staffAccepts = true;
+  totpCalls.length = 0;
+  totpEnrolled = true;
+  totpAccepts = true;
 });
 
 afterAll(async () => {
@@ -287,11 +315,90 @@ describe('staff routes', () => {
     const res = await request(app.getHttpServer())
       .post('/v1/probe/review')
       .set('Authorization', `Bearer ${bearer()}`)
-      .send({ transaction_pin: '123456' })
+      .send({ transaction_pin: '123456', totp_code: '123456' })
       .expect(201);
 
     expect(res.body).toEqual({ ok: true });
     expect(staffCalls).toEqual(['u:giftcard_reviewer']);
     expect(pinCalls).toHaveLength(1);
+  });
+});
+
+describe('the staff second factor', () => {
+  it('refuses an operator who has not enrolled one', async () => {
+    // Every staff route, including reads. Gating only the ACTING routes would
+    // leave the whole customer database — names, balances, KYC status — behind
+    // one password, and that data is what a targeted phishing campaign is
+    // built from.
+    totpEnrolled = false;
+    const res = await request(app.getHttpServer())
+      .post('/v1/probe/review')
+      .set('Authorization', `Bearer ${bearer()}`)
+      .send({ transaction_pin: '123456', totp_code: '123456' });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe('totp_not_enrolled');
+  });
+
+  it('refuses an acting route with no code in the body', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/v1/probe/review')
+      .set('Authorization', `Bearer ${bearer()}`)
+      .send({ transaction_pin: '123456' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('totp_required');
+  });
+
+  it('refuses a wrong code', async () => {
+    totpAccepts = false;
+    const res = await request(app.getHttpServer())
+      .post('/v1/probe/review')
+      .set('Authorization', `Bearer ${bearer()}`)
+      .send({ transaction_pin: '123456', totp_code: '000000' });
+
+    expect(res.status).toBe(401);
+    expect(res.body.error).toBe('invalid_totp');
+  });
+
+  it('checks the ROLE before the second factor', async () => {
+    // Same rule the PIN already follows. A customer poking at an admin path
+    // must not be able to burn an operator's five TOTP attempts — that is a
+    // way to lock the operations team out of their own dashboard from an
+    // endpoint the attacker was never allowed to call.
+    staffAccepts = false;
+    await request(app.getHttpServer())
+      .post('/v1/probe/review')
+      .set('Authorization', `Bearer ${bearer()}`)
+      .send({ transaction_pin: '123456', totp_code: '123456' })
+      .expect(403);
+
+    expect(totpCalls).toEqual([]);
+  });
+
+  it('checks the second factor BEFORE the PIN', async () => {
+    // And the PIN after that, so a failed second factor does not spend a PIN
+    // attempt either. The order is bearer, role, factor, PIN — cheapest and
+    // least damaging refusal first, every time.
+    totpAccepts = false;
+    await request(app.getHttpServer())
+      .post('/v1/probe/review')
+      .set('Authorization', `Bearer ${bearer()}`)
+      .send({ transaction_pin: '123456', totp_code: '000000' })
+      .expect(401);
+
+    expect(pinCalls).toEqual([]);
+  });
+
+  it('does not ask a plain customer for a second factor', async () => {
+    // A money route is not a staff route. Requiring an authenticator app to
+    // send somebody money would be a different product.
+    await request(app.getHttpServer())
+      .post('/v1/probe/money')
+      .set('Authorization', `Bearer ${bearer()}`)
+      .send({ transaction_pin: '123456' })
+      .expect(201);
+
+    expect(totpCalls).toEqual([]);
   });
 });

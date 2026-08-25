@@ -24,8 +24,11 @@ import {
   registerSchema,
   refreshSchema,
   resetPasswordSchema,
+  totpCodeSchema,
 } from './dto.js';
 import { PasswordResetService } from './password-reset.service.js';
+import { StaffTotpService } from './staff-totp.service.js';
+import type { TotpEnrolment } from './staff-totp.service.js';
 import { AccountSecurityService } from './account-security.service.js';
 import type { DeviceView } from './account-security.service.js';
 
@@ -43,6 +46,7 @@ export class AuthController {
     @Inject(PinService) private readonly pins: PinService,
     @Inject(AccountSecurityService) private readonly security: AccountSecurityService,
     @Inject(PasswordResetService) private readonly resets: PasswordResetService,
+    @Inject(StaffTotpService) private readonly totp: StaffTotpService,
   ) {}
 
   /**
@@ -283,5 +287,53 @@ export class AuthController {
       });
     }
     await this.resets.reset(parsed.data.token, parsed.data.new_password);
+  }
+
+  /**
+   * Begin enrolling a second factor.
+   *
+   * Authenticated but NOT staff-only, and that is deliberate. A person who has
+   * just been granted a role has to be able to enrol before they can use the
+   * admin surface — and every staff route now requires an enrolled factor, so
+   * gating this one behind `staff()` would be a circular lock nobody could
+   * open. Enrolling is harmless for a customer who never becomes staff: it
+   * writes a row that nothing consults.
+   *
+   * The secret is returned ONCE, here, and never again. Re-reading it would
+   * turn any stolen session into a way to clone the factor.
+   */
+  @Post('totp/enrol')
+  @HttpCode(200)
+  async enrolTotp(@Req() request: AuthenticatedRequest): Promise<TotpEnrolment> {
+    const auth = request.auth;
+    if (auth === undefined) throw new UnauthorizedException({ error: 'invalid_token' });
+    return await this.totp.beginEnrolment(auth.sub, auth.sub);
+  }
+
+  /**
+   * Prove the authenticator works, and turn the factor on.
+   *
+   * Until this succeeds the enrolment is inert. Trusting the row at issue time
+   * instead would lock out an operator who scanned nothing — and they would
+   * find out while trying to open the admin surface during whatever made them
+   * need it.
+   */
+  @Post('totp/confirm')
+  @HttpCode(204)
+  async confirmTotp(
+    @Body() body: unknown,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<void> {
+    const auth = request.auth;
+    if (auth === undefined) throw new UnauthorizedException({ error: 'invalid_token' });
+
+    const parsed = totpCodeSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException({
+        error: 'invalid_request',
+        fields: parsed.error.issues.map((issue) => issue.path.join('.')),
+      });
+    }
+    await this.totp.confirmEnrolment(auth.sub, auth.sid, parsed.data.totp_code);
   }
 }

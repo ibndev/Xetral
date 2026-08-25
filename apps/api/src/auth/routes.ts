@@ -84,6 +84,13 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // account. Reading the device list takes NO pin: this is where they find
       // out, and putting a PIN in front of looking would hide the discovery
       // behind the factor they may be about to learn has been used.
+      // Enrolling a second factor. Authenticated but NOT staff-only, and
+      // deliberately: every staff route now requires an enrolled factor, so
+      // gating enrolment behind staff() would be a circular lock that a newly
+      // granted operator could never open.
+      .authenticated('POST', '/v1/auth/totp/enrol', { pin: false })
+      .authenticated('POST', '/v1/auth/totp/confirm', { pin: false })
+
       .authenticated('GET', '/v1/auth/devices', { pin: false })
       // Acting on it does. All three are reachable with a stolen access token,
       // so without the PIN a thief could evict the real owner with the session

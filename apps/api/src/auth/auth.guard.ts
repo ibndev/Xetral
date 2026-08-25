@@ -16,6 +16,7 @@ import type { ApiConfig } from '../config.js';
 import { routeKeyOf } from './route-key.js';
 import { PinService } from './pin.service.js';
 import { StaffService } from './staff.service.js';
+import { StaffTotpService, optionalTotpFrom } from './staff-totp.service.js';
 
 /** The claims a handler can rely on once the guard has allowed the request. */
 export interface AuthenticatedRequest extends Request {
@@ -44,6 +45,7 @@ export class AuthGuard implements CanActivate {
     @Inject(CLOCK) private readonly clock: Clock,
     @Inject(PinService) private readonly pins: PinService,
     @Inject(StaffService) private readonly staff: StaffService,
+    @Inject(StaffTotpService) private readonly totp: StaffTotpService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -85,6 +87,27 @@ export class AuthGuard implements CanActivate {
     // same reasoning that puts the bearer check before the PIN, one level up.
     if (decision.requiresRole !== undefined) {
       await this.staff.assertRole(claims.sub, decision.requiresRole);
+
+      // A SECOND FACTOR, on every staff route including the read-only ones.
+      //
+      // Gating only the acting routes would leave the whole customer database
+      // — names, balances, KYC status, transaction history — behind one
+      // password. That data is what a targeted phishing campaign is built
+      // from, so reading it is not the harmless half.
+      //
+      // Enrolment is checked here rather than at a login step because a signed
+      // access token cannot be revoked mid-life: an operator whose factor is
+      // removed during an incident would otherwise keep working for fifteen
+      // minutes. Same reasoning that reads roles fresh per request.
+      await this.totp.assertEnrolled(claims.sub);
+
+      // And a FRESH CODE on anything that acts. `requiresPin` already marks
+      // exactly those routes — approving a payout, changing a fee, granting a
+      // role — so the two travel together rather than needing a second flag
+      // somebody could forget to set.
+      if (decision.requiresPin) {
+        await this.totp.assertElevated(claims.sub, claims.sid, optionalTotpFrom(request.body));
+      }
     }
 
     // The PIN is checked AFTER the bearer token, and the order is not

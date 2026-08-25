@@ -13,6 +13,7 @@ import type { ApiConfig } from '../config.js';
 import { GiftCardHoldService } from './hold-release.service.js';
 import { systemClock } from '../tokens.js';
 import { testApiConfig } from '../test-support/api-config.js';
+import { enrolAndElevate } from '../test-support/staff-totp.js';
 
 /**
  * Gift card trading, end to end.
@@ -104,6 +105,9 @@ async function makeReviewer(): Promise<Customer> {
   await pool.query(`INSERT INTO staff_roles (user_id, role) VALUES ($1, 'giftcard_reviewer')`, [
     reviewer.userId,
   ]);
+  // Every staff route now requires a second factor, including the read-only
+  // ones — so a role with no authenticator is a role that cannot be used.
+  await enrolAndElevate(app, pool, reviewer.token, reviewer.userId);
   return reviewer;
 }
 

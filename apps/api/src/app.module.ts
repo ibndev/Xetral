@@ -38,6 +38,7 @@ import {
 import { GiftCardService } from './giftcards/giftcard.service.js';
 import { GiftCardHoldService } from './giftcards/hold-release.service.js';
 import { StaffService } from './auth/staff.service.js';
+import { StaffTotpService } from './auth/staff-totp.service.js';
 import { HealthController } from './health/health.controller.js';
 import { SettingsService } from './settings/settings.service.js';
 import { AuditService } from './admin/audit.service.js';
@@ -574,6 +575,7 @@ export class AppModule {
         PurchaseService,
         PurchaseOutcome,
         StaffService,
+        StaffTotpService,
         SettingsService,
         AuditService,
         AdminService,

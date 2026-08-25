@@ -13,6 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../app.module.js';
 import { systemClock } from '../tokens.js';
 import { testApiConfig } from '../test-support/api-config.js';
+import { enrolAndElevate } from '../test-support/staff-totp.js';
 
 /**
  * Registration, identity, and the operations backend, over HTTP.
@@ -85,6 +86,12 @@ async function grant(person: Person, role: string): Promise<void> {
      ON CONFLICT DO NOTHING`,
     [person.userId, role],
   );
+
+  // Every staff route now requires a second factor, including the read-only
+  // ones — so a role with no authenticator is a role that cannot be used.
+  // Enrolment here goes through the real endpoints; see the helper for what
+  // it does and does not exercise.
+  await enrolAndElevate(app, pool, person.token, person.userId);
 }
 
 const submitKyc = (person: Person, overrides: Record<string, string> = {}) =>

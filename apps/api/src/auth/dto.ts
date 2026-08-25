@@ -90,3 +90,10 @@ export const resetPasswordSchema = z.object({
 
 export type ForgotPasswordRequest = z.infer<typeof forgotPasswordSchema>;
 export type ResetPasswordRequest = z.infer<typeof resetPasswordSchema>;
+
+/** Confirming an enrolment, and every acting staff request. */
+export const totpCodeSchema = z.object({
+  totp_code: z.string().trim().regex(/^[0-9]{6}$/),
+});
+
+export type TotpCodeRequest = z.infer<typeof totpCodeSchema>;

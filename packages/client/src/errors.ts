@@ -39,6 +39,16 @@ const API_ERROR_CODES = [
      telling them to try again would send them round a loop that cannot end. */
   'password_reset_unavailable',
 
+  /* The staff second factor. `totp_required` and `invalid_totp` ARE
+     user-fixable — the operator opens their authenticator and reads the
+     current code — while the other three describe the state of the enrolment
+     and are fixed by an administrator, not by retrying. */
+  'totp_required',
+  'invalid_totp',
+  'totp_locked',
+  'totp_not_enrolled',
+  'totp_already_enrolled',
+
   /* the transaction PIN */
   'invalid_pin',
   'pin_locked',
@@ -178,6 +188,8 @@ const USER_FIXABLE: ReadonlySet<ApiErrorCode> = new Set<ApiErrorCode>([
   'daily_limit_exceeded',
   'fee_moved',
   'rate_moved',
+  'totp_required',
+  'invalid_totp',
 ]);
 
 /** The session is gone and the customer must sign in again. */

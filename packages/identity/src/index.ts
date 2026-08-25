@@ -6,3 +6,4 @@ export * from './policy.js';
 export * from './redaction.js';
 export * from './secret-hash.js';
 export * from './tokens.js';
+export * from './totp.js';
