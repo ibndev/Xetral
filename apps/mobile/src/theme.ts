@@ -1,4 +1,4 @@
-import { Platform, StyleSheet } from 'react-native';
+import { Platform, StyleSheet, useColorScheme } from 'react-native';
 
 /**
  * The design tokens, matched to the web's `globals.css`.
@@ -33,11 +33,11 @@ export const light: Palette = {
   accent: '#F5A623',
   link: '#4B7BF5',
 
-  bg: '#F2F4F8',
+  bg: '#FFFFFF',
   surface: '#FFFFFF',
-  surface2: '#F7F9FC',
-  line: '#E4E9F2',
-  lineStrong: '#D3DAE8',
+  surface2: '#F6F7F9',
+  line: '#E5E7EB',
+  lineStrong: '#D0D4DB',
 
   text: '#0D1B3E',
   text2: '#4A5878',
@@ -60,11 +60,11 @@ export const dark: Palette = {
   accent: '#F5A623',
   link: '#6E9BFF',
 
-  bg: '#080D1A',
-  surface: '#101728',
-  surface2: '#0B111F',
-  line: '#1E2942',
-  lineStrong: '#2B3856',
+  bg: '#000000',
+  surface: '#0C0D10',
+  surface2: '#141519',
+  line: '#212227',
+  lineStrong: '#303237',
 
   text: '#EEF2FA',
   text2: '#A3B0CC',
@@ -81,9 +81,39 @@ export const dark: Palette = {
   infoBg: '#131E3A',
 };
 
-/** The palette in force. Swapped by the theme provider; `colors` is what
- *  screens import so no screen has to know which one is active. */
+/**
+ * The LIGHT palette, as a static binding.
+ *
+ * This is not "the palette in force", though its comment used to say so and
+ * no theme provider ever existed to make it true. A module-level `const`
+ * cannot be swapped from outside the module, so every screen importing
+ * `colors` is pinned to light whatever the phone is set to.
+ *
+ * Screens that need to follow the device call `useTheme()` below. The rest
+ * are light-only until they are moved across, which is a mechanical change
+ * per screen — `StyleSheet.create` runs once at module load and so cannot
+ * hold a themed value, and that is the actual work in migrating one.
+ */
 export const colors = light;
+
+/** The palette the device is currently asking for. */
+export function useTheme(): Palette {
+  return useColorScheme() === 'dark' ? dark : light;
+}
+
+/**
+ * The mark's ink, which is NOT `brand`.
+ *
+ * Black on white, metal on black. The web fills the dark mark with a true
+ * brushed-metal gradient; here it is the ramp's dominant tone as a flat
+ * colour, because a gradient across live text on React Native needs either a
+ * masked view or SVG-rendered text, and neither is in this app's dependency
+ * list. Adding one blind — the phone app has never been run on hardware from
+ * this repo — would be shipping an untested dependency into the first thing a
+ * customer sees. Flat silver on both halves has no seam; a gradient mark
+ * beside a flat-silver word would have an obvious one.
+ */
+export const logoInk = { light: '#000000', dark: '#D5DBE2' } as const;
 
 export const radius = { sm: 10, md: 14, lg: 18, xl: 24, pill: 999 } as const;
 export const space = { xs: 6, sm: 10, md: 14, lg: 18, xl: 24, xxl: 32 } as const;

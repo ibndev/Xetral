@@ -3,6 +3,7 @@ import localFont from 'next/font/local';
 import { headers } from 'next/headers';
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
+import { LogoGradient } from '@/ui/logo';
 
 /*
  * The three families from the approved design, SELF-HOSTED.
@@ -57,8 +58,8 @@ export const viewport: Viewport = {
   // the zoom without taking the control away.
   viewportFit: 'cover',
   themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#F2F4F8' },
-    { media: '(prefers-color-scheme: dark)', color: '#080D1A' },
+    { media: '(prefers-color-scheme: light)', color: '#FFFFFF' },
+    { media: '(prefers-color-scheme: dark)', color: '#000000' },
   ],
 };
 
@@ -94,7 +95,16 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       <head>
         <script nonce={nonce} dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP }} />
       </head>
-      <body>{children}</body>
+      <body>
+        {/*
+          The metal gradient the dark-theme mark is filled with, defined once
+          for the whole document. Every `<LogoMark>` references it by id, so
+          repeating the `<defs>` inside each mark — a dozen copies of the same
+          id in one document — is not necessary.
+        */}
+        <LogoGradient />
+        {children}
+      </body>
     </html>
   );
 }

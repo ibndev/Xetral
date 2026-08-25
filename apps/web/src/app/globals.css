@@ -35,16 +35,30 @@
    */
   --ink:          #0D1B3E;
   --ink-700:      #16295A;
+
+  /* The logo's ink, which is NOT --brand.
+
+     The mark is black on white and brushed metal on black — a material, not
+     a brand colour, and it does not follow the navy that buttons and headings
+     use. Tying it to --brand is what would make it navy on a white page and
+     white-on-white the moment --brand inverts for the dark theme. */
+  --logo-ink:     #000000;
   --accent-600:   #E8941E;
   --link:         #4B7BF5;   /* blue — links and selected states */
   --link-600:     #3866E0;
 
-  /* Surfaces */
-  --bg:           #F2F4F8;   /* the page */
+  /* Surfaces.
+
+     The page is PURE WHITE and a card is the same white, separated by a
+     hairline rather than by a fill. Tinting the page grey to make white cards
+     "pop" is the older move and it costs contrast everywhere else: body text
+     on #F2F4F8 is measurably flatter than the same text on paper, and every
+     screenshot picks up a grey cast. Borders do the separating instead. */
+  --bg:           #FFFFFF;   /* the page */
   --surface:      #FFFFFF;   /* cards */
-  --surface-2:    #F7F9FC;   /* inputs, wells */
-  --line:         #E4E9F2;
-  --line-strong:  #D3DAE8;
+  --surface-2:    #F6F7F9;   /* inputs, wells */
+  --line:         #E5E7EB;
+  --line-strong:  #D0D4DB;
 
   /* Text */
   --text:         #0D1B3E;
@@ -107,6 +121,10 @@
 
 [data-theme='dark'] {
   --brand:        #FFFFFF;
+  /* Unused in dark — the metal gradient takes over — but defined so that a
+     mark rendered before the gradient sprite mounts is white, not black on
+     black. */
+  --logo-ink:     #FFFFFF;
   --brand-700:    #E8EDF7;
   --brand-500:    #C7D2E8;
   --accent:       #F5A623;
@@ -114,11 +132,18 @@
   --link:         #6E9BFF;
   --link-600:     #8FB2FF;
 
-  --bg:           #080D1A;
-  --surface:      #101728;
-  --surface-2:    #0B111F;
-  --line:         #1E2942;
-  --line-strong:  #2B3856;
+  /* True black, not near-black navy.
+
+     On the OLED panel most Nigerian customers are holding, #000 is an
+     unlit pixel: the page has no glow in a dark room and the metal in the
+     mark has something to be metal against. It also costs no battery to
+     display. Cards lift off it by a few points of lightness rather than by
+     a shadow, which black swallows. */
+  --bg:           #000000;
+  --surface:      #0C0D10;
+  --surface-2:    #141519;
+  --line:         #212227;
+  --line-strong:  #303237;
 
   --text:         #EEF2FA;
   --text-2:       #A3B0CC;
@@ -1024,3 +1049,56 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
   margin-bottom: 8px;
 }
 .nav .spacer { flex: 1; }
+
+/* ═══════════════════════════ the mark ═══════════════════════════
+
+   Black on the light theme, brushed metal on the dark one.
+
+   The switch is made HERE rather than in the component, and that is the whole
+   design. A component that read the theme in JavaScript would render the
+   light mark on the server and swap it after hydration — a visible flash of
+   the wrong logo on every cold load, on the first thing a customer looks at.
+   CSS knows the answer before the first paint.
+
+   `--metal-css` is set inline by the component and carries the same ramp the
+   SVG gradient uses, generated from one list of stops. */
+
+.logo-mark path { fill: var(--logo-ink); }
+.logo-word {
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--logo-ink);
+}
+
+[data-theme='dark'] .logo-mark.logo-auto path {
+  /* The fallback matters: if the gradient sprite is missing — a page that
+     renders outside the root layout, an email client, a saved copy of the
+     HTML — the mark is white rather than nothing at all. */
+  fill: var(--logo-ink);
+  fill: url(#xetral-metal);
+}
+[data-theme='dark'] .logo-word.logo-auto {
+  background-image: var(--metal-css);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* On a coloured surface the page theme is not what decides legibility. */
+.logo-mark.logo-inverse path,
+[data-theme='dark'] .logo-mark.logo-inverse path { fill: #FFFFFF; }
+.logo-word.logo-inverse,
+[data-theme='dark'] .logo-word.logo-inverse { color: #FFFFFF; background: none; }
+
+.logo-mark.logo-current path,
+[data-theme='dark'] .logo-mark.logo-current path { fill: currentColor; }
+.logo-word.logo-current,
+[data-theme='dark'] .logo-word.logo-current { color: currentColor; background: none; }
+
+/* Printed, the metal becomes a grey mush and the black mark is the one that
+   reproduces. */
+@media print {
+  .logo-mark path { fill: #000000 !important; }
+  .logo-word { color: #000000 !important; background: none !important; }
+}

@@ -1,6 +1,6 @@
-import { Text, View } from 'react-native';
+import { Text, useColorScheme, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
-import { colors, font } from './theme';
+import { font, logoInk } from './theme';
 
 /**
  * The Xetral mark — the SAME geometry as `apps/web/src/ui/logo.tsx`.
@@ -17,21 +17,26 @@ const LEFT_CHEVRON =
   'M0 1l158 197l2 1l29 38v8l-5 8l-95 115l-69 86l-2 1l-14 19l5 -1h131l4 -1l7 -3' +
   'l8 -7l105 -132v-7l-2 -4l-2 -1l-6 -9l-33 -40l-5 -10l-2 -9v-9l3 -12l7 -12l49 -59' +
   'l5 -7v-5l-15 -21l-69 -86l-22 -27l-8 -7l-13 -5h-143l-1 1l-5 -1z';
-  'L80 118 C83 114.5 83 108.5 80 105 Z';
 
 const RIGHT_CHEVRON =
   'M539 459l-162 -199l-14 -19l1 -10l5 -7l130 -153h-110l-6 2l-4 2l-13 14l-124 142' +
   'l-4 8v13l2 5l150 185l11 12l12 5z';
-  'L179 118 C176 114.5 176 108.5 179 105 Z';
+
+/** Black on light, metal on dark — see `logoInk`. `inverse` is for a mark on
+ *  a coloured surface, where the device theme is not what decides legibility. */
+function inkFor(tone: 'auto' | 'inverse', scheme: ReturnType<typeof useColorScheme>): string {
+  if (tone === 'inverse') return '#FFFFFF';
+  return scheme === 'dark' ? logoInk.dark : logoInk.light;
+}
 
 export function LogoMark({
   size = 28,
-  tone = 'brand',
+  tone = 'auto',
 }: {
   readonly size?: number;
-  readonly tone?: 'brand' | 'inverse';
+  readonly tone?: 'auto' | 'inverse';
 }) {
-  const fill = tone === 'inverse' ? '#FFFFFF' : colors.brand;
+  const fill = inkFor(tone, useColorScheme());
   return (
     <Svg width={(size * VB_W) / VB_H} height={size} viewBox={`0 0 ${VB_W} ${VB_H}`}>
       <Path d={RIGHT_CHEVRON} fill={fill} />
@@ -52,12 +57,13 @@ export function LogoMark({
 export function Logo({
   size = 28,
   wordmark = true,
-  tone = 'brand',
+  tone = 'auto',
 }: {
   readonly size?: number;
   readonly wordmark?: boolean;
-  readonly tone?: 'brand' | 'inverse';
+  readonly tone?: 'auto' | 'inverse';
 }) {
+  const ink = inkFor(tone, useColorScheme());
   if (!wordmark) return <LogoMark size={size} tone={tone} />;
 
   return (
@@ -76,7 +82,7 @@ export function Logo({
           // its capitals to match the mark's height.
           fontSize: Math.round(size / 0.72),
           letterSpacing: -0.6,
-          color: tone === 'inverse' ? '#FFFFFF' : colors.brand,
+          color: ink,
           // Negative: the mark's right edge is a WEDGE, not a flat side — the
           // chevron's arms reach the full width only at the very top and
           // bottom, so a zero gap still reads as "X etral". The 'e' is tucked
