@@ -66,7 +66,22 @@ export type NotificationRequest =
       readonly address: string;
       readonly network: string;
     }
-  | { readonly kind: 'card_frozen'; readonly last4: string; readonly reason: string };
+  | { readonly kind: 'card_frozen'; readonly last4: string; readonly reason: string }
+  /**
+   * The one message not addressed to a customer.
+   *
+   * It goes to the operations address, and it is `security` class so it is
+   * retried hardest — an alert about a platform failure that itself fails to
+   * send is the worst possible thing for this table to produce.
+   */
+  | {
+      readonly kind: 'operations_alert';
+      readonly headline: string;
+      readonly detail: string;
+      readonly occurrences: string;
+      readonly severity: string;
+      readonly fingerprint: string;
+    };
 
 export type NotificationKind = NotificationRequest['kind'];
 
@@ -87,7 +102,17 @@ const CLASS_OF: Record<NotificationKind, NotificationClass> = {
   transfer_sent: 'transactional',
   crypto_withdrawal_sent: 'transactional',
   card_frozen: 'transactional',
+  operations_alert: 'security',
 };
+
+/**
+ * Every kind, as a value.
+ *
+ * Derived from `CLASS_OF` rather than written out again, so it cannot fall
+ * behind the union: the Record's key type is `NotificationKind`, and the
+ * compiler already refuses a missing or misspelled entry there.
+ */
+export const ALL_NOTIFICATION_KINDS = Object.keys(CLASS_OF) as readonly NotificationKind[];
 
 export function classOf(kind: NotificationKind): NotificationClass {
   return CLASS_OF[kind];
@@ -308,6 +333,28 @@ export function render(request: NotificationRequest): RenderedNotification {
             h`<p style="margin:0;font-size:13px;color:#7c8089;word-break:break-all;">To ${request.address}</p>`,
           'An on-chain transaction cannot be recalled. If you did not make this ' +
             'withdrawal, contact support immediately.',
+        ),
+      };
+
+    case 'operations_alert':
+      return {
+        subject: `[Xetral ${request.severity}] ${request.headline}`,
+        text:
+          `${request.headline}\n\n` +
+          `${request.detail}\n\n` +
+          `Occurrences: ${request.occurrences}\n` +
+          `Fingerprint: ${request.fingerprint}\n\n` +
+          `Open the operations dashboard to see the full picture.`,
+        html: shell(
+          request.headline,
+          h`<p style="margin:0 0 12px;">${request.detail}</p>` +
+            `<table role="presentation" cellpadding="0" cellspacing="0" style="font-size:14px;color:#33363d;">` +
+            h`<tr><td style="padding:3px 16px 3px 0;color:#7c8089;">Occurrences</td><td>${request.occurrences}</td></tr>` +
+            h`<tr><td style="padding:3px 16px 3px 0;color:#7c8089;">Severity</td><td>${request.severity}</td></tr>` +
+            h`<tr><td style="padding:3px 16px 3px 0;color:#7c8089;">Fingerprint</td><td><code>${request.fingerprint}</code></td></tr>` +
+            `</table>`,
+          'You are receiving this because you are the operations contact for this ' +
+            'Xetral deployment.',
         ),
       };
 

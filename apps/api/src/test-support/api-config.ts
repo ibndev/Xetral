@@ -90,6 +90,8 @@ export function testApiConfig(databaseUrl: string, overrides: Partial<ApiConfig>
     notificationIntervalSeconds: undefined,
     appBaseUrl: 'https://app.xetral.test',
     passwordResetTtlMinutes: 30,
+    operationsEmail: 'ops@xetral.test',
+    errorAlertIntervalSeconds: undefined,
     ...overrides,
   };
 }

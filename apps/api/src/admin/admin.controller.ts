@@ -16,6 +16,7 @@ import { AdminService } from './admin.service.js';
 import { AuditService } from './audit.service.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { KycService } from '../kyc/kyc.service.js';
+import { ErrorRecorder } from '../observability/error-recorder.service.js';
 import { kycReviewSchema } from '../kyc/dto.js';
 
 /**
@@ -62,6 +63,7 @@ export class AdminController {
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(SettingsService) private readonly settings: SettingsService,
     @Inject(KycService) private readonly kyc: KycService,
+    @Inject(ErrorRecorder) private readonly errors: ErrorRecorder,
   ) {}
 
   /* ------------------------------ overview ----------------------------- */
@@ -279,6 +281,43 @@ export class AdminController {
     return {
       entries: await this.audit.list({ limit, ...(before === undefined ? {} : { before }) }),
     };
+  }
+
+  /* -------------------------------- errors ----------------------------- */
+
+  /**
+   * What is currently failing.
+   *
+   * `admin`, not `support`: an error message describes how the platform is
+   * built, and the smallest audience that can act on it is the right one. It
+   * carries no customer data by construction — the route pattern is stored,
+   * never the resolved path — but "no customer data by construction" is a
+   * property of the recorder, and this is the wrong place to bet on it
+   * staying true.
+   */
+  @Get('errors')
+  async errorList(): Promise<{ errors: readonly Record<string, unknown>[] }> {
+    return { errors: await this.errors.open() };
+  }
+
+  /**
+   * Acknowledge one.
+   *
+   * No PIN, and deliberately NOT written to the audit log. The audit log
+   * exists for actions that touch a customer or the platform's policy, and
+   * its action and subject columns are closed enums so that adding one is a
+   * decision rather than a habit. Acknowledging a failure is neither: it
+   * changes nothing about money, nothing a customer can see, and it cannot
+   * hide anything, because `record_error` clears `resolved_at` on the next
+   * occurrence — a bug somebody closed and which has come back reopens itself
+   * rather than staying hidden behind a fix that did not work.
+   */
+  @Post('errors/:fingerprint/resolve')
+  @HttpCode(200)
+  async errorResolve(
+    @Param('fingerprint') fingerprint: string,
+  ): Promise<{ resolved: boolean }> {
+    return { resolved: await this.errors.resolve(fingerprint) };
   }
 }
 

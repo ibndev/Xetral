@@ -189,8 +189,17 @@ export class PasswordResetService {
     });
   }
 
+  /**
+   * `deliverable`, not `available`.
+   *
+   * Enqueueing works with a keyring alone, so the weaker check let this
+   * endpoint answer 204 on a deployment with no email provider — telling a
+   * locked-out customer to check an inbox nothing was ever going to arrive in.
+   * Found by booting the built bundle and calling it, which is the fifth time
+   * that has been the thing that found something here.
+   */
   get available(): boolean {
-    return this.notifications.available && this.config.appBaseUrl !== undefined;
+    return this.notifications.deliverable && this.config.appBaseUrl !== undefined;
   }
 
   #resetUrl(token: string): string {

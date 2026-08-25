@@ -1,7 +1,8 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { Pool, PoolClient } from 'pg';
 import { seal } from '@xetral/identity';
-import { API_CONFIG, DATABASE } from '../tokens.js';
+import { API_CONFIG, DATABASE, NOTIFICATION_PORT } from '../tokens.js';
+import type { NotificationPort } from '@xetral/providers';
 import type { ApiConfig } from '../config.js';
 import { classOf, render } from './templates.js';
 import type { NotificationRequest } from './templates.js';
@@ -44,12 +45,30 @@ export class NotificationService {
   constructor(
     @Inject(API_CONFIG) private readonly config: ApiConfig,
     @Inject(DATABASE) private readonly pool: Pool,
+    @Inject(NOTIFICATION_PORT) private readonly port: NotificationPort | undefined,
   ) {}
 
-  /** Whether messages can be enqueued at all. False without an encryption
-   *  keyring, because an unsealed body cannot reach a row. */
+  /** Whether messages can be ENQUEUED. False without an encryption keyring,
+   *  because an unsealed body cannot reach a row. */
   get available(): boolean {
     return this.config.encryptionKeyring !== undefined;
+  }
+
+  /**
+   * Whether anything will actually SEND what is enqueued.
+   *
+   * SEPARATE FROM `available`, and the distinction is one that booting the
+   * bundle found rather than any test. With a keyring but no email provider,
+   * enqueueing succeeds — correctly, the message is owed and waits — but
+   * nothing drains it. Password reset checked only `available` and therefore
+   * answered "check your email" to a customer whose reset was going nowhere:
+   * a locked-out customer told to wait for mail that does not exist, which is
+   * worse than being told the feature is unavailable.
+   *
+   * A flow whose whole purpose is the message must ask THIS question.
+   */
+  get deliverable(): boolean {
+    return this.available && this.port !== undefined;
   }
 
   /**

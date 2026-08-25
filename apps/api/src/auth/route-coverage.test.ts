@@ -160,6 +160,9 @@ describe('the privileged surface is declared as privileged', () => {
     expect(staffRoutes.map((r) => `${r.method} ${r.path} (${r.role})`).sort()).toEqual([
       'GET /v1/admin/audit (admin)',
       'GET /v1/admin/drift (finance)',
+      // What is currently failing. `admin` because an error message describes
+      // how the platform is built.
+      'GET /v1/admin/errors (admin)',
       'GET /v1/admin/giftcards/queue (giftcard_reviewer)',
       'GET /v1/admin/kyc (compliance)',
       'GET /v1/admin/overview (support)',
@@ -170,6 +173,9 @@ describe('the privileged surface is declared as privileged', () => {
       'GET /v1/admin/suspense (finance)',
       'GET /v1/admin/users (support)',
       'GET /v1/admin/users/:id (support)',
+      // Acknowledging a failure. No PIN: it hides nothing, because a
+      // recurrence reopens the fingerprint by itself.
+      'POST /v1/admin/errors/:fingerprint/resolve (admin)',
       'POST /v1/admin/giftcards/:id/clawback (giftcard_reviewer)',
       'POST /v1/admin/giftcards/:id/reveal (giftcard_reviewer)',
       'POST /v1/admin/giftcards/:id/review (giftcard_reviewer)',

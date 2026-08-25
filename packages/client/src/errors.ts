@@ -49,6 +49,11 @@ const API_ERROR_CODES = [
   'totp_not_enrolled',
   'totp_already_enrolled',
 
+  /* What the global filter answers when something threw that nothing in the
+     codebase expected. Not user-fixable: nothing the customer types changes
+     it, and the honest thing to show is that it was our fault. */
+  'internal_error',
+
   /* the transaction PIN */
   'invalid_pin',
   'pin_locked',

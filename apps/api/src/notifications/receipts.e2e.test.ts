@@ -13,6 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../app.module.js';
 import { LEDGER, systemClock } from '../tokens.js';
 import { testApiConfig } from '../test-support/api-config.js';
+import { ALL_NOTIFICATION_KINDS } from './templates.js';
 
 /**
  * Alerts and receipts, over HTTP, against a real database.
@@ -323,5 +324,31 @@ describe('revoking other devices', () => {
       .expect(201);
 
     expect(await queued(customer.id, 'devices_revoked')).toBe(0);
+  });
+});
+
+describe('the TypeScript union and the Postgres enum agree', () => {
+  it('every declared kind can actually be written', async () => {
+    // ONLY AN INSERT PROVES THIS. `NotificationRequest` is a literal union in
+    // TypeScript and `notification_kind` is an enum in Postgres; the compiler
+    // cannot see the second one, so the two drift silently until something
+    // tries to write a row.
+    //
+    // That is not hypothetical here: `operations_alert` was added to the union
+    // and to the templates, passed typecheck and every unit test, and failed
+    // on the first real enqueue with "invalid input value for enum". It is the
+    // same finding Phase 3 recorded about `EntryKind` and `AccountRef`.
+    const kinds = await pool.query<{ label: string }>(
+      `SELECT enumlabel AS label FROM pg_enum e
+         JOIN pg_type t ON t.oid = e.enumtypid
+        WHERE t.typname = 'notification_kind'`,
+    );
+    const inDatabase = new Set(kinds.rows.map((r) => r.label));
+
+    const missing = ALL_NOTIFICATION_KINDS.filter((kind) => !inDatabase.has(kind));
+    expect(
+      missing,
+      `these kinds exist in TypeScript and would fail on write: ${missing.join(', ')}`,
+    ).toEqual([]);
   });
 });

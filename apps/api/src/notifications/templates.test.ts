@@ -11,6 +11,7 @@ const ALL_KINDS: readonly NotificationKind[] = [
   'transfer_sent',
   'crypto_withdrawal_sent',
   'card_frozen',
+  'operations_alert',
 ];
 
 /** One representative request per kind, so a template cannot be added without
@@ -33,6 +34,15 @@ function example(kind: NotificationKind, injected: string): NotificationRequest 
       return { kind, amount: '25.00', asset: 'USDT', address: injected, network: 'tron' };
     case 'card_frozen':
       return { kind, last4: '4242', reason: injected };
+    case 'operations_alert':
+      return {
+        kind,
+        headline: injected,
+        detail: injected,
+        occurrences: '12',
+        severity: 'error',
+        fingerprint: 'abcdef0123456789',
+      };
   }
 }
 

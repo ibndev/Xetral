@@ -102,6 +102,19 @@ async function linkFor(userId: string): Promise<string> {
   return match[0];
 }
 
+/** The outbox row id for this customer's most recent reset. */
+async function idFor(userId: string): Promise<string> {
+  const row = await pool.query<{ id: string }>(
+    `SELECT id FROM notification_outbox
+      WHERE user_id = $1::bigint AND kind = 'password_reset'
+      ORDER BY id DESC LIMIT 1`,
+    [userId],
+  );
+  const id = row.rows[0]?.id;
+  if (id === undefined) throw new Error('no reset message queued');
+  return id;
+}
+
 const tokenFrom = (link: string): string =>
   new URL(link).searchParams.get('token') ?? '';
 
@@ -391,9 +404,7 @@ describe('the outbox worker', () => {
       .send({ identifier: email })
       .expect(204);
 
-    const before = mailer.sent.length;
     await worker.sweep();
-    expect(mailer.sent.length).toBeGreaterThan(before);
 
     const row = await pool.query<{
       status: string;
@@ -415,16 +426,28 @@ describe('the outbox worker', () => {
   });
 
   it('does not send the same message twice', async () => {
-    const { email } = await seedCustomer();
+    // Asserted on THIS message, not on a global count.
+    //
+    // The sweep is global by design and drains whatever any other suite left
+    // behind, so `mailer.sent.length` before and after is a statement about
+    // the whole database rather than about this customer. The reconciliation
+    // worker's suite already records this rule — its counts are lower bounds
+    // and its assertions name a specific purchase — and the first version of
+    // this test broke it, passing on an empty database and failing on a used
+    // one.
+    const { userId, email } = await seedCustomer();
     await request(app.getHttpServer())
       .post('/v1/auth/password/forgot')
       .send({ identifier: email })
       .expect(204);
 
+    const key = `xetral:notification:${await idFor(userId)}`;
+    const mine = (): number => mailer.sent.filter((m) => m.idempotencyKey === key).length;
+
     await worker.sweep();
-    const afterFirst = mailer.sent.length;
+    expect(mine()).toBe(1);
     await worker.sweep();
-    expect(mailer.sent.length).toBe(afterFirst);
+    expect(mine()).toBe(1);
   });
 
   it('keeps a message for another attempt when the provider is down', async () => {
@@ -468,5 +491,46 @@ describe('the outbox worker', () => {
     // Cleared here too. An abandoned reset still holds a live token, and it
     // would otherwise sit in this table for as long as anyone left it there.
     expect(row.rows[0]?.payload_sealed).toBeNull();
+  });
+});
+
+describe('a deployment with no email provider', () => {
+  /**
+   * The bug this suite gained after the built bundle was booted and curled.
+   *
+   * `NotificationService.available` asks whether a message can be ENQUEUED —
+   * true with a keyring alone. Password reset checked that, so on a deployment
+   * with no email provider it answered 204: a locked-out customer told to
+   * check an inbox that nothing was ever going to reach. Refusing outright is
+   * the honest answer, and the one that sends them to support instead of to
+   * their inbox.
+   */
+  it('refuses the request instead of promising an email', async () => {
+    const bare = await Test.createTestingModule({
+      imports: [
+        AppModule.forRoot({
+          // No `notificationPort`, and none derivable: the fixture sets no
+          // RESEND_API_KEY, so `createNotificationPort` returns undefined.
+          config: testApiConfig(DATABASE_URL as string),
+          pool,
+          clock: systemClock,
+        }),
+      ],
+    }).compile();
+
+    const unsendable = bare.createNestApplication(new ExpressAdapter());
+    await unsendable.init();
+
+    try {
+      const { email } = await seedCustomer();
+      const res = await request(unsendable.getHttpServer())
+        .post('/v1/auth/password/forgot')
+        .send({ identifier: email });
+
+      expect(res.status).toBe(503);
+      expect(res.body.error).toBe('password_reset_unavailable');
+    } finally {
+      await unsendable.close();
+    }
   });
 });

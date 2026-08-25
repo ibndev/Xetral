@@ -262,6 +262,16 @@ export interface ApiConfig {
    * enough to survive an email provider queueing it for a few minutes.
    */
   readonly passwordResetTtlMinutes: number;
+
+  /**
+   * Where platform failure alerts go, and how often we look.
+   *
+   * Both absent means failures are recorded and nobody is told — which is a
+   * legitimate state for a development box and a serious one in production, so
+   * bootstrap says so out loud rather than leaving it to be discovered.
+   */
+  readonly operationsEmail: string | undefined;
+  readonly errorAlertIntervalSeconds: number | undefined;
 }
 
 export class ConfigError extends Error {
@@ -604,6 +614,8 @@ export function loadConfig(env: Env): ApiConfig {
     notificationIntervalSeconds: optionalInteger(env, 'NOTIFICATION_INTERVAL_SECONDS'),
     appBaseUrl: appBaseUrl(env),
     passwordResetTtlMinutes: integer(env, 'PASSWORD_RESET_TTL_MINUTES', 30),
+    operationsEmail: optional(env, 'OPERATIONS_EMAIL'),
+    errorAlertIntervalSeconds: optionalInteger(env, 'ERROR_ALERT_INTERVAL_SECONDS'),
   };
 }
 

@@ -171,6 +171,14 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
 
       .staff('GET', '/v1/admin/audit', { pin: false, role: 'admin' })
 
+      // What is currently failing. `admin` rather than `support`: an error
+      // message describes how the platform is built, and the smallest
+      // audience that can act on it is the right one.
+      .staff('GET', '/v1/admin/errors', { pin: false, role: 'admin' })
+      // Acknowledging one takes no PIN — it moves no money and hides nothing,
+      // because a recurrence reopens the fingerprint by itself.
+      .staff('POST', '/v1/admin/errors/:fingerprint/resolve', { pin: false, role: 'admin' })
+
       // Gift cards. Every one of these refuses with `gift_cards_disabled`
       // until GIFT_CARDS_ENABLED is set — the policy is declared regardless,
       // because a route that exists must be policed whether or not it is

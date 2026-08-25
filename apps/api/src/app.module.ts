@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger, Module, ServiceUnavailableException } from '@nestjs/common';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import type { DynamicModule, OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common';
 import Redis from 'ioredis';
 import type { Pool } from 'pg';
@@ -66,6 +66,9 @@ import { CryptoDepositReconciliationService } from './crypto/crypto-deposit-reco
 import { FxController } from './fx/fx.controller.js';
 import { FxService } from './fx/fx.service.js';
 import { NotificationService } from './notifications/notification.service.js';
+import { ErrorRecorder } from './observability/error-recorder.service.js';
+import { ErrorRecordingFilter } from './observability/error.filter.js';
+import { ErrorAlertService } from './observability/error-alert.service.js';
 import { NotificationWorker } from './notifications/notification.worker.js';
 import { ResendNotificationAdapter } from '@xetral/providers';
 import type { NotificationPort } from '@xetral/providers';
@@ -484,6 +487,22 @@ export class NotificationLifecycle implements OnApplicationBootstrap {
   }
 }
 
+/**
+ * Starts the alerter.
+ *
+ * Separate lifecycle because it is enabled independently — and because an
+ * instance that RECORDS failures without telling anybody is a legitimate
+ * configuration for all but one box, exactly like the other sweeps.
+ */
+@Injectable()
+export class ErrorAlertLifecycle implements OnApplicationBootstrap {
+  constructor(@Inject(ErrorAlertService) private readonly alerts: ErrorAlertService) {}
+
+  onApplicationBootstrap(): void {
+    this.alerts.start();
+  }
+}
+
 /** Starts the gift card hold release sweep. Separate from the reconciliation
  *  lifecycle because the two are enabled independently. */
 @Injectable()
@@ -590,6 +609,9 @@ export class AppModule {
         CryptoLifecycle,
         DepositReconciliationService,
         DepositLifecycle,
+        ErrorRecorder,
+        ErrorAlertService,
+        ErrorAlertLifecycle,
         NotificationService,
         NotificationWorker,
         NotificationLifecycle,
@@ -606,6 +628,12 @@ export class AppModule {
         // author never thought about authorisation. That is the whole point of
         // deny by default: the guard cannot be forgotten, only satisfied.
         { provide: APP_GUARD, useClass: AuthGuard },
+
+        // Registered globally, so no unhandled failure anywhere in the app can
+        // avoid being recorded. Same reasoning as the guard: a filter that has
+        // to be remembered per controller is one that will be forgotten on the
+        // controller that needed it.
+        { provide: APP_FILTER, useClass: ErrorRecordingFilter },
       ],
     };
   }
