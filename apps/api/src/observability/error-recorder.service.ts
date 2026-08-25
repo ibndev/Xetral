@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { Pool } from 'pg';
 import { DATABASE } from '../tokens.js';
@@ -82,13 +83,31 @@ const MAX_MESSAGE = 500;
 export class ErrorRecorder {
   readonly #logger = new Logger(ErrorRecorder.name);
   /**
-   * Set while a recording attempt is in flight.
+   * Marks the async context that is already inside `record()`.
    *
-   * If the database is the thing that is broken, recording an error will throw,
-   * and the natural place to report THAT is here — which is a loop that ends
-   * in a stack overflow during the exact outage it was meant to document.
+   * WHY NOT A BOOLEAN, which is what this was. The guard exists to stop one
+   * thing: if the database is what is broken, recording an error throws, and
+   * the natural place to report THAT is here — a loop that ends in a stack
+   * overflow during the exact outage it was meant to document.
+   *
+   * A boolean cannot tell that recursion apart from two UNRELATED errors
+   * arriving at once. The filter calls `record()` without awaiting it, so the
+   * flag stayed set across the `await` while the next request came in, threw,
+   * and was dropped without a word. Errors cluster — an outage is many
+   * failures in the same second — so the table undercounted worst at exactly
+   * the moment somebody would be reading it, and "it happened twice" would be
+   * the evidence for something that happened two hundred times.
+   *
+   * Found by a test that fired three failures in a row and counted two,
+   * nondeterministically: the same commit passed on one CI run and failed on
+   * the next, because whether the second request overlapped the first was a
+   * matter of scheduling.
+   *
+   * `AsyncLocalStorage` is the tool that draws the line correctly. A recursive
+   * call runs inside the store its caller entered; a concurrent request has
+   * its own context and is unaffected.
    */
-  #recording = false;
+  readonly #inFlight = new AsyncLocalStorage<true>();
 
   constructor(@Inject(DATABASE) private readonly pool: Pool) {}
 
@@ -99,9 +118,15 @@ export class ErrorRecorder {
    * something; giving it a second failure to handle is not help.
    */
   async record(error: RecordableError): Promise<void> {
-    if (this.#recording) return;
+    // Re-entered from inside our own failure path. Return, or loop.
+    if (this.#inFlight.getStore() === true) return;
 
-    this.#recording = true;
+    return this.#inFlight.run(true, async () => {
+      await this.#write(error);
+    });
+  }
+
+  async #write(error: RecordableError): Promise<void> {
     try {
       const fingerprint = fingerprintOf({ message: error.message, ...(error.route === undefined ? {} : { route: error.route }) });
 
@@ -118,8 +143,6 @@ export class ErrorRecorder {
       this.#logger.error(
         `could not record an error: ${cause instanceof Error ? cause.message : String(cause)}`,
       );
-    } finally {
-      this.#recording = false;
     }
   }
 

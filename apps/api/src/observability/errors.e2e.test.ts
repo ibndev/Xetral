@@ -191,6 +191,54 @@ describe('what the filter records', () => {
   });
 });
 
+describe('concurrent failures are all recorded', () => {
+  it('does not drop errors that overlap each other', async () => {
+    /*
+     * THE DETERMINISTIC VERSION OF A BUG THE SEQUENTIAL TEST ABOVE FOUND ONLY
+     * SOMETIMES. The re-entry guard used to be a boolean, and the filter calls
+     * `record()` without awaiting it — so the flag stayed set across the await
+     * while the next failure arrived and was dropped in silence. Whether two
+     * failures overlapped was a matter of scheduling: the same commit passed on
+     * one CI run and failed on the next.
+     *
+     * Errors CLUSTER — an outage is many failures in the same second — so this
+     * is the state the table is read in, and undercounting it turns "this
+     * happened twice" into the evidence for something that happened two
+     * hundred times.
+     *
+     * Driven through `recorder.record()` rather than over HTTP, for two
+     * reasons. The guard is what is under test, not the filter. And a burst of
+     * requests to the shared /probe/throws route would add occurrences to a
+     * fingerprint the alerting tests assert on — which it did, and knocked one
+     * of them over. A unique message per run keeps this test's evidence its
+     * own.
+     */
+    const message = `Error: overlapping probe ${randomUUID()}`;
+    const fingerprint = fingerprintOf({ message, route: '/probe/concurrent' });
+    expect(await countFor(fingerprint)).toBe(0);
+
+    const AT_ONCE = 8;
+    await Promise.all(
+      Array.from({ length: AT_ONCE }, () =>
+        recorder.record({ message, route: '/probe/concurrent', statusCode: 500 }),
+      ),
+    );
+
+    // Every one of them, not "at least one". With the boolean guard this
+    // counted 1: the first call held the flag across its await and the other
+    // seven returned having done nothing.
+    expect(await countFor(fingerprint)).toBe(AT_ONCE);
+
+    // And still ONE row — the fingerprint is what makes a thousand of these
+    // one line in a table rather than a log.
+    const rows = await pool.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM error_events WHERE fingerprint = $1`,
+      [fingerprint],
+    );
+    expect(rows.rows[0]?.n).toBe('1');
+  });
+});
+
 describe('the recorder never makes things worse', () => {
   it('does not throw when the message is enormous', async () => {
     // It is truncated, not refused. A recorder that threw on a long message
