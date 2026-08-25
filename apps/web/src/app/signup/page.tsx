@@ -13,11 +13,15 @@ import { ThemeToggle } from '@/ui/theme-toggle';
 /**
  * Opening an account.
  *
- * Email and a password, and nothing else. Identity documents are a SEPARATE,
- * reviewed step — folding a BVN into this form would make a regulatory
- * decision a side effect of choosing a password, and would collect the most
- * sensitive identifier a Nigerian fintech holds from someone who has not yet
- * proved they can receive mail at the address they typed.
+ * Email and a password, and nothing else — and then straight into the
+ * product.
+ *
+ * Identity documents are a SEPARATE, reviewed step, asked for at the first
+ * moment they are actually required rather than at the door. Folding a BVN
+ * into this form would make a regulatory decision a side effect of choosing a
+ * password, and would collect the most sensitive identifier a Nigerian
+ * fintech holds from someone who has not yet proved they can receive mail at
+ * the address they typed.
  */
 export default function SignUp() {
   const router = useRouter();
@@ -47,7 +51,16 @@ export default function SignUp() {
         password,
         device: { fingerprint: deviceFingerprint(), platform: 'web' },
       });
-      router.push('/kyc');
+      // The WALLET, not the identity form.
+      //
+      // Sign-up used to land here on /kyc, so the first thing a new customer
+      // saw was a demand for their full legal name, date of birth and BVN —
+      // the most sensitive identifier a Nigerian fintech holds — before they
+      // had seen one screen of the product or had any reason to trust us with
+      // it. Identity is now asked for at the first moment it is actually
+      // required: a USD card, crypto, gift cards, or a Nigerian account
+      // number. Naira, transfers, airtime, data and bills all work on day one.
+      router.push('/wallet');
       return undefined;
     });
   }

@@ -418,7 +418,15 @@ export class CardService {
       // Bitnob means sending them identity documents, which is a KYC step with
       // its own consent and its own audit trail -- not a side effect of
       // tapping "get a card".
-      error: 'provider_customer_not_registered',
+      //
+      // `kyc_required`, the same code crypto, gift cards and NGN accounts
+      // use. This was `provider_customer_not_registered`, which describes our
+      // internal plumbing rather than what the customer has to do, and it
+      // meant the client needed two branches for one condition — so a
+      // customer reaching for a card got a generic error while the same
+      // customer reaching for crypto got a prompt to verify.
+      error: 'kyc_required',
+      product: 'card',
     });
   }
 }

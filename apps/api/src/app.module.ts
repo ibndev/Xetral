@@ -24,6 +24,7 @@ import { CardService } from './cards/card.service.js';
 import { CardWebhookService } from './cards/webhook.service.js';
 import { CardProtectionService } from './cards/card-protection.service.js';
 import { AffordabilityService } from './wallet/affordability.service.js';
+import { KycGateService } from './kyc/kyc-gate.service.js';
 import { PurchaseController } from './purchases/purchase.controller.js';
 import { PurchaseService } from './purchases/purchase.service.js';
 import { PurchaseOutcome } from './purchases/purchase-outcome.js';
@@ -467,6 +468,7 @@ export class AppModule {
         CardWebhookService,
         CardProtectionService,
         AffordabilityService,
+        KycGateService,
         PurchaseService,
         PurchaseOutcome,
         StaffService,

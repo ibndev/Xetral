@@ -6,6 +6,7 @@ import type { CryptoAddress, CryptoQuote } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { Icon } from '@/ui/icon';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/lib/hooks';
+import { VerifyPrompt } from '@/ui/verify-prompt';
 
 /**
  * Deposits and withdrawals on chain.
@@ -25,6 +26,17 @@ const ASSETS = [
 export default function Crypto() {
   const client = useXetral();
   const withdrawals = useLoad(() => client.withdrawals(), [client]);
+
+  // The address request is what trips the identity gate first, so its refusal
+  // is the one that decides whether this whole screen is usable. Shown as an
+  // invitation at the top rather than as red text buried in one panel.
+  if (withdrawals.code === 'kyc_required') {
+    return (
+      <Shell>
+        <VerifyPrompt what="crypto" detail={withdrawals.error} />
+      </Shell>
+    );
+  }
 
   return (
     <Shell>

@@ -342,7 +342,10 @@ describe('issuing', () => {
       });
 
     expect(res.status).toBe(409);
-    expect(res.body.error).toBe('provider_customer_not_registered');
+    expect(res.body.error).toBe('kyc_required');
+    // Names what the customer was reaching for, so the screen can say
+    // "verify to get a USD card" rather than a bare "kyc required".
+    expect(res.body.product).toBe('card');
   });
 });
 

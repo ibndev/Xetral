@@ -1102,3 +1102,27 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
   .logo-mark path { fill: #000000 !important; }
   .logo-word { color: #000000 !important; background: none !important; }
 }
+
+/* The identity prompt. A NOTICE, not an error — nothing has gone wrong, the
+   customer has reached the one part of the product that needs more than an
+   email address. Styled to look like an invitation rather than a refusal. */
+.verify-prompt {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  border-color: var(--line-strong);
+}
+.verify-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border-radius: 12px;
+  background: var(--info-bg);
+  color: var(--info);
+}
+.verify-body { min-width: 0; }
+.verify-body h2 { font-size: 17px; margin: 2px 0 6px; }
+.verify-body p { margin: 0 0 8px; color: var(--text-2); font-size: 14px; }
+.verify-body .btn { margin-top: 6px; }

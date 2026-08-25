@@ -467,7 +467,7 @@ export class CryptoService {
       [userId, this.port.provider],
     );
     const row = result.rows[0];
-    if (row === undefined) throw new ConflictException({ error: 'kyc_required' });
+    if (row === undefined) throw new ConflictException({ error: 'kyc_required', product: 'crypto' });
     return row.provider_customer_id;
   }
 

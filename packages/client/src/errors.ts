@@ -48,7 +48,6 @@ const API_ERROR_CODES = [
   'account_closed',
   'kyc_required',
   'below_minimum_age',
-  'provider_customer_not_registered',
   'forbidden',
 
   /* money */

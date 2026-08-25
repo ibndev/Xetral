@@ -6,6 +6,7 @@ import type { Card } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { Icon } from '@/ui/icon';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/lib/hooks';
+import { VerifyPrompt } from '@/ui/verify-prompt';
 
 /**
  * Virtual USD cards.
@@ -17,7 +18,7 @@ import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/lib/hooks';
  */
 export default function Cards() {
   const client = useXetral();
-  const { data, loading, error, reload } = useLoad(() => client.cards(), [client]);
+  const { data, loading, error, code, reload } = useLoad(() => client.cards(), [client]);
 
   return (
     <Shell>
@@ -27,7 +28,12 @@ export default function Cards() {
         <h2>Virtual dollar cards, funded from your wallet</h2>
 
         {loading && <p className="spinner">Loading…</p>}
-        {error !== undefined && <p className="error">{error}</p>}
+        {error !== undefined &&
+          (code === 'kyc_required' ? (
+            <VerifyPrompt what="a USD card" detail={error} />
+          ) : (
+            <p className="error">{error}</p>
+          ))}
 
         {data !== undefined && data.length === 0 && (
           <p className="empty">No cards yet.</p>

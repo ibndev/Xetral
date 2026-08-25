@@ -212,7 +212,7 @@ export class FundingService {
     );
     const row = result.rows[0];
     if (row === undefined) {
-      throw new ConflictException({ error: 'kyc_required' });
+      throw new ConflictException({ error: 'kyc_required', product: 'ngn_account' });
     }
     return row.provider_customer_id;
   }
