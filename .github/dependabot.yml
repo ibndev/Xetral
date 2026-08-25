@@ -1,0 +1,54 @@
+# ============================================================================
+#  Dependency updates.
+#
+#  WEEKLY, not daily. A money platform that learns about a compromised package
+#  from the news has already been running it; a daily flood of pull requests
+#  nobody reads is the same outcome with more noise in front of it. Weekly is
+#  the cadence a person can actually keep up with, which is what makes it a
+#  control rather than a setting.
+#
+#  Security updates arrive as they are published regardless of this schedule —
+#  that is Dependabot's own behaviour and is the half that matters.
+# ============================================================================
+version: 2
+updates:
+  # One ecosystem entry for the whole workspace: npm workspaces share a single
+  # lockfile, so a per-workspace entry would produce several pull requests
+  # editing the same file and every one of them would conflict.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '07:00'
+      timezone: Africa/Lagos
+    open-pull-requests-limit: 10
+    groups:
+      # Grouped so a week's routine updates are ONE pull request to read rather
+      # than fifteen to skim. Security updates are deliberately not grouped —
+      # they arrive alone so that the one that matters is not buried in a
+      # diff full of patch bumps.
+      development:
+        dependency-type: development
+        update-types: ['minor', 'patch']
+      production:
+        dependency-type: production
+        update-types: ['patch']
+    ignore:
+      # Majors are a decision, not an update. Next 15 to 16 changed the default
+      # bundler and broke module resolution for this repo's `.js` specifiers —
+      # a pull request that could not have been merged on a glance.
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
+    labels: ['dependencies']
+
+  # The workflows themselves. A pinned action with a known vulnerability has
+  # the repository's own token.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '07:00'
+      timezone: Africa/Lagos
+    labels: ['dependencies']

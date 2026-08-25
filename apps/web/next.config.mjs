@@ -66,6 +66,25 @@ export default {
     ];
   },
 
+  /**
+   * THIS APP BUILDS WITH WEBPACK, and on Next 16 that is now a deliberate
+   * choice rather than the default. `next build --webpack` in package.json is
+   * the other half of it.
+   *
+   * The repo imports with explicit `.js` specifiers — what native ESM requires
+   * and what every other workspace does — so a bundler has to be told that
+   * `./admin.js` means `admin.ts`. Webpack has `resolve.extensionAlias` for
+   * exactly that. TURBOPACK, as of 16.3, HAS NO WORKING EQUIVALENT: its
+   * `resolveExtensions` appends extensions to a BARE specifier and does
+   * nothing for one that already carries `.js`, and `experimental.extensionAlias`
+   * is accepted, printed as an active experiment, and then ignored — the build
+   * still fails with `Module not found: Can't resolve './admin.js'`.
+   *
+   * The alternative would be dropping the extensions from every import, and
+   * that is the one thing that must not happen: native ESM in Node requires
+   * them, so it would fix the web build by breaking every other workspace.
+   * Revisit when Turbopack implements the mapping.
+   */
   webpack(config) {
     // The repo imports with explicit `.js` specifiers, which is what native
     // ESM requires and what every other workspace does. Next's webpack

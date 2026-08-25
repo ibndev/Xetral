@@ -180,6 +180,54 @@ jobs:
             -f packages/ledger/sql/017_transfer_velocity.sql \
             -f packages/ledger/sql/018_disputes.sql
 
+      # ------------------------------------------------------------------
+      # Dependency scanning.
+      #
+      # SCOPED TO THE WORKSPACES THAT SERVE CUSTOMER TRAFFIC, and the scoping
+      # is the design. A repo-wide `npm audit` here reports thirty findings,
+      # almost all of them in the Expo and Metro toolchain — build tools that
+      # never run on our servers and never touch a customer's money. Failing
+      # the build on those trains everybody to skip the step, and then the one
+      # finding that IS in the request path scrolls past with the rest. That is
+      # the same reasoning that makes the error alerter speak twice and no more.
+      #
+      # This step found a real one on the day it was written: apps/web was on
+      # Next 15.1.3, which carries an authorization-bypass-in-middleware
+      # advisory — and this app's Content-Security-Policy lives in middleware.
+      #
+      # APPS/MOBILE IS DELIBERATELY NOT IN THIS LIST, said out loud rather than
+      # left as a gap somebody notices later. Expo and Metro are declared as
+      # ordinary dependencies rather than devDependencies, so `--omit=dev`
+      # cannot separate the toolchain from what actually ships in the bundle,
+      # and gating on it would mean this step is permanently red for reasons
+      # nobody can act on. Its findings appear in the advisory step below, and
+      # the day one of them is in a runtime library rather than the CLI it
+      # belongs in this list.
+      # ------------------------------------------------------------------
+      - name: Audit the customer-facing dependency tree
+        run: |
+          set -o pipefail
+          failed=0
+          for w in apps/api apps/web packages/ledger packages/identity \
+                   packages/providers packages/shared packages/client; do
+            echo "== $w"
+            # --omit=dev, because a vulnerability in a test runner is not a
+            # vulnerability in the request path. moderate, because "high only"
+            # on a system holding customer deposits is the wrong threshold.
+            if ! (cd "$w" && npm audit --omit=dev --audit-level=moderate); then
+              echo "::error::$w has a vulnerable production dependency"
+              failed=1
+            fi
+          done
+          exit $failed
+
+      # Reported, never fatal. The build toolchain's findings are worth seeing
+      # and are not worth blocking a deploy over — a rule people mute is worse
+      # than no rule.
+      - name: Report the whole tree (advisory)
+        if: always()
+        run: npm audit --audit-level=high || true
+
       - run: npm run typecheck
 
       - run: npm test
