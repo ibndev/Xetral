@@ -90,7 +90,7 @@ export class CryptoService {
     @Inject(LEDGER) private readonly ledger: LedgerService,
     @Inject(CRYPTO_PORT) private readonly port: CryptoPort,
     @Inject(API_CONFIG) private readonly config: ApiConfig,
-    private readonly affordability: AffordabilityService,
+    @Inject(AffordabilityService) private readonly affordability: AffordabilityService,
   ) {}
 
   /** The customer's deposit address, issued once and returned for ever after. */

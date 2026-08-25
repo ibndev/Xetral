@@ -33,7 +33,7 @@ export class CardProtectionService {
 
   constructor(
     @Inject(DATABASE) private readonly pool: Pool,
-    private readonly settings: SettingsService,
+    @Inject(SettingsService) private readonly settings: SettingsService,
   ) {}
 
   /**

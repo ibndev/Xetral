@@ -31,8 +31,8 @@ export class CardWebhookService {
     @Inject(DATABASE) private readonly pool: Pool,
     @Inject(LEDGER) private readonly ledger: LedgerService,
     @Inject(API_CONFIG) private readonly config: ApiConfig,
-    private readonly protection: CardProtectionService,
-    private readonly settings: SettingsService,
+    @Inject(CardProtectionService) private readonly protection: CardProtectionService,
+    @Inject(SettingsService) private readonly settings: SettingsService,
   ) {}
 
   /**

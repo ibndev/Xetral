@@ -97,7 +97,7 @@ export class GiftCardService {
     @Inject(LEDGER) private readonly ledger: LedgerService,
     @Inject(API_CONFIG) private readonly config: ApiConfig,
     @Inject(SettingsService) private readonly settings: SettingsService,
-    private readonly kycGate: KycGateService,
+    @Inject(KycGateService) private readonly kycGate: KycGateService,
   ) {}
 
   /**

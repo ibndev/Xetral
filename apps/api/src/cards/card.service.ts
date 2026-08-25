@@ -73,7 +73,7 @@ export class CardService {
     @Inject(DATABASE) private readonly pool: Pool,
     @Inject(LEDGER) private readonly ledger: LedgerService,
     @Inject(CARD_PORT) private readonly cards: CardPort,
-    private readonly protection: CardProtectionService,
+    @Inject(CardProtectionService) private readonly protection: CardProtectionService,
   ) {}
 
   async list(userUuid: string): Promise<readonly CardView[]> {

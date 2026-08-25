@@ -86,7 +86,7 @@ export class FxService {
     @Inject(LEDGER) private readonly ledger: LedgerService,
     @Inject(FX_PORT) private readonly port: FxPort,
     @Inject(API_CONFIG) private readonly config: ApiConfig,
-    private readonly affordability: AffordabilityService,
+    @Inject(AffordabilityService) private readonly affordability: AffordabilityService,
   ) {}
 
   async quote(body: FxQuoteBody): Promise<FxQuoteView> {
