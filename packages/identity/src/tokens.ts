@@ -82,3 +82,43 @@ export type RotationOutcome =
 export function isSecurityIncident(outcome: RotationOutcome): boolean {
   return outcome === 'reuse_detected';
 }
+
+/**
+ * Password reset tokens, built exactly like refresh tokens.
+ *
+ * The same 32 CSPRNG bytes, the same base64url encoding, the same SHA-256 hex
+ * hash — and named separately rather than reusing the refresh functions
+ * directly, because the two are used in different tables with different
+ * lifetimes and a future change to one must not silently change the other.
+ *
+ * The construction is right for the same reasons it is right there: 256 bits
+ * of entropy means there is nothing to guess, so a slow password hash would
+ * buy nothing and cost a CPU-bound denial-of-service surface on a PUBLIC
+ * endpoint. Hashing is for disclosure — a dump, a replica, a leaked log —
+ * where a stored SHA-256 cannot be presented as a credential.
+ *
+ * The hex output is what satisfies the `^[0-9a-f]{64}$` CHECK on
+ * `password_reset_tokens.token_hash`, which is what stops a raw token ever
+ * reaching a row.
+ */
+export interface IssuedResetToken {
+  /** Goes into the email and nowhere else. Never logged, never stored. */
+  readonly token: string;
+  /** Stored. The only half that touches the database. */
+  readonly hash: string;
+}
+
+export function hashPasswordResetToken(token: string): string {
+  return createHash('sha256').update(token, 'utf8').digest('hex');
+}
+
+export function issuePasswordResetToken(): IssuedResetToken {
+  const token = randomBytes(REFRESH_TOKEN_BYTES).toString('base64url');
+  return { token, hash: hashPasswordResetToken(token) };
+}
+
+/** The outcomes of `consume_password_reset_token`, mirrored from the SQL enum.
+ *
+ *  To the CLIENT all three failures are one response, deliberately: telling
+ *  somebody which way their token failed tells them whether it was ever real. */
+export type PasswordResetOutcome = 'consumed' | 'unknown_token' | 'already_used' | 'expired';

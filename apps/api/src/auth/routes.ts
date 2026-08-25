@@ -47,6 +47,28 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
         'authenticated by the refresh token in its body, which is single-use and ' +
           'checked by rotate_refresh_token; the access token is expected to be expired here',
       )
+      // Account recovery, and the two most carefully-worded justifications in
+      // this file. Both MUST be public: a customer who has lost their password
+      // has no session to present, so requiring one would make the endpoint
+      // reachable only by people who do not need it.
+      .public(
+        'POST',
+        '/v1/auth/password/forgot',
+        'a customer who has forgotten their password has no session; requiring one ' +
+          'would be circular. Answers 204 for every valid identifier whether or not an ' +
+          'account exists, so it cannot be used to enumerate customers, and is rate ' +
+          'limited per identifier because each accepted request sends mail to somebody ' +
+          'who did not ask for it',
+      )
+      .public(
+        'POST',
+        '/v1/auth/password/reset',
+        'authenticated by the single-use token from the reset email, which is checked ' +
+          'by consume_password_reset_token under a row lock; the caller has no session ' +
+          'by definition. Answers 204 and issues NO tokens, so a leaked link grants a ' +
+          'password that can be used rather than an immediate live session',
+      )
+
       .authenticated('POST', '/v1/auth/logout', { pin: false })
       .authenticated('GET', '/v1/auth/session', { pin: false })
       // Setting the first PIN cannot itself require a PIN. Changing one does,

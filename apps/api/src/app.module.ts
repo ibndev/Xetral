@@ -16,6 +16,7 @@ import { AuthController } from './auth/auth.controller.js';
 import { AuthGuard } from './auth/auth.guard.js';
 import { AuthService } from './auth/auth.service.js';
 import { PinService } from './auth/pin.service.js';
+import { PasswordResetService } from './auth/password-reset.service.js';
 import { WalletController } from './wallet/wallet.controller.js';
 import { WalletService } from './wallet/wallet.service.js';
 import { SpendingLimitService } from './wallet/spending-limits.service.js';
@@ -63,7 +64,11 @@ import { CryptoReconciliationService } from './crypto/crypto-reconciliation.serv
 import { CryptoDepositReconciliationService } from './crypto/crypto-deposit-reconciliation.service.js';
 import { FxController } from './fx/fx.controller.js';
 import { FxService } from './fx/fx.service.js';
-import { LoginRateLimitGuard } from './auth/login-rate-limit.guard.js';
+import { NotificationService } from './notifications/notification.service.js';
+import { NotificationWorker } from './notifications/notification.worker.js';
+import { ResendNotificationAdapter } from '@xetral/providers';
+import type { NotificationPort } from '@xetral/providers';
+import { LoginRateLimitGuard, PasswordResetRateLimitGuard } from './auth/login-rate-limit.guard.js';
 import {
   InMemoryRateLimitStore,
   RedisRateLimitStore,
@@ -83,6 +88,7 @@ import {
   FUNDING_PORT,
   FX_PORT,
   LEDGER,
+  NOTIFICATION_PORT,
   RATE_LIMIT_STORE,
   ROUTE_POLICY,
   systemClock,
@@ -107,6 +113,8 @@ export interface AppModuleOptions {
   readonly cryptoPort?: CryptoPort;
   /** Overridden in tests so FX runs without a live Bitnob. */
   readonly fxPort?: FxPort;
+  /** Overridden in tests so the outbox can be drained without a live Resend. */
+  readonly notificationPort?: NotificationPort;
 }
 
 /**
@@ -309,6 +317,42 @@ export function createFxPort(config: ApiConfig): FxPort {
 }
 
 /**
+ * The email provider, or nothing at all.
+ *
+ * `undefined` rather than a refusing stand-in, and the difference matters
+ * here. Every other port in this file gets a stand-in that throws
+ * `..._not_configured`, because a customer asking for a card deserves a clear
+ * refusal. Notifications are not requested by a customer — they are owed to
+ * one — so there is no request to refuse. A stand-in that threw would turn
+ * every queued receipt into an error in the worker's log and every password
+ * reset into a 500 on a route that should have refused at the door instead.
+ *
+ * Absent means: the outbox still accepts rows, nothing drains them, and the
+ * routes that depend on email refuse up front.
+ */
+export function createNotificationPort(config: ApiConfig): NotificationPort | undefined {
+  const { resendApiKey, notificationFrom } = config;
+  const logger = new Logger('Notifications');
+
+  if (resendApiKey === undefined || notificationFrom === undefined) {
+    logger.warn(
+      'RESEND_API_KEY or NOTIFICATION_FROM is not set: NO EMAIL WILL BE SENT. Password ' +
+        'reset is unavailable, and customers will not be told when a new device signs ' +
+        'into their account.',
+    );
+    return undefined;
+  }
+
+  return new ResendNotificationAdapter({
+    apiKey: resendApiKey,
+    from: notificationFrom,
+    ...(config.notificationReplyTo === undefined
+      ? {}
+      : { replyTo: config.notificationReplyTo }),
+  });
+}
+
+/**
  * Chooses the rate-limit backend, and says out loud when it picks the one that
  * only works on a single box.
  *
@@ -422,6 +466,23 @@ export class CryptoLifecycle implements OnApplicationBootstrap {
   }
 }
 
+/**
+ * Starts the outbox worker.
+ *
+ * Separate from the other lifecycles because it is enabled independently, and
+ * because it is the one whose absence is silent in the worst way: rows
+ * accumulate, the API keeps answering "check your email", and nothing is ever
+ * delivered. The worker says so at boot when nobody has turned it on.
+ */
+@Injectable()
+export class NotificationLifecycle implements OnApplicationBootstrap {
+  constructor(@Inject(NotificationWorker) private readonly worker: NotificationWorker) {}
+
+  onApplicationBootstrap(): void {
+    this.worker.start();
+  }
+}
+
 /** Starts the gift card hold release sweep. Separate from the reconciliation
  *  lifecycle because the two are enabled independently. */
 @Injectable()
@@ -496,6 +557,10 @@ export class AppModule {
           provide: FX_PORT,
           useValue: options.fxPort ?? createFxPort(options.config),
         },
+        {
+          provide: NOTIFICATION_PORT,
+          useValue: options.notificationPort ?? createNotificationPort(options.config),
+        },
         AuthService,
         PinService,
         WalletService,
@@ -523,12 +588,17 @@ export class AppModule {
         CryptoLifecycle,
         DepositReconciliationService,
         DepositLifecycle,
+        NotificationService,
+        NotificationWorker,
+        NotificationLifecycle,
         GiftCardService,
         GiftCardHoldService,
         ReconciliationService,
         ReconciliationLifecycle,
         GiftCardLifecycle,
         LoginRateLimitGuard,
+        PasswordResetRateLimitGuard,
+        PasswordResetService,
 
         // Registered globally, so it runs for every route including one whose
         // author never thought about authorisation. That is the whole point of

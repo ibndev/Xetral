@@ -28,6 +28,9 @@ export const FUNDING_PORT = Symbol('FUNDING_PORT');
 export const CRYPTO_PORT = Symbol('CRYPTO_PORT');
 /** FX rates and swaps. One per instance. */
 export const FX_PORT = Symbol('FX_PORT');
+/** Email. Undefined when no provider is configured, which disables password
+ *  reset — there is no other way to prove control of an address. */
+export const NOTIFICATION_PORT = Symbol('NOTIFICATION_PORT');
 export const CLOCK = Symbol('CLOCK');
 
 /** Injected rather than read from Date.now() so expiry and rate-limit windows

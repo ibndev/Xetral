@@ -210,6 +210,58 @@ export interface ApiConfig {
   /** How often addresses are re-checked for deposits whose webhook never
    *  arrived. One instance, same arrangement as the other sweeps. */
   readonly cryptoDepositReconcileIntervalSeconds: number | undefined;
+
+  /**
+   * Email. Optional as a set, and its absence disables PASSWORD RESET
+   * entirely — there is no other way to prove control of an address.
+   *
+   * `notificationFrom` must be an address on a domain whose SPF, DKIM and
+   * DMARC records name the provider. Security mail from an unauthenticated
+   * domain lands in spam, which is indistinguishable from not sending it.
+   */
+  /**
+   * The ceiling on password reset requests.
+   *
+   * Deliberately much tighter than the login limit, and for a different
+   * reason: an accepted request sends an email to somebody who did not ask for
+   * it. Without the per-identifier bucket the endpoint is a mail bomb aimed at
+   * any address, delivered by our own sending domain.
+   */
+  readonly passwordResetRateLimit: {
+    readonly perIdentifier: RateLimitRule;
+    readonly perIp: RateLimitRule;
+  };
+
+  readonly resendApiKey: string | undefined;
+  readonly notificationFrom: string | undefined;
+  readonly notificationReplyTo: string | undefined;
+  /**
+   * How often queued messages are sent, in seconds.
+   *
+   * Undefined means this instance sends nothing, and exactly one should — the
+   * same arrangement as every other sweep. Bootstrap warns when none does,
+   * because the failure is silent in the worst way: rows accumulate, the API
+   * answers "check your email", and no email is ever sent.
+   */
+  readonly notificationIntervalSeconds: number | undefined;
+
+  /**
+   * The customer-facing origin, used to build links in email.
+   *
+   * Required for password reset and validated as an absolute https URL. A
+   * reset link is followed by a customer who has already been told to expect
+   * it, so a wrong or attacker-supplied origin here is a credential harvester
+   * with our branding on it — which is exactly why it is a deployment value
+   * and never read from a request header.
+   */
+  readonly appBaseUrl: string | undefined;
+  /**
+   * How long a password reset link is good for, in minutes.
+   *
+   * Short, because it is a bearer token that grants account access, and long
+   * enough to survive an email provider queueing it for a few minutes.
+   */
+  readonly passwordResetTtlMinutes: number;
 }
 
 export class ConfigError extends Error {
@@ -534,5 +586,56 @@ export function loadConfig(env: Env): ApiConfig {
       env,
       'CRYPTO_DEPOSIT_RECONCILE_INTERVAL_SECONDS',
     ),
+    passwordResetRateLimit: {
+      // Three per hour per address. Enough for a customer whose first email
+      // went to spam to try again twice; not enough to be a weapon.
+      perIdentifier: {
+        max: integer(env, 'PASSWORD_RESET_RATE_LIMIT_PER_IDENTIFIER', 3),
+        windowSeconds: integer(env, 'PASSWORD_RESET_RATE_LIMIT_WINDOW_SECONDS', 3600),
+      },
+      perIp: {
+        max: integer(env, 'PASSWORD_RESET_RATE_LIMIT_PER_IP', 15),
+        windowSeconds: integer(env, 'PASSWORD_RESET_RATE_LIMIT_WINDOW_SECONDS', 3600),
+      },
+    },
+    resendApiKey: optional(env, 'RESEND_API_KEY'),
+    notificationFrom: optional(env, 'NOTIFICATION_FROM'),
+    notificationReplyTo: optional(env, 'NOTIFICATION_REPLY_TO'),
+    notificationIntervalSeconds: optionalInteger(env, 'NOTIFICATION_INTERVAL_SECONDS'),
+    appBaseUrl: appBaseUrl(env),
+    passwordResetTtlMinutes: integer(env, 'PASSWORD_RESET_TTL_MINUTES', 30),
   };
+}
+
+/**
+ * The origin reset links are built from.
+ *
+ * Validated rather than passed through. A reset link is followed by a customer
+ * who has been told to expect it, so a malformed or non-https origin here
+ * produces a link that either does not work or is interceptable — and both
+ * failures land on the one flow a locked-out customer has left.
+ *
+ * `http://localhost` is allowed because development has no certificate;
+ * nothing else non-https is.
+ */
+function appBaseUrl(env: Env): string | undefined {
+  const raw = optional(env, 'APP_BASE_URL');
+  if (raw === undefined) return undefined;
+
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new ConfigError(`APP_BASE_URL must be an absolute URL, got '${raw}'`);
+  }
+  const isLocal = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+  if (url.protocol !== 'https:' && !isLocal) {
+    throw new ConfigError(
+      `APP_BASE_URL must be https (got '${url.protocol}'); password reset links are ` +
+        `bearer tokens and must not travel over plaintext`,
+    );
+  }
+  // Normalised without a trailing slash so link building is a plain
+  // concatenation everywhere rather than each caller guessing.
+  return `${url.origin}${url.pathname.replace(/\/+$/, '')}`;
 }

@@ -75,6 +75,21 @@ export function testApiConfig(databaseUrl: string, overrides: Partial<ApiConfig>
     confirmationsFor: () => 3,
     cryptoReconcileIntervalSeconds: undefined,
     cryptoDepositReconcileIntervalSeconds: undefined,
+    // No email provider by default: the suites that care about notifications
+    // assert on the OUTBOX, which is where the guarantee lives. A suite that
+    // needed a real send would be testing Resend, not Xetral.
+    // High by default so flow suites are not throttled by each other; the
+    // suite that tests the limit builds its own app with a real one.
+    passwordResetRateLimit: {
+      perIdentifier: { max: 1000, windowSeconds: 3600 },
+      perIp: { max: 1000, windowSeconds: 3600 },
+    },
+    resendApiKey: undefined,
+    notificationFrom: undefined,
+    notificationReplyTo: undefined,
+    notificationIntervalSeconds: undefined,
+    appBaseUrl: 'https://app.xetral.test',
+    passwordResetTtlMinutes: 30,
     ...overrides,
   };
 }

@@ -106,6 +106,11 @@ describe('the public surface is small and justified', () => {
       'GET /health',
       'GET /ready',
       'POST /v1/auth/login',
+      // Account recovery. Public because a customer who has lost their
+      // password has no session to present; both answer 204 and neither
+      // issues a token.
+      'POST /v1/auth/password/forgot',
+      'POST /v1/auth/password/reset',
       'POST /v1/auth/refresh',
       'POST /v1/auth/register',
       'POST /v1/webhooks/bitnob',

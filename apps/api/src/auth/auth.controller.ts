@@ -16,8 +16,16 @@ import { AuthService } from './auth.service.js';
 import { PinService } from './pin.service.js';
 import { setPinSchema } from '../wallet/dto.js';
 import type { SessionSummary, TokenPair } from './auth.service.js';
-import { LoginRateLimitGuard } from './login-rate-limit.guard.js';
-import { changePasswordSchema, loginSchema, registerSchema, refreshSchema } from './dto.js';
+import { LoginRateLimitGuard, PasswordResetRateLimitGuard } from './login-rate-limit.guard.js';
+import {
+  changePasswordSchema,
+  forgotPasswordSchema,
+  loginSchema,
+  registerSchema,
+  refreshSchema,
+  resetPasswordSchema,
+} from './dto.js';
+import { PasswordResetService } from './password-reset.service.js';
 import { AccountSecurityService } from './account-security.service.js';
 import type { DeviceView } from './account-security.service.js';
 
@@ -34,6 +42,7 @@ export class AuthController {
     @Inject(AuthService) private readonly auth: AuthService,
     @Inject(PinService) private readonly pins: PinService,
     @Inject(AccountSecurityService) private readonly security: AccountSecurityService,
+    @Inject(PasswordResetService) private readonly resets: PasswordResetService,
   ) {}
 
   /**
@@ -226,5 +235,53 @@ export class AuthController {
       parsed.data.current_password,
       parsed.data.new_password,
     );
+  }
+
+  /**
+   * Ask for a reset link.
+   *
+   * ALWAYS 204, for any syntactically valid identifier. That is the whole
+   * security property of this endpoint: answering 404 for an unknown address
+   * and 204 for a known one turns any address list into a customer list.
+   *
+   * A 204 therefore means "if that address has an account, mail is on its way"
+   * and nothing more. It is not a confirmation that anything was sent, and it
+   * deliberately cannot be used as one.
+   */
+  @Post('password/forgot')
+  @HttpCode(204)
+  @UseGuards(PasswordResetRateLimitGuard)
+  async forgotPassword(@Body() body: unknown, @Req() request: AuthenticatedRequest): Promise<void> {
+    const parsed = forgotPasswordSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException({
+        error: 'invalid_request',
+        fields: parsed.error.issues.map((issue) => issue.path.join('.')),
+      });
+    }
+    await this.resets.request(parsed.data.identifier, request.ip);
+  }
+
+  /**
+   * Finish a reset.
+   *
+   * 204 with no body: there is no session here. The customer signs in with the
+   * password they just set, which is also what proves the reset worked. Issuing
+   * a token pair from this endpoint would mean a leaked reset link grants an
+   * immediate live session rather than merely a password that can be used —
+   * and every session on the account was just revoked for that same reason.
+   */
+  @Post('password/reset')
+  @HttpCode(204)
+  @UseGuards(PasswordResetRateLimitGuard)
+  async resetPassword(@Body() body: unknown): Promise<void> {
+    const parsed = resetPasswordSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException({
+        error: 'invalid_request',
+        fields: parsed.error.issues.map((issue) => issue.path.join('.')),
+      });
+    }
+    await this.resets.reset(parsed.data.token, parsed.data.new_password);
   }
 }

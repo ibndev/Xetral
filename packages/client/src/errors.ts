@@ -34,6 +34,10 @@ const API_ERROR_CODES = [
   'email_taken',
   'registration_closed',
   'too_many_attempts',
+  /* Password reset is refused as a whole when the deployment has no email
+     provider. NOT user-fixable: nothing the customer types changes it, and
+     telling them to try again would send them round a loop that cannot end. */
+  'password_reset_unavailable',
 
   /* the transaction PIN */
   'invalid_pin',
