@@ -67,6 +67,48 @@ they will bite:
    instance. Running them everywhere is safe for the ledger — advisory locks
    serialise the sweeps — and rude to every provider.
 
+## Staging
+
+`docker-compose.staging.yml` and `.env.staging.example`. One box: API, web,
+Postgres and Redis together, with sandbox providers.
+
+It runs the same bundle, the same migrations, the same guard and the same
+ledger as production, because a staging environment that differs in those
+proves nothing. What it deliberately does NOT have is a standby, backups, or a
+separate database node — there are no customer deposits here, so the reasoning
+that makes production three machines has nothing to protect.
+
+Two protections are worth knowing about because they are refusals, not
+warnings:
+
+**It cannot reach a live provider.** With `XETRAL_ENVIRONMENT=staging`, the
+API refuses to start if `BITNOB_BASE_URL` or `VTPASS_BASE_URL` points at a
+live host. Failing at boot costs a deploy; failing on the first card issue
+spends a real customer's money and looks like a bug in staging. The mistake
+this catches is a specific one — copying a production `.env` to get a box
+working quickly — and it is made by people in a hurry, which is when nobody
+reads carefully.
+
+**It cannot email real customers.** A staging database is usually restored
+from a production backup, because that is the only way to test against
+realistic data. From that moment the outbox worker holds every real customer's
+address and a queue of messages about transfers that never happened, and it
+will send them. `NOTIFICATION_ALLOWLIST` is the set of addresses that may be
+reached, matched by suffix; unset means nobody, which is the direction to be
+wrong in.
+
+`GET /health` names the environment, because staging and production are
+identical in every visible respect — which is what makes staging worth having
+and also what makes "which one am I looking at?" a question people get wrong
+under pressure.
+
+    curl -s localhost:3000/health
+    {"status":"ok","environment":"staging","uptime_seconds":41}
+
+Generate FRESH secrets. A staging box holding production's access-token key
+can mint tokens the real API accepts; sharing the encryption key lets it open
+production's sealed envelopes.
+
 ## Failing over
 
 `standby/promote.sh`, and read its header first. Promotion is not reversible

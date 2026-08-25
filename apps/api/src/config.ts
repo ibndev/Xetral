@@ -18,7 +18,19 @@ export interface RateLimitRule {
   readonly windowSeconds: number;
 }
 
+/**
+ * Which deployment this is.
+ *
+ * REQUIRED, with no default, and the reason is the direction the failure runs
+ * in. A staging instance that fell back to `production` would simply be
+ * strict, which is survivable; a production instance that fell back to
+ * `staging` would relax the guards protecting real customers. Neither default
+ * is safe enough to be worth having, so there is none.
+ */
+export type Environment = 'production' | 'staging' | 'development';
+
 export interface ApiConfig {
+  readonly environment: Environment;
   readonly databaseUrl: string;
   readonly accessTokenKeyring: AccessTokenKeyring;
   readonly accessTokenTtlSeconds: number;
@@ -272,6 +284,26 @@ export interface ApiConfig {
    */
   readonly operationsEmail: string | undefined;
   readonly errorAlertIntervalSeconds: number | undefined;
+
+  /**
+   * In STAGING, the only addresses email may be sent to.
+   *
+   * A staging database is very often restored from a production backup,
+   * because that is the only way to test against realistic data. The moment it
+   * is, every worker on that box is holding a list of real customers and their
+   * real addresses — and the notification worker will happily mail all of them
+   * about transfers that never happened. That is not a hypothetical failure
+   * mode; it is the classic one, and it reaches people who never consented to
+   * hear from a test system.
+   *
+   * A suffix match rather than exact addresses, so a team can use
+   * `@xetral.com` and plus-addressing without maintaining a list. Empty in
+   * staging means NOTHING is sent, which is the safe direction.
+   *
+   * Ignored entirely in production, where restricting delivery would be the
+   * bug.
+   */
+  readonly notificationAllowlist: readonly string[];
 }
 
 export class ConfigError extends Error {
@@ -540,7 +572,10 @@ export function loadConfig(env: Env): ApiConfig {
     );
   }
 
+  const environment = parseEnvironment(env);
+
   return {
+    environment,
     databaseUrl: required(env, 'DATABASE_URL'),
     accessTokenKeyring: parseKeyring(env),
     accessTokenTtlSeconds,
@@ -616,7 +651,87 @@ export function loadConfig(env: Env): ApiConfig {
     passwordResetTtlMinutes: integer(env, 'PASSWORD_RESET_TTL_MINUTES', 30),
     operationsEmail: optional(env, 'OPERATIONS_EMAIL'),
     errorAlertIntervalSeconds: optionalInteger(env, 'ERROR_ALERT_INTERVAL_SECONDS'),
+    notificationAllowlist: parseAllowlist(env),
   };
+}
+
+/**
+ * Which deployment this is, and what that FORBIDS.
+ *
+ * The guards below are the whole point of naming the environment. A staging
+ * environment whose only protection is "we set different variables" is one
+ * variable away from test traffic moving real money — and the person who makes
+ * that mistake will be copying a production `.env` to get a box working
+ * quickly, which is exactly when nobody is reading carefully.
+ *
+ * So staging REFUSES TO BOOT pointed at a live provider. Failing at startup is
+ * loud and costs a deploy; failing on the first card issue costs a real
+ * customer's money and looks like a bug in staging.
+ */
+function parseEnvironment(env: Env): Environment {
+  const raw = required(env, 'XETRAL_ENVIRONMENT').trim().toLowerCase();
+  if (raw !== 'production' && raw !== 'staging' && raw !== 'development') {
+    throw new ConfigError(
+      `XETRAL_ENVIRONMENT must be production, staging or development, got '${raw}'`,
+    );
+  }
+
+  if (raw === 'staging') assertProviderSandbox(env);
+  return raw;
+}
+
+/**
+ * A provider host that is not a sandbox is the one thing staging must not have.
+ *
+ * Matched on the URL rather than on a flag somebody sets alongside it: the
+ * flag and the URL can disagree, and the URL is the thing that actually
+ * carries the request. Bitnob's own SDK names its two hosts
+ * `https://api.bitnob.co/api/v1` and `https://sandboxapi.bitnob.co/api/v1`, and
+ * VTpass uses `vtpass.com` and `sandbox.vtpass.com`.
+ *
+ * An UNSET provider is fine — an instance with no card configuration serves
+ * everything else and refuses those routes. It is a SET, live one that is
+ * refused.
+ */
+function assertProviderSandbox(env: Env): void {
+  const live: string[] = [];
+
+  const bitnob = optional(env, 'BITNOB_BASE_URL');
+  if (bitnob !== undefined && !/sandbox/i.test(bitnob)) {
+    live.push(`BITNOB_BASE_URL=${bitnob}`);
+  }
+
+  const vtpass = optional(env, 'VTPASS_BASE_URL');
+  if (vtpass !== undefined && !/sandbox/i.test(vtpass)) {
+    live.push(`VTPASS_BASE_URL=${vtpass}`);
+  }
+
+  if (live.length > 0) {
+    throw new ConfigError(
+      `XETRAL_ENVIRONMENT is 'staging' but these point at a LIVE provider: ` +
+        `${live.join(', ')}. A staging instance that can reach production ` +
+        `providers can spend real money and issue real cards. Use the sandbox ` +
+        `hosts, or set XETRAL_ENVIRONMENT=production if this is production.`,
+    );
+  }
+}
+
+/**
+ * Who staging is allowed to email.
+ *
+ * Deliberately NOT defaulted to something permissive. In staging an unset
+ * allowlist means nothing is sent, because the alternative — a staging box
+ * restored from a production backup mailing every real customer — is the
+ * failure this exists to prevent, and it is not one an operator gets to make
+ * by omission.
+ */
+function parseAllowlist(env: Env): readonly string[] {
+  const raw = optional(env, 'NOTIFICATION_ALLOWLIST');
+  if (raw === undefined) return [];
+  return raw
+    .split(',')
+    .map((entry) => entry.trim().toLowerCase())
+    .filter((entry) => entry !== '');
 }
 
 /**

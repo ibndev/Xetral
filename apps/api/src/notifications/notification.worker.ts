@@ -79,6 +79,20 @@ export class NotificationWorker implements OnApplicationShutdown {
       return;
     }
 
+    if (this.config.environment === 'staging') {
+      const allowed = this.config.notificationAllowlist;
+      if (allowed.length === 0) {
+        this.#logger.warn(
+          'staging with an EMPTY NOTIFICATION_ALLOWLIST: no email will be sent to ' +
+            'anybody. That is the safe default — a staging database restored from a ' +
+            'production backup would otherwise mail every real customer — but set it ' +
+            'if you want to receive anything.',
+        );
+      } else {
+        this.#logger.log(`staging: email restricted to ${allowed.join(', ')}`);
+      }
+    }
+
     this.#logger.log(`sending queued notifications every ${everySeconds}s`);
     this.#timer = setInterval(() => {
       void this.sweep().catch((error: unknown) => {
@@ -90,6 +104,32 @@ export class NotificationWorker implements OnApplicationShutdown {
 
   onApplicationShutdown(): void {
     if (this.#timer !== undefined) clearInterval(this.#timer);
+  }
+
+  /**
+   * In STAGING, who may actually be emailed.
+   *
+   * THE FAILURE THIS PREVENTS is specific and common. A staging database is
+   * usually restored from a production backup, because that is the only way to
+   * test against realistic data — and the moment it is, this worker is holding
+   * every real customer's address and a queue of messages about transfers that
+   * never happened. It will send them. The recipients never consented to hear
+   * from a test system, and there is no way to un-send it.
+   *
+   * A suffix match, so a team can use `@xetral.com` and plus-addressing without
+   * maintaining a list of individuals. An EMPTY allowlist in staging means
+   * nothing is sent at all, which is the safe direction to be wrong in.
+   *
+   * Production is unrestricted, because restricting delivery there would be the
+   * bug.
+   */
+  #mayDeliverTo(recipient: string): boolean {
+    if (this.config.environment !== 'staging') return true;
+
+    const address = recipient.trim().toLowerCase();
+    return this.config.notificationAllowlist.some(
+      (allowed) => address === allowed || address.endsWith(allowed),
+    );
   }
 
   /**
@@ -160,6 +200,16 @@ export class NotificationWorker implements OnApplicationShutdown {
   async #deliver(row: DueRow): Promise<'sent' | 'retry' | 'abandoned'> {
     const keyring = this.config.encryptionKeyring;
     if (keyring === undefined || this.port === undefined) return 'retry';
+
+    if (!this.#mayDeliverTo(row.recipient)) {
+      // ABANDONED rather than retried: the address will not become allowed by
+      // waiting, and leaving it pending would fill the queue with messages
+      // that can never go out and hide the ones that could.
+      return await this.#abandon(
+        row,
+        `staging will not send to ${row.recipient}: not on NOTIFICATION_ALLOWLIST`,
+      );
+    }
 
     let rendered: RenderedNotification;
     try {

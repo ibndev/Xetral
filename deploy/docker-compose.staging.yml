@@ -1,0 +1,133 @@
+# ============================================================================
+#  STAGING — one box, sandbox providers, no route to anything real.
+#
+#  WHAT IT IS FOR. Somewhere to run a release against real provider sandboxes,
+#  with the real bundle and the real migrations, before production traffic sees
+#  it. Every failure this codebase has recorded that was invisible to the
+#  compiler and the tests appeared when something was actually started; CI now
+#  boots the bundle and probes it, and this is the next step out — the same
+#  artifact, with a database, a queue and providers that answer.
+#
+#  HOW IT DIFFERS FROM PRODUCTION, STATED RATHER THAN IMPLIED:
+#
+#   - ONE NODE. Production is three (app, db-primary, db-standby) because a
+#     single disk failure would end the records of a business holding customer
+#     deposits. Staging holds no customer deposits, so the reason does not
+#     apply — and pretending otherwise would mean maintaining a replica nobody
+#     would ever fail over to.
+#   - NO STANDBY AND NO BACKUPS. There is nothing here worth restoring. If
+#     staging is lost, it is rebuilt from this file.
+#   - SANDBOX PROVIDERS, enforced at BOOT rather than by convention. The API
+#     refuses to start when `XETRAL_ENVIRONMENT=staging` and a provider URL
+#     points at a live host — see `parseEnvironment` in config.ts. A staging
+#     box that could reach live Bitnob can issue real cards and spend real
+#     money, and the person who makes that mistake will be copying a
+#     production .env to get something working quickly.
+#   - EMAIL RESTRICTED TO AN ALLOWLIST. A staging database is usually restored
+#     from a production backup, and the moment it is, the outbox worker holds
+#     every real customer's address. Unset means nothing is sent.
+#   - WORKERS ON THE SAME PROCESS. Production splits them onto a single-replica
+#     `worker` service because the API scales; staging runs one API, so the
+#     distinction has nothing to protect.
+#
+#  WHAT IS THE SAME, DELIBERATELY: the bundle, the migrations, the guard, the
+#  CSP, the ledger. A staging environment that differs in those is a staging
+#  environment that proves nothing.
+# ============================================================================
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.api
+    restart: always
+    env_file: .env.staging
+    environment:
+      # The variable every guard in this file hangs off. Required, with no
+      # default: a staging box falling back to `production` would merely be
+      # strict, while a production box falling back to `staging` would relax
+      # the protections around real customers.
+      XETRAL_ENVIRONMENT: staging
+      # One API, so the workers live here. Faster than production's intervals
+      # because the point of staging is to see the outcome inside a session
+      # rather than to be gentle with a provider.
+      RECONCILE_INTERVAL_SECONDS: '60'
+      DEPOSIT_RECONCILE_INTERVAL_SECONDS: '60'
+      CRYPTO_RECONCILE_INTERVAL_SECONDS: '60'
+      CRYPTO_DEPOSIT_RECONCILE_INTERVAL_SECONDS: '60'
+      GIFTCARD_RELEASE_INTERVAL_SECONDS: '60'
+      NOTIFICATION_INTERVAL_SECONDS: '15'
+      ERROR_ALERT_INTERVAL_SECONDS: '60'
+    ports:
+      - '127.0.0.1:3000:3000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # The same probe production uses: a guarded route answering 401 proves
+      # the global guard is MOUNTED rather than merely compiled.
+      test:
+        - CMD-SHELL
+        - >-
+          wget -qS -O /dev/null http://127.0.0.1:3000/v1/auth/session 2>&1
+          | grep -q "401"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.web
+    restart: always
+    env_file: .env.staging
+    environment:
+      XETRAL_API_URL: http://api:3000
+    ports:
+      - '127.0.0.1:3001:3000'
+    depends_on:
+      - api
+
+  # In the same compose file as the app, which production would never do.
+  # There is no customer money here, so the reasoning that keeps the two apart
+  # in production — a database one firewall mistake from the internet — has
+  # nothing to protect. It is still bound to localhost.
+  postgres:
+    image: postgres:16-alpine
+    restart: always
+    ports:
+      - '127.0.0.1:5432:5432'
+    environment:
+      POSTGRES_DB: xetral
+      POSTGRES_USER: xetral
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_INITDB_ARGS: '--auth-host=scram-sha-256 --data-checksums'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U xetral -d xetral']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    # Persistence ON here too, even though the data is disposable. The rate
+    # limiter behaves differently against a Redis that forgets, and a staging
+    # environment whose limiter behaves differently from production's is one
+    # that cannot be used to test the limiter.
+    command: redis-server --appendonly yes --maxmemory-policy noeviction
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  pgdata:
+  redisdata:

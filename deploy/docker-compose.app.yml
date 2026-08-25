@@ -16,6 +16,11 @@ services:
     restart: always
     env_file: .env
     environment:
+      # Stated here as well as in .env, because this is the file that says
+      # which deployment this is. A staging .env accidentally used with this
+      # compose file would otherwise start a production topology in staging
+      # mode, with the provider guards relaxed.
+      XETRAL_ENVIRONMENT: production
       RECONCILE_INTERVAL_SECONDS: ''
       DEPOSIT_RECONCILE_INTERVAL_SECONDS: ''
       CRYPTO_RECONCILE_INTERVAL_SECONDS: ''
@@ -59,6 +64,8 @@ services:
       dockerfile: deploy/Dockerfile.api
     restart: always
     env_file: .env
+    environment:
+      XETRAL_ENVIRONMENT: production
     deploy:
       replicas: 1
     depends_on:

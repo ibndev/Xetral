@@ -201,6 +201,7 @@ jobs:
         run: |
           ACCESS_TOKEN_KEYS="v1:$(openssl rand -base64 32)" \
           ACCESS_TOKEN_CURRENT_VERSION=v1 \
+          XETRAL_ENVIRONMENT=production \
           PORT=3100 \
           node apps/api/dist/main.js > /tmp/api.log 2>&1 &
           api_pid=$!

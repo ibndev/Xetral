@@ -534,3 +534,117 @@ describe('a deployment with no email provider', () => {
     }
   });
 });
+
+describe('a staging deployment', () => {
+  /**
+   * The failure this prevents is specific and common: a staging database is
+   * usually restored from a production backup, because that is the only way
+   * to test against realistic data. The moment it is, the outbox worker holds
+   * every real customer's address and a queue of messages about transfers
+   * that never happened — and it will send them. The recipients never
+   * consented to hear from a test system, and it cannot be un-sent.
+   */
+  async function stagingWorker(allowlist: readonly string[]): Promise<{
+    worker: NotificationWorker;
+    mailer: StubMailer;
+    close: () => Promise<void>;
+  }> {
+    const stagingMailer = new StubMailer();
+    const mod = await Test.createTestingModule({
+      imports: [
+        AppModule.forRoot({
+          // The SAME keyring as the app that sealed the messages. Without
+          // it the staging worker cannot open what the main app wrote, and
+          // every message fails to decrypt rather than being refused by the
+          // allowlist — which looks identical from the outside and would have
+          // made this test pass for the wrong reason on the negative cases.
+          config: { ...config, environment: 'staging', notificationAllowlist: allowlist },
+          pool,
+          clock: systemClock,
+          notificationPort: stagingMailer,
+        }),
+      ],
+    }).compile();
+
+    const staging = mod.createNestApplication(new ExpressAdapter());
+    await staging.init();
+    return {
+      worker: staging.get(NotificationWorker),
+      mailer: stagingMailer,
+      close: () => staging.close(),
+    };
+  }
+
+  it('will not email an address that is not on the allowlist', async () => {
+    const { userId, email } = await seedCustomer();
+    await request(app.getHttpServer())
+      .post('/v1/auth/password/forgot')
+      .send({ identifier: email })
+      .expect(204);
+
+    const staging = await stagingWorker(['@allowed.test']);
+    try {
+      await staging.worker.sweep();
+    } finally {
+      await staging.close();
+    }
+
+    expect(staging.mailer.sent).toHaveLength(0);
+
+    const row = await pool.query<{ status: string; last_error: string }>(
+      `SELECT status::text AS status, last_error FROM notification_outbox
+        WHERE user_id = $1::bigint ORDER BY id DESC LIMIT 1`,
+      [userId],
+    );
+    // ABANDONED rather than left pending: the address will not become allowed
+    // by waiting, and a queue full of messages that can never go out hides
+    // the ones that could.
+    expect(row.rows[0]?.status).toBe('abandoned');
+    expect(row.rows[0]?.last_error).toContain('NOTIFICATION_ALLOWLIST');
+  });
+
+  it('sends nothing at all when the allowlist is empty', async () => {
+    // The safe default, and the one an operator gets by omission.
+    const { email } = await seedCustomer();
+    await request(app.getHttpServer())
+      .post('/v1/auth/password/forgot')
+      .send({ identifier: email })
+      .expect(204);
+
+    const staging = await stagingWorker([]);
+    try {
+      await staging.worker.sweep();
+    } finally {
+      await staging.close();
+    }
+    expect(staging.mailer.sent).toHaveLength(0);
+  });
+
+  it('DOES email an allowed address, matched by suffix', async () => {
+    // A suffix so a team can use `@xetral.com` and plus-addressing without
+    // maintaining a list of individuals.
+    const email = `staging-${randomUUID()}@allowed.test`;
+    const inserted = await pool.query<{ id: string }>(
+      `INSERT INTO users (email, status) VALUES ($1, 'active') RETURNING id`,
+      [email],
+    );
+    await pool.query(`INSERT INTO user_credentials (user_id, password_hash) VALUES ($1, $2)`, [
+      inserted.rows[0]?.id,
+      await hashPassword(PASSWORD),
+    ]);
+
+    await request(app.getHttpServer())
+      .post('/v1/auth/password/forgot')
+      .send({ identifier: email })
+      .expect(204);
+
+    const staging = await stagingWorker(['@allowed.test']);
+    try {
+      await staging.worker.sweep();
+    } finally {
+      await staging.close();
+    }
+
+    expect(staging.mailer.sent.some((m) => m.to === email)).toBe(true);
+  });
+});

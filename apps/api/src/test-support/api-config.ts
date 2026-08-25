@@ -16,6 +16,10 @@ export function testApiConfig(databaseUrl: string, overrides: Partial<ApiConfig>
   const sealing = { version: 'v1', key: randomBytes(32) };
 
   return {
+    // The suites are neither production nor staging: they must exercise the
+    // real code paths without the staging guards, which exist to protect
+    // production customers from a staging box.
+    environment: 'development',
     databaseUrl,
     accessTokenKeyring: { current: signing, accepted: [signing] },
     accessTokenTtlSeconds: 900,
@@ -92,6 +96,7 @@ export function testApiConfig(databaseUrl: string, overrides: Partial<ApiConfig>
     passwordResetTtlMinutes: 30,
     operationsEmail: 'ops@xetral.test',
     errorAlertIntervalSeconds: undefined,
+    notificationAllowlist: [],
     ...overrides,
   };
 }
