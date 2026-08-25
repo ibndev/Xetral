@@ -19,6 +19,7 @@ import type { Currency, Money } from '@xetral/shared';
 import { API_CONFIG, CRYPTO_PORT, DATABASE, LEDGER } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
 import type { CryptoQuoteBody, WithdrawBody } from './dto.js';
+import { AffordabilityService } from '../wallet/affordability.service.js';
 
 /**
  * On-chain deposits and withdrawals.
@@ -89,6 +90,7 @@ export class CryptoService {
     @Inject(LEDGER) private readonly ledger: LedgerService,
     @Inject(CRYPTO_PORT) private readonly port: CryptoPort,
     @Inject(API_CONFIG) private readonly config: ApiConfig,
+    private readonly affordability: AffordabilityService,
   ) {}
 
   /** The customer's deposit address, issued once and returned for ever after. */
@@ -222,6 +224,17 @@ export class CryptoService {
     }
 
     const amount = this.#parseAmount(body.amount, asset);
+
+    // BEFORE the quote, which is a network call to Bitnob. A customer who
+    // cannot cover the amount cannot cover amount + fee either — fees are
+    // never negative — so this refuses only what the overdraft guard would
+    // certainly refuse, and it does so without spending a round trip or a
+    // rate-limit slot to reach an answer we already held.
+    //
+    // The guard still decides. See AffordabilityService for why this is not
+    // the pre-check CLAUDE.md forbids.
+    await this.affordability.assertWalletCanCover(userId, amount);
+
     const quote = await this.port.quoteWithdrawal(asset, body.network, amount);
 
     if (body.max_fee !== undefined) {

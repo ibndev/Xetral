@@ -15,6 +15,7 @@ import type { CardPort, VirtualCard } from '@xetral/providers';
 import { fromMajor, subtract, toMajor } from '@xetral/shared';
 import type { Money } from '@xetral/shared';
 import { CARD_PORT, DATABASE, LEDGER } from '../tokens.js';
+import { CardProtectionService } from './card-protection.service.js';
 
 const PROVIDER = 'bitnob';
 
@@ -26,6 +27,20 @@ export interface CardView {
   readonly expiry_month: number | null;
   readonly expiry_year: number | null;
   readonly balance: string;
+  /**
+   * Why the card is frozen, when it is. Absent on a live card.
+   *
+   * `status: 'frozen'` alone cannot be turned into a sentence: one case is
+   * "you froze this, tap to unfreeze" and the other is "we stopped a charge
+   * that looked wrong". Showing the first wording for the second tells a
+   * customer nothing happened when something did.
+   */
+  readonly frozen?: {
+    readonly by: string;
+    readonly reason: string;
+    readonly detail: string | null;
+    readonly at: string;
+  };
 }
 
 interface CardRow {
@@ -58,6 +73,7 @@ export class CardService {
     @Inject(DATABASE) private readonly pool: Pool,
     @Inject(LEDGER) private readonly ledger: LedgerService,
     @Inject(CARD_PORT) private readonly cards: CardPort,
+    private readonly protection: CardProtectionService,
   ) {}
 
   async list(userUuid: string): Promise<readonly CardView[]> {
@@ -166,6 +182,9 @@ export class CardService {
 
     const updated = await this.cards.freeze(row.provider_card_id);
     await this.#setStatus(row.id, updated.status);
+    // Recorded as the CUSTOMER's freeze, so unfreezing later can tell them
+    // this was their own doing rather than an incident they slept through.
+    await this.protection.record(row.id, 'customer', 'customer_request', null);
     return this.get(userUuid, cardUuid);
   }
 
@@ -177,6 +196,10 @@ export class CardService {
 
     const updated = await this.cards.unfreeze(row.provider_card_id);
     await this.#setStatus(row.id, updated.status);
+    // The freeze record is closed, not deleted: "was this card ever frozen
+    // automatically, and when" has to stay answerable months later, which is
+    // the whole reason the table is append-only.
+    await this.protection.liftFreeze(row.id, row.user_id);
     return this.get(userUuid, cardUuid);
   }
 
@@ -299,6 +322,22 @@ export class CardService {
       expiry_month: row.expiry_month,
       expiry_year: row.expiry_year,
       balance: toMajor({ amount: balance, currency: 'USD' }),
+      ...(await this.#freezeContext(row)),
+    };
+  }
+
+  /** The live freeze on a card, if there is one, shaped for the client. */
+  async #freezeContext(row: CardRow): Promise<Pick<CardView, 'frozen'>> {
+    if (row.status !== 'frozen') return {};
+    const live = await this.protection.liveFreeze(row.id);
+    if (live === undefined) return {};
+    return {
+      frozen: {
+        by: live.actor,
+        reason: live.reason,
+        detail: live.detail,
+        at: live.at.toISOString(),
+      },
     };
   }
 

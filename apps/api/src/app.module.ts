@@ -22,6 +22,8 @@ import { SpendingLimitService } from './wallet/spending-limits.service.js';
 import { CardController, CardWebhookController } from './cards/card.controller.js';
 import { CardService } from './cards/card.service.js';
 import { CardWebhookService } from './cards/webhook.service.js';
+import { CardProtectionService } from './cards/card-protection.service.js';
+import { AffordabilityService } from './wallet/affordability.service.js';
 import { PurchaseController } from './purchases/purchase.controller.js';
 import { PurchaseService } from './purchases/purchase.service.js';
 import { PurchaseOutcome } from './purchases/purchase-outcome.js';
@@ -463,6 +465,8 @@ export class AppModule {
         SpendingLimitService,
         CardService,
         CardWebhookService,
+        CardProtectionService,
+        AffordabilityService,
         PurchaseService,
         PurchaseOutcome,
         StaffService,

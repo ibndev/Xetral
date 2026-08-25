@@ -75,7 +75,51 @@ VALUES
   ('support_email', 'support@xetral.com', 'text', NULL, NULL,
    'Support email',
    'Shown to customers on error screens and in receipts.',
-   'operations', FALSE)
+   'operations', FALSE),
+
+  -- ---- Card protection ---------------------------------------------------
+  -- These are the numbers a fraud analyst tunes during an incident, which is
+  -- exactly why they are rows and not constants: tightening a window at 2am
+  -- must not be a deploy.
+  ('card_duplicate_window_seconds', '90', 'integer', 0, 3600,
+   'Duplicate charge window (seconds)',
+   'Two charges from the same merchant for the same amount inside this window '
+   'are treated as a double charge. 0 turns the check off. Wider catches more '
+   'and starts calling a genuine second purchase a duplicate.',
+   'cards', TRUE),
+
+  ('card_freeze_on_duplicate', 'true', 'boolean', NULL, NULL,
+   'Freeze a card on a duplicate charge',
+   'The charge itself cannot be blocked — it has already been approved by the '
+   'network when we hear about it. Freezing stops the THIRD one, which is the '
+   'only one still preventable.',
+   'cards', TRUE),
+
+  ('card_freeze_on_insufficient_funds', 'true', 'boolean', NULL, NULL,
+   'Freeze a card on the first insufficient-funds decline',
+   'A subscription that fails once retries on a schedule. Left alone it runs '
+   'the customer through a week of declines and any per-attempt fee the '
+   'merchant charges, and repeated declines are themselves a fraud signal to '
+   'the network.',
+   'cards', TRUE),
+
+  ('card_decline_burst_threshold', '4', 'integer', 0, 50,
+   'Freeze after this many declines in an hour',
+   'A burst of declines on one card is what card testing looks like: someone '
+   'is trying amounts against a stolen PAN. 0 turns the check off.',
+   'cards', TRUE),
+
+  ('card_daily_spend_limit_cents', '200000', 'integer', 0, 100000000,
+   'Daily spend limit per card (US cents)',
+   'Caps what a leaked card number can spend in a day. 0 means no limit, and '
+   'no limit means one leaked card is worth its whole balance.',
+   'cards', TRUE),
+
+  ('card_hourly_authorization_limit', '25', 'integer', 0, 1000,
+   'Authorizations per card per hour',
+   'A velocity cap. Ordinary use is a handful an hour; scripted use is not. '
+   '0 turns the check off.',
+   'cards', TRUE)
 
 ON CONFLICT (key) DO UPDATE SET
   -- Refresh the presentation and the bounds, never the VALUE. Re-running this

@@ -19,6 +19,7 @@ import type { Currency, Money } from '@xetral/shared';
 import { API_CONFIG, DATABASE, FX_PORT, LEDGER } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
 import type { ConvertBody, FxQuoteBody } from './dto.js';
+import { AffordabilityService } from '../wallet/affordability.service.js';
 
 /**
  * Converting between currencies, and sending across them.
@@ -85,6 +86,7 @@ export class FxService {
     @Inject(LEDGER) private readonly ledger: LedgerService,
     @Inject(FX_PORT) private readonly port: FxPort,
     @Inject(API_CONFIG) private readonly config: ApiConfig,
+    private readonly affordability: AffordabilityService,
   ) {}
 
   async quote(body: FxQuoteBody): Promise<FxQuoteView> {
@@ -162,6 +164,17 @@ export class FxService {
 
     const recipientId =
       body.recipient === undefined ? undefined : await this.#recipientId(body.recipient, userId);
+
+    // BEFORE the rate call. The base amount is what leaves the wallet — the
+    // spread comes off it rather than being added to it — so a wallet that
+    // cannot cover the amount cannot cover the trade, whatever the rate turns
+    // out to be. Refusing here costs a customer with an empty wallet nothing
+    // but the truth, immediately, instead of two seconds of spinner and a
+    // provider round trip to reach the same answer.
+    //
+    // The overdraft guard still decides at write time. See
+    // AffordabilityService for why this is not the forbidden pre-check.
+    await this.affordability.assertWalletCanCover(userId, amount);
 
     const rate = await this.port.rate(from, to);
     const converted = this.#convert(amount, rate, policy.spread_basis_points);

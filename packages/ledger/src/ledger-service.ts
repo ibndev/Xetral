@@ -96,6 +96,36 @@ function sqlState(error: unknown): string | undefined {
  */
 export interface PostOptions {
   readonly precondition?: (client: PoolClient) => Promise<void>;
+
+  /**
+   * A hook that runs AFTER the postings are written and BEFORE the commit, on
+   * the entry's own connection.
+   *
+   * For a record that must exist if and only if the entry does. The card
+   * protection tables are the case that motivated it: they count charges to
+   * decide whether to freeze a card, so a row surviving a rolled-back posting
+   * would freeze a card over a charge that never happened, and a posting
+   * without its row would leave a real charge uncounted.
+   *
+   * It receives the entry's id, which `precondition` cannot — the entry does
+   * not exist yet when that one runs.
+   *
+   * NOT called on a replay. A replay means this exact business event was
+   * already posted, so the hook already ran for it; running again would count
+   * the same charge twice, which is the specific thing the idempotency key
+   * exists to prevent.
+   *
+   * Like `precondition`, it must not take a connection of its own: it is
+   * inside a transaction holding one, and a second would deadlock the pool at
+   * `pool.max` concurrent writers.
+   */
+  readonly onEntry?: (client: PoolClient, entry: WrittenEntry) => Promise<void>;
+}
+
+/** Identifies the entry just written, for `PostOptions.onEntry`. */
+export interface WrittenEntry {
+  readonly entryId: string;
+  readonly entryUuid: string;
 }
 
 export class LedgerService {
@@ -161,6 +191,8 @@ export class LedgerService {
           ],
         );
       }
+
+      await options.onEntry?.(client, { entryId: row.id, entryUuid: row.uuid });
 
       await client.query('COMMIT');
       return { entryId: row.id, entryUuid: row.uuid, replayed: false };
