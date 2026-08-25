@@ -74,6 +74,7 @@ export function testApiConfig(databaseUrl: string, overrides: Partial<ApiConfig>
     // rather than short-circuited by a threshold of one.
     confirmationsFor: () => 3,
     cryptoReconcileIntervalSeconds: undefined,
+    cryptoDepositReconcileIntervalSeconds: undefined,
     ...overrides,
   };
 }

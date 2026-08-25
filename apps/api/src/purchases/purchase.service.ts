@@ -29,6 +29,7 @@ import type { PurchaseRequestBody } from './dto.js';
 import { ENTRY_KIND, PurchaseOutcome, negate, pending, wallet } from './purchase-outcome.js';
 import type { ReservedPurchase } from './purchase-outcome.js';
 import { SpendingLimitService } from '../wallet/spending-limits.service.js';
+import { SettingsService } from '../settings/settings.service.js';
 
 /**
  * A catalogue item as it goes over the wire.
@@ -102,6 +103,7 @@ export class PurchaseService {
     @Inject(API_CONFIG) private readonly config: ApiConfig,
     @Inject(PurchaseOutcome) private readonly outcomes: PurchaseOutcome,
     @Inject(SpendingLimitService) private readonly limits: SpendingLimitService,
+    @Inject(SettingsService) private readonly settings: SettingsService,
   ) {}
 
   async catalogue(
@@ -116,6 +118,7 @@ export class PurchaseService {
   /** Confirms a meter or smartcard number belongs to who the customer thinks.
    *  Only some providers can; the rest say so rather than guessing. */
   async verifyTarget(service: ServiceKind, itemCode: string, target: string): Promise<VerifiedTarget> {
+    await this.settings.assertServiceEnabled('bills');
     const port = this.#port(service);
     if (!supportsVerification(port)) {
       throw new ConflictException({ error: 'verification_not_supported', service });
@@ -135,6 +138,7 @@ export class PurchaseService {
   }
 
   async buy(userUuid: string, body: PurchaseRequestBody): Promise<PurchaseView> {
+    await this.settings.assertServiceEnabled('bills');
     const userId = await this.#activeUserId(userUuid);
     const port = this.#port(body.service);
 

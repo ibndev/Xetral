@@ -16,6 +16,7 @@ import { fromMajor, subtract, toMajor } from '@xetral/shared';
 import type { Money } from '@xetral/shared';
 import { CARD_PORT, DATABASE, LEDGER } from '../tokens.js';
 import { CardProtectionService } from './card-protection.service.js';
+import { SettingsService } from '../settings/settings.service.js';
 
 const PROVIDER = 'bitnob';
 
@@ -74,6 +75,7 @@ export class CardService {
     @Inject(LEDGER) private readonly ledger: LedgerService,
     @Inject(CARD_PORT) private readonly cards: CardPort,
     @Inject(CardProtectionService) private readonly protection: CardProtectionService,
+    @Inject(SettingsService) private readonly settings: SettingsService,
   ) {}
 
   async list(userUuid: string): Promise<readonly CardView[]> {
@@ -105,6 +107,7 @@ export class CardService {
     userUuid: string,
     input: { nameOnCard: string; initialFunding: string; idempotencyKey: string },
   ): Promise<CardView> {
+    await this.settings.assertServiceEnabled('cards');
     const userId = await this.#activeUserId(userUuid);
     const amount = this.#parseAmount(input.initialFunding);
 
@@ -147,6 +150,7 @@ export class CardService {
     cardUuid: string,
     input: { amount: string; idempotencyKey: string },
   ): Promise<CardView> {
+    await this.settings.assertServiceEnabled('cards');
     const { userId, row } = await this.#ownedCard(userUuid, cardUuid);
     this.#assertUsable(row);
 

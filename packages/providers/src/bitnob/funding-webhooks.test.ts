@@ -49,11 +49,14 @@ describe('a deposit that resolves to a customer', () => {
     ]);
   });
 
-  it('keys the entry on the provider event id', async () => {
+  it('keys the entry on the DEPOSIT, not the webhook delivery', async () => {
+    // The reconciliation sweep only ever learns `data.id`, so keying on
+    // `event_id` meant a sweep and a late redelivery credited the same deposit
+    // twice — on the one flow in the system that creates money.
     // The replay guard. A redelivered webhook must reach the ledger with the
     // same key so the UNIQUE constraint refuses the second credit.
     const out = await handleDepositWebhook(parseDepositWebhook(body()), context());
-    expect(out.intent.idempotencyKey).toBe('bitnob:evt_dep_1');
+    expect(out.intent.idempotencyKey).toBe('bitnob:dep_9911');
   });
 
   it('keeps the sender out of ledger metadata', async () => {

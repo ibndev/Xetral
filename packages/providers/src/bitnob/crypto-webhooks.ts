@@ -115,7 +115,12 @@ export async function handleCryptoDeposit(
   const intent: LedgerIntent =
     phase === 'seen'
       ? {
-          idempotencyKey: `${PROVIDER}:${event.event_id}`,
+          // Keyed on the DEPOSIT (`data.id`), not the delivery (`event_id`).
+          // The reconciliation sweep only ever learns `data.id` — a webhook
+          // that never arrived has no event id to know — so keying on the
+          // delivery would let a sweep and a late redelivery credit the same
+          // deposit twice. The NGN rail had exactly that bug.
+          idempotencyKey: `${PROVIDER}:${event.data.id}:seen`,
           kind: 'crypto_deposit',
           occurredAt: new Date(event.created_at),
           description: `${asset} deposit seen on ${network}`,
@@ -127,10 +132,11 @@ export async function handleCryptoDeposit(
           ],
         }
       : {
-          // A DIFFERENT key from the seen phase, derived from the same event.
-          // Without the suffix the confirmation would replay the seen entry and
-          // the money would never become spendable.
-          idempotencyKey: `${PROVIDER}:${event.event_id}:confirmed`,
+          // A DIFFERENT key from the seen phase, derived from the same
+          // DEPOSIT. Without the suffix the confirmation would replay the seen
+          // entry and the money would never become spendable; keyed on the
+          // deposit rather than the delivery, a sweep and a late webhook agree.
+          idempotencyKey: `${PROVIDER}:${event.data.id}:confirmed`,
           kind: 'crypto_deposit',
           occurredAt: new Date(event.created_at),
           description: `${asset} deposit confirmed on ${network}`,

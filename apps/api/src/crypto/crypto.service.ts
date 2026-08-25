@@ -20,6 +20,7 @@ import { API_CONFIG, CRYPTO_PORT, DATABASE, LEDGER } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
 import type { CryptoQuoteBody, WithdrawBody } from './dto.js';
 import { AffordabilityService } from '../wallet/affordability.service.js';
+import { SettingsService } from '../settings/settings.service.js';
 
 /**
  * On-chain deposits and withdrawals.
@@ -91,6 +92,7 @@ export class CryptoService {
     @Inject(CRYPTO_PORT) private readonly port: CryptoPort,
     @Inject(API_CONFIG) private readonly config: ApiConfig,
     @Inject(AffordabilityService) private readonly affordability: AffordabilityService,
+    @Inject(SettingsService) private readonly settings: SettingsService,
   ) {}
 
   /** The customer's deposit address, issued once and returned for ever after. */
@@ -99,6 +101,7 @@ export class CryptoService {
     asset: Currency,
     network: CryptoNetwork,
   ): Promise<CryptoAddressView> {
+    await this.settings.assertServiceEnabled('crypto');
     const userId = await this.#activeUserId(userUuid);
 
     const existing = await this.pool.query<{
@@ -169,6 +172,7 @@ export class CryptoService {
   /** What sending would cost. Called before the customer commits, so the
    *  number they approve is the number they pay. */
   async quote(body: CryptoQuoteBody): Promise<CryptoQuoteView> {
+    await this.settings.assertServiceEnabled('crypto');
     const asset = body.asset as Currency;
     const amount = this.#parseAmount(body.amount, asset);
     const quote = await this.port.quoteWithdrawal(asset, body.network, amount);
@@ -205,6 +209,7 @@ export class CryptoService {
    *   4. Only then send.
    */
   async withdraw(userUuid: string, body: WithdrawBody): Promise<WithdrawalView> {
+    await this.settings.assertServiceEnabled('crypto');
     const userId = await this.#activeUserId(userUuid);
     const asset = body.asset as Currency;
 

@@ -60,6 +60,7 @@ import {
 import { CryptoService } from './crypto/crypto.service.js';
 import { CryptoWebhookService } from './crypto/crypto-webhook.service.js';
 import { CryptoReconciliationService } from './crypto/crypto-reconciliation.service.js';
+import { CryptoDepositReconciliationService } from './crypto/crypto-deposit-reconciliation.service.js';
 import { FxController } from './fx/fx.controller.js';
 import { FxService } from './fx/fx.service.js';
 import { LoginRateLimitGuard } from './auth/login-rate-limit.guard.js';
@@ -281,6 +282,7 @@ export function createCryptoPort(config: ApiConfig): CryptoPort {
       quoteWithdrawal: refuse,
       send: refuse,
       withdrawalStatus: refuse,
+      listDeposits: refuse,
     };
   }
 
@@ -406,10 +408,17 @@ export class CryptoLifecycle implements OnApplicationBootstrap {
   constructor(
     @Inject(CryptoReconciliationService)
     private readonly crypto: CryptoReconciliationService,
+    @Inject(CryptoDepositReconciliationService)
+    private readonly cryptoDeposits: CryptoDepositReconciliationService,
   ) {}
 
   onApplicationBootstrap(): void {
     this.crypto.start();
+    // Deposits as well as withdrawals. Withdrawals had a sweep from the day
+    // they shipped and deposits did not, which meant a lost deposit webhook
+    // was money on a chain that never reached a balance and nothing would
+    // ever notice.
+    this.cryptoDeposits.start();
   }
 }
 
@@ -510,6 +519,7 @@ export class AppModule {
         CryptoWebhookService,
         FxService,
         CryptoReconciliationService,
+        CryptoDepositReconciliationService,
         CryptoLifecycle,
         DepositReconciliationService,
         DepositLifecycle,

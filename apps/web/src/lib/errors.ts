@@ -50,6 +50,17 @@ export function messageFor(error: unknown): string {
       return 'This account cannot make transactions right now.';
     case 'gift_cards_disabled':
       return 'Gift cards are not available yet.';
+    // Paused by an operator, usually because a provider is having an incident.
+    // Worth saying "right now" — this is temporary and retrying later works,
+    // which is not true of the refusals around it.
+    case 'crypto_disabled':
+      return 'Crypto is paused right now. Your balance is safe — try again shortly.';
+    case 'fx_disabled':
+      return 'Currency conversion is paused right now. Try again shortly.';
+    case 'cards_disabled':
+      return 'New cards and card funding are paused right now. Your existing cards still work.';
+    case 'bills_disabled':
+      return 'Airtime and bill payments are paused right now. Try again shortly.';
     case 'service_not_configured':
       return 'That service is unavailable right now.';
     case 'forbidden':

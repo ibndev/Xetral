@@ -207,6 +207,9 @@ export interface ApiConfig {
   /** How often withdrawals with an unknown outcome are re-checked. One
    *  instance, same arrangement as the other sweeps. */
   readonly cryptoReconcileIntervalSeconds: number | undefined;
+  /** How often addresses are re-checked for deposits whose webhook never
+   *  arrived. One instance, same arrangement as the other sweeps. */
+  readonly cryptoDepositReconcileIntervalSeconds: number | undefined;
 }
 
 export class ConfigError extends Error {
@@ -527,5 +530,9 @@ export function loadConfig(env: Env): ApiConfig {
     depositReconcileIntervalSeconds: optionalInteger(env, 'DEPOSIT_RECONCILE_INTERVAL_SECONDS'),
     confirmationsFor: confirmationPolicy(env),
     cryptoReconcileIntervalSeconds: optionalInteger(env, 'CRYPTO_RECONCILE_INTERVAL_SECONDS'),
+    cryptoDepositReconcileIntervalSeconds: optionalInteger(
+      env,
+      'CRYPTO_DEPOSIT_RECONCILE_INTERVAL_SECONDS',
+    ),
   };
 }

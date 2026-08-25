@@ -77,6 +77,20 @@ VALUES
    'Shown to customers on error screens and in receipts.',
    'operations', FALSE),
 
+  ('cards_enabled', 'true', 'boolean', NULL, NULL,
+   'USD cards',
+   'Off refuses card issuing and funding. Freezing, unfreezing and terminating '
+   'stay available, because a customer must always be able to stop or exit a '
+   'card, and webhooks keep posting — money that already moved is still '
+   'recorded.',
+   'features', TRUE),
+
+  ('bills_enabled', 'true', 'boolean', NULL, NULL,
+   'Airtime, data and bills',
+   'Off refuses new purchases and target verification. Reconciliation keeps '
+   'resolving purchases already held, so switching off never strands money.',
+   'features', TRUE),
+
   -- ---- Card protection ---------------------------------------------------
   -- These are the numbers a fraud analyst tunes during an incident, which is
   -- exactly why they are rows and not constants: tightening a window at 2am

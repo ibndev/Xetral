@@ -20,6 +20,7 @@ import { API_CONFIG, DATABASE, FX_PORT, LEDGER } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
 import type { ConvertBody, FxQuoteBody } from './dto.js';
 import { AffordabilityService } from '../wallet/affordability.service.js';
+import { SettingsService } from '../settings/settings.service.js';
 
 /**
  * Converting between currencies, and sending across them.
@@ -87,9 +88,11 @@ export class FxService {
     @Inject(FX_PORT) private readonly port: FxPort,
     @Inject(API_CONFIG) private readonly config: ApiConfig,
     @Inject(AffordabilityService) private readonly affordability: AffordabilityService,
+    @Inject(SettingsService) private readonly settings: SettingsService,
   ) {}
 
   async quote(body: FxQuoteBody): Promise<FxQuoteView> {
+    await this.settings.assertServiceEnabled('fx');
     const from = body.from as Currency;
     const to = body.to as Currency;
     if (from === to) throw new BadRequestException({ error: 'same_currency' });
@@ -144,6 +147,7 @@ export class FxService {
    * there.
    */
   async convert(userUuid: string, body: ConvertBody): Promise<FxTradeView> {
+    await this.settings.assertServiceEnabled('fx');
     const userId = await this.#activeUserId(userUuid);
     const from = body.from as Currency;
     const to = body.to as Currency;

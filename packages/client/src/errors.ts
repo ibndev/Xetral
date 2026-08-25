@@ -98,6 +98,12 @@ const API_ERROR_CODES = [
 
   /* gift cards */
   'gift_cards_disabled',
+  // The kill switches. Each names its service so a screen can say which part
+  // of the product is paused rather than showing one generic message.
+  'crypto_disabled',
+  'fx_disabled',
+  'cards_disabled',
+  'bills_disabled',
   'no_rate_for_card',
   'not_clawable',
   'not_convertible',

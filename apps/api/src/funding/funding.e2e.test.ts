@@ -429,6 +429,49 @@ describe('a webhook that never arrived', () => {
     expect(await balanceOf(customer)).toBe('25000.00');
   });
 
+  it('a late webhook for a swept deposit does not credit it twice', async () => {
+    // THE REPRODUCTION. The test above claims to cover this and does not: its
+    // late webhook carries no account_number, so it resolves to no owner and
+    // lands in suspense — the customer's balance is unchanged for a reason
+    // that has nothing to do with idempotency. This one addresses the webhook
+    // to the customer's real account, which is what Bitnob would do.
+    const customer = await onboard();
+    const account = await getAccount(customer).expect(200);
+    const reference = `dep_late_${randomUUID()}`;
+
+    const accountRow = await pool.query<{ provider_account_id: string }>(
+      `SELECT provider_account_id FROM virtual_accounts WHERE user_id = $1::bigint`,
+      [customer.userId],
+    );
+    port.deposits.set(accountRow.rows[0]?.provider_account_id ?? '', [
+      {
+        providerReference: reference,
+        amountMinor: 1_000_000n,
+        currency: 'NGN',
+        senderName: 'LATE WEBHOOK',
+        senderBank: 'Access Bank',
+        senderAccount: '0011223344',
+        occurredAt: new Date(),
+      },
+    ]);
+
+    await app.get(DepositReconciliationService).sweep();
+    const afterSweep = await balanceOf(customer);
+
+    // Same deposit, different webhook event id — which is exactly what a
+    // redelivery after the sweep looks like.
+    expect(
+      (
+        await deposit(
+          { event_id: `evt_${randomUUID()}` },
+          { id: reference, account_number: account.body.account_number, amount: '1000000' },
+        )
+      ).status,
+    ).toBe(200);
+
+    expect(await balanceOf(customer)).toBe(afterSweep);
+  });
+
   it('does not re-credit a deposit it already knows about', async () => {
     const customer = await onboard();
     const account = await getAccount(customer).expect(200);

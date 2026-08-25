@@ -1,4 +1,11 @@
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import type { OnApplicationBootstrap } from '@nestjs/common';
 import type { Pool } from 'pg';
 import { API_CONFIG, DATABASE } from '../tokens.js';
@@ -48,6 +55,43 @@ export interface SettingView {
   readonly sensitive: boolean;
   readonly updated_at: string;
 }
+
+/**
+ * Every service that can be switched off, and the accessor that reads its
+ * flag.
+ *
+ * A single list rather than a check written at each call site, because "which
+ * services can be paused" is an operational question with one answer, and the
+ * audit found two flags that existed everywhere except at a call site. Adding
+ * a service here without asserting it somewhere fails `kill-switches.test.ts`.
+ */
+export const KILL_SWITCHES = {
+  crypto: (s: SettingsService) => s.cryptoEnabled(),
+  fx: (s: SettingsService) => s.fxEnabled(),
+  cards: (s: SettingsService) => s.cardsEnabled(),
+  bills: (s: SettingsService) => s.billsEnabled(),
+} as const;
+
+export type KillSwitch = keyof typeof KILL_SWITCHES;
+
+/**
+ * The refusal each switch produces, written out as literals.
+ *
+ * Built with a template — `${service}_disabled` — these codes would be
+ * invisible to `error-codes.test.ts`, which scans the source for
+ * `error: '...'` to prove the API and the client agree on every code a
+ * customer can receive. A code that no scanner can find is a code that
+ * silently drifts out of the client's union and reaches a customer as
+ * "Something went wrong".
+ *
+ * Four lines of repetition buys a greppable code and a checked invariant.
+ */
+const DISABLED_ERROR: Record<KillSwitch, { readonly error: string }> = {
+  crypto: { error: 'crypto_disabled' },
+  fx: { error: 'fx_disabled' },
+  cards: { error: 'cards_disabled' },
+  bills: { error: 'bills_disabled' },
+};
 
 @Injectable()
 export class SettingsService implements OnApplicationBootstrap {
@@ -203,12 +247,50 @@ export class SettingsService implements OnApplicationBootstrap {
     return this.boolean('gift_cards_enabled', false);
   }
 
+  /*
+   * THE KILL SWITCHES.
+   *
+   * Each of these must be ASSERTED by the service that owns the flow. Two of
+   * them — crypto and FX — existed here, were listed in the admin dashboard,
+   * and were read by nothing at all: an operator could switch crypto off
+   * during a Bitnob incident, watch the dashboard confirm it, and withdrawals
+   * would keep going out. A switch that reports success and changes nothing is
+   * worse than no switch, because it is trusted at exactly the wrong moment.
+   *
+   * `assertServiceEnabled` below is the only sanctioned way to read one, and
+   * `kill-switches.test.ts` fails the build if a service gains a flag without
+   * a call site.
+   */
   async cryptoEnabled(): Promise<boolean> {
     return this.boolean('crypto_enabled', true);
   }
 
   async fxEnabled(): Promise<boolean> {
     return this.boolean('fx_enabled', true);
+  }
+
+  async cardsEnabled(): Promise<boolean> {
+    return this.boolean('cards_enabled', true);
+  }
+
+  async billsEnabled(): Promise<boolean> {
+    return this.boolean('bills_enabled', true);
+  }
+
+  /**
+   * Refuses with a 503 when the named service is switched off.
+   *
+   * `ServiceUnavailableException` rather than a 4xx, deliberately: the request
+   * was well-formed and the customer did nothing wrong. It also means a client
+   * retry is the correct behaviour once the incident is over, and monitoring
+   * sees a service outage rather than a wave of customer errors.
+   *
+   * The error code names the SERVICE, so a screen can say which part of the
+   * product is paused rather than showing one generic message everywhere.
+   */
+  async assertServiceEnabled(service: KillSwitch): Promise<void> {
+    const on = await KILL_SWITCHES[service](this);
+    if (!on) throw new ServiceUnavailableException(DISABLED_ERROR[service]);
   }
 
   async registrationEnabled(): Promise<boolean> {
