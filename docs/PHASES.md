@@ -21,7 +21,7 @@ shipped, that is called out explicitly.
 | 10 — Multi-currency + FX / remittance | ✅ | Bitnob credentials to go live |
 | 11 — Mobile and web clients | ✅ | |
 | 12 — Pre-deployment audit | ✅ | Bitnob credentials to go live |
-| 13 — Closing the audit's findings | 🚧 | tiers 1–2 landed; 3–4 open |
+| 13 — Closing the audit's findings | 🚧 | tiers 1–3 landed; tier 4 open |
 
 All eleven phases are built, a **pre-deployment audit** (Phase 12) closed what
 building them phase by phase had left between the phases, and **Phase 13** is
@@ -1279,7 +1279,71 @@ Findings from building it:
     like a corrupt archive. Worth knowing before an incident rather than during
     one.
 
-**Still open — tier 3 and 4:** Bitnob's card reveal, a staging environment,
-general (non-login) rate limiting, disputes and chargebacks, the velocity
-limits that exist for cards but not for transfers, dependency scanning, data
-retention, and a privacy policy.
+### Tier 3 — the product did not work, and nowhere was safe to find out ✅
+
+| File | What it is |
+|---|---|
+| `packages/providers/src/ports/card.ts` | `CardSecrets`, deliberately not part of a card |
+| `packages/ledger/sql/016_card_reveals.sql` | that a reveal happened, never what it showed |
+| `apps/api/src/cards/card.service.ts` | the two ceilings, counted in rows |
+| `apps/api/src/config.ts` | the environment, and what staging refuses |
+| `apps/api/src/environment.test.ts` | the refusals, as tests |
+| `deploy/docker-compose.staging.yml` | one box, sandbox providers, no route to anything real |
+
+**Every virtual card issued since Phase 5 was unusable.** `003_cards.sql`
+stores `last4` and an expiry and nothing else — correctly, because a database
+dump must not contain PANs — with the consequence that there was no way for a
+customer to see the number: no port method, no endpoint, nothing to call. A
+card you cannot read is not a product.
+
+Findings from building it:
+
+1. **The reveal is a PASS-THROUGH, and every other decision follows from
+   that.** Fetched from the provider, handed to a customer who proved a PIN,
+   and dropped. "Never stored" is a property of the schema rather than a rule
+   somebody keeps: there is no column that could hold a card number, and the
+   test asserts `card_reveals` has none whose name could tempt anybody.
+2. **`CardSecrets` is a separate type from `VirtualCard` at every layer.** As
+   optional members of the ordinary card view, a PAN would ride along in every
+   listing, every cached response and every log line that serialises a card —
+   and nothing would fail on the day it did. Two types means a card number
+   only reaches code that named it.
+3. **The rate limit is counted in ROWS, not in memory.** An attacker's loop
+   outlives a pod restart and an in-process counter does not. There are two
+   ceilings because they catch different things: per card, and per customer —
+   the second is what sees a stolen session walking through every card on an
+   account, which a per-card limit never does. Both were proved load-bearing
+   by removing them and watching the test fail.
+4. **A frozen card can still be revealed; a terminated one cannot.** Freezing
+   stops spending, not looking — a customer disputing charges still needs to
+   read the number. A terminated card's number is dead at the provider.
+5. **Bitnob's card response shape was not what the adapter required, and only
+   a probe found it.** Their SDK reads `cardNumber`, `cvv2` and a single
+   `expiry`; the schema here demanded `last4`, `expiry_month` and
+   `expiry_year`, and an SDK-shaped payload threw `unexpected card shape`.
+   The read accepts both now. Being tolerant on a read costs nothing; being
+   wrong costs every card. Phase 3's lesson again — a table of plausible
+   constants passes tests written from the same assumptions.
+6. **A staging environment whose only protection is "we set different
+   variables" is one variable away from test traffic moving real money.** Both
+   protections here are REFUSALS. `XETRAL_ENVIRONMENT` is required with no
+   default, and when it says `staging` the API exits at boot if any provider
+   URL points at a live host, naming every offender at once so three mistakes
+   are not three deploys. Verified against the built bundle both ways.
+7. **The second refusal is about email, and it is the one a restored backup
+   makes urgent.** A staging database is usually restored from production,
+   because that is the only way to test against realistic data — and the
+   moment it is, the outbox worker holds every real customer's address and a
+   queue of messages about transfers that never happened. It will send them,
+   and it cannot be un-sent. Delivery is confined to `NOTIFICATION_ALLOWLIST`,
+   which is EMPTY by default, and a message to anyone else is ABANDONED rather
+   than retried: the address will not become allowed by waiting.
+8. **A test can fail for the harness rather than the product, and both are
+   worth fixing.** The staging e2e suite minted a fresh keyring per app, so
+   the staging worker could not open what the main app had sealed — while the
+   two negative tests passed, because the allowlist check runs before
+   decryption. A green pair either side of a broken one.
+
+**Still open — tier 4:** general (non-login) rate limiting, disputes and
+chargebacks, the velocity limits that exist for cards but not for transfers,
+dependency scanning, data retention, and a privacy policy.

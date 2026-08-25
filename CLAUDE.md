@@ -845,3 +845,29 @@ mistake from the internet.
   asks whether every entry still sums to zero per currency and whether the
   materialised balances still agree with the postings. An untested backup is a
   hope with a cron entry.
+
+### Staging — non-obvious rules
+
+Config: `deploy/docker-compose.staging.yml`, `deploy/.env.staging.example`.
+
+- **`XETRAL_ENVIRONMENT` is required and has no default.** Neither default is
+  safe enough to be worth having: a staging box falling back to `production`
+  would merely be strict, while a production box falling back to `staging`
+  would relax the guards protecting real customers.
+- **Staging REFUSES TO BOOT pointed at a live provider**, naming every
+  offending variable at once. Not a warning — the process exits. A staging box
+  that can reach live Bitnob issues real cards and spends real money, and the
+  person who makes that mistake will be copying a production `.env` to get
+  something working quickly. Failing at startup costs a deploy; failing on the
+  first card issue costs a customer.
+- **The notification worker will not email an address outside
+  `NOTIFICATION_ALLOWLIST`, and empty means NOBODY.** A staging database is
+  usually restored from a production backup — the only way to test against
+  realistic data — and the moment it is, the worker holds every real customer's
+  address and a queue of messages about transfers that never happened. Such a
+  message is **abandoned, not retried**: the address will not become allowed by
+  waiting, and leaving it pending buries the messages that could go out.
+- **What staging deliberately does not copy from production is stated in the
+  compose file**: one node, no standby, no backups, workers in-process. What it
+  must copy is the bundle, the migrations, the guard, the CSP and the ledger —
+  a staging environment differing in those proves nothing.
