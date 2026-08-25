@@ -82,21 +82,19 @@ export const dark: Palette = {
 };
 
 /**
- * The LIGHT palette, as a static binding.
+ * The palette the device is currently asking for.
  *
- * This is not "the palette in force", though its comment used to say so and
- * no theme provider ever existed to make it true. A module-level `const`
- * cannot be swapped from outside the module, so every screen importing
- * `colors` is pinned to light whatever the phone is set to.
+ * THERE IS DELIBERATELY NO `colors` EXPORT. There used to be — `export const
+ * colors = light`, with a comment calling it "the palette in force, swapped
+ * by the theme provider". No provider existed, and a module-level `const`
+ * cannot be swapped from outside its module anyway, so every screen importing
+ * it was pinned to light whatever the phone was set to. The app had a dark
+ * palette defined and unreachable.
  *
- * Screens that need to follow the device call `useTheme()` below. The rest
- * are light-only until they are moved across, which is a mechanical change
- * per screen — `StyleSheet.create` runs once at module load and so cannot
- * hold a themed value, and that is the actual work in migrating one.
+ * Removing the binding rather than leaving it beside the hook is the point:
+ * with it gone the compiler names every screen that still has to move, and
+ * there is no shorter path for the next screen to take by accident.
  */
-export const colors = light;
-
-/** The palette the device is currently asking for. */
 export function useTheme(): Palette {
   return useColorScheme() === 'dark' ? dark : light;
 }
@@ -128,32 +126,70 @@ export const font = {
   mono: 'SplineSansMono',
 } as const;
 
-/** Elevation, expressed for both platforms. iOS takes a shadow, Android takes
- *  an elevation number, and giving only one leaves the other flat. */
-export const shadow = {
-  card: Platform.select({
-    ios: {
-      shadowColor: '#0D1B3E',
-      shadowOpacity: 0.06,
-      shadowRadius: 8,
-      shadowOffset: { width: 0, height: 2 },
-    },
-    android: { elevation: 2 },
-    default: {},
-  }),
-  raised: Platform.select({
-    ios: {
-      shadowColor: '#0D1B3E',
-      shadowOpacity: 0.1,
-      shadowRadius: 20,
-      shadowOffset: { width: 0, height: 8 },
-    },
-    android: { elevation: 6 },
-    default: {},
-  }),
-} as const;
+/**
+ * Elevation, expressed for both platforms. iOS takes a shadow, Android takes
+ * an elevation number, and giving only one leaves the other flat.
+ *
+ * A function of the palette because the shadow colour is not: navy at 6%
+ * over a white card reads as depth, and the same navy over a near-black one
+ * reads as a smudge. On black the shadow is black — which is invisible, and
+ * correctly so, because a card on a true-black page is separated by its
+ * lightness rather than by a glow.
+ */
+export function shadowsFor(palette: Palette) {
+  const tint = palette.bg === '#000000' ? '#000000' : '#0D1B3E';
+  return {
+    card: Platform.select({
+      ios: {
+        shadowColor: tint,
+        shadowOpacity: 0.06,
+        shadowRadius: 8,
+        shadowOffset: { width: 0, height: 2 },
+      },
+      android: { elevation: 2 },
+      default: {},
+    }),
+    raised: Platform.select({
+      ios: {
+        shadowColor: tint,
+        shadowOpacity: 0.1,
+        shadowRadius: 20,
+        shadowOffset: { width: 0, height: 8 },
+      },
+      android: { elevation: 6 },
+      default: {},
+    }),
+  } as const;
+}
 
-export const styles = StyleSheet.create({
+/**
+ * The shared stylesheet, as a function of the palette.
+ *
+ * `StyleSheet.create` runs once and freezes whatever colours it was handed,
+ * which is exactly why the old static `styles` export could never follow the
+ * device: it captured the light palette at module load. There is one sheet
+ * per palette instead, built on first use and cached — there are only ever
+ * two, so caching them is a Map with two entries rather than a memo that has
+ * to be invalidated.
+ *
+ * Screens call `useStyles()`, never this.
+ */
+const SHEETS = new Map<Palette, ReturnType<typeof buildSheet>>();
+
+/** The sheet for the palette in force. */
+export function useStyles(): ReturnType<typeof buildSheet> {
+  const palette = useTheme();
+  let sheet = SHEETS.get(palette);
+  if (sheet === undefined) {
+    sheet = buildSheet(palette);
+    SHEETS.set(palette, sheet);
+  }
+  return sheet;
+}
+
+function buildSheet(colors: Palette) {
+  const shadow = shadowsFor(colors);
+  return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   content: { padding: space.lg, paddingBottom: space.xxl * 2 },
 
@@ -269,5 +305,6 @@ export const styles = StyleSheet.create({
   error: { color: colors.danger, fontSize: 13.5, marginTop: 10 },
   ok: { color: colors.ok, fontSize: 13.5, marginTop: 10 },
   muted: { color: colors.text3, fontSize: 12.5 },
-  link: { color: colors.link, fontSize: 14.5, fontWeight: '600' },
-});
+    link: { color: colors.link, fontSize: 14.5, fontWeight: '600' },
+  });
+}

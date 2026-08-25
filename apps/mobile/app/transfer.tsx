@@ -4,9 +4,10 @@ import { router } from 'expo-router';
 import { exponentFor, formatAmount, isValidAmount } from '@xetral/client';
 import { xetral } from '@/session';
 import { messageFor } from '@/errors';
-import { styles } from '@/theme';
+import { useStyles } from '@/theme';
 
 export default function Transfer() {
+  const styles = useStyles();
   const [recipient, setRecipient] = useState('');
   const [amount, setAmount] = useState('');
   const [pin, setPin] = useState('');

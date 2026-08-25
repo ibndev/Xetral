@@ -5,9 +5,11 @@ import { formatAmount } from '@xetral/client';
 import type { Balance } from '@xetral/client';
 import { resetXetral, xetral } from '@/session';
 import { messageFor } from '@/errors';
-import { colors, styles } from '@/theme';
+import { useStyles, useTheme } from '@/theme';
 
 export default function Wallet() {
+  const styles = useStyles();
+  const colors = useTheme();
   const [balances, setBalances] = useState<readonly Balance[]>([]);
   const [error, setError] = useState<string | undefined>();
   const [loading, setLoading] = useState(true);

@@ -1,8 +1,9 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { colors } from '@/theme';
+import { useTheme } from '@/theme';
 
 export default function Layout() {
+  const colors = useTheme();
   return (
     <>
       <StatusBar style="light" />

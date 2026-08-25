@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { router } from 'expo-router';
 import { xetral } from '@/session';
-import { colors } from '@/theme';
+import { useTheme } from '@/theme';
 
 /**
  * Decides where to start.
@@ -14,6 +14,7 @@ import { colors } from '@/theme';
  * on a wallet that fails to load.
  */
 export default function Index() {
+  const colors = useTheme();
   useEffect(() => {
     void (async () => {
       try {
