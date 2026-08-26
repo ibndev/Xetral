@@ -72,6 +72,9 @@ export function testApiConfig(databaseUrl: string, overrides: Partial<ApiConfig>
     // background one deleting rows under another suite is the worst possible
     // shape of flake.
     retentionIntervalSeconds: undefined,
+    // No timer: the balance suite drives `sweep()` directly, and a background
+    // one asking a fake provider under another suite is a flake nobody can read.
+    balanceReconcileIntervalSeconds: undefined,
     reconcileIntervalSeconds: undefined,
     // No grace either — a test that had to wait two minutes for a row to become
     // eligible is a test nobody runs. Zero rather than undefined, which would

@@ -17,6 +17,9 @@ export const ROUTE_POLICY = Symbol('ROUTE_POLICY');
 export const RATE_LIMIT_STORE = Symbol('RATE_LIMIT_STORE');
 export const LEDGER = Symbol('LEDGER');
 export const CARD_PORT = Symbol('CARD_PORT');
+/** Reads a provider's own view of what it holds. Read-only by construction —
+ *  nothing behind this token can move money. */
+export const PROVIDER_BALANCE_PORT = Symbol('PROVIDER_BALANCE_PORT');
 /** A ReadonlyMap<ServiceKind, FulfilmentPort>: one entry per service the
  *  instance is configured for. A missing entry refuses that service's routes,
  *  which is a better answer than a placeholder adapter that fails on the

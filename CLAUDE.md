@@ -882,6 +882,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/016_card_reveals.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/017_transfer_velocity.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/018_disputes.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/019_retention.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/020_balance_reconciliation.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/003_cards.test.sql
@@ -901,6 +902,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/016_card_reveals.test.s
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/017_transfer_velocity.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/018_disputes.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/019_retention.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/020_balance_reconciliation.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,
 # Redis for the rate-limiter contract.
@@ -940,7 +942,7 @@ mistake from the internet.
   `DEPOSIT_RECONCILE_INTERVAL_SECONDS`, `CRYPTO_RECONCILE_INTERVAL_SECONDS`,
   `CRYPTO_DEPOSIT_RECONCILE_INTERVAL_SECONDS`,
   `GIFTCARD_RELEASE_INTERVAL_SECONDS`, `NOTIFICATION_INTERVAL_SECONDS`,
-  `ERROR_ALERT_INTERVAL_SECONDS`) go on exactly one instance —
+  `ERROR_ALERT_INTERVAL_SECONDS`, `BALANCE_RECONCILE_INTERVAL_SECONDS`) go on exactly one instance —
   `docker-compose.app.yml` does this by blanking them on `api` and setting them
   on `worker`. `NOTIFICATION_INTERVAL_SECONDS` is the one whose absence is
   silent in the worst way: rows accumulate, the API answers "check your email",

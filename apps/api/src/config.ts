@@ -255,6 +255,13 @@ export interface ApiConfig {
    */
   readonly retentionIntervalSeconds: number | undefined;
 
+  /**
+   * How often to compare provider balances against the ledger, on exactly one
+   * instance. Undefined means nothing does — and a transaction-level sweep
+   * cannot see money that was never a transaction here.
+   */
+  readonly balanceReconcileIntervalSeconds: number | undefined;
+
   readonly requestRateLimit: {
     readonly windowSeconds: number;
     readonly publicMax: number;
@@ -657,6 +664,7 @@ export function loadConfig(env: Env): ApiConfig {
       'CRYPTO_DEPOSIT_RECONCILE_INTERVAL_SECONDS',
     ),
     retentionIntervalSeconds: optionalInteger(env, 'RETENTION_INTERVAL_SECONDS'),
+    balanceReconcileIntervalSeconds: optionalInteger(env, 'BALANCE_RECONCILE_INTERVAL_SECONDS'),
     requestRateLimit: {
       windowSeconds: integer(env, 'REQUEST_RATE_LIMIT_WINDOW_SECONDS', 60),
       // Generous, because an unauthenticated request has only an address to

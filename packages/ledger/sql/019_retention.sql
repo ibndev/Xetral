@@ -351,7 +351,12 @@ INSERT INTO retention_decisions (table_name, decision, rationale) VALUES
   ('biometric_enrollments', 'derive', 'One row per device, and no secret.'),
   ('staff_totp', 'derive', 'One row per staff member, holding a sealed secret.'),
   ('platform_settings', 'keep', 'Current policy. Its history is a separate table.'),
-  ('retention_decisions', 'keep', 'This table. Deleting a decision is not a decision.')
+  ('retention_decisions', 'keep', 'This table. Deleting a decision is not a decision.'),
+  ('provider_balance_checks', 'keep',
+   'A record that the provider and the ledger disagreed, and what each said. '
+   'It is append-only by trigger for the same reason the audit log is: this is '
+   'the row that matters in the argument about where money went, and a trail a '
+   'scheduled job can delete from is one an intruder can prune.')
 ON CONFLICT (table_name) DO NOTHING;
 
 /**

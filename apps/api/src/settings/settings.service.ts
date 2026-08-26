@@ -237,6 +237,16 @@ export class SettingsService implements OnApplicationBootstrap {
   }
 
   /** How many transfers a customer may send in a rolling hour, any currency. */
+  /**
+   * A provider/ledger difference at or below this is not recorded.
+   *
+   * ZERO by default. On a double-entry ledger the correct difference is
+   * nothing, and a tolerance is a decision to stop looking at a class of error.
+   */
+  async balanceToleranceMinor(): Promise<number> {
+    return this.integer('balance_tolerance_minor', 0);
+  }
+
   async transferCountHourly(): Promise<number> {
     return this.integer('transfer_count_hourly', 20);
   }

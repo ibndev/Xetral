@@ -54,6 +54,14 @@ export const BITNOB_ENDPOINTS = {
   unfreezeCard: '/virtualcards/unfreeze',
   terminateCard: '/virtualcards/terminate',
   getCard: (cardId: string) => `/virtualcards/card/${cardId}`,
+  /**
+   * The company wallet, and what Bitnob says it holds for us.
+   *
+   * VERIFIED against their own Node SDK (npm `bitnob`, `lib/wallet.ts`):
+   * `walletDetails()` issues `GET /wallets`. Not a guess — every path in this
+   * table was wrong the first time it was one.
+   */
+  wallets: '/wallets',
 } as const;
 
 export class BitnobClient {

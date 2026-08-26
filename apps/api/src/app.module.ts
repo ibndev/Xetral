@@ -6,12 +6,18 @@ import type { Pool } from 'pg';
 import { LedgerService } from '@xetral/ledger';
 import {
   AiraloAdapter,
+  BitnobBalanceAdapter,
   BitnobCardAdapter,
   BitnobClient,
   TwilioAdapter,
   VtpassAdapter,
 } from '@xetral/providers';
-import type { CardPort, FulfilmentPort, ServiceKind } from '@xetral/providers';
+import type {
+  CardPort,
+  FulfilmentPort,
+  ProviderBalancePort,
+  ServiceKind,
+} from '@xetral/providers';
 import { AuthController } from './auth/auth.controller.js';
 import { AuthGuard } from './auth/auth.guard.js';
 import { AuthService } from './auth/auth.service.js';
@@ -77,6 +83,7 @@ import { RequestRateLimiter } from './auth/request-rate-limit.service.js';
 import { AdminDisputeController, DisputeController } from './disputes/dispute.controller.js';
 import { DisputeService } from './disputes/dispute.service.js';
 import { RetentionService } from './retention/retention.service.js';
+import { BalanceReconciliationService } from './reconciliation/balance-reconciliation.service.js';
 import {
   InMemoryRateLimitStore,
   RedisRateLimitStore,
@@ -90,13 +97,14 @@ import {
   API_CONFIG,
   CARD_PORT,
   CLOCK,
+  CRYPTO_PORT,
   DATABASE,
   FULFILMENT_PORTS,
-  CRYPTO_PORT,
   FUNDING_PORT,
   FX_PORT,
   LEDGER,
   NOTIFICATION_PORT,
+  PROVIDER_BALANCE_PORT,
   RATE_LIMIT_STORE,
   ROUTE_POLICY,
   systemClock,
@@ -113,6 +121,8 @@ export interface AppModuleOptions {
   readonly rateLimitStore?: RateLimitStore;
   /** Overridden in tests so card flows run without a live Bitnob. */
   readonly cardPort?: CardPort;
+  /** Read-only, and injectable so a suite can drive a known provider figure. */
+  readonly providerBalancePort?: ProviderBalancePort;
   /** Overridden in tests so purchases run without live VTpass/Airalo/Twilio. */
   readonly fulfilmentPorts?: ReadonlyMap<ServiceKind, FulfilmentPort>;
   /** Overridden in tests so funding runs without a live Bitnob. */
@@ -133,6 +143,23 @@ export interface AppModuleOptions {
  * request, where it looks like a provider outage rather than a missing
  * environment variable.
  */
+/**
+ * The read-only balance port, or nothing.
+ *
+ * Returns `undefined` rather than an unconfigured stand-in, and the sweep skips
+ * itself when it is absent. A stub that answered "zero" would be worse than no
+ * check at all: every float would look like a discrepancy the size of the whole
+ * balance, and the queue this exists to fill would be unreadable on day one.
+ */
+export function createProviderBalancePort(config: ApiConfig): ProviderBalancePort | undefined {
+  const { bitnobBaseUrl, bitnobApiKey } = config;
+  if (bitnobBaseUrl === undefined || bitnobApiKey === undefined) return undefined;
+
+  return new BitnobBalanceAdapter(
+    new BitnobClient({ baseUrl: bitnobBaseUrl, apiKey: bitnobApiKey }),
+  );
+}
+
 export function createCardPort(config: ApiConfig): CardPort {
   const { bitnobBaseUrl, bitnobApiKey } = config;
 
@@ -509,6 +536,21 @@ export class ErrorAlertLifecycle implements OnApplicationBootstrap {
 }
 
 /**
+ * Starts the balance comparison sweep. Its own lifecycle, like every other:
+ * they are enabled independently.
+ */
+@Injectable()
+export class BalanceReconciliationLifecycle implements OnApplicationBootstrap {
+  constructor(
+    @Inject(BalanceReconciliationService) private readonly balances: BalanceReconciliationService,
+  ) {}
+
+  onApplicationBootstrap(): void {
+    this.balances.start();
+  }
+}
+
+/**
  * Starts the retention sweep.
  *
  * Its own lifecycle rather than sharing one, for the same reason every other
@@ -585,6 +627,10 @@ export class AppModule {
           useValue: options.cardPort ?? createCardPort(options.config),
         },
         {
+          provide: PROVIDER_BALANCE_PORT,
+          useValue: options.providerBalancePort ?? createProviderBalancePort(options.config),
+        },
+        {
           provide: FULFILMENT_PORTS,
           useValue: options.fulfilmentPorts ?? createFulfilmentPorts(options.config),
         },
@@ -653,6 +699,8 @@ export class AppModule {
         DisputeService,
         RetentionService,
         RetentionLifecycle,
+        BalanceReconciliationService,
+        BalanceReconciliationLifecycle,
         PasswordResetService,
 
         // Registered globally, so it runs for every route including one whose
