@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import type { KycStatus } from '@xetral/client';
+import { formatAmount } from '@xetral/client';
+import type { KycLimits, KycStatus } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { Icon } from '@/ui/icon';
 import { useLoad, useSubmit, useXetral } from '@/lib/hooks';
@@ -60,6 +61,15 @@ export default function Kyc() {
 
   return (
     <Shell>
+      {/*
+        What they can move TODAY, before the form rather than after it.
+
+        A customer arrives here either because something refused them or
+        because they were told to. Either way the useful first sentence is what
+        their current ceiling is — being refused and shown a form, with no
+        statement of what changes, is what makes a limit feel arbitrary.
+      */}
+      <Limits />
 
       <form className="card" onSubmit={submit}>
         <h1>Verify your identity</h1>
@@ -157,6 +167,8 @@ function Submitted({ status }: { status: KycStatus }) {
           </p>
         )}
 
+        <Limits />
+
         {status.rejection_reason !== null && (
           <div className="notice danger" style={{ marginTop: 16 }}>
             <p>{status.rejection_reason}</p>
@@ -167,5 +179,53 @@ function Submitted({ status }: { status: KycStatus }) {
         )}
       </div>
     </Shell>
+  );
+}
+
+/**
+ * What this customer's verification currently allows.
+ *
+ * Rendered on both states of this screen — before submitting and after — for
+ * the same reason: a ceiling somebody cannot see is one they can only discover
+ * by hitting it, and a refusal with no explanation of what would change is
+ * what turns a control into a support ticket.
+ *
+ * A ZERO IS A REAL LIMIT and is shown as one. An unverified account may move
+ * no crypto at all, because a chain transaction is the single movement nobody
+ * can recall — and saying "not available yet" is more honest than hiding the
+ * row and letting somebody find out at the moment they try.
+ */
+function Limits() {
+  const client = useXetral();
+  const { data } = useLoad<KycLimits>(() => client.kycLimits(), [client]);
+  if (data === undefined) return null;
+
+  const TIERS = ['Registered', 'Verified', 'Enhanced'];
+
+  return (
+    <div className="card">
+      <h2>
+        Your daily limits{' '}
+        <span className="badge">{TIERS[data.tier] ?? `tier ${data.tier}`}</span>
+      </h2>
+      {data.limits.map((limit) => (
+        <div className="row" key={limit.currency}>
+          <span className="muted">{limit.currency}</span>
+          <span className="mono">
+            {limit.daily_limit === '0' ? (
+              'not available yet'
+            ) : (
+              <>{formatAmount(limit.daily_limit, limit.currency)} a day</>
+            )}
+          </span>
+        </div>
+      ))}
+      {data.next_tier === 1 && (
+        <p className="hint">
+          Verifying your identity raises every one of these, and is what lets us
+          issue you an account number and a card.
+        </p>
+      )}
+    </div>
   );
 }

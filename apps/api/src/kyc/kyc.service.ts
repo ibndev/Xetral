@@ -74,6 +74,51 @@ export class KycService {
     return row === undefined ? null : toView(row);
   }
 
+  /**
+   * What this customer's verification currently allows them to move.
+   *
+   * A CUSTOMER-FACING surface, and it is the half that makes tiers a product
+   * rather than a trap. Without it, somebody refused for exceeding a ceiling
+   * is told "daily_limit_exceeded" and has no way to learn that the answer is
+   * to finish verifying — which turns a control into a support ticket, and a
+   * customer who cannot move their own money into one who does not know why.
+   *
+   * Amounts are MINOR-UNIT STRINGS, like every other amount that crosses this
+   * boundary. The client formats them without ever producing a number.
+   */
+  async limits(userUuid: string): Promise<{
+    readonly tier: number;
+    readonly limits: readonly { readonly currency: string; readonly daily_limit: string }[];
+    readonly next_tier: number | null;
+  }> {
+    const userId = await this.#userId(userUuid);
+    const result = await this.pool.query<{
+      kyc_tier: number;
+      currency: string;
+      daily_limit_minor: string;
+    }>(
+      `SELECT u.kyc_tier, l.currency, l.daily_limit_minor::text
+         FROM users u
+         JOIN kyc_tier_limits l ON l.tier = u.kyc_tier
+        WHERE u.id = $1::bigint
+        ORDER BY l.currency`,
+      [userId],
+    );
+
+    const tier = result.rows[0]?.kyc_tier ?? 0;
+    return {
+      tier,
+      limits: result.rows.map((row) => ({
+        currency: row.currency,
+        daily_limit: row.daily_limit_minor,
+      })),
+      // Tier 2 is an administrator's judgement about source of funds, not
+      // something a customer can apply for — so the next tier they can reach
+      // by their own action is 1, and above that there is nothing to offer.
+      next_tier: tier === 0 ? 1 : null,
+    };
+  }
+
   async submit(userUuid: string, body: KycBody): Promise<KycView> {
     const userId = await this.#userId(userUuid);
 
@@ -189,6 +234,20 @@ export class KycService {
          VALUES ($1::bigint, 'bitnob', $2)
          ON CONFLICT (user_id, provider) DO NOTHING`,
         [row.user_id, `xetral-${row.uuid}`],
+      );
+
+      // VERIFIED, in the same transaction as the approval. A customer marked
+      // approved whose ceiling never moved is verified on paper and still
+      // limited to an unverified account's daily total — which they discover
+      // on their first real transfer, and support cannot explain.
+      //
+      // Only from 0. An enhanced customer whose identity is re-reviewed must
+      // not be silently demoted to tier 1 by a routine approval; taking a tier
+      // away is an administrator's deliberate act, and the WHERE clause is
+      // what makes that true rather than remembered.
+      await client.query(
+        `UPDATE users SET kyc_tier = 1 WHERE id = $1::bigint AND kyc_tier < 1`,
+        [row.user_id],
       );
 
       await client.query('COMMIT');

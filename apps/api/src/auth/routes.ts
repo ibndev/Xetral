@@ -137,6 +137,9 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // Identity verification. Submitting is not a money movement, so no PIN;
       // it is authenticated because the documents attach to a known account.
       .authenticated('GET', '/v1/kyc', { pin: false })
+      // What this customer's verification allows. Their own tier and the
+      // ceilings that go with it — nobody else's.
+      .authenticated('GET', '/v1/kyc/limits', { pin: false })
       .authenticated('POST', '/v1/kyc', { pin: false })
 
       // ---- The operations backend -------------------------------------
@@ -203,6 +206,11 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // authenticator ends up on somebody's desk — the lesson the staff second
       // factor already records. Closing takes one, because it resolves every
       // signal attached and is the act a regulator inspects.
+      // A customer's verification tier. `compliance`, not `support`: it decides
+      // how much money may leave an account in a day, which is the same kind
+      // of decision as approving the identity behind it.
+      .staff('POST', '/v1/admin/users/:id/tier', { pin: true, role: 'compliance' })
+
       .staff('GET', '/v1/admin/risk/cases', { pin: false, role: 'compliance' })
       .staff('GET', '/v1/admin/risk/cases/:id', { pin: false, role: 'compliance' })
       .staff('POST', '/v1/admin/risk/cases', { pin: false, role: 'compliance' })

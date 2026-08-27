@@ -36,7 +36,19 @@ async function customer(): Promise<string> {
     `INSERT INTO users (email, status) VALUES ($1, 'active') RETURNING id`,
     [`velocity-${randomUUID()}@example.ng`],
   );
-  return r.rows[0]!.id;
+  const id = r.rows[0]!.id;
+  // THE HIGHEST TIER, because this suite is about the FLOW ceilings and the
+  // one in force is the LOWER of the two. A tier ceiling below the flow
+  // ceiling this file pins would be what refused, and every assertion here
+  // would quietly be testing the tier instead — tier 0 may move no crypto at
+  // all, and even tier 1's 0.25 BTC is below what the satoshi case needs.
+  //
+  // Climbed one step at a time: the trigger refuses a jump that skips the
+  // evidence below it.
+  for (const tier of [1, 2]) {
+    await pool.query(`UPDATE users SET kyc_tier = $2 WHERE id = $1::bigint`, [id, tier]);
+  }
+  return id;
 }
 
 /** Credits a wallet in any asset, so a ceiling can be reached without an overdraft. */
@@ -112,7 +124,7 @@ beforeAll(async () => {
   pool = new pg.Pool({ connectionString: DATABASE_URL, max: 6 });
   ledger = new LedgerService(pool);
   settings = new SettingsService(pool, testApiConfig(DATABASE_URL as string));
-  limits = new SpendingLimitService(settings);
+  limits = new SpendingLimitService(settings, pool);
 
   // Small enough to reach without a hundred postings.
   await setLimit('crypto_withdrawal_count_hourly', '2');
@@ -159,13 +171,19 @@ describe('crypto withdrawals', () => {
     // so a shared number would be two different limits wearing one name. Here
     // BTC is given a ceiling a USDT-sized number could never express, and an
     // amount far above the USDT ceiling passes.
+    //
+    // Two BTC rather than four. The customer is tier 2, whose BTC ceiling is
+    // 2.5 — and the amount was lowered rather than that figure raised, because
+    // a product limit moved to make a test pass is a product limit nobody
+    // chose. Two hundred million satoshi is still twenty times the USDT
+    // ceiling this test exists to distinguish itself from.
     await setLimit('crypto_withdrawal_count_hourly', '50');
     await setLimit('crypto_daily_limit_btc_minor', '100000000000');
     const user = await customer();
-    await fund(user, money(500_000_000n, 'BTC' as Currency));
+    await fund(user, money(300_000_000n, 'BTC' as Currency));
 
     expect(
-      await move(user, 'crypto_withdrawal', 'crypto_withdrawal', money(400_000_000n, 'BTC' as Currency)),
+      await move(user, 'crypto_withdrawal', 'crypto_withdrawal', money(200_000_000n, 'BTC' as Currency)),
     ).toBeUndefined();
     await setLimit('crypto_withdrawal_count_hourly', '2');
   });

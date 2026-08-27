@@ -93,6 +93,21 @@ async function register(): Promise<Person> {
     .send({ pin: PIN })
     .expect(204);
 
+  // ENHANCED, and the reason is worth stating rather than working around.
+  //
+  // This suite asserts on what the MONITORING rules see, and a transfer
+  // refused by a ceiling never reaches them — the queue would be empty and the
+  // rules would look broken. But the ceiling that refuses is the TIER's, and
+  // tier 1 allows ₦5,000,000 a day: exactly the NGN reporting threshold. So
+  // with the shipped grid a single transfer AT the reporting threshold can
+  // only be made by a customer somebody established a source of funds for,
+  // which is a coherent policy and is also why this fixture is tier 2.
+  //
+  // One step at a time: the trigger refuses a jump that skips the evidence.
+  for (const tier of [1, 2]) {
+    await pool.query(`UPDATE users SET kyc_tier = $2 WHERE id = $1::bigint`, [found.id, tier]);
+  }
+
   return { email, userId: found.id, uuid: found.uuid, token: created.body.access_token };
 }
 

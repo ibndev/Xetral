@@ -696,6 +696,69 @@ Schema: `packages/ledger/sql/028_risk_cases.sql`. Service in
   notes per case, and demanding the factor on each is how a shared
   authenticator ends up on a desk — the lesson 014 records.
 
+### Verification tiers — non-obvious rules
+
+**Every e2e fixture that stands in for KYC approval must set the tier too.**
+Approval writes `provider_customers` AND `users.kyc_tier` in one transaction; a
+fixture doing only the first describes a customer whom every provider accepts
+and whose ceiling is an unverified account's — a state production cannot reach.
+A suite whose subject is a different control (the flow ceilings, the monitoring
+rules) needs a tier high enough not to confound it, because the limit in force
+is the LOWER of the two.
+
+**A suite must PIN what its assertions depend on.** The e2e files share one
+database and run in file order with `fileParallelism: false`, and a suite that
+narrows a limit does not put it back. `flow-velocity` pins the USDT ceiling to
+10 USDT; `crypto` passed only while it happened to run first, and stopped the
+day two unrelated files shifted the order. Never change a shared setting
+mid-test: for the length of that test every other suite is subject to it.
+
+### Verification tiers — non-obvious rules
+
+Schema: `packages/ledger/sql/029_kyc_tiers.sql`, seeded by
+`029_kyc_tiers.seed.sql`. Enforced in `wallet/spending-limits.service.ts`.
+
+- **Every ceiling used to be ONE NUMBER for everybody.** A customer who had
+  typed an email address that morning was allowed exactly what a customer whose
+  documents a person had read was allowed — wrong in both directions.
+- **Three tiers, because three have a REAL PATH to them.** 0 registered, 1
+  granted by KYC approval, 2 granted by an administrator who established source
+  of funds. The CBN's phone-verified tier is deliberately absent: nothing here
+  verifies a phone, so it would be a tier no customer could be in.
+- **The ceiling in force is the LOWER of the tier's and the flow's.** A tier
+  does not replace `transfer_daily_limit_kobo`, it competes with it — so
+  raising somebody's tier can never let them past a limit an operator tightened
+  during an incident, and tightening one can never be undone by a tier.
+- **`kyc_tier` DEFAULTS TO 0.** A path that forgets to set one produces the
+  least trusted account, not the most. A default of 1 would mean a registration
+  endpoint that skipped verification handed out verified limits and nothing
+  failed.
+- **The tier is read on EVERY check, not cached.** The reason to lower one is
+  usually that something is wrong with the account, and a ceiling that keeps
+  its old value for thirty seconds has not been lowered.
+- **A missing limits row returns undefined, never zero.** Zero is a real limit
+  — it is how "no crypto without an identity" is expressed — so collapsing the
+  two would turn a coverage gap into a customer who cannot move their own
+  money, indistinguishably.
+- **`kyc_tier_coverage` must be complete**, and the invariant suite fails on a
+  gap. There is deliberately no fallback, so a gap would not be a smaller limit
+  but none at all.
+- **Each tier rests on the one below it, by trigger.** 0 → 2 is refused: giving
+  enhanced due diligence to somebody whose identity was never checked makes the
+  higher ceiling rest on nothing. Going DOWN is unrestricted — finding out we
+  were wrong must never be harder than the mistake.
+- **KYC approval sets the tier in the SAME transaction**, and only `WHERE
+  kyc_tier < 1` — a routine re-review must not silently demote an enhanced
+  customer.
+- **The customer can see their own ceiling** at `GET /v1/kyc/limits`. Being
+  refused with no way to learn what would change is what turns a control into a
+  support ticket.
+- **A tier does NOT cap a balance**, and that absence is a decision. Capping one
+  means refusing money that has already arrived, and the only honest answers —
+  hold it in suspense, or send it back — are products with support paths and
+  customer messages. Inventing one inside a limits migration is the wrong place
+  to decide it.
+
 ### Disputes — non-obvious rules
 
 Schema: `packages/ledger/sql/018_disputes.sql`.
@@ -1123,6 +1186,8 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/026_provider_credential
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/027_risk_signals.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/027_risk_signals.seed.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/028_risk_cases.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/029_kyc_tiers.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/029_kyc_tiers.seed.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -1150,6 +1215,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/025_bvn_uniqueness.test
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/026_provider_credentials.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/027_risk_signals.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/028_risk_cases.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/029_kyc_tiers.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

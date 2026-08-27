@@ -71,6 +71,14 @@ const resolutionSchema = z.object({
   resolution: z.string().trim().min(10).max(1000),
 });
 
+const tierSchema = z.object({
+  // 0 registered, 1 verified, 2 enhanced. A number rather than a name, because
+  // the ordering is the meaning — the trigger refuses a jump that skips the
+  // evidence below it, and that check is arithmetic.
+  tier: z.coerce.number().int().min(0).max(2),
+  reason: z.string().trim().min(10).max(500),
+});
+
 const openCaseSchema = z.object({
   user_id: z.string().uuid(),
   reason: z.string().trim().min(10).max(500),
@@ -237,6 +245,41 @@ export class AdminController {
       parsed.data.reason,
       ipOf(request),
     );
+  }
+
+  /**
+   * Raises or lowers a customer's verification tier.
+   *
+   * Separate from the status endpoint above, because freezing an account and
+   * deciding what we know about a person answer different questions — and
+   * unfreezing must not restore a ceiling somebody removed for a reason.
+   */
+  @Post('users/:id/tier')
+  @HttpCode(200)
+  async setUserTier(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ): Promise<unknown> {
+    const parsed = tierSchema.safeParse(body);
+    if (!parsed.success) throw invalid(parsed.error.issues);
+
+    const actor = claims(request).sub;
+    const updated = await this.admin.setUserTier(id, parsed.data.tier, actor, parsed.data.reason);
+
+    const ip = ipOf(request);
+    await this.audit.record({
+      actorId: actor,
+      action: 'user.tier',
+      subjectType: 'user',
+      subjectId: id,
+      detail: { tier: String(parsed.data.tier) },
+      // Required in both directions: raising decides how much can leave, and
+      // lowering takes something away from a customer.
+      reason: parsed.data.reason,
+      ...(ip === undefined ? {} : { ip }),
+    });
+    return updated;
   }
 
   /* --------------------------- risk monitoring ------------------------- */

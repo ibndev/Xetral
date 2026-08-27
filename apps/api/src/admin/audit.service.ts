@@ -18,6 +18,10 @@ export type AdminAction =
   | 'user.freeze'
   | 'user.unfreeze'
   | 'user.close'
+  /* A verification tier raised or lowered. A reason is required in both
+     directions: raising decides how much money may leave in a day, and
+     lowering takes something away from a customer. */
+  | 'user.tier'
   | 'kyc.approve'
   | 'kyc.reject'
   | 'deposit.attribute'

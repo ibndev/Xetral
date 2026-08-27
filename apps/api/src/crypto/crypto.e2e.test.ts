@@ -28,6 +28,7 @@ import { CryptoReconciliationService } from './crypto-reconciliation.service.js'
 import { systemClock } from '../tokens.js';
 import { testApiConfig } from '../test-support/api-config.js';
 import { CryptoDepositReconciliationService } from './crypto-deposit-reconciliation.service.js';
+import { SettingsService } from '../settings/settings.service.js';
 
 /**
  * Crypto, end to end.
@@ -155,6 +156,13 @@ async function onboard(kyc = true): Promise<Customer> {
        VALUES ($1::bigint, 'bitnob', $2)`,
       [userId, `cus_${userId}`],
     );
+    // AND THE TIER, because KYC approval sets both in ONE transaction.
+    //
+    // This fixture stands in for that approval, and a fixture that performs
+    // half of an atomic operation is a fixture that tests a state production
+    // cannot reach — here, a customer whom every provider accepts and whose
+    // ceiling is still an unverified account's.
+    await pool.query(`UPDATE users SET kyc_tier = 1 WHERE id = $1::bigint`, [userId]);
   }
 
   const login = await request(app.getHttpServer())
@@ -254,11 +262,35 @@ async function usdtBalance(
   );
 }
 
+/**
+ * Every setting these assertions depend on, PINNED rather than inherited.
+ *
+ * The suites share one database and run in file order, and a suite that
+ * narrows a limit does not put it back. `flow-velocity.e2e.test.ts` pins the
+ * USDT ceiling to 10 USDT to reach it without a hundred postings — so whether
+ * this file passes depended on whether it happened to run first, and it stopped
+ * doing so the day two unrelated e2e files were added and the order shifted.
+ *
+ * The fix is the one `spending-limits.e2e.test.ts` already records: a suite
+ * asserting on exact behaviour states what it needs. Inheriting is what makes a
+ * green run a coincidence.
+ */
+const PINNED: Readonly<Record<string, string>> = {
+  crypto_daily_limit_usdt_minor: '100000000000',
+  crypto_daily_limit_btc_minor: '100000000000',
+  crypto_withdrawal_count_hourly: '100',
+};
+
 beforeAll(async () => {
   pool = new pg.Pool({ connectionString: DATABASE_URL, max: 8 });
   ledger = new LedgerService(pool);
   port = new FakeCryptoPort();
   app = await boot(makeConfig());
+
+  for (const [key, value] of Object.entries(PINNED)) {
+    await pool.query(`UPDATE platform_settings SET value = $2 WHERE key = $1`, [key, value]);
+  }
+  await app.get(SettingsService).refresh();
 });
 
 afterAll(async () => {

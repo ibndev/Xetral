@@ -21,6 +21,14 @@ export class KycController {
     return { kyc: await this.kyc.mine(claims(request).sub) };
   }
 
+  /** What this customer's verification allows them to move. Public to the
+   *  customer themselves: being refused without being told how to fix it is
+   *  what turns a control into a support ticket. */
+  @Get('limits')
+  async limits(@Req() request: AuthenticatedRequest): Promise<unknown> {
+    return this.kyc.limits(claims(request).sub);
+  }
+
   @Post()
   @HttpCode(200)
   async submit(@Req() request: AuthenticatedRequest, @Body() body: unknown): Promise<KycView> {

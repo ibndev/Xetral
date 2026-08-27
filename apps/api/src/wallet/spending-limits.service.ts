@@ -1,7 +1,8 @@
 import { Injectable, UnprocessableEntityException } from '@nestjs/common';
-import type { PoolClient } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import type { Currency, Money } from '@xetral/shared';
 import { SettingsService } from '../settings/settings.service.js';
+import { DATABASE } from '../tokens.js';
 import { Inject } from '@nestjs/common';
 
 /**
@@ -129,7 +130,15 @@ export interface LimitCheck<C extends Currency> {
 
 @Injectable()
 export class SpendingLimitService {
-  constructor(@Inject(SettingsService) private readonly settings: SettingsService) {}
+  constructor(
+    @Inject(SettingsService) private readonly settings: SettingsService,
+    // Its own pool, used OUTSIDE the ledger's transaction. The tier lookup
+    // happens with `precondition` being built, not while it runs — taking a
+    // second connection inside the entry's transaction is the deadlock this
+    // service's header records, and it must not be reintroduced by a lookup
+    // that looks harmless.
+    @Inject(DATABASE) private readonly pool: Pool,
+  ) {}
 
   /**
    * Builds the precondition to hand to `LedgerService.post`.
@@ -154,7 +163,62 @@ export class SpendingLimitService {
    * because a limit nobody configured must not refuse every withdrawal, and
    * must not silently pretend to cap one either.
    */
+  /**
+   * The ceiling for this movement, which is the LOWER of two different claims.
+   *
+   * The TIER limit says what this customer may move, given what we know about
+   * them. It is per currency and it exists for every tier and every currency
+   * the ledger holds — `kyc_tier_coverage` and the invariant suite make sure of
+   * that, because the alternative is a fallback and a fallback here means an
+   * unverified account is silently unlimited in some currency.
+   *
+   * The FLOW limit says what anybody may move through this particular flow in a
+   * day, whoever they are. It is what an operator narrows during an incident,
+   * and it must keep working while they do — so a tier limit does not replace
+   * it, it competes with it.
+   *
+   * The lower wins, which is the only combination that cannot surprise anyone:
+   * raising a customer's tier can never let them past a flow limit somebody
+   * tightened, and tightening a flow limit can never be undone by a tier.
+   */
   async #amountLimitFor<C extends Currency>(check: LimitCheck<C>): Promise<bigint | undefined> {
+    const tier = await this.#tierLimit(check.userId, check.amount.currency);
+    const flow = await this.#flowLimit(check);
+
+    if (tier === undefined) return flow;
+    if (flow === undefined) return tier;
+    return tier < flow ? tier : flow;
+  }
+
+  /**
+   * What this customer's verification tier allows in this currency, per day.
+   *
+   * Read on every check rather than cached, and that is deliberate. The reason
+   * to lower somebody's tier is usually that something is wrong with their
+   * account, and a ceiling that keeps the old value for thirty seconds after an
+   * operator dropped it is a ceiling that has not been dropped. It is one
+   * indexed lookup on a primary key.
+   *
+   * A missing row returns undefined rather than zero. Zero is a REAL limit here
+   * — it is how "this tier may not move this currency at all" is expressed —
+   * so collapsing "no row" into it would turn a coverage gap into a customer
+   * who cannot move their own money, and nobody would be able to tell the two
+   * apart from the error.
+   */
+  async #tierLimit(userId: string, currency: Currency): Promise<bigint | undefined> {
+    const result = await this.pool.query<{ daily_limit_minor: string }>(
+      `SELECT l.daily_limit_minor
+         FROM users u
+         JOIN kyc_tier_limits l ON l.tier = u.kyc_tier AND l.currency = $2
+        WHERE u.id = $1::bigint`,
+      [userId, currency],
+    );
+    const found = result.rows[0]?.daily_limit_minor;
+    return found === undefined ? undefined : BigInt(found);
+  }
+
+  /** What anybody may move through this flow in a day, whoever they are. */
+  async #flowLimit<C extends Currency>(check: LimitCheck<C>): Promise<bigint | undefined> {
     if (check.scope === 'crypto_withdrawal') {
       return this.settings.cryptoDailyLimitMinor(check.amount.currency);
     }

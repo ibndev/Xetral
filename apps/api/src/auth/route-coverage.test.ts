@@ -207,6 +207,8 @@ describe('the privileged surface is declared as privileged', () => {
       'POST /v1/admin/staff/revoke (admin)',
       'POST /v1/admin/suspense/:id/attribute (finance)',
       'POST /v1/admin/users/:id/status (compliance)',
+      // Deciding how much money may leave an account in a day.
+      'POST /v1/admin/users/:id/tier (compliance)',
     ]);
   });
 });

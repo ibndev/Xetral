@@ -5,6 +5,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import type { Pool } from 'pg';
 import { LedgerService, posting } from '@xetral/ledger';
@@ -139,9 +140,10 @@ export class AdminService {
     const row = found.rows[0];
     if (row === undefined) throw new NotFoundException({ error: 'user_not_found' });
 
-    const [profile, balances, devices, statusHistory] = await Promise.all([
+    const [profile, balances, devices, statusHistory, tierHistory, tierLimits] =
+      await Promise.all([
       this.pool.query(
-        `SELECT u.uuid AS id, u.email, u.status, u.created_at,
+        `SELECT u.uuid AS id, u.email, u.status, u.created_at, u.kyc_tier,
                 k.status::text AS kyc_status, k.full_name, k.bvn_last4, k.phone
            FROM users u
            LEFT JOIN kyc_submissions k
@@ -166,6 +168,21 @@ export class AdminService {
           WHERE c.user_id = $1::bigint ORDER BY c.created_at DESC LIMIT 20`,
         [row.id],
       ),
+      this.pool.query(
+        `SELECT t.from_tier, t.to_tier, t.reason, t.changed_at, a.email AS changed_by
+           FROM kyc_tier_changes t
+           LEFT JOIN users a ON a.id = t.changed_by
+          WHERE t.user_id = $1::bigint ORDER BY t.changed_at DESC LIMIT 20`,
+        [row.id],
+      ),
+      // What this customer's tier actually allows, so an operator looking at a
+      // refused transfer does not have to hold the grid in their head.
+      this.pool.query(
+        `SELECT l.currency, l.daily_limit_minor::text
+           FROM users u JOIN kyc_tier_limits l ON l.tier = u.kyc_tier
+          WHERE u.id = $1::bigint ORDER BY l.currency`,
+        [row.id],
+      ),
     ]);
 
     return {
@@ -173,7 +190,69 @@ export class AdminService {
       balances: balances.rows,
       devices: devices.rows,
       status_history: statusHistory.rows,
+      tier_history: tierHistory.rows,
+      tier_limits: tierLimits.rows,
     };
+  }
+
+  /**
+   * Raises or lowers a customer's verification tier.
+   *
+   * SEPARATE FROM `setUserStatus`, deliberately. Freezing is a protective
+   * action about an account's safety; a tier is a claim about what we know
+   * about a person, and the two answer different questions. Conflating them
+   * would mean unfreezing an account also restored a ceiling somebody removed
+   * for a reason.
+   *
+   * A REASON IS REQUIRED IN BOTH DIRECTIONS. Raising one to enhanced is the act
+   * that decides how much money may leave in a day, and the answer to "who
+   * allowed this" has to exist. Lowering one takes something away from a
+   * customer, which `admin_audit_log`'s CHECK already demands a reason for.
+   */
+  async setUserTier(
+    uuid: string,
+    tier: number,
+    actorUuid: string,
+    reason: string,
+  ): Promise<Record<string, unknown>> {
+    const actorId = await this.#userId(actorUuid);
+
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const updated = await client.query<{ id: string; kyc_tier: number }>(
+        `UPDATE users SET kyc_tier = $2 WHERE uuid = $1::uuid RETURNING id, kyc_tier`,
+        [uuid, tier],
+      );
+      const row = updated.rows[0];
+      if (row === undefined) throw new NotFoundException({ error: 'user_not_found' });
+
+      // The trigger records the change; this fills in WHO and WHY, which the
+      // trigger cannot know. Updating the row it just wrote is safe because
+      // `kyc_tier_changes` is append-only only against later edits — this is
+      // the same statement completing its own record.
+      await client.query(
+        `UPDATE kyc_tier_changes SET changed_by = $2::bigint, reason = $3
+          WHERE id = (SELECT max(id) FROM kyc_tier_changes WHERE user_id = $1::bigint)`,
+        [row.id, actorId, reason],
+      );
+
+      await client.query('COMMIT');
+      return { id: uuid, kyc_tier: row.kyc_tier };
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      if (
+        error !== null &&
+        typeof error === 'object' &&
+        String((error as { message?: string }).message ?? '').includes('rests on the evidence')
+      ) {
+        throw new UnprocessableEntityException({ error: 'tier_skips_evidence' });
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   /**

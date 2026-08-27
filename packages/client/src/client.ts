@@ -156,6 +156,26 @@ export interface KycStatus {
   readonly created_at: string;
 }
 
+/**
+ * What a customer's verification tier allows.
+ *
+ * `daily_limit` is a MINOR-UNIT STRING. A zero here is a real limit, not a
+ * missing value: an unverified account may move no crypto at all, because a
+ * chain transaction is the one movement nobody can recall.
+ */
+export interface KycLimits {
+  /** 0 registered, 1 verified, 2 enhanced. */
+  readonly tier: number;
+  readonly limits: readonly {
+    readonly currency: string;
+    readonly daily_limit: string;
+  }[];
+  /** The next tier this customer can reach BY THEIR OWN ACTION, or null.
+   *  Enhanced is an administrator's judgement about source of funds, so it is
+   *  never offered as something to apply for. */
+  readonly next_tier: number | null;
+}
+
 export interface XetralClientOptions {
   readonly baseUrl: string;
   readonly session: Session;
@@ -398,6 +418,20 @@ export class XetralClient {
   async kyc(): Promise<KycStatus | null> {
     const body = await this.#get<{ kyc: KycStatus | null }>('/v1/kyc');
     return body.kyc;
+  }
+
+  /**
+   * What this customer's verification currently allows them to move.
+   *
+   * The half that makes tiers a product rather than a trap: somebody refused
+   * for exceeding a ceiling can be shown what it is and how to raise it,
+   * instead of an error code they can do nothing with.
+   *
+   * `daily_limit` is a MINOR-UNIT STRING, like every amount that crosses this
+   * boundary. Format it; never turn it into a number.
+   */
+  async kycLimits(): Promise<KycLimits> {
+    return this.#get<KycLimits>('/v1/kyc/limits');
   }
 
   async submitKyc(input: {

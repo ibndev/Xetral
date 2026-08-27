@@ -102,6 +102,10 @@ const API_ERROR_CODES = [
   'case_closed',
   'report_reference_required',
   'signal_not_this_customer',
+  /* A tier granted without the evidence of the one below it. Each tier rests
+     on the one under it, so enhanced due diligence cannot be given to somebody
+     whose identity was never checked. */
+  'tier_skips_evidence',
   'device_not_found',
   'below_minimum_age',
   'forbidden',

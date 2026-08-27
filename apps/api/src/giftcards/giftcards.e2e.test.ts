@@ -80,6 +80,13 @@ async function onboard(instance: INestApplication = app): Promise<Customer> {
      VALUES ($1, 'bitnob', $2)`,
     [row.id, `cus_${randomUUID()}`],
   );
+  // AND THE TIER, because KYC approval sets both in ONE transaction.
+  //
+  // This fixture stands in for that approval, and a fixture that performs
+  // half of an atomic operation is a fixture that tests a state production
+  // cannot reach — here, a customer whom every provider accepts and whose
+  // ceiling is still an unverified account's.
+  await pool.query(`UPDATE users SET kyc_tier = 1 WHERE id = $1::bigint`, [row.id]);
 
   const login = await request(instance.getHttpServer())
     .post('/v1/auth/login')
