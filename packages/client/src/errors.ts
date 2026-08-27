@@ -91,6 +91,9 @@ const API_ERROR_CODES = [
      Refused rather than stored, because a credential nothing reads is one
      somebody believes is live. */
   'credential_not_found',
+  /* A monitoring signal that does not exist, or that a colleague resolved
+     first. One answer for both, so nobody learns which signal ids are real. */
+  'signal_not_found',
   'device_not_found',
   'below_minimum_age',
   'forbidden',

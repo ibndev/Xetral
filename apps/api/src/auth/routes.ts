@@ -181,6 +181,21 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       })
       .staff('POST', '/v1/admin/credentials/:provider/:name', { pin: true, role: 'admin' })
 
+      // THE COMPLIANCE QUEUE, on the `compliance` role — the same people who
+      // review identity, because the two questions are the same one asked at
+      // different moments. Not `dispute_reviewer`: a customer complaint and a
+      // monitoring signal are different jobs, and 018 already made that split
+      // rather than reusing the gift card reviewer.
+      //
+      // Resolving takes a PIN. It is not a money movement, but it is the act
+      // that says a person looked and decided, and that is the record a
+      // regulator inspects.
+      .staff('GET', '/v1/admin/risk/signals', { pin: false, role: 'compliance' })
+      .staff('POST', '/v1/admin/risk/signals/:id/resolve', {
+        pin: true,
+        role: 'compliance',
+      })
+
       .staff('GET', '/v1/admin/settings', { pin: false, role: 'finance' })
       .staff('GET', '/v1/admin/settings/:key/history', { pin: false, role: 'finance' })
       // Changing a fee or a limit affects every customer at once.

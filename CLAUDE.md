@@ -609,6 +609,50 @@ Schema: `packages/ledger/sql/026_provider_credentials.sql`, seeded by
   and the dashboard say so, because a filled box on an operations screen reads
   as "this is running".
 
+### Transaction monitoring — non-obvious rules
+
+Schema: `packages/ledger/sql/027_risk_signals.sql`, seeded by
+`027_risk_signals.seed.sql`. Worker in `apps/api/src/risk/monitoring.service.ts`,
+queue at `/admin/risk`.
+
+- **A signal is an OBSERVATION, never a verdict.** Nothing here refuses,
+  freezes or holds — it runs after the fact by construction. The controls that
+  ACT (the daily ceiling, the velocity rules, the card freezes) run before
+  money moves and are tuned to almost never fire, because a false positive
+  there refuses a customer their own money. Monitoring can afford to be far
+  more suspicious because a false positive costs a reviewer a minute.
+- **Every rule reads POSTINGS**, and `027_risk_signals.test.sql` fails the
+  build if `detect_risk_signals()` mentions `metadata`. A control depending on
+  a key some flow remembered to set switches itself off the first time a new
+  flow forgets — and nothing fails when monitoring stops working.
+- **Thresholds are per currency, in `risk_thresholds`, not in settings keys.**
+  An amount carries units; a kobo figure applied to USDT because both are
+  integers is the same mistake as adding kobo to cents. `risk_currency_coverage`
+  reports a currency the ledger holds and this file does not watch, and the
+  invariant suite fails on one — unmonitored has to be a visible state.
+- **`large_value_minor` is a REGULATORY figure and the seed's is a starting
+  point.** It must be set to what the NFIU currently requires; a programme
+  running on a number somebody copied from a migration is a finding.
+- **The daily transfer ceiling ships EQUAL to the NGN reporting threshold**, so
+  out of the box no single transfer can reach it and `large_value` fires on
+  transfers only if an operator moves one of the two. That is not a fault in
+  either — the ceiling stops the transaction the threshold reports, and the
+  rule still fires on deposits, card settlements and crypto.
+- **`notable_minor` is the floor the proportional rules need.** Without it an
+  account moving ₦2,000 in and out fires `rapid_passthrough` daily, and a rule
+  people learn to ignore is worse than none — the lesson 015 records about
+  alerting. Proved load-bearing by lowering it and watching a test go red.
+- **Every insert is `ON CONFLICT (signal_key) DO NOTHING`**, so the sweep is
+  idempotent and the advisory lock is an optimisation rather than a correctness
+  requirement.
+- **A signal is immutable except for its resolution, and a resolution is
+  final** — with a person and a reason, both by CHECK. A queue cleared with
+  one-word reasons is indistinguishable from one nobody worked, and the reason
+  is the only part a regulator can inspect.
+- **`RISK_MONITOR_INTERVAL_SECONDS` absent is the silent failure.** Nothing
+  errors; the queue is simply empty, which looks exactly like a quiet week. It
+  has a DEFAULT on the worker for that reason, unlike the retention sweep.
+
 ### Disputes — non-obvious rules
 
 Schema: `packages/ledger/sql/018_disputes.sql`.
@@ -1033,6 +1077,8 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/024_sign_in_events.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/025_bvn_uniqueness.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/026_provider_credentials.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/026_provider_credentials.seed.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/027_risk_signals.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/027_risk_signals.seed.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -1058,6 +1104,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/023_entry_status.test.s
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/024_sign_in_events.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/025_bvn_uniqueness.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/026_provider_credentials.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/027_risk_signals.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,
@@ -1098,7 +1145,8 @@ mistake from the internet.
   `DEPOSIT_RECONCILE_INTERVAL_SECONDS`, `CRYPTO_RECONCILE_INTERVAL_SECONDS`,
   `CRYPTO_DEPOSIT_RECONCILE_INTERVAL_SECONDS`,
   `GIFTCARD_RELEASE_INTERVAL_SECONDS`, `NOTIFICATION_INTERVAL_SECONDS`,
-  `ERROR_ALERT_INTERVAL_SECONDS`, `BALANCE_RECONCILE_INTERVAL_SECONDS`) go on exactly one instance —
+  `ERROR_ALERT_INTERVAL_SECONDS`, `BALANCE_RECONCILE_INTERVAL_SECONDS`,
+  `RISK_MONITOR_INTERVAL_SECONDS`) go on exactly one instance —
   `docker-compose.app.yml` does this by blanking them on `api` and setting them
   on `worker`. `NOTIFICATION_INTERVAL_SECONDS` is the one whose absence is
   silent in the worst way: rows accumulate, the API answers "check your email",

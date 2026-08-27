@@ -9,6 +9,7 @@ const TABS = [
   { href: '/admin', label: 'Overview' },
   { href: '/admin/users', label: 'Customers' },
   { href: '/admin/kyc', label: 'Identity' },
+  { href: '/admin/risk', label: 'Compliance' },
   { href: '/admin/suspense', label: 'Suspense' },
   { href: '/admin/giftcards', label: 'Gift cards' },
   { href: '/admin/settings', label: 'Settings' },

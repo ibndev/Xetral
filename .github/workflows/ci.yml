@@ -108,6 +108,8 @@ jobs:
             -f packages/ledger/sql/025_bvn_uniqueness.sql \
             -f packages/ledger/sql/026_provider_credentials.sql \
             -f packages/ledger/sql/026_provider_credentials.seed.sql \
+            -f packages/ledger/sql/027_risk_signals.sql \
+            -f packages/ledger/sql/027_risk_signals.seed.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       - name: Ledger and identity invariants
@@ -142,6 +144,7 @@ jobs:
                    packages/ledger/sql/024_sign_in_events.test.sql \
                    packages/ledger/sql/025_bvn_uniqueness.test.sql \
                    packages/ledger/sql/026_provider_credentials.test.sql \
+                   packages/ledger/sql/027_risk_signals.test.sql \
                    packages/ledger/sql/099_least_privilege.test.sql; do
             echo "== $f"
             psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
@@ -203,6 +206,8 @@ jobs:
             -f packages/ledger/sql/025_bvn_uniqueness.sql \
             -f packages/ledger/sql/026_provider_credentials.sql \
             -f packages/ledger/sql/026_provider_credentials.seed.sql \
+            -f packages/ledger/sql/027_risk_signals.sql \
+            -f packages/ledger/sql/027_risk_signals.seed.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       # ------------------------------------------------------------------

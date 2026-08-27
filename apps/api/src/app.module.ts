@@ -86,6 +86,7 @@ import { AdminDisputeController, DisputeController } from './disputes/dispute.co
 import { DisputeService } from './disputes/dispute.service.js';
 import { RetentionService } from './retention/retention.service.js';
 import { BalanceReconciliationService } from './reconciliation/balance-reconciliation.service.js';
+import { MonitoringService } from './risk/monitoring.service.js';
 import {
   InMemoryRateLimitStore,
   RedisRateLimitStore,
@@ -553,6 +554,22 @@ export class BalanceReconciliationLifecycle implements OnApplicationBootstrap {
 }
 
 /**
+ * Starts the transaction monitoring sweep.
+ *
+ * Its own lifecycle, like every other. This is the one whose absence is
+ * hardest to notice — nothing fails, the queue is simply empty — so it must be
+ * possible to see that it is off without reading a compose file.
+ */
+@Injectable()
+export class MonitoringLifecycle implements OnApplicationBootstrap {
+  constructor(@Inject(MonitoringService) private readonly monitoring: MonitoringService) {}
+
+  onApplicationBootstrap(): void {
+    this.monitoring.start();
+  }
+}
+
+/**
  * Starts the retention sweep.
  *
  * Its own lifecycle rather than sharing one, for the same reason every other
@@ -704,7 +721,9 @@ export class AppModule {
         RetentionService,
         RetentionLifecycle,
         BalanceReconciliationService,
+        MonitoringService,
         BalanceReconciliationLifecycle,
+        MonitoringLifecycle,
         PasswordResetService,
 
         // Registered globally, so it runs for every route including one whose

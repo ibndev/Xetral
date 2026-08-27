@@ -36,7 +36,10 @@ export type AdminAction =
      never the value: this table is append-only, so a secret written into it
      could never be removed — which is exactly why credentials do not go
      through `setting.change`, whose detail IS the new value. */
-  | 'credential.change';
+  | 'credential.change'
+  /* A monitoring signal reviewed and closed. Its `reason` is the reviewer's
+     own words, and it is the part of an AML programme a regulator inspects. */
+  | 'risk.resolve';
 
 export interface AuditEntry {
   /** The actor's UUID, as it appears in an access token. Resolved to the
@@ -51,6 +54,7 @@ export interface AuditEntry {
     | 'kyc'
     | 'staff'
     | 'provider_credential'
+    | 'risk_signal'
     | 'dispute';
   readonly subjectId: string;
   readonly detail?: Record<string, unknown>;

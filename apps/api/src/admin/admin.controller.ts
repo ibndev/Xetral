@@ -5,6 +5,7 @@ import {
   Get,
   HttpCode,
   Inject,
+  NotFoundException,
   Param,
   Post,
   Query,
@@ -16,6 +17,7 @@ import { AdminService } from './admin.service.js';
 import { AuditService } from './audit.service.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { ProviderCredentialService } from '../settings/provider-credentials.service.js';
+import { MonitoringService } from '../risk/monitoring.service.js';
 import { KycService } from '../kyc/kyc.service.js';
 import { ErrorRecorder } from '../observability/error-recorder.service.js';
 import { kycReviewSchema } from '../kyc/dto.js';
@@ -58,6 +60,16 @@ const credentialSchema = z.object({
   secret: z.string().min(1).max(4096),
 });
 
+const queueQuery = z.object({
+  limit: z.coerce.number().int().min(1).max(200).default(100),
+});
+
+/** A minimum length, because "ok" is not a review. The CHECK in the schema
+ *  demands a reason exists; this demands it says something. */
+const resolutionSchema = z.object({
+  resolution: z.string().trim().min(10).max(1000),
+});
+
 const roleSchema = z.object({
   user_id: z.string().uuid(),
   role: z.enum(['giftcard_reviewer', 'compliance', 'support', 'finance', 'admin']),
@@ -78,6 +90,7 @@ export class AdminController {
     @Inject(SettingsService) private readonly settings: SettingsService,
     @Inject(ProviderCredentialService)
     private readonly credentialStore: ProviderCredentialService,
+    @Inject(MonitoringService) private readonly monitoring: MonitoringService,
     @Inject(KycService) private readonly kyc: KycService,
     @Inject(ErrorRecorder) private readonly errors: ErrorRecorder,
   ) {}
@@ -202,6 +215,62 @@ export class AdminController {
       parsed.data.reason,
       ipOf(request),
     );
+  }
+
+  /* --------------------------- risk monitoring ------------------------- */
+
+  /**
+   * The compliance queue: what the rules flagged and nobody has decided about.
+   *
+   * Oldest first, and each row says how many OTHER open signals the same
+   * customer has — one signal is a transaction, several is a pattern, and a
+   * reviewer should know which they are looking at before they open the first.
+   */
+  @Get('risk/signals')
+  async riskSignals(@Query() query: unknown): Promise<{ signals: readonly unknown[] }> {
+    const parsed = queueQuery.safeParse(query);
+    if (!parsed.success) throw invalid(parsed.error.issues);
+    return { signals: await this.monitoring.queue(parsed.data.limit) };
+  }
+
+  /**
+   * Closes one, with a reason.
+   *
+   * The reason is required by a CHECK as well as by this schema. A signal
+   * closed with no explanation is a queue that was cleared rather than worked,
+   * and that distinction is the only part of an AML programme a regulator can
+   * actually inspect.
+   */
+  @Post('risk/signals/:id/resolve')
+  @HttpCode(200)
+  async resolveRiskSignal(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ): Promise<unknown> {
+    const parsed = resolutionSchema.safeParse(body);
+    if (!parsed.success) throw invalid(parsed.error.issues);
+
+    const actor = claims(request).sub;
+    const resolved = await this.monitoring.resolve(id, actor, parsed.data.resolution);
+    if (resolved === undefined) {
+      // One answer for "no such signal" and "already resolved", the same way
+      // the dispute endpoints answer. A reviewer racing a colleague learns
+      // that it is handled; nobody learns which signal ids exist.
+      throw new NotFoundException({ error: 'signal_not_found' });
+    }
+
+    const ip = ipOf(request);
+    await this.audit.record({
+      actorId: actor,
+      action: 'risk.resolve',
+      subjectType: 'risk_signal',
+      subjectId: id,
+      detail: {},
+      reason: parsed.data.resolution,
+      ...(ip === undefined ? {} : { ip }),
+    });
+    return resolved;
   }
 
   /* ------------------------- provider credentials ---------------------- */

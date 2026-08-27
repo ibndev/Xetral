@@ -91,6 +91,10 @@ export function testApiConfig(databaseUrl: string, overrides: Partial<ApiConfig>
     // No timer: the balance suite drives `sweep()` directly, and a background
     // one asking a fake provider under another suite is a flake nobody can read.
     balanceReconcileIntervalSeconds: undefined,
+    // Undefined, so no suite has a sweep firing underneath it on a timer. The
+    // monitoring e2e calls `sweep()` directly, which is also how a reader can
+    // tell the assertion is about the rules rather than about the schedule.
+    riskMonitorIntervalSeconds: undefined,
     reconcileIntervalSeconds: undefined,
     // No grace either — a test that had to wait two minutes for a row to become
     // eligible is a test nobody runs. Zero rather than undefined, which would

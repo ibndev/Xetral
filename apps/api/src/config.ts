@@ -280,6 +280,16 @@ export interface ApiConfig {
    */
   readonly balanceReconcileIntervalSeconds: number | undefined;
 
+  /**
+   * How often the transaction monitoring rules run. ONE INSTANCE.
+   *
+   * Absent means no monitoring at all, and that absence is invisible from
+   * outside: no request fails, nothing errors, and the compliance queue is
+   * simply empty — which looks exactly like a quiet week. Bootstrap says so
+   * loudly for that reason.
+   */
+  readonly riskMonitorIntervalSeconds: number | undefined;
+
   readonly requestRateLimit: {
     readonly windowSeconds: number;
     readonly publicMax: number;
@@ -717,6 +727,7 @@ export function loadConfig(env: Env): ApiConfig {
     ),
     retentionIntervalSeconds: optionalInteger(env, 'RETENTION_INTERVAL_SECONDS'),
     balanceReconcileIntervalSeconds: optionalInteger(env, 'BALANCE_RECONCILE_INTERVAL_SECONDS'),
+    riskMonitorIntervalSeconds: optionalInteger(env, 'RISK_MONITOR_INTERVAL_SECONDS'),
     requestRateLimit: {
       windowSeconds: integer(env, 'REQUEST_RATE_LIMIT_WINDOW_SECONDS', 60),
       // Generous, because an unauthenticated request has only an address to

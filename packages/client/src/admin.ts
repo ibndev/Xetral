@@ -75,6 +75,31 @@ export interface AdminCredential {
   readonly updated_at: string | null;
 }
 
+/**
+ * A transaction the monitoring rules thought worth a look.
+ *
+ * An OBSERVATION, never a verdict. Nothing was refused, frozen or held because
+ * of this — the rules run after the fact, so anything that must decide before
+ * money moves lives in a ledger precondition instead. What this is, is a queue.
+ */
+export interface AdminRiskSignal {
+  readonly id: string;
+  /** 'large_value', 'structuring', 'rapid_passthrough', 'dormant_reactivation'
+   *  or 'crypto_fast_out'. */
+  readonly rule: string;
+  /** The numbers the rule saw, so a reviewer can check its arithmetic rather
+   *  than trust it. Amounts here are STRINGS in minor units, like every other
+   *  amount that crosses this boundary. */
+  readonly detail: Readonly<Record<string, string>>;
+  readonly observed_at: string;
+  readonly user_uuid: string;
+  readonly email: string | null;
+  readonly user_status: string;
+  /** How many OTHER open signals this customer has. One signal is a
+   *  transaction; several is a pattern. */
+  readonly other_open_signals: number;
+}
+
 export interface AdminSetting {
   readonly key: string;
   readonly value: string;
@@ -328,6 +353,24 @@ export class AdminClient {
   async setSetting(key: string, value: string, pin: string): Promise<AdminSetting> {
     return this.#post(`/v1/admin/settings/${encodeURIComponent(key)}`, {
       value,
+      transaction_pin: pin,
+    });
+  }
+
+  /* --------------------------- risk monitoring ------------------------- */
+
+  async riskSignals(): Promise<readonly AdminRiskSignal[]> {
+    const body = await this.#get<{ signals: AdminRiskSignal[] }>('/v1/admin/risk/signals');
+    return body.signals;
+  }
+
+  async resolveRiskSignal(
+    id: string,
+    resolution: string,
+    pin: string,
+  ): Promise<Record<string, unknown>> {
+    return this.#post(`/v1/admin/risk/signals/${encodeURIComponent(id)}/resolve`, {
+      resolution,
       transaction_pin: pin,
     });
   }
