@@ -1,5 +1,6 @@
 export * from './access-token.js';
 export * from './envelope.js';
+export * from './blind-index.js';
 export * from './password.js';
 export * from './pin.js';
 export * from './policy.js';

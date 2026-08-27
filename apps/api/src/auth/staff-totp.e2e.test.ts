@@ -115,6 +115,17 @@ async function signInAgain(operator: Operator): Promise<string> {
  * elevation exists to keep operators out of. Bounded, so a broken clock fails
  * the test rather than hanging it.
  */
+/**
+ * Waits for the TOTP step to roll over, which takes up to thirty seconds.
+ *
+ * The caller must give itself a timeout longer than the suite's default, and
+ * `WAIT_FOR_STEP_TIMEOUT_MS` below is that number. Without it the test's own
+ * 30s ceiling and this 35s deadline race, so the suite goes red roughly
+ * whenever the wait starts near the beginning of a step — a flake that reads
+ * as a product failure in the staff second factor.
+ */
+const WAIT_FOR_STEP_TIMEOUT_MS = 90_000;
+
 async function waitForNextCode(code: () => string): Promise<void> {
   const spent = code();
   const deadline = Date.now() + 35_000;
@@ -304,7 +315,9 @@ describe('the staff surface', () => {
     expect(acting.body.error).toBe('totp_required');
   });
 
-  it('acts with a valid code, and stays elevated afterwards', async () => {
+  it(
+    'acts with a valid code, and stays elevated afterwards',
+    async () => {
     // The reason elevation exists. Codes are single-use and change every
     // thirty seconds, so demanding a fresh one per action would refuse a
     // reviewer on their second approval — and the predictable outcome of that
@@ -340,7 +353,13 @@ describe('the staff surface', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({ status: 'frozen', reason: 'second action, elevated', transaction_pin: PIN })
       .expect(200);
-  });
+    },
+    // Longer than the suite default, because this is the one test that waits
+    // for a step boundary — up to thirty seconds — inside a thirty-second
+    // ceiling. It went red under load for exactly that reason and read as a
+    // failure of the second factor.
+    WAIT_FOR_STEP_TIMEOUT_MS,
+  );
 
   it('still requires the PIN inside an elevated window', async () => {
     const operator = await register();

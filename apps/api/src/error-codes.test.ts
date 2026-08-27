@@ -61,6 +61,18 @@ function emittedCodes(): ReadonlySet<string> {
       const code = match[1];
       if (code !== undefined) found.add(code);
     }
+    // A code chosen by a ternary is invisible to the pattern above, because
+    // what follows `error:` is an expression rather than a literal. Two codes
+    // were reaching customers that way with no client-side name, and the
+    // scanner reported full coverage — the same shape as the route-coverage
+    // test walking its own hand-written list.
+    for (const match of text.matchAll(
+      /error:\s*[^,\n]*?\?\s*'([a-z_]+)'\s*:\s*'([a-z_]+)'/g,
+    )) {
+      for (const code of [match[1], match[2]]) {
+        if (code !== undefined) found.add(code);
+      }
+    }
   }
   return found;
 }

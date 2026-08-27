@@ -77,6 +77,16 @@ const API_ERROR_CODES = [
   'account_not_active',
   'account_closed',
   'kyc_required',
+  /* identity review. The first two were reaching customers with no name here
+     at all: they are chosen by a ternary, which the API-side scanner could not
+     see until it was taught to read one. */
+  'already_verified',
+  'review_in_progress',
+  /* One person, one account. Answered to a REVIEWER at approval, never to the
+     customer at submission — a form that said "that BVN is already
+     registered" would confirm to anybody holding a stolen BVN that its owner
+     banks here. */
+  'bvn_already_verified',
   'device_not_found',
   'below_minimum_age',
   'forbidden',

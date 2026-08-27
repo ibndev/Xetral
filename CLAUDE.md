@@ -536,6 +536,43 @@ Schema: `packages/ledger/sql/024_sign_in_events.sql`. Service in
   setting `apply_retention()` reads, so the sweep and the trigger cannot
   disagree about which rows are still evidence.
 
+### One person, one account — non-obvious rules
+
+Schema: `packages/ledger/sql/025_bvn_uniqueness.sql`. Primitive in
+`packages/identity/src/blind-index.ts`.
+
+- **Every per-customer control assumes a person cannot become several
+  customers.** The daily ceiling, the new-recipient count, the hourly
+  velocity — all per customer, and all meaningless if one BVN can open twenty
+  accounts. Nothing stopped that.
+- **`bvn_sealed` cannot answer "is this BVN already here?"** The envelope's IV
+  is random, so one BVN sealed twice is two different strings. `bvn_last4`
+  collides one submission in ten thousand, so a rule built on it would refuse
+  honest customers.
+- **A blind index is an HMAC, and the key is what makes it safe.** A BVN is
+  eleven digits: an unkeyed digest of one is a few hours of hashing away from
+  being the BVN.
+- **`KYC_BLIND_INDEX_KEY` is SEPARATE from the encryption keyring.** A blind
+  index cannot have two live keys — matching requires exactly one — so
+  rotating it means recomputing every fingerprint with
+  `scripts/backfill-bvn-fingerprint.mjs`. Tying it to a keyring that rotates
+  for unrelated reasons would break the control at whatever moment somebody
+  rotated the other thing.
+- **The column is NOT NULL, and 025 REFUSES to apply to a database that
+  already holds submissions.** A nullable fingerprint is the silent-off
+  failure: one submission written without one slips past the unique index and
+  nothing fails. The BVNs are sealed, so only the application can backfill.
+- **It refuses at APPROVAL, not at submission.** A form answering "that BVN is
+  already registered" confirms, to anybody holding a stolen BVN, that its
+  owner banks here. `kyc_bvn_collisions` shows the reviewer the collision
+  first — and carries no BVN and no fingerprint.
+- **The unique index is partial on `approved`.** Pending must be accepted so a
+  reviewer can decide; rejected must not block a customer whose first
+  photograph was unreadable.
+- **`kyc_blind_index_versions` must report exactly one version**, and the
+  invariant suite fails otherwise. While two are in use the index cannot see
+  across the boundary and two accounts on one BVN are both approvable.
+
 ### Disputes — non-obvious rules
 
 Schema: `packages/ledger/sql/018_disputes.sql`.
@@ -957,6 +994,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/020_balance_reconciliat
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/021_flow_velocity.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/023_entry_status.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/024_sign_in_events.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/025_bvn_uniqueness.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -980,6 +1018,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/019_retention.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/020_balance_reconciliation.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/023_entry_status.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/024_sign_in_events.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/025_bvn_uniqueness.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

@@ -9,8 +9,8 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import type { Pool } from 'pg';
-import { seal } from '@xetral/identity';
-import type { Keyring } from '@xetral/identity';
+import { blindIndex, seal } from '@xetral/identity';
+import type { BlindIndexKey, Keyring } from '@xetral/identity';
 import { API_CONFIG, DATABASE } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
 import { AuditService } from '../admin/audit.service.js';
@@ -101,8 +101,9 @@ export class KycService {
 
     const inserted = await this.pool.query<KycRow>(
       `INSERT INTO kyc_submissions
-         (user_id, full_name, date_of_birth, phone, bvn_sealed, bvn_last4, address)
-       VALUES ($1::bigint, $2, $3::date, $4, $5, $6, $7)
+         (user_id, full_name, date_of_birth, phone, bvn_sealed, bvn_last4, address,
+          bvn_fingerprint)
+       VALUES ($1::bigint, $2, $3::date, $4, $5, $6, $7, $8)
        RETURNING id, uuid, user_id, status::text, full_name, bvn_last4,
                  rejection_reason, created_at`,
       [
@@ -115,6 +116,11 @@ export class KycService {
         seal(body.bvn, this.#keyring()),
         body.bvn.slice(-4),
         body.address,
+        // Deterministic and keyed, so two accounts on one BVN collide in the
+        // unique index while nobody reading this table learns a BVN. The
+        // sealed column cannot do this job: its IV is random, so one BVN
+        // sealed twice is two different strings.
+        blindIndex(body.bvn, this.#blindIndexKey()),
       ],
     );
 
@@ -188,6 +194,19 @@ export class KycService {
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');
+      // ONE PERSON, ONE ACCOUNT. `kyc_one_approved_per_bvn` refuses a second
+      // approved submission on the same BVN, and it is the database that
+      // refuses rather than a check up here — a reviewer working a queue at
+      // speed is exactly who a pre-check races. The collision is visible in
+      // `kyc_bvn_collisions` before they click; this is what happens if they
+      // did not look, or if two reviewers clicked at once.
+      if (
+        error !== null &&
+        typeof error === 'object' &&
+        (error as { constraint?: string }).constraint === 'kyc_one_approved_per_bvn'
+      ) {
+        throw new ConflictException({ error: 'bvn_already_verified' });
+      }
       throw error;
     } finally {
       client.release();
@@ -244,6 +263,23 @@ export class KycService {
   }
 
   /* ------------------------------ helpers ------------------------------ */
+
+  /**
+   * REFUSES rather than skipping the fingerprint.
+   *
+   * The same shape as `#keyring()` above and for the same reason: a submission
+   * written without one would slip past `kyc_one_approved_per_bvn`, and
+   * nothing anywhere would fail. A control that switches itself off when a
+   * configuration value is missing is worse than no control, because it is
+   * trusted.
+   */
+  #blindIndexKey(): BlindIndexKey {
+    const key = this.config.kycBlindIndexKey;
+    if (key === undefined) {
+      throw new ServiceUnavailableException({ error: 'encryption_not_configured' });
+    }
+    return key;
+  }
 
   #keyring(): Keyring {
     const keyring = this.config.encryptionKeyring;

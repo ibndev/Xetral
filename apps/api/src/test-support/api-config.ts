@@ -11,6 +11,18 @@ import type { ApiConfig } from '../config.js';
  * still exercise the old shape means the tests agree with each other and not
  * with production.
  */
+/**
+ * MODULE SCOPE, not per call, unlike the two keyrings below it.
+ *
+ * A blind index only works if every process that writes one uses the same key,
+ * and a suite that builds two apps against one database would otherwise give
+ * them two — so a duplicate BVN submitted through the second would not collide
+ * with the first, and the test asserting it does would fail for the harness
+ * rather than the product. That is the trap the staging suite already fell
+ * into once with a per-app keyring.
+ */
+const blindIndexKey = randomBytes(32);
+
 export function testApiConfig(databaseUrl: string, overrides: Partial<ApiConfig> = {}): ApiConfig {
   const signing = { version: 'v1', secret: randomBytes(32) };
   const sealing = { version: 'v1', key: randomBytes(32) };
@@ -55,6 +67,10 @@ export function testApiConfig(databaseUrl: string, overrides: Partial<ApiConfig>
     // A real keyring, not undefined: a suite that never seals anything cannot
     // catch a sealing path that was silently skipped.
     encryptionKeyring: { current: sealing, accepted: [sealing] },
+    // Likewise real. Left undefined, every KYC submission in the e2e suites
+    // would refuse, and the duplicate-BVN rule would be a schema object no
+    // test ever reached.
+    kycBlindIndexKey: { version: 'v1', key: blindIndexKey },
     vtpassBaseUrl: undefined,
     vtpassApiKey: undefined,
     vtpassSecretKey: undefined,

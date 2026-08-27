@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer';
-import type { AccessTokenKey, AccessTokenKeyring, EncryptionKey, Keyring } from '@xetral/identity';
+import type { AccessTokenKey, AccessTokenKeyring, BlindIndexKey, EncryptionKey, Keyring } from '@xetral/identity';
 import type { NgnAmountUnit } from '@xetral/providers';
 import { ACCESS_TOKEN_TTL_SECONDS, REFRESH_TOKEN_TTL_SECONDS } from '@xetral/identity';
 
@@ -88,6 +88,24 @@ export interface ApiConfig {
    * the logs would say which rows were written before the key arrived.
    */
   readonly encryptionKeyring: Keyring | undefined;
+
+  /**
+   * The key that fingerprints a BVN so two accounts cannot be opened on one.
+   *
+   * SEPARATE FROM THE ENVELOPE KEYRING, and that is not tidiness. A blind
+   * index cannot have two live keys the way the keyring can — matching
+   * requires exactly one — so its lifecycle is different: rotating it means
+   * recomputing every fingerprint, and until that finishes the uniqueness rule
+   * cannot see across the boundary. Tying it to a key that rotates for
+   * unrelated reasons would break the control silently, at whatever moment
+   * somebody rotated the other thing.
+   *
+   * Optional as config and REQUIRED by the route that writes one, exactly like
+   * the keyring. A submission cannot exist without a sealed BVN, and it now
+   * cannot exist without a fingerprint either — so there is no state in which
+   * this is absent and identity review quietly stops catching duplicates.
+   */
+  readonly kycBlindIndexKey: BlindIndexKey | undefined;
 
   /** VTpass — airtime, data, utilities. `https://vtpass.com` (sandbox:
    *  `https://sandbox.vtpass.com`); the endpoint table adds `/api/...`.
@@ -484,6 +502,39 @@ function parseEncryptionKeyring(env: Env): Keyring | undefined {
   return { current, accepted };
 }
 
+/**
+ * `v1:<base64>` — ONE key, carrying its own version.
+ *
+ * Not a keyring, deliberately, and not the same parser: a keyring's whole
+ * point is that several keys are accepted at once, which is exactly what a
+ * blind index cannot do. Sharing `parseEncryptionKeyring` would have made it
+ * expressible to configure two, and the second would silently never match
+ * anything.
+ *
+ * At least 32 bytes rather than exactly 32: this keys an HMAC, which takes a
+ * key of any length, unlike AES-256 which takes precisely one.
+ */
+function parseBlindIndexKey(env: Env): BlindIndexKey | undefined {
+  const raw = optional(env, 'KYC_BLIND_INDEX_KEY');
+  if (raw === undefined) return undefined;
+
+  const separator = raw.indexOf(':');
+  if (separator === -1) {
+    throw new ConfigError(`KYC_BLIND_INDEX_KEY must look like 'v1:<base64>'`);
+  }
+  const version = raw.slice(0, separator);
+  if (!/^v[0-9]+$/.test(version)) {
+    throw new ConfigError(`KYC_BLIND_INDEX_KEY version must look like 'v1', got '${version}'`);
+  }
+  const key = Buffer.from(raw.slice(separator + 1), 'base64');
+  if (key.length < 32) {
+    throw new ConfigError(
+      `KYC_BLIND_INDEX_KEY must decode to at least 32 bytes, got ${key.length}`,
+    );
+  }
+  return { version, key };
+}
+
 /** Minor units, parsed from a STRING and never a JSON number — the same rule
  *  as everywhere else money is read from the outside world. */
 function minorUnits(env: Env, key: string): bigint | undefined {
@@ -633,6 +684,7 @@ export function loadConfig(env: Env): ApiConfig {
     bitnobApiKey: optional(env, 'BITNOB_API_KEY'),
     bitnobWebhookSecret: optional(env, 'BITNOB_WEBHOOK_SECRET'),
     encryptionKeyring: parseEncryptionKeyring(env),
+    kycBlindIndexKey: parseBlindIndexKey(env),
     vtpassBaseUrl: optional(env, 'VTPASS_BASE_URL'),
     vtpassApiKey: optional(env, 'VTPASS_API_KEY'),
     vtpassSecretKey: optional(env, 'VTPASS_SECRET_KEY'),
