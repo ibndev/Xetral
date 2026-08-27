@@ -884,6 +884,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/018_disputes.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/019_retention.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/020_balance_reconciliation.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/021_flow_velocity.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/022_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/003_cards.test.sql
@@ -904,6 +905,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/017_transfer_velocity.t
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/018_disputes.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/019_retention.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/020_balance_reconciliation.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/022_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,
 # Redis for the rate-limiter contract.

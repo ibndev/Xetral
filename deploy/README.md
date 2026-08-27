@@ -115,3 +115,42 @@ production's sealed envelopes.
 without a rebuild, and promoting while the old primary is still writing gives
 two databases that both believe they are authoritative — which for a ledger
 means two divergent sets of postings and no way to say which is real.
+
+## The application's database role
+
+The API must NOT connect as the role that owns the schema, and this is the one
+deployment step where the reason is worth reading rather than skimming.
+
+`011_ledger_immutability.sql` puts a trigger on `journal_entries` and
+`postings` that refuses every UPDATE and DELETE. A table's OWNER can turn that
+trigger off:
+
+```sql
+ALTER TABLE postings DISABLE TRIGGER USER;   -- ALTER TABLE
+UPDATE postings SET amount_minor = amount_minor + 500000;
+```
+
+So while the application owns those tables, the immutability guarantee is
+really "nobody runs two statements" — one injection reaching a second
+statement, or one migration written in a hurry, and financial history is
+rewritable with nothing left behind but a drift figure.
+
+`022_least_privilege.sql` creates `xetral_app`, which owns nothing, cannot
+create a table, holds no DELETE on any table in the database, and has UPDATE
+revoked on every append-only table. Deletion happens only through
+`apply_retention()`, which runs as the owner and names its tables literally.
+
+**Migrations run as the owner. The application runs as `xetral_app`.**
+
+```bash
+# Once, as the owner, after the migrations:
+psql -d xetral -c "ALTER ROLE xetral_app LOGIN PASSWORD '<generated>'"
+psql -d xetral -c "GRANT CONNECT ON DATABASE xetral TO xetral_app"
+```
+
+Then point `DATABASE_URL` at `xetral_app`. The password is not in any
+migration, because a password in a migration is a password in git.
+
+The whole end-to-end suite is run against this role in CI, so a change that
+needs a privilege the application should not have fails the build rather than
+being discovered in production.

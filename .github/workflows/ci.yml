@@ -102,7 +102,8 @@ jobs:
             -f packages/ledger/sql/018_disputes.sql \
             -f packages/ledger/sql/019_retention.sql \
             -f packages/ledger/sql/020_balance_reconciliation.sql \
-            -f packages/ledger/sql/021_flow_velocity.sql
+            -f packages/ledger/sql/021_flow_velocity.sql \
+            -f packages/ledger/sql/022_least_privilege.sql
 
       - name: Ledger and identity invariants
         run: |
@@ -131,7 +132,8 @@ jobs:
                    packages/ledger/sql/017_transfer_velocity.test.sql \
                    packages/ledger/sql/018_disputes.test.sql \
                    packages/ledger/sql/019_retention.test.sql \
-                   packages/ledger/sql/020_balance_reconciliation.test.sql; do
+                   packages/ledger/sql/020_balance_reconciliation.test.sql \
+                   packages/ledger/sql/022_least_privilege.test.sql; do
             echo "== $f"
             psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
               -f "$f" 2>&1 | tee "/tmp/$(basename "$f").out"
@@ -186,7 +188,8 @@ jobs:
             -f packages/ledger/sql/018_disputes.sql \
             -f packages/ledger/sql/019_retention.sql \
             -f packages/ledger/sql/020_balance_reconciliation.sql \
-            -f packages/ledger/sql/021_flow_velocity.sql
+            -f packages/ledger/sql/021_flow_velocity.sql \
+            -f packages/ledger/sql/022_least_privilege.sql
 
       # ------------------------------------------------------------------
       # Dependency scanning.
@@ -245,8 +248,22 @@ jobs:
       # ledger schema. The second is the only check that the adapter's entry
       # kinds and account roles actually exist as enum values -- TypeScript is
       # perfectly happy with a literal the database has never heard of.
-      - name: End-to-end (real Postgres and Redis)
+      # THE E2E SUITE RUNS AS THE RESTRICTED ROLE, not as the schema owner.
+      #
+      # Running it as the owner proves the product works with privileges the
+      # application will not have in production — which is exactly how a query
+      # needing DELETE, or a migration-shaped statement, reaches a deploy.
+      # Doing it this way already caught a test that deleted a settings row.
+      - name: Grant the application role a login
+        run: |
+          psql -h localhost -U xetral -d xetral \
+            -c "ALTER ROLE xetral_app LOGIN PASSWORD 'ci-only'" \
+            -c "GRANT CONNECT ON DATABASE xetral TO xetral_app"
+
+      - name: End-to-end (real Postgres and Redis, as xetral_app)
         run: npm run test:e2e
+        env:
+          DATABASE_URL: postgres://xetral_app:ci-only@localhost:5432/xetral
 
       - run: npm run build
 

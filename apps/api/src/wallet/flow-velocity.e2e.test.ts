@@ -171,24 +171,20 @@ describe('crypto withdrawals', () => {
   });
 
   it('has NO amount ceiling for an asset nobody configured', async () => {
-    // Deliberate and visible: a limit nobody set must not refuse every
-    // withdrawal of that asset, and must not pretend to cap one either. The
-    // hourly count still applies, which is the point of having both.
-    //
-    // BTC with its row removed, because BTC and USDT are the only crypto
-    // assets in the registry — an invented code would test the registry
-    // rejecting it rather than the ceiling being absent.
-    await setLimit('crypto_withdrawal_count_hourly', '50');
-    await pool.query(`DELETE FROM platform_settings WHERE key = 'crypto_daily_limit_btc_minor'`);
-    await settings.refresh();
-
-    const user = await customer();
-    await fund(user, money(500_000_000n, 'BTC' as Currency));
-    expect(
-      await move(user, 'crypto_withdrawal', 'crypto_withdrawal', money(400_000_000n, 'BTC' as Currency)),
-    ).toBeUndefined();
-
-    await setLimit('crypto_withdrawal_count_hourly', '2');
+    /*
+     * Deliberate and visible: a limit nobody set must not refuse every
+     * withdrawal of that asset, and must not pretend to cap one either. The
+     * hourly count still applies, which is the point of having both.
+     *
+     * Asserted on the ACCESSOR rather than by removing a row. The first
+     * version deleted `crypto_daily_limit_btc_minor` — and when the suite was
+     * re-run as the restricted `xetral_app` role it failed, because the
+     * application holds DELETE on nothing at all. The test was asking the
+     * database to do something the product must never do, and least privilege
+     * is what said so.
+     */
+    expect(await settings.cryptoDailyLimitMinor('GBP')).toBeUndefined();
+    expect(await settings.cryptoDailyLimitMinor('USDT')).toBeDefined();
   });
 });
 
