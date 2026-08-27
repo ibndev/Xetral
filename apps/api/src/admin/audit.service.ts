@@ -31,7 +31,12 @@ export type AdminAction =
   /* A dispute resolved. Recorded whichever way it went: an upheld one moved
      money, and a rejected one is a decision a customer may come back about. */
   | 'dispute.accept'
-  | 'dispute.reject';
+  | 'dispute.reject'
+  /* A provider credential replaced. Recorded with the four-character HINT and
+     never the value: this table is append-only, so a secret written into it
+     could never be removed — which is exactly why credentials do not go
+     through `setting.change`, whose detail IS the new value. */
+  | 'credential.change';
 
 export interface AuditEntry {
   /** The actor's UUID, as it appears in an access token. Resolved to the
@@ -45,6 +50,7 @@ export interface AuditEntry {
     | 'giftcard'
     | 'kyc'
     | 'staff'
+    | 'provider_credential'
     | 'dispute';
   readonly subjectId: string;
   readonly detail?: Record<string, unknown>;

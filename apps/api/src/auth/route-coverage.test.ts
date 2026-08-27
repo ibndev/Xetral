@@ -159,6 +159,11 @@ describe('the privileged surface is declared as privileged', () => {
   it('lists exactly the routes only staff can reach', () => {
     expect(staffRoutes.map((r) => `${r.method} ${r.path} (${r.role})`).sort()).toEqual([
       'GET /v1/admin/audit (admin)',
+      // Provider credentials. `admin` on all three: the write decides whether
+      // money can move at all, and the reads are a map of which integrations
+      // are live.
+      'GET /v1/admin/credentials (admin)',
+      'GET /v1/admin/credentials/:provider/:name/rotations (admin)',
       // The complaints queue. Its own role rather than the gift card
       // reviewer's — a different job with a different risk.
       'GET /v1/admin/disputes (dispute_reviewer)',
@@ -180,6 +185,7 @@ describe('the privileged surface is declared as privileged', () => {
       // recurrence reopens the fingerprint by itself.
       // Upholding a dispute pays money out of our own account, so it takes a
       // PIN and — through the guard — a fresh second factor.
+      'POST /v1/admin/credentials/:provider/:name (admin)',
       'POST /v1/admin/disputes/:id/resolve (dispute_reviewer)',
       'POST /v1/admin/errors/:fingerprint/resolve (admin)',
       'POST /v1/admin/giftcards/:id/clawback (giftcard_reviewer)',

@@ -15,6 +15,7 @@ import type { AuthenticatedRequest } from '../auth/auth.guard.js';
 import { AdminService } from './admin.service.js';
 import { AuditService } from './audit.service.js';
 import { SettingsService } from '../settings/settings.service.js';
+import { ProviderCredentialService } from '../settings/provider-credentials.service.js';
 import { KycService } from '../kyc/kyc.service.js';
 import { ErrorRecorder } from '../observability/error-recorder.service.js';
 import { kycReviewSchema } from '../kyc/dto.js';
@@ -44,6 +45,19 @@ const settingSchema = z.object({
   value: z.string().trim().min(1).max(500),
 });
 
+/**
+ * A pasted provider credential.
+ *
+ * NOT trimmed by zod, and the length ceiling is generous. Some providers issue
+ * keys with meaningful trailing characters, and a schema that quietly rewrote
+ * one would produce a credential that authenticates nothing — which presents
+ * as the provider rejecting every request rather than as a mistake here. The
+ * service trims exactly once, at the point where it also refuses an empty one.
+ */
+const credentialSchema = z.object({
+  secret: z.string().min(1).max(4096),
+});
+
 const roleSchema = z.object({
   user_id: z.string().uuid(),
   role: z.enum(['giftcard_reviewer', 'compliance', 'support', 'finance', 'admin']),
@@ -62,6 +76,8 @@ export class AdminController {
     @Inject(AdminService) private readonly admin: AdminService,
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(SettingsService) private readonly settings: SettingsService,
+    @Inject(ProviderCredentialService)
+    private readonly credentialStore: ProviderCredentialService,
     @Inject(KycService) private readonly kyc: KycService,
     @Inject(ErrorRecorder) private readonly errors: ErrorRecorder,
   ) {}
@@ -186,6 +202,72 @@ export class AdminController {
       parsed.data.reason,
       ipOf(request),
     );
+  }
+
+  /* ------------------------- provider credentials ---------------------- */
+
+  /**
+   * Every slot and whether it is filled. NEVER what is in one.
+   *
+   * There is no companion endpoint that reads a credential back. That is the
+   * design rather than an omission: a key goes in and the only thing that ever
+   * reads it is the adapter that uses it, in process. An operator confirming
+   * they pasted the right thing has the four-character hint.
+   */
+  @Get('credentials')
+  async credentials(): Promise<{ credentials: readonly unknown[] }> {
+    return { credentials: await this.credentialStore.status() };
+  }
+
+  /** That a credential was replaced, by whom, and when — never what it was.
+   *  The whole difference from `platform_settings_history`, which records
+   *  every value a row has ever held. */
+  @Get('credentials/:provider/:name/rotations')
+  async credentialRotations(
+    @Param('provider') provider: string,
+    @Param('name') name: string,
+  ): Promise<{ rotations: readonly unknown[] }> {
+    return { rotations: await this.credentialStore.rotations(provider, name) };
+  }
+
+  /**
+   * Pastes a new credential.
+   *
+   * The audit entry records the slot and the HINT, never the value — unlike
+   * `setting.change` below, which records the value because for a fee that is
+   * the point. `admin_audit_log` is append-only, so a secret written there
+   * could never be removed.
+   */
+  @Post('credentials/:provider/:name')
+  @HttpCode(200)
+  async setCredential(
+    @Req() request: AuthenticatedRequest,
+    @Param('provider') provider: string,
+    @Param('name') name: string,
+    @Body() body: unknown,
+  ): Promise<unknown> {
+    const parsed = credentialSchema.safeParse(body);
+    if (!parsed.success) throw invalid(parsed.error.issues);
+
+    const actor = claims(request).sub;
+    const updated = await this.credentialStore.set(
+      provider,
+      name,
+      parsed.data.secret,
+      actor,
+    );
+
+    const ip = ipOf(request);
+    await this.audit.record({
+      actorId: actor,
+      action: 'credential.change',
+      subjectType: 'provider_credential',
+      subjectId: `${provider}.${name}`,
+      // The hint, and only because it is already the safest thing we store.
+      detail: { hint: updated.hint ?? '' },
+      ...(ip === undefined ? {} : { ip }),
+    });
+    return updated;
   }
 
   /* ------------------------------ settings ----------------------------- */

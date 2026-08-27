@@ -573,6 +573,42 @@ Schema: `packages/ledger/sql/025_bvn_uniqueness.sql`. Primitive in
   invariant suite fails otherwise. While two are in use the index cannot see
   across the boundary and two accounts on one BVN are both approvable.
 
+### Provider credentials — non-obvious rules
+
+Schema: `packages/ledger/sql/026_provider_credentials.sql`, seeded by
+`026_provider_credentials.seed.sql`. Screen at `/admin/credentials`.
+
+- **A secret is NOT a `platform_settings` row**, and the reason is two features
+  of that table. `platform_settings_history` records every value a row has ever
+  held, and `POST /v1/admin/settings/:key` writes the new value into the
+  append-only audit log. Both are exactly right for a fee; applied to an API
+  key, rotating one would leave the compromised value in two tables that can
+  never be scrubbed.
+- **A credential goes IN and never comes back out over HTTP.** There is no
+  endpoint that returns one — not sealed, not masked. `secretFor()` is for an
+  adapter, in process; `status()` is what the dashboard sees. An e2e asserts
+  the key appears in no admin response body.
+- **The hint is FOUR characters, by CHECK.** "Just enough to recognise it"
+  becomes "most of it" the first time somebody is debugging in a hurry, and
+  then a dashboard screenshot carries a working credential — the same lesson
+  `cards.last4` records.
+- **The rotation log records WHO AND WHEN AND NEVER WHAT**, is written by
+  trigger rather than by the endpoint (so a psql prompt cannot skip it), and is
+  append-only.
+- **The database is authoritative; the environment is the fallback** — the same
+  order as settings, and the reason a key can be replaced during an incident
+  without a deploy. It fails silently the other way, so bootstrap names every
+  environment credential the database is overriding.
+- **The cache is FIVE seconds, not thirty.** The reason to replace one of these
+  is usually that it has leaked, and a key that keeps working for half a minute
+  after an operator revoked it is not revoked. `set()` clears its own entry.
+- **A slot must exist in the catalogue**, or the paste is refused. A credential
+  nothing reads is one an operator believes is live.
+- **`in_use = FALSE` marks a slot documented ahead of its adapter** — Dojah's
+  are, today. The key is stored safely and read by nothing, and both the API
+  and the dashboard say so, because a filled box on an operations screen reads
+  as "this is running".
+
 ### Disputes — non-obvious rules
 
 Schema: `packages/ledger/sql/018_disputes.sql`.
@@ -995,6 +1031,8 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/021_flow_velocity.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/023_entry_status.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/024_sign_in_events.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/025_bvn_uniqueness.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/026_provider_credentials.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/026_provider_credentials.seed.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -1019,6 +1057,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/020_balance_reconciliat
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/023_entry_status.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/024_sign_in_events.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/025_bvn_uniqueness.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/026_provider_credentials.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

@@ -91,7 +91,11 @@ DECLARE
         -- alike. Its own trigger permits a DELETE only for rows past the
         -- retention window; taking the grant away as well means the
         -- application cannot even attempt one, at any age.
-        'sign_in_events'
+        'sign_in_events',
+        -- Who replaced a provider credential and when. It holds no secret,
+        -- and it is the row somebody reads when asking how a key changed
+        -- during an incident.
+        'provider_credential_rotations'
     ];
     v_table TEXT;
 BEGIN

@@ -163,6 +163,24 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // Moves real money to a named customer.
       .staff('POST', '/v1/admin/suspense/:id/attribute', { pin: true, role: 'finance' })
 
+      // PROVIDER CREDENTIALS, and `admin` rather than `finance`.
+      //
+      // Replacing a provider key is not adjusting a fee: it is the action that
+      // decides whether money can move at all, and a wrong one presents as
+      // every card declining or every webhook answering 401. It also sits
+      // beside the role grants for a reason — both are the privileges that
+      // create every other privilege.
+      //
+      // The listing needs `admin` too. It carries no secret, but it is a map
+      // of which integrations are live and which are unconfigured, which is
+      // the first thing worth knowing to somebody probing.
+      .staff('GET', '/v1/admin/credentials', { pin: false, role: 'admin' })
+      .staff('GET', '/v1/admin/credentials/:provider/:name/rotations', {
+        pin: false,
+        role: 'admin',
+      })
+      .staff('POST', '/v1/admin/credentials/:provider/:name', { pin: true, role: 'admin' })
+
       .staff('GET', '/v1/admin/settings', { pin: false, role: 'finance' })
       .staff('GET', '/v1/admin/settings/:key/history', { pin: false, role: 'finance' })
       // Changing a fee or a limit affects every customer at once.

@@ -52,6 +52,29 @@ export interface AdminUserDetail {
 /** Mirrors `SettingView` on the server, field for field. It did not, once:
  *  `value_type`/`min_value`/`max_value` here against `type`/`min`/`max` there
  *  rendered every bound as "min undefined" and every boolean as a text box. */
+/**
+ * A provider credential slot, and whether it is filled.
+ *
+ * THERE IS DELIBERATELY NO FIELD HERE THAT COULD HOLD A SECRET. The API has no
+ * endpoint that returns one — not sealed, not masked — so this type could not
+ * carry one even if somebody added the field. `hint` is the last four
+ * characters, which answers "is this the key I pasted?" and nothing else.
+ */
+export interface AdminCredential {
+  readonly provider: string;
+  readonly name: string;
+  readonly label: string;
+  readonly description: string;
+  /** The environment variable this slot falls back to when no row is stored. */
+  readonly env_var: string;
+  /** FALSE for a slot documented ahead of its adapter. A filled box would
+   *  otherwise imply an integration that is running. */
+  readonly in_use: boolean;
+  readonly is_set: boolean;
+  readonly hint: string | null;
+  readonly updated_at: string | null;
+}
+
 export interface AdminSetting {
   readonly key: string;
   readonly value: string;
@@ -307,6 +330,38 @@ export class AdminClient {
       value,
       transaction_pin: pin,
     });
+  }
+
+  /* ------------------------ provider credentials ----------------------- */
+
+  async credentials(): Promise<readonly AdminCredential[]> {
+    const body = await this.#get<{ credentials: AdminCredential[] }>('/v1/admin/credentials');
+    return body.credentials;
+  }
+
+  /** That a credential was replaced, by whom and when — never what it was. */
+  async credentialRotations(
+    provider: string,
+    name: string,
+  ): Promise<readonly Record<string, unknown>[]> {
+    const body = await this.#get<{ rotations: Record<string, unknown>[] }>(
+      `/v1/admin/credentials/${encodeURIComponent(provider)}/${encodeURIComponent(name)}/rotations`,
+    );
+    return body.rotations;
+  }
+
+  /** Returns the slot's new STATUS, which carries a hint and no secret. There
+   *  is no response shape here that could echo the pasted value back. */
+  async setCredential(
+    provider: string,
+    name: string,
+    secret: string,
+    pin: string,
+  ): Promise<AdminCredential> {
+    return this.#post(
+      `/v1/admin/credentials/${encodeURIComponent(provider)}/${encodeURIComponent(name)}`,
+      { secret, transaction_pin: pin },
+    );
   }
 
   /* -------------------------------- staff ------------------------------ */
