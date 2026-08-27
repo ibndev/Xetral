@@ -247,6 +247,42 @@ export class SettingsService implements OnApplicationBootstrap {
     return this.integer('balance_tolerance_minor', 0);
   }
 
+  async fxDailyLimitKobo(): Promise<bigint> {
+    return this.bigint('fx_daily_limit_kobo', 5_000_000_00n);
+  }
+
+  async giftcardDailyLimitKobo(): Promise<bigint> {
+    return this.bigint('giftcard_daily_limit_kobo', 2_000_000_00n);
+  }
+
+  async cryptoWithdrawalCountHourly(): Promise<number> {
+    return this.integer('crypto_withdrawal_count_hourly', 3);
+  }
+
+  async fxCountHourly(): Promise<number> {
+    return this.integer('fx_count_hourly', 10);
+  }
+
+  async giftcardCountHourly(): Promise<number> {
+    return this.integer('giftcard_count_hourly', 5);
+  }
+
+  /**
+   * The daily withdrawal ceiling for one crypto asset, in ITS OWN minor units.
+   *
+   * Keyed by asset because there is no currency-agnostic amount: USDT has six
+   * decimals and BTC has eight, so one number shared between them would mean
+   * two different things. An asset with no configured row returns undefined —
+   * no ceiling — rather than zero, because a limit nobody set must not refuse
+   * every withdrawal of that asset.
+   */
+  async cryptoDailyLimitMinor(currency: string): Promise<bigint | undefined> {
+    const key = `crypto_daily_limit_${currency.toLowerCase()}_minor`;
+    const raw = await this.text(key, '');
+    if (raw === '' || !/^[0-9]+$/.test(raw)) return undefined;
+    return BigInt(raw);
+  }
+
   async transferCountHourly(): Promise<number> {
     return this.integer('transfer_count_hourly', 20);
   }

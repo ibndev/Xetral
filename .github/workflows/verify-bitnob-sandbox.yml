@@ -1,0 +1,75 @@
+# ============================================================================
+#  Ask Bitnob's sandbox what is actually true.
+#
+#  WHY IN CI. Every constant in the Bitnob adapters is verified against their
+#  own Node SDK, which is the best evidence available without a live call — but
+#  the SDK defines no webhook event names and says nothing about response
+#  shapes, and both have already been wrong once. A stub cannot catch that;
+#  only the provider can. Development containers here cannot reach
+#  `sandboxapi.bitnob.co` at all (the egress policy answers 403 at CONNECT), so
+#  the call is made from a runner that can.
+#
+#  MANUAL ONLY. This authenticates to a provider. It should happen when
+#  somebody wants an answer, not on every push.
+#
+#  THE CREDENTIAL IS A REPOSITORY SECRET and never appears in the workflow, the
+#  script, the logs or the report. Add it under
+#  Settings → Secrets and variables → Actions as BITNOB_SANDBOX_API_KEY.
+# ============================================================================
+name: Verify Bitnob sandbox
+
+on:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Refuse to run without a sandbox key
+        # Named rather than left to fail inside the script, so the reason is the
+        # first thing in the log rather than a stack trace.
+        run: |
+          if [ -z "${{ secrets.BITNOB_SANDBOX_API_KEY }}" ]; then
+            echo "::error::BITNOB_SANDBOX_API_KEY is not set for this repository."
+            echo "::error::Add it under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
+      - name: Probe the sandbox
+        env:
+          # The script itself refuses any base URL without "sandbox" in it, so a
+          # production value cannot be exercised even by mistake.
+          BITNOB_BASE_URL: https://sandboxapi.bitnob.co/api/v1
+          BITNOB_API_KEY: ${{ secrets.BITNOB_SANDBOX_API_KEY }}
+        run: node scripts/verify-bitnob-sandbox.mjs
+
+      - name: Summarise what the provider said
+        if: always()
+        run: |
+          if [ ! -f bitnob-sandbox-report.json ]; then
+            echo "No report was produced." >> "$GITHUB_STEP_SUMMARY"; exit 0
+          fi
+          {
+            echo "### Bitnob sandbox"
+            echo ""
+            echo "Keys only — no values and no credential are recorded."
+            echo ""
+            echo '```json'
+            cat bitnob-sandbox-report.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bitnob-sandbox-report
+          path: bitnob-sandbox-report.json
+          if-no-files-found: warn
+          retention-days: 14

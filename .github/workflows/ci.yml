@@ -101,7 +101,8 @@ jobs:
             -f packages/ledger/sql/017_transfer_velocity.sql \
             -f packages/ledger/sql/018_disputes.sql \
             -f packages/ledger/sql/019_retention.sql \
-            -f packages/ledger/sql/020_balance_reconciliation.sql
+            -f packages/ledger/sql/020_balance_reconciliation.sql \
+            -f packages/ledger/sql/021_flow_velocity.sql
 
       - name: Ledger and identity invariants
         run: |
@@ -184,7 +185,8 @@ jobs:
             -f packages/ledger/sql/017_transfer_velocity.sql \
             -f packages/ledger/sql/018_disputes.sql \
             -f packages/ledger/sql/019_retention.sql \
-            -f packages/ledger/sql/020_balance_reconciliation.sql
+            -f packages/ledger/sql/020_balance_reconciliation.sql \
+            -f packages/ledger/sql/021_flow_velocity.sql
 
       # ------------------------------------------------------------------
       # Dependency scanning.

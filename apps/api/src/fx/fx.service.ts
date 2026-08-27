@@ -21,6 +21,7 @@ import type { ApiConfig } from '../config.js';
 import type { ConvertBody, FxQuoteBody } from './dto.js';
 import { AffordabilityService } from '../wallet/affordability.service.js';
 import { SettingsService } from '../settings/settings.service.js';
+import { SpendingLimitService } from '../wallet/spending-limits.service.js';
 
 /**
  * Converting between currencies, and sending across them.
@@ -89,6 +90,7 @@ export class FxService {
     @Inject(API_CONFIG) private readonly config: ApiConfig,
     @Inject(AffordabilityService) private readonly affordability: AffordabilityService,
     @Inject(SettingsService) private readonly settings: SettingsService,
+    @Inject(SpendingLimitService) private readonly limits: SpendingLimitService,
   ) {}
 
   async quote(body: FxQuoteBody): Promise<FxQuoteView> {
@@ -277,14 +279,34 @@ export class FxService {
 
     let entryId: string;
     try {
-      const posted = await this.ledger.post({
+      /*
+       * Capped on `sold` — the BASE amount, what actually leaves the wallet —
+       * rather than on what arrives. The kobo ceiling therefore applies to a
+       * conversion out of naira and is skipped in the other direction, which is
+       * the same rule every other kobo limit here follows. The hourly COUNT
+       * applies either way, because a count carries no units.
+       *
+       * A precondition on the entry's own transaction, not a check around it:
+       * two conversions arriving together would each find room and both post.
+       */
+      const precondition = await this.limits.precondition({
+        userId,
+        scope: 'fx',
+        amount: sold,
         idempotencyKey: `fx-trade:${reference}`,
-        kind: 'fx_trade',
-        occurredAt: new Date(),
-        description: `${from} -> ${to}${recipientId === undefined ? '' : ' (remittance)'}`,
-        metadata: { reference, from, to },
-        postings,
       });
+
+      const posted = await this.ledger.post(
+        {
+          idempotencyKey: `fx-trade:${reference}`,
+          kind: 'fx_trade',
+          occurredAt: new Date(),
+          description: `${from} -> ${to}${recipientId === undefined ? '' : ' (remittance)'}`,
+          metadata: { reference, from, to },
+          postings,
+        },
+        precondition === undefined ? {} : { precondition },
+      );
       entryId = posted.entryId;
     } catch (error) {
       if (error instanceof InsufficientFundsError) {

@@ -21,6 +21,7 @@ import type { ApiConfig } from '../config.js';
 import type { CryptoQuoteBody, WithdrawBody } from './dto.js';
 import { AffordabilityService } from '../wallet/affordability.service.js';
 import { SettingsService } from '../settings/settings.service.js';
+import { SpendingLimitService } from '../wallet/spending-limits.service.js';
 import { NotificationService } from '../notifications/notification.service.js';
 
 /**
@@ -94,6 +95,7 @@ export class CryptoService {
     @Inject(API_CONFIG) private readonly config: ApiConfig,
     @Inject(AffordabilityService) private readonly affordability: AffordabilityService,
     @Inject(SettingsService) private readonly settings: SettingsService,
+    @Inject(SpendingLimitService) private readonly limits: SpendingLimitService,
     @Inject(NotificationService) private readonly notifications: NotificationService,
   ) {}
 
@@ -392,17 +394,38 @@ export class CryptoService {
 
     let entryId: string;
     try {
-      const posted = await this.ledger.post({
+      /*
+       * THE ONLY MOVEMENT HERE NOBODY CAN RECALL, and until now the only one
+       * with no ceiling. The guard runs as a precondition on the ledger's own
+       * transaction under a per-customer advisory lock — never as a check
+       * around it — because two withdrawals arriving together would otherwise
+       * each read the day's total, each find room, and both go on a chain.
+       *
+       * On the RESERVE, not the settle. By the time a withdrawal settles it has
+       * been broadcast and refusing it would be a statement about money that
+       * has already gone.
+       */
+      const precondition = await this.limits.precondition({
+        userId,
+        scope: 'crypto_withdrawal',
+        amount: total,
         idempotencyKey: `crypto-withdraw-reserve:${reference}`,
-        kind: 'crypto_withdrawal',
-        occurredAt: new Date(),
-        description: `${body.asset} withdrawal reserved`,
-        metadata: { reference, chain: body.network },
-        postings: [
-          posting(walletAccount(userId, asset), money(-total.amount, asset)),
-          posting(pendingAccount(userId, asset), total),
-        ],
       });
+
+      const posted = await this.ledger.post(
+        {
+          idempotencyKey: `crypto-withdraw-reserve:${reference}`,
+          kind: 'crypto_withdrawal',
+          occurredAt: new Date(),
+          description: `${body.asset} withdrawal reserved`,
+          metadata: { reference, chain: body.network },
+          postings: [
+            posting(walletAccount(userId, asset), money(-total.amount, asset)),
+            posting(pendingAccount(userId, asset), total),
+          ],
+        },
+        precondition === undefined ? {} : { precondition },
+      );
       entryId = posted.entryId;
     } catch (error) {
       if (error instanceof InsufficientFundsError) {

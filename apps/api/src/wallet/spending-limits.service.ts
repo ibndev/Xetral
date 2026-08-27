@@ -39,7 +39,13 @@ import { Inject } from '@nestjs/common';
  * sending forty is exactly what this is for.
  */
 
-export type LimitScope = 'transfer' | 'purchase';
+export type LimitScope =
+  | 'transfer'
+  | 'purchase'
+  /* The only money movement here that nobody can recall once it has left. */
+  | 'crypto_withdrawal'
+  | 'fx'
+  | 'giftcard';
 
 /**
  * What counts toward each limit.
@@ -53,6 +59,9 @@ export type LimitScope = 'transfer' | 'purchase';
 const COUNTED: Readonly<Record<LimitScope, readonly string[]>> = {
   transfer: ['wallet_transfer', 'wallet_withdrawal'],
   purchase: ['bill_payment', 'esim_purchase', 'number_purchase'],
+  crypto_withdrawal: ['crypto_withdrawal'],
+  fx: ['fx_trade'],
+  giftcard: ['giftcard_purchase'],
 };
 
 /**
@@ -71,6 +80,9 @@ const LIMITED_CURRENCY = 'NGN';
 const SCOPE_LOCK_KEY: Readonly<Record<LimitScope, number>> = {
   transfer: 0x7845_7401,
   purchase: 0x7845_7402,
+  crypto_withdrawal: 0x7845_7403,
+  fx: 0x7845_7404,
+  giftcard: 0x7845_7405,
 };
 
 /**
@@ -127,6 +139,65 @@ export class SpendingLimitService {
    * always runs and sometimes decides not to is a hook somebody later adds a
    * side effect to.
    */
+  /**
+   * The daily AMOUNT ceiling for this check, or undefined when there is none.
+   *
+   * TWO DIFFERENT UNIT SYSTEMS MEET HERE, and keeping them apart is the whole
+   * job. The fiat ceilings are published in KOBO, so they are statements about
+   * naira and are skipped in any other currency — applying a kobo number to
+   * USDT because both are integers is the kobo-plus-cents mistake.
+   *
+   * A crypto ceiling is stated PER ASSET in that asset's own minor units,
+   * because there is no such thing as a currency-agnostic amount: 1,000,000 is
+   * one USDT and one hundredth of a BTC. An asset with no configured row has
+   * NO amount ceiling and is capped by the hourly count alone — deliberately,
+   * because a limit nobody configured must not refuse every withdrawal, and
+   * must not silently pretend to cap one either.
+   */
+  async #amountLimitFor<C extends Currency>(check: LimitCheck<C>): Promise<bigint | undefined> {
+    if (check.scope === 'crypto_withdrawal') {
+      return this.settings.cryptoDailyLimitMinor(check.amount.currency);
+    }
+
+    if (check.amount.currency !== LIMITED_CURRENCY) return undefined;
+
+    switch (check.scope) {
+      case 'transfer':
+        return this.settings.transferDailyLimitKobo();
+      case 'purchase':
+        return this.settings.purchaseDailyLimitKobo();
+      case 'fx':
+        return this.settings.fxDailyLimitKobo();
+      case 'giftcard':
+        return this.settings.giftcardDailyLimitKobo();
+    }
+  }
+
+  /**
+   * How many of this kind of movement are allowed in a rolling hour.
+   *
+   * A COUNT, so it applies in every currency and every asset — which is what
+   * makes it the control that covers crypto at all. Every scope has one; there
+   * is no flow where "as many as you like per hour" is the right answer.
+   */
+  async #countHourlyFor(scope: LimitScope): Promise<number | undefined> {
+    switch (scope) {
+      case 'transfer':
+        return this.settings.transferCountHourly();
+      case 'crypto_withdrawal':
+        return this.settings.cryptoWithdrawalCountHourly();
+      case 'fx':
+        return this.settings.fxCountHourly();
+      case 'giftcard':
+        return this.settings.giftcardCountHourly();
+      // A purchase is capped by its daily total and by the provider's own
+      // rate limits; a count here would refuse somebody topping up several
+      // phones in a row, which is ordinary behaviour rather than a signal.
+      case 'purchase':
+        return undefined;
+    }
+  }
+
   async precondition<C extends Currency>(
     check: LimitCheck<C>,
   ): Promise<((client: PoolClient) => Promise<void>) | undefined> {
@@ -142,25 +213,26 @@ export class SpendingLimitService {
      * nothing to mis-apply and no reason to exempt a currency: a drain
      * denominated in USDT is a drain.
      */
-    const amountLimit =
-      check.amount.currency === LIMITED_CURRENCY
-        ? check.scope === 'transfer'
-          ? // Read OUTSIDE the transaction, deliberately. It is a cached
-            // settings lookup that may itself hit the database, and doing it
-            // while holding the ledger's transaction open would lengthen every
-            // transfer's transaction for a value that changes a few times a
-            // year.
-            await this.settings.transferDailyLimitKobo()
-          : await this.settings.purchaseDailyLimitKobo()
-        : undefined;
+    // Read OUTSIDE the transaction, deliberately. These are cached settings
+    // lookups that may themselves hit the database, and doing them while
+    // holding the ledger's transaction open would lengthen every money
+    // movement's transaction for values that change a few times a year.
+    const amountLimit = await this.#amountLimitFor(check);
 
+    const countHourly = await this.#countHourlyFor(check.scope);
     const velocity =
-      check.scope === 'transfer'
-        ? {
-            newRecipientsDaily: await this.settings.transferNewRecipientsDaily(),
-            countHourly: await this.settings.transferCountHourly(),
-          }
-        : undefined;
+      countHourly === undefined
+        ? undefined
+        : {
+            countHourly,
+            // Only a transfer has a RECIPIENT to have never been paid before.
+            // A conversion pays the customer's own other wallet, and a gift
+            // card pays the customer themselves.
+            newRecipientsDaily:
+              check.scope === 'transfer'
+                ? await this.settings.transferNewRecipientsDaily()
+                : undefined,
+          };
 
     // Nothing to enforce: the caller passes no precondition at all rather than
     // one that does nothing. A hook that always runs and sometimes decides not
@@ -184,7 +256,7 @@ export class SpendingLimitService {
       if (await alreadyPosted(client, check.idempotencyKey)) return;
 
       if (amountLimit !== undefined) {
-        const spent = await spentToday(client, check.userId, check.scope);
+        const spent = await spentToday(client, check.userId, check.scope, check.amount.currency);
         if (spent + check.amount.amount > amountLimit) {
           // 422 and no figure, for the same reason `InsufficientFundsError`
           // carries none: "₦412,000 of your ₦5,000,000 left today" is a report
@@ -195,12 +267,12 @@ export class SpendingLimitService {
       }
 
       if (velocity !== undefined) {
-        const sentThisHour = await transfersInLastHour(client, check.userId);
+        const sentThisHour = await movementsInLastHour(client, check.userId, check.scope);
         if (sentThisHour + 1 > velocity.countHourly) {
           throw new UnprocessableEntityException({ error: 'too_many_transfers' });
         }
 
-        if (check.recipientId !== undefined) {
+        if (check.recipientId !== undefined && velocity.newRecipientsDaily !== undefined) {
           const recipients = await recipientHistory(client, check.userId, check.recipientId);
           // Somebody already paid is not a new recipient however many times
           // they are paid again, so the ceiling only bites on strangers.
@@ -234,6 +306,13 @@ async function alreadyPosted(client: PoolClient, key: string): Promise<boolean> 
  * postings are what actually happened, and a limit computed from them cannot
  * disagree with the ledger.
  *
+ * THE CURRENCY IS A PARAMETER, not the naira constant. It was `LIMITED_CURRENCY`
+ * while every ceiling was published in kobo, and that was invisible until a
+ * crypto ceiling arrived: a USDT limit compared against a sum of NGN postings
+ * is always zero, so the ceiling could never be reached and a USDT withdrawal
+ * of any size passed. The caller states which currency it is limiting and this
+ * sums that one.
+ *
  * "Today" is a Lagos day. The customers are Nigerian and their day ends at
  * midnight where they are — a UTC boundary would reset the limit at 1am local,
  * which is both surprising to them and an hour a fraudster would learn.
@@ -242,6 +321,7 @@ async function spentToday(
   client: PoolClient,
   userId: string,
   scope: LimitScope,
+  currency: string,
 ): Promise<bigint> {
   const result = await client.query<{ spent: string }>(
     `SELECT COALESCE(-SUM(p.amount_minor), 0)::text AS spent
@@ -257,20 +337,25 @@ async function spentToday(
         AND p.created_at >=
             (date_trunc('day', now() AT TIME ZONE 'Africa/Lagos')
                AT TIME ZONE 'Africa/Lagos')`,
-    [userId, LIMITED_CURRENCY, COUNTED[scope]],
+    [userId, currency, COUNTED[scope]],
   );
   return BigInt(result.rows[0]?.spent ?? '0');
 }
 
 /**
- * How many transfers this customer has sent in the last hour, in any currency.
+ * How many movements of this KIND the customer has made in the last hour, in
+ * any currency.
  *
  * Counted from the SENDER'S OWN DEBIT LEG, so a transfer counts once however
  * many postings the entry carries — a fee leg would otherwise make every
  * charged transfer count twice, and the ceiling would halve itself the day a
  * fee was configured.
  */
-async function transfersInLastHour(client: PoolClient, userId: string): Promise<number> {
+async function movementsInLastHour(
+  client: PoolClient,
+  userId: string,
+  scope: LimitScope,
+): Promise<number> {
   const result = await client.query<{ sent: string }>(
     `SELECT count(*)::text AS sent
        FROM postings p
@@ -280,9 +365,9 @@ async function transfersInLastHour(client: PoolClient, userId: string): Promise<
         AND a.owner_type = 'user'
         AND a.owner_id   = $1::bigint
         AND p.amount_minor < 0
-        AND e.kind = 'wallet_transfer'
+        AND e.kind::text = ANY($2::text[])
         AND p.created_at > now() - INTERVAL '1 hour'`,
-    [userId],
+    [userId, COUNTED[scope]],
   );
   return Number(result.rows[0]?.sent ?? '0');
 }

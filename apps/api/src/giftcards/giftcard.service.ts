@@ -19,6 +19,7 @@ import type { Currency, Money } from '@xetral/shared';
 import { API_CONFIG, DATABASE, LEDGER } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
 import { SettingsService } from '../settings/settings.service.js';
+import { SpendingLimitService } from '../wallet/spending-limits.service.js';
 import { payoutFor } from './rate-card.js';
 import type { RateCard } from './rate-card.js';
 import type { QuoteBody, SubmitGiftCardBody } from './dto.js';
@@ -97,6 +98,7 @@ export class GiftCardService {
     @Inject(LEDGER) private readonly ledger: LedgerService,
     @Inject(API_CONFIG) private readonly config: ApiConfig,
     @Inject(SettingsService) private readonly settings: SettingsService,
+    @Inject(SpendingLimitService) private readonly limits: SpendingLimitService,
     @Inject(KycGateService) private readonly kycGate: KycGateService,
   ) {}
 
@@ -264,18 +266,37 @@ export class GiftCardService {
       currency,
     };
 
-    const posted = await this.ledger.post({
+    /*
+     * Capped at APPROVAL, which is the moment money is committed — a
+     * submission commits nothing, so limiting one would refuse an offer rather
+     * than a payment.
+     *
+     * The hold period and mandatory human approval remain the real controls
+     * here; this caps the exposure while both are still pending, and the
+     * hourly count stops a flood arriving faster than reviewers can read it.
+     */
+    const precondition = await this.limits.precondition({
+      userId: row.user_id,
+      scope: 'giftcard',
+      amount: payout,
       idempotencyKey: `giftcard-approve:${row.reference}`,
-      kind: 'giftcard_purchase',
-      occurredAt: new Date(),
-      description: `gift card purchase (${row.brand})`,
-      metadata: { reference: row.reference, reviewer: reviewerUuid },
-      postings: [
-        // Into PENDING, not the wallet. This is the hold.
-        posting(pendingAccount(row.user_id, currency), payout),
-        posting({ kind: 'asset_giftcard_inventory', currency }, negate(payout)),
-      ],
     });
+
+    const posted = await this.ledger.post(
+      {
+        idempotencyKey: `giftcard-approve:${row.reference}`,
+        kind: 'giftcard_purchase',
+        occurredAt: new Date(),
+        description: `gift card purchase (${row.brand})`,
+        metadata: { reference: row.reference, reviewer: reviewerUuid },
+        postings: [
+          // Into PENDING, not the wallet. This is the hold.
+          posting(pendingAccount(row.user_id, currency), payout),
+          posting({ kind: 'asset_giftcard_inventory', currency }, negate(payout)),
+        ],
+      },
+      precondition === undefined ? {} : { precondition },
+    );
 
     const holdDays = await this.settings.giftCardHoldDays();
     const holdUntil = new Date(Date.now() + holdDays * 86_400_000);
