@@ -653,6 +653,49 @@ queue at `/admin/risk`.
   errors; the queue is simply empty, which looks exactly like a quiet week. It
   has a DEFAULT on the worker for that reason, unlike the retention sweep.
 
+### Compliance cases — non-obvious rules
+
+Schema: `packages/ledger/sql/028_risk_cases.sql`. Service in
+`apps/api/src/risk/case.service.ts`, screen at `/admin/risk/cases`.
+
+- **Closing a case resolves every signal attached to it, by trigger.** That is
+  the point of a case rather than a convenience: a reviewer with five signals
+  and one story who closes each separately produces a record claiming five
+  unrelated reviews happened. The summary becomes each signal's resolution, so
+  the trail says the same true thing about all of them.
+- **TIPPING OFF IS AN OFFENCE, and it shapes the schema.** Nothing here has a
+  customer-facing surface — no endpoint returns a case to its subject and no
+  notification kind could mention one. `028_risk_cases.test.sql` fails the
+  build if a template appears whose name could tell a customer they are under
+  investigation.
+- **Signals attach through a JOIN TABLE, not a `case_id` column.** 027 makes a
+  signal immutable; adding a column would mean relaxing that trigger, and
+  "immutable except for the fields we later needed" is how immutability stops
+  being a property.
+- **One open case per customer**, by partial unique index. Two reviewers
+  investigating one person separately, each seeing half the signals, is exactly
+  the failure a case file prevents.
+- **A signal can only be attached to a case about the SAME customer**, by
+  trigger — otherwise one mistyped id puts another customer's transaction into
+  an investigation that then describes somebody never involved.
+- **The deadline is the database's clock and cannot be supplied or moved**, the
+  same rule 018 applies to a dispute. Here it is a regulator's reporting window
+  rather than a courtesy.
+- **A `reported` outcome REQUIRES its reference**, by CHECK. A report nobody
+  can point at is one nobody can prove was filed.
+- **A closed case takes no new notes and cannot reopen.** New information opens
+  a new case — otherwise a file decided on one set of facts reads as though it
+  was decided on another.
+- **The sweep opens a case when a customer accrues
+  `risk_case_auto_open_signals` open signals**, with `opened_by` NULL. Noticing
+  a pattern otherwise means somebody sorting the queue by customer and
+  counting, which is the work nobody does at four in the afternoon — and the
+  queue says "opened by the sweep", because counting and judging are different
+  starting points.
+- **Opening and noting take NO PIN; closing does.** A reviewer writes several
+  notes per case, and demanding the factor on each is how a shared
+  authenticator ends up on a desk — the lesson 014 records.
+
 ### Disputes — non-obvious rules
 
 Schema: `packages/ledger/sql/018_disputes.sql`.
@@ -1079,6 +1122,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/026_provider_credential
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/026_provider_credentials.seed.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/027_risk_signals.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/027_risk_signals.seed.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/028_risk_cases.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -1105,6 +1149,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/024_sign_in_events.test
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/025_bvn_uniqueness.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/026_provider_credentials.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/027_risk_signals.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/028_risk_cases.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

@@ -94,6 +94,14 @@ const API_ERROR_CODES = [
   /* A monitoring signal that does not exist, or that a colleague resolved
      first. One answer for both, so nobody learns which signal ids are real. */
   'signal_not_found',
+  /* Compliance cases. `case_not_found` answers both "no such case" and
+     "already closed", so a reviewer racing a colleague learns it is handled
+     and nobody learns which case ids exist. */
+  'case_not_found',
+  'case_already_open',
+  'case_closed',
+  'report_reference_required',
+  'signal_not_this_customer',
   'device_not_found',
   'below_minimum_age',
   'forbidden',

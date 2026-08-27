@@ -39,7 +39,11 @@ export type AdminAction =
   | 'credential.change'
   /* A monitoring signal reviewed and closed. Its `reason` is the reviewer's
      own words, and it is the part of an AML programme a regulator inspects. */
-  | 'risk.resolve';
+  | 'risk.resolve'
+  /* A compliance case opened and closed. Closing carries the summary as its
+     reason, which is the same text every signal the case covered gets. */
+  | 'risk.case_open'
+  | 'risk.case_close';
 
 export interface AuditEntry {
   /** The actor's UUID, as it appears in an access token. Resolved to the
@@ -55,6 +59,7 @@ export interface AuditEntry {
     | 'staff'
     | 'provider_credential'
     | 'risk_signal'
+    | 'risk_case'
     | 'dispute';
   readonly subjectId: string;
   readonly detail?: Record<string, unknown>;

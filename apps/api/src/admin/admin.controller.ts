@@ -18,6 +18,7 @@ import { AuditService } from './audit.service.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { ProviderCredentialService } from '../settings/provider-credentials.service.js';
 import { MonitoringService } from '../risk/monitoring.service.js';
+import { CaseService } from '../risk/case.service.js';
 import { KycService } from '../kyc/kyc.service.js';
 import { ErrorRecorder } from '../observability/error-recorder.service.js';
 import { kycReviewSchema } from '../kyc/dto.js';
@@ -70,6 +71,26 @@ const resolutionSchema = z.object({
   resolution: z.string().trim().min(10).max(1000),
 });
 
+const openCaseSchema = z.object({
+  user_id: z.string().uuid(),
+  reason: z.string().trim().min(10).max(500),
+});
+
+const noteSchema = z.object({
+  note: z.string().trim().min(3).max(4000),
+});
+
+/**
+ * The summary becomes the resolution on every signal the case covers, so it
+ * has to say something — twenty characters, matching the CHECK rather than
+ * being a second, different opinion about the same rule.
+ */
+const closeCaseSchema = z.object({
+  outcome: z.enum(['no_action', 'reported', 'account_restricted']),
+  summary: z.string().trim().min(20).max(4000),
+  report_reference: z.string().trim().min(1).max(200).optional(),
+});
+
 const roleSchema = z.object({
   user_id: z.string().uuid(),
   role: z.enum(['giftcard_reviewer', 'compliance', 'support', 'finance', 'admin']),
@@ -91,6 +112,7 @@ export class AdminController {
     @Inject(ProviderCredentialService)
     private readonly credentialStore: ProviderCredentialService,
     @Inject(MonitoringService) private readonly monitoring: MonitoringService,
+    @Inject(CaseService) private readonly cases: CaseService,
     @Inject(KycService) private readonly kyc: KycService,
     @Inject(ErrorRecorder) private readonly errors: ErrorRecorder,
   ) {}
@@ -271,6 +293,101 @@ export class AdminController {
       ...(ip === undefined ? {} : { ip }),
     });
     return resolved;
+  }
+
+  /* ---------------------------- case files ----------------------------- */
+
+  @Get('risk/cases')
+  async riskCases(@Query() query: unknown): Promise<{ cases: readonly unknown[] }> {
+    const parsed = queueQuery.safeParse(query);
+    if (!parsed.success) throw invalid(parsed.error.issues);
+    return { cases: await this.cases.queue(parsed.data.limit) };
+  }
+
+  /** One case, with its signals and its notes. There is deliberately no
+   *  customer-facing counterpart: tipping off is an offence. */
+  @Get('risk/cases/:id')
+  async riskCase(@Param('id') id: string): Promise<unknown> {
+    return this.cases.detail(id);
+  }
+
+  @Post('risk/cases')
+  @HttpCode(201)
+  async openRiskCase(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: unknown,
+  ): Promise<unknown> {
+    const parsed = openCaseSchema.safeParse(body);
+    if (!parsed.success) throw invalid(parsed.error.issues);
+
+    const actor = claims(request).sub;
+    const opened = await this.cases.open(parsed.data.user_id, actor, parsed.data.reason);
+
+    const ip = ipOf(request);
+    await this.audit.record({
+      actorId: actor,
+      action: 'risk.case_open',
+      subjectType: 'risk_case',
+      subjectId: opened.id,
+      detail: { user: parsed.data.user_id },
+      reason: parsed.data.reason,
+      ...(ip === undefined ? {} : { ip }),
+    });
+    return opened;
+  }
+
+  /**
+   * Adds a note.
+   *
+   * Deliberately NOT audited. A reviewer writes several while working one
+   * case, and an audit log filling with "somebody typed something" buries the
+   * entries that matter — the notes are themselves an append-only trail on the
+   * case, which is where they belong.
+   */
+  @Post('risk/cases/:id/notes')
+  @HttpCode(204)
+  async noteRiskCase(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ): Promise<void> {
+    const parsed = noteSchema.safeParse(body);
+    if (!parsed.success) throw invalid(parsed.error.issues);
+    await this.cases.addNote(id, claims(request).sub, parsed.data.note);
+  }
+
+  /** Closes it, which resolves every signal attached — by trigger, so it
+   *  cannot be closed with its signals left open by any path. */
+  @Post('risk/cases/:id/close')
+  @HttpCode(200)
+  async closeRiskCase(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ): Promise<unknown> {
+    const parsed = closeCaseSchema.safeParse(body);
+    if (!parsed.success) throw invalid(parsed.error.issues);
+
+    const actor = claims(request).sub;
+    const closed = await this.cases.close(id, actor, {
+      outcome: parsed.data.outcome,
+      summary: parsed.data.summary,
+      ...(parsed.data.report_reference === undefined
+        ? {}
+        : { report_reference: parsed.data.report_reference }),
+    });
+
+    const ip = ipOf(request);
+    await this.audit.record({
+      actorId: actor,
+      action: 'risk.case_close',
+      subjectType: 'risk_case',
+      subjectId: id,
+      detail: { outcome: parsed.data.outcome },
+      reason: parsed.data.summary,
+      ...(ip === undefined ? {} : { ip }),
+    });
+    return closed;
   }
 
   /* ------------------------- provider credentials ---------------------- */

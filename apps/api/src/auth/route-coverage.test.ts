@@ -175,6 +175,8 @@ describe('the privileged surface is declared as privileged', () => {
       'GET /v1/admin/kyc (compliance)',
       'GET /v1/admin/overview (support)',
       // The compliance queue, on the role that already reviews identity.
+      'GET /v1/admin/risk/cases (compliance)',
+      'GET /v1/admin/risk/cases/:id (compliance)',
       'GET /v1/admin/risk/signals (compliance)',
       'GET /v1/admin/settings (finance)',
       'GET /v1/admin/settings/:key/history (finance)',
@@ -194,6 +196,11 @@ describe('the privileged surface is declared as privileged', () => {
       'POST /v1/admin/giftcards/:id/reveal (giftcard_reviewer)',
       'POST /v1/admin/giftcards/:id/review (giftcard_reviewer)',
       'POST /v1/admin/kyc/:id/review (compliance)',
+      // Opening and noting take no PIN; closing does, because it resolves
+      // every signal the case covers.
+      'POST /v1/admin/risk/cases (compliance)',
+      'POST /v1/admin/risk/cases/:id/close (compliance)',
+      'POST /v1/admin/risk/cases/:id/notes (compliance)',
       'POST /v1/admin/risk/signals/:id/resolve (compliance)',
       'POST /v1/admin/settings/:key (finance)',
       'POST /v1/admin/staff/grant (admin)',

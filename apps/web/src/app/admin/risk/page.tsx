@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 import type { AdminRiskSignal } from '@xetral/client';
 import { useAdmin, useLoad } from '@/lib/hooks';
@@ -67,6 +68,12 @@ export default function Risk() {
           so every transaction below already happened — the controls that refuse
           run before money moves and are elsewhere. Closing a row records that
           you looked and what you decided.
+        </p>
+        <p className="hint">
+          <Link href="/admin/risk/cases">
+            Compliance cases — where several signals about one customer become
+            one investigation →
+          </Link>
         </p>
         {signals.error !== undefined && <p className="error">{signals.error}</p>}
         {signals.loading && <p className="spinner">Loading…</p>}

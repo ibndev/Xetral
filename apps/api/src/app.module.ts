@@ -87,6 +87,7 @@ import { DisputeService } from './disputes/dispute.service.js';
 import { RetentionService } from './retention/retention.service.js';
 import { BalanceReconciliationService } from './reconciliation/balance-reconciliation.service.js';
 import { MonitoringService } from './risk/monitoring.service.js';
+import { CaseService } from './risk/case.service.js';
 import {
   InMemoryRateLimitStore,
   RedisRateLimitStore,
@@ -722,6 +723,7 @@ export class AppModule {
         RetentionLifecycle,
         BalanceReconciliationService,
         MonitoringService,
+        CaseService,
         BalanceReconciliationLifecycle,
         MonitoringLifecycle,
         PasswordResetService,

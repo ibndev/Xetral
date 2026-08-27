@@ -100,6 +100,32 @@ export interface AdminRiskSignal {
   readonly other_open_signals: number;
 }
 
+/**
+ * One investigation about one customer.
+ *
+ * There is deliberately no customer-facing counterpart to any of this. Tipping
+ * off is an offence, so a case must not be reachable by its subject — not as a
+ * status, not as a message, not through a support agent reading a note.
+ */
+export interface AdminRiskCase {
+  readonly id: string;
+  readonly user_uuid: string;
+  readonly email: string | null;
+  readonly user_status: string;
+  readonly reason: string | null;
+  readonly opened_at: string;
+  readonly due_at: string;
+  readonly overdue: boolean;
+  /** TRUE when the monitoring sweep opened it by counting rather than a person
+   *  by judging — a different starting point, so a reviewer is told which. */
+  readonly opened_by_the_sweep: boolean;
+  readonly opened_by_email: string | null;
+  readonly signals: number;
+  readonly notes: number;
+}
+
+export type AdminCaseOutcome = 'no_action' | 'reported' | 'account_restricted';
+
 export interface AdminSetting {
   readonly key: string;
   readonly value: string;
@@ -371,6 +397,43 @@ export class AdminClient {
   ): Promise<Record<string, unknown>> {
     return this.#post(`/v1/admin/risk/signals/${encodeURIComponent(id)}/resolve`, {
       resolution,
+      transaction_pin: pin,
+    });
+  }
+
+  /* ---------------------------- case files ----------------------------- */
+
+  async riskCases(): Promise<readonly AdminRiskCase[]> {
+    const body = await this.#get<{ cases: AdminRiskCase[] }>('/v1/admin/risk/cases');
+    return body.cases;
+  }
+
+  async riskCase(id: string): Promise<Record<string, unknown>> {
+    return this.#get(`/v1/admin/risk/cases/${encodeURIComponent(id)}`);
+  }
+
+  async openRiskCase(userId: string, reason: string): Promise<{ id: string }> {
+    return this.#post('/v1/admin/risk/cases', { user_id: userId, reason });
+  }
+
+  /** No PIN. A reviewer writes several notes while working one case, and
+   *  demanding the factor on each is how a shared authenticator ends up on
+   *  somebody's desk. */
+  async noteRiskCase(id: string, note: string): Promise<void> {
+    await this.#post(`/v1/admin/risk/cases/${encodeURIComponent(id)}/notes`, { note });
+  }
+
+  async closeRiskCase(
+    id: string,
+    decision: {
+      readonly outcome: AdminCaseOutcome;
+      readonly summary: string;
+      readonly report_reference?: string;
+    },
+    pin: string,
+  ): Promise<Record<string, unknown>> {
+    return this.#post(`/v1/admin/risk/cases/${encodeURIComponent(id)}/close`, {
+      ...decision,
       transaction_pin: pin,
     });
   }

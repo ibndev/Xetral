@@ -196,6 +196,19 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
         role: 'compliance',
       })
 
+      // The case file, on the same role as the signals it groups.
+      //
+      // Opening and noting take NO PIN: a reviewer writes several notes while
+      // working one case, and demanding the factor on each is how a shared
+      // authenticator ends up on somebody's desk — the lesson the staff second
+      // factor already records. Closing takes one, because it resolves every
+      // signal attached and is the act a regulator inspects.
+      .staff('GET', '/v1/admin/risk/cases', { pin: false, role: 'compliance' })
+      .staff('GET', '/v1/admin/risk/cases/:id', { pin: false, role: 'compliance' })
+      .staff('POST', '/v1/admin/risk/cases', { pin: false, role: 'compliance' })
+      .staff('POST', '/v1/admin/risk/cases/:id/notes', { pin: false, role: 'compliance' })
+      .staff('POST', '/v1/admin/risk/cases/:id/close', { pin: true, role: 'compliance' })
+
       .staff('GET', '/v1/admin/settings', { pin: false, role: 'finance' })
       .staff('GET', '/v1/admin/settings/:key/history', { pin: false, role: 'finance' })
       // Changing a fee or a limit affects every customer at once.

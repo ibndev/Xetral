@@ -27,6 +27,9 @@ export interface MonitoringReport {
   /** How many signals each rule raised on this pass. */
   readonly raised: Readonly<Record<string, number>>;
   readonly total: number;
+  /** Cases the sweep opened because a customer's signals had become a
+   *  pattern. */
+  readonly casesOpened: number;
 }
 
 @Injectable()
@@ -84,7 +87,7 @@ export class MonitoringService implements OnApplicationShutdown {
         `SELECT pg_try_advisory_lock($1::bigint) AS ok`,
         [SWEEP_LOCK_KEY],
       );
-      if (acquired.rows[0]?.ok !== true) return { raised: {}, total: 0 };
+      if (acquired.rows[0]?.ok !== true) return { raised: {}, total: 0, casesOpened: 0 };
 
       try {
         const result = await lock.query<{ rule: string; raised: string }>(
@@ -99,6 +102,18 @@ export class MonitoringService implements OnApplicationShutdown {
           total += count;
         }
 
+        // AFTER the rules, on the same lock and the same pass.
+        //
+        // A customer with several open signals is already a pattern, and
+        // noticing it otherwise means somebody sorting the queue by customer
+        // and counting — the work nobody does at four in the afternoon. A case
+        // opening itself is what turns several rows into one thing with a
+        // deadline on it.
+        const cases = await lock.query<{ opened: string }>(
+          `SELECT opened FROM open_risk_cases_for_patterns()`,
+        );
+        const casesOpened = Number(cases.rows[0]?.opened ?? 0);
+
         if (total > 0) {
           // The counts, never the customers. This line goes to whatever
           // aggregates logs, and a compliance queue's contents are not
@@ -111,7 +126,10 @@ export class MonitoringService implements OnApplicationShutdown {
                 .join(' '),
           );
         }
-        return { raised, total };
+        if (casesOpened > 0) {
+          this.#logger.log(`monitoring opened ${casesOpened} case(s) on repeated signals`);
+        }
+        return { raised, total, casesOpened };
       } finally {
         await lock.query(`SELECT pg_advisory_unlock($1::bigint)`, [SWEEP_LOCK_KEY]);
       }
