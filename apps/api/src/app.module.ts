@@ -21,6 +21,7 @@ import type {
 import { AuthController } from './auth/auth.controller.js';
 import { AuthGuard } from './auth/auth.guard.js';
 import { AuthService } from './auth/auth.service.js';
+import { SignInEventService } from './auth/sign-in-events.service.js';
 import { PinService } from './auth/pin.service.js';
 import { PasswordResetService } from './auth/password-reset.service.js';
 import { WalletController } from './wallet/wallet.controller.js';
@@ -651,6 +652,7 @@ export class AppModule {
           useValue: options.notificationPort ?? createNotificationPort(options.config),
         },
         AuthService,
+        SignInEventService,
         PinService,
         WalletService,
         SpendingLimitService,

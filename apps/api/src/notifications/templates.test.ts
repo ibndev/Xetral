@@ -6,6 +6,7 @@ const ALL_KINDS: readonly NotificationKind[] = [
   'password_reset',
   'password_changed',
   'new_device',
+  'new_location',
   'devices_revoked',
   'deposit_credited',
   'transfer_sent',
@@ -26,6 +27,11 @@ function example(kind: NotificationKind, injected: string): NotificationRequest 
       return { kind, at: injected };
     case 'new_device':
       return { kind, platform: injected, at: '2026-08-25 10:00 WAT', ipAddress: injected };
+    case 'new_location':
+      // The country is the one outside-controlled value here: it comes from a
+      // request header, so a request that did not reach us through the edge
+      // carries whatever its sender typed.
+      return { kind, country: injected, at: '2026-08-25 10:00 WAT', ipAddress: injected };
     case 'devices_revoked':
       return { kind, count: 3, at: injected };
     case 'deposit_credited':

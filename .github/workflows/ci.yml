@@ -104,6 +104,7 @@ jobs:
             -f packages/ledger/sql/020_balance_reconciliation.sql \
             -f packages/ledger/sql/021_flow_velocity.sql \
             -f packages/ledger/sql/023_entry_status.sql \
+            -f packages/ledger/sql/024_sign_in_events.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       - name: Ledger and identity invariants
@@ -135,6 +136,7 @@ jobs:
                    packages/ledger/sql/019_retention.test.sql \
                    packages/ledger/sql/020_balance_reconciliation.test.sql \
                    packages/ledger/sql/023_entry_status.test.sql \
+                   packages/ledger/sql/024_sign_in_events.test.sql \
                    packages/ledger/sql/099_least_privilege.test.sql; do
             echo "== $f"
             psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
@@ -192,6 +194,7 @@ jobs:
             -f packages/ledger/sql/020_balance_reconciliation.sql \
             -f packages/ledger/sql/021_flow_velocity.sql \
             -f packages/ledger/sql/023_entry_status.sql \
+            -f packages/ledger/sql/024_sign_in_events.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       # ------------------------------------------------------------------

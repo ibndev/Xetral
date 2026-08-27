@@ -17,6 +17,7 @@ import { PinService } from './pin.service.js';
 import { setPinSchema } from '../wallet/dto.js';
 import type { SessionSummary, TokenPair } from './auth.service.js';
 import { LoginRateLimitGuard, PasswordResetRateLimitGuard } from './login-rate-limit.guard.js';
+import { countryFrom } from './sign-in-events.service.js';
 import {
   changePasswordSchema,
   forgotPasswordSchema,
@@ -89,7 +90,14 @@ export class AuthController {
         fields: parsed.error.issues.map((issue) => issue.path.join('.')),
       });
     }
-    return this.auth.login(parsed.data, request.ip);
+    // Both fields describe the sign-in and neither decides it. `request.ip`
+    // resolves the forwarded chain against TRUST_PROXY_HOPS; the country comes
+    // from the edge's own header and is discarded unless it looks like one.
+    return this.auth.login(parsed.data, {
+      ip: request.ip,
+      country: countryFrom(request.headers),
+      platform: parsed.data.device.platform,
+    });
   }
 
   @Post('refresh')

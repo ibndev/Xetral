@@ -86,7 +86,12 @@ DECLARE
         'postings',
         'admin_audit_log',
         'card_reveals',
-        'provider_balance_checks'
+        'provider_balance_checks',
+        -- The record of where every sign-in came from, successes and failures
+        -- alike. Its own trigger permits a DELETE only for rows past the
+        -- retention window; taking the grant away as well means the
+        -- application cannot even attempt one, at any age.
+        'sign_in_events'
     ];
     v_table TEXT;
 BEGIN

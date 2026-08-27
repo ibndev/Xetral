@@ -493,6 +493,49 @@ Schema: `packages/ledger/sql/023_entry_status.sql`.
   per card, not globally, so an unscoped match could attach one customer's
   refund to another customer's charge.
 
+### Sign-in events — non-obvious rules
+
+Schema: `packages/ledger/sql/024_sign_in_events.sql`. Service in
+`apps/api/src/auth/sign-in-events.service.ts`.
+
+- **The FAILURES are the half that was missing.** A password sprayed across
+  four hundred accounts produced four hundred refusals and no rows at all, so
+  the attack easiest to see from outside was the one nothing here could see.
+- **A success is recorded on the login's OWN transaction; a failure is not.**
+  `login()` throws on a refusal and its transaction rolls back, so a failure
+  written on that client is a failure that is never written — and a
+  'succeeded' row that commits while its session rolls back is a claim that
+  somebody signed in when nobody did. Hence two methods, not one with a flag.
+- **The country comes from Cloudflare's `CF-IPCountry`, not a geo-IP lookup.**
+  The edge already computes it, so there is no provider to keep current and
+  nothing extra to be down. It is trusted on exactly the terms
+  `x-forwarded-for` is: it describes a sign-in and never authorises one.
+- **The identifier is stored as a SHA-256 hash.** A failed attempt against an
+  address that matched no account is somebody else's email, put there by
+  whoever guessed it; in the clear this table is a list of addresses under
+  attack.
+- **Familiarity is read from SUCCESSES only, and asked before the current
+  event is written.** Either mistake silences the alert permanently — counting
+  failures makes one guess enough to make an address familiar; writing first
+  makes every place familiar the moment it is used.
+- **An unplaceable sign-in raises nothing.** A missing address must not
+  manufacture an alert on every request from a client we cannot place.
+- **`new_location` is sent only when the DEVICE is already known.** A takeover
+  normally arrives on new hardware and `new_device` covers it; this is the case
+  that message cannot see. Sending both would mail the customer twice about one
+  event.
+- **Credential stuffing is counted on DISTINCT identifiers, not attempts.** The
+  login limiter already caps attempts per identifier, which is what makes an
+  attacker spread across identifiers — so the spread is what is worth counting.
+- **A shared address is a lead, not a verdict.** Nigerian carriers put whole
+  subscriber pools behind a handful of addresses — the same fact that made the
+  request limiter count per customer. A shared DEVICE is the much stronger
+  claim.
+- Append-only, with 019's one relaxation: an UPDATE is refused at any age, and
+  a DELETE only for rows past `retention_sign_in_events_days` — the same
+  setting `apply_retention()` reads, so the sweep and the trigger cannot
+  disagree about which rows are still evidence.
+
 ### Disputes — non-obvious rules
 
 Schema: `packages/ledger/sql/018_disputes.sql`.
@@ -913,6 +956,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/019_retention.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/020_balance_reconciliation.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/021_flow_velocity.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/023_entry_status.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/024_sign_in_events.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -935,6 +979,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/018_disputes.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/019_retention.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/020_balance_reconciliation.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/023_entry_status.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/024_sign_in_events.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

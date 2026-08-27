@@ -46,6 +46,24 @@ export type NotificationRequest =
       /** Absent when the request arrived without a usable client address. */
       readonly ipAddress?: string;
     }
+  /**
+   * A sign-in from a country this account has never used, on a device it HAS.
+   *
+   * Deliberately not merged into `new_device`, and deliberately not sent
+   * alongside it. A takeover normally arrives on new hardware, which that
+   * message already covers; this one is the case it cannot see — a fingerprint
+   * we already trust, presented from somewhere the customer has never been.
+   * Sending both when both are new would mail somebody twice about one event,
+   * and a customer who learns that our security alerts arrive in pairs is a
+   * customer who reads neither.
+   */
+  | {
+      readonly kind: 'new_location';
+      /** ISO 3166-1 alpha-2, or Cloudflare's `XX`/`T1`. */
+      readonly country: string;
+      readonly at: string;
+      readonly ipAddress?: string;
+    }
   | { readonly kind: 'devices_revoked'; readonly count: number; readonly at: string }
   | {
       readonly kind: 'deposit_credited';
@@ -127,6 +145,7 @@ const CLASS_OF: Record<NotificationKind, NotificationClass> = {
   password_reset: 'security',
   password_changed: 'security',
   new_device: 'security',
+  new_location: 'security',
   devices_revoked: 'security',
   deposit_credited: 'transactional',
   transfer_sent: 'transactional',
@@ -300,6 +319,29 @@ export function render(request: NotificationRequest): RenderedNotification {
             `<table role="presentation" cellpadding="0" cellspacing="0" style="font-size:14px;color:#33363d;">` +
             h`<tr><td style="padding:3px 16px 3px 0;color:#7c8089;">When</td><td>${request.at}</td></tr>` +
             h`<tr><td style="padding:3px 16px 3px 0;color:#7c8089;">Device</td><td>${request.platform}</td></tr>` +
+            (request.ipAddress === undefined
+              ? ''
+              : h`<tr><td style="padding:3px 16px 3px 0;color:#7c8089;">IP address</td><td>${request.ipAddress}</td></tr>`) +
+            `</table>`,
+          SECURITY_FOOTER,
+        ),
+      };
+
+    case 'new_location':
+      return {
+        subject: 'Sign-in to your Xetral account from a new country',
+        text:
+          `Your account was signed into from a country it has not been used ` +
+          `from before.\n\n` +
+          `When: ${request.at}\nCountry: ${request.country}\n` +
+          (request.ipAddress === undefined ? '' : `IP address: ${request.ipAddress}\n`) +
+          `\n${SECURITY_FOOTER}`,
+        html: shell(
+          'Sign-in from a new country',
+          h`<p style="margin:0 0 12px;">Your account was signed into from a country it has not been used from before, on a device you have used before.</p>` +
+            `<table role="presentation" cellpadding="0" cellspacing="0" style="font-size:14px;color:#33363d;">` +
+            h`<tr><td style="padding:3px 16px 3px 0;color:#7c8089;">When</td><td>${request.at}</td></tr>` +
+            h`<tr><td style="padding:3px 16px 3px 0;color:#7c8089;">Country</td><td>${request.country}</td></tr>` +
             (request.ipAddress === undefined
               ? ''
               : h`<tr><td style="padding:3px 16px 3px 0;color:#7c8089;">IP address</td><td>${request.ipAddress}</td></tr>`) +

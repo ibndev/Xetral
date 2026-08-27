@@ -27,6 +27,8 @@ import type { LoginRequest, RegisterRequest } from './dto.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { NotificationService } from '../notifications/notification.service.js';
 import { lagosTime } from './password-reset.service.js';
+import { SignInEventService } from './sign-in-events.service.js';
+import type { SignInOrigin } from './sign-in-events.service.js';
 
 export interface TokenPair {
   readonly access_token: string;
@@ -102,6 +104,7 @@ export class AuthService {
     @Inject(CLOCK) private readonly clock: Clock,
     @Inject(SettingsService) private readonly settings: SettingsService,
     @Inject(NotificationService) private readonly notifications: NotificationService,
+    @Inject(SignInEventService) private readonly signIns: SignInEventService,
   ) {}
 
   /**
@@ -184,12 +187,20 @@ export class AuthService {
   }
 
   /**
-   * `ipAddress` is only ever used to describe the sign-in in an alert email.
-   * It is not an authorisation input and must not become one: it arrives
-   * through the proxy chain and is only as trustworthy as `trustProxyHops`.
+   * `origin` describes the sign-in — where it came from and on what — and is
+   * NEVER an authorisation input. Both its fields arrive through the edge, so
+   * they are worth what the edge is worth: enough to show a customer and to
+   * correlate against, not enough to decide anything on.
    */
-  async login(input: LoginRequest, ipAddress?: string): Promise<TokenPair> {
+  async login(input: LoginRequest, origin: SignInOrigin = {}): Promise<TokenPair> {
+    const ipAddress = origin.ip;
     const client = await this.pool.connect();
+    // Set as soon as we know which refusal it was, and recorded AFTER the
+    // rollback below — see `recordFailure`. A failure written on this client
+    // is a failure that is never written, which would leave the
+    // credential-stuffing view looking at a clean database during an attack.
+    let failure: 'bad_credentials' | 'unknown_identifier' | 'refused' | undefined;
+    let failedUserId: string | undefined;
     try {
       await client.query('BEGIN');
 
@@ -204,6 +215,13 @@ export class AuthService {
 
       if (user === undefined || !passwordMatches) {
         this.#logger.warn(`login failed for '${input.identifier}': bad credentials`);
+        // The two are recorded apart even though the caller cannot tell them
+        // apart. "Somebody is guessing passwords on real accounts" and
+        // "somebody is guessing which accounts exist" are different attacks
+        // with different responses, and the endpoint answering identically is
+        // what makes the distinction safe to keep here.
+        failure = user === undefined ? 'unknown_identifier' : 'bad_credentials';
+        failedUserId = user?.id;
         throw new UnauthorizedException(INVALID_CREDENTIALS);
       }
 
@@ -211,11 +229,27 @@ export class AuthService {
       // must not be able to obtain a session at all.
       if (user.status === 'closed') {
         this.#logger.warn(`login refused for user ${user.id}: account closed`);
+        failure = 'refused';
+        failedUserId = user.id;
         throw new UnauthorizedException(INVALID_CREDENTIALS);
       }
 
+      // ASKED BEFORE THE EVENT IS WRITTEN. Recording first would make every
+      // place familiar the moment it is used, and the alert below would never
+      // fire again.
+      const familiar = await this.signIns.familiarity(client, user.id, origin);
+
       const device = await this.#resolveDevice(client, user.id, input.device);
       const pair = await this.#openSession(client, user, device);
+
+      // On the login's OWN transaction, so a 'succeeded' row cannot commit
+      // while the session it describes rolls back.
+      await this.signIns.recordSuccess(client, {
+        userId: user.id,
+        identifier: input.identifier,
+        deviceId: device.id,
+        origin,
+      });
 
       // A sign-in from a device this customer has never used is the single
       // most useful thing to tell them about: it is what account takeover
@@ -247,6 +281,34 @@ export class AuthService {
         });
       }
 
+      // A KNOWN DEVICE IN AN UNKNOWN COUNTRY is the case the new-device alert
+      // cannot see, and it is the whole reason this is a second message rather
+      // than a field on that one. A takeover normally arrives on new hardware
+      // and `new_device` covers it; a replayed fingerprint arrives on hardware
+      // we already trust, and only the country moves. Sending both when both
+      // are new would mail the customer twice about one event and train them
+      // to ignore the pair.
+      if (
+        !device.firstSeen &&
+        !familiar.countrySeenBefore &&
+        origin.country !== undefined &&
+        user.email !== null
+      ) {
+        await this.notifications.enqueueBestEffort(client, {
+          userId: user.id,
+          recipient: user.email,
+          // Keyed on the country, so a customer who has genuinely moved is
+          // told once rather than on every sign-in until they come home.
+          idempotencyKey: `new_location:${user.id}:${origin.country}`,
+          request: {
+            kind: 'new_location',
+            country: origin.country,
+            at: lagosTime(),
+            ...(ipAddress === undefined ? {} : { ipAddress }),
+          },
+        });
+      }
+
       await client.query('COMMIT');
       return pair;
     } catch (error) {
@@ -254,6 +316,17 @@ export class AuthService {
       throw error;
     } finally {
       client.release();
+      if (failure !== undefined) {
+        // After the rollback and after the connection is back, on a client of
+        // its own. Swallows its own errors: being unable to record an attempt
+        // must not change the answer the caller already has.
+        await this.signIns.recordFailure({
+          identifier: input.identifier,
+          outcome: failure,
+          origin,
+          ...(failedUserId === undefined ? {} : { userId: failedUserId }),
+        });
+      }
     }
   }
 
