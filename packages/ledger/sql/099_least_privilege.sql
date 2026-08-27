@@ -40,8 +40,11 @@
 --  list; `022_least_privilege.test.sql` fails the build if a table with such a
 --  trigger still carries UPDATE or DELETE for the application role.
 --
---  RUN THIS AS THE OWNER. It is the last migration, so every table exists by
---  the time it grants against them.
+--  RUN THIS AS THE OWNER, AND RUN IT LAST. It grants against every table in the
+--  schema, so a migration added after it arrives with no grant at all and the
+--  application cannot read it. Numbered 099 rather than taking the next number
+--  in sequence, so that ordering is stated by the filename instead of being a
+--  fact somebody has to remember.
 -- ============================================================================
 
 BEGIN;

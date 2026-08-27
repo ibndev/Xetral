@@ -131,3 +131,43 @@ describe('balance checking', () => {
     ).not.toThrow();
   });
 });
+
+describe('naming the entry an entry acts upon', () => {
+  const legs = [posting(wallet, ngn(-500_000)), posting(floatNgn, ngn(500_000))];
+  const of = (kind: LedgerIntent['kind'], reversesEntryId?: string): LedgerIntent => ({
+    ...intent(legs),
+    kind,
+    ...(reversesEntryId === undefined ? {} : { reversesEntryId }),
+  });
+
+  it('requires a reversal to name its target', () => {
+    // "That entry did not happen" is a statement ABOUT a specific entry.
+    // Without one it is not a reversal, it is money leaving for no reason.
+    expect(() => assertBalanced(of('reversal'))).toThrow(/names no entry it acts upon/);
+  });
+
+  it('requires a dispute refund to name the charge it answers', () => {
+    // The gap this closes. `journal_entries` bound `reverses_id` to reversals
+    // by a biconditional, so a dispute refund COULD NOT name what it refunded
+    // — every one was a credit arriving in a wallet with nothing in the books
+    // saying what it was for, and nothing could derive that the charge had
+    // been refunded.
+    expect(() => assertBalanced(of('dispute_refund'))).toThrow(/names no entry it acts upon/);
+    expect(() => assertBalanced(of('dispute_refund', '42'))).not.toThrow();
+  });
+
+  it('lets a card refund go either way', () => {
+    // The one asymmetry, and it is deliberate: a merchant refund arrives days
+    // later through a provider payload we do not control. Refusing it for a
+    // missing link would turn worse reporting into money the customer is owed
+    // and does not get.
+    expect(() => assertBalanced(of('card_refund'))).not.toThrow();
+    expect(() => assertBalanced(of('card_refund', '42'))).not.toThrow();
+  });
+
+  it('refuses an ordinary entry that names one', () => {
+    expect(() => assertBalanced(of('wallet_transfer', '42'))).toThrow(
+      /names an entry to act upon but is kind/,
+    );
+  });
+});

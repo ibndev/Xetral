@@ -91,7 +91,18 @@ export class CardWebhookService {
       return this.#handleDecline(envelope, card.id);
     }
 
-    const intent = toLedgerIntent(envelope, { ownerId });
+    // A refund names the authorization it answers, when Bitnob tells us which
+    // one. Resolved here rather than in the adapter, because it is a database
+    // lookup and the adapter is a pure translation of a payload.
+    const refundsEntryId =
+      envelope.event === BITNOB_EVENTS.cardRefund
+        ? await this.#authorizationEntry(card.id, envelope.data.authorization_id)
+        : undefined;
+
+    const intent = toLedgerIntent(envelope, {
+      ownerId,
+      ...(refundsEntryId === undefined ? {} : { refundsEntryId }),
+    });
     if (intent === undefined) return { received: true };
 
     // Only an AUTHORIZATION is a spend the customer is exposed to. A
@@ -241,6 +252,35 @@ export class CardWebhookService {
       [providerCardId],
     );
     return result.rows[0];
+  }
+
+  /**
+   * The journal entry for the authorization a refund answers.
+   *
+   * Looked up on `card_authorizations`, which has recorded `provider_txn_id`
+   * against `entry_id` since Phase 13's card protections — so this needs no
+   * new bookkeeping, only the join nobody had reason to write before.
+   *
+   * SCOPED TO THE CARD. `provider_txn_id` is UNIQUE per card rather than
+   * globally, so matching on it alone could attach one customer's refund to
+   * another customer's charge — which would then read, in both their
+   * histories, as a refund of something that was never theirs.
+   *
+   * Returns undefined for anything it cannot resolve, and that is not an
+   * error: the refund still posts. A refund the customer is owed must not be
+   * refused because the provider did not say what it was for.
+   */
+  async #authorizationEntry(
+    cardId: string,
+    authorizationId: string | undefined,
+  ): Promise<string | undefined> {
+    if (authorizationId === undefined) return undefined;
+    const result = await this.pool.query<{ entry_id: string }>(
+      `SELECT entry_id FROM card_authorizations
+        WHERE card_id = $1 AND provider_txn_id = $2`,
+      [cardId, authorizationId],
+    );
+    return result.rows[0]?.entry_id;
   }
 
   async #ownerOfCard(providerCardId: string): Promise<string | undefined> {

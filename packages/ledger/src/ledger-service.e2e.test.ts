@@ -309,7 +309,7 @@ describe('reversals', () => {
           postings: [posting(wallet(alice), ngn(-100)), posting(wallet(bob), ngn(100))],
         }),
       ),
-    ).rejects.toThrow(/names no entry to reverse/);
+    ).rejects.toThrow(/names no entry it acts upon/);
   });
 
   it('refuses a non-reversal that names one', async () => {
@@ -323,7 +323,7 @@ describe('reversals', () => {
           postings: [posting(wallet(alice), ngn(-100)), posting(wallet(bob), ngn(100))],
         }),
       ),
-    ).rejects.toThrow(/names an entry to reverse but is kind/);
+    ).rejects.toThrow(/names an entry to act upon but is kind/);
   });
 
   it('refuses to reverse an entry that does not exist', async () => {

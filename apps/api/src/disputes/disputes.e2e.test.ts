@@ -294,6 +294,30 @@ describe('resolving one', () => {
       `SELECT count(*)::text AS n FROM journal_entries WHERE kind = 'dispute_refund'`,
     );
     expect(Number(refund.rows[0]?.n)).toBeGreaterThan(0);
+
+    // AND THE REFUND NAMES THE CHARGE. Until 023 it could not: `reverses_id`
+    // was bound to reversals by a biconditional, so every dispute refund was a
+    // credit arriving in a wallet with nothing in the books saying what it
+    // answered — and the customer read a debit and an unexplained credit.
+    const status = await pool.query<{ status: string; answered_by: string | null }>(
+      `SELECT status, answered_by::text FROM entry_status WHERE uuid = $1::uuid`,
+      [entryId],
+    );
+    expect(status.rows[0]?.status).toBe('refunded');
+    expect(status.rows[0]?.answered_by).not.toBeNull();
+
+    // Which is what the customer's own history now says, rather than only
+    // being derivable by somebody with psql.
+    const history = await request(app.getHttpServer())
+      .get('/v1/wallets/transactions?currency=NGN')
+      .set('Authorization', `Bearer ${sender.token}`)
+      .expect(200);
+
+    const line = history.body.entries.find(
+      (e: { id: string }) => e.id === entryId,
+    ) as { status: string; answered_by: string | null } | undefined;
+    expect(line?.status).toBe('refunded');
+    expect(line?.answered_by).not.toBeNull();
   });
 
   it('rejecting it moves NOTHING', async () => {
@@ -429,5 +453,34 @@ describe('the customer own view', () => {
 
     expect(withdrawn.body.status).toBe('withdrawn');
     expect(await spendable(sender)).toBe(before);
+  });
+
+  it('reads as DISPUTED while the claim is open, and settled before it', async () => {
+    // The state the customer is actually in for most of a dispute's life:
+    // raised, nothing decided, waiting on us. It had no representation
+    // anywhere — the audit's "no disputed state" — so a support agent looking
+    // at the entry saw exactly what they saw before the complaint.
+    const sender = await onboard();
+    const recipient = await onboard();
+    await fund(sender.userId, 20_000_00);
+    const entryId = await transfer(sender, recipient);
+
+    const historyOf = async (): Promise<{ status: string } | undefined> => {
+      const res = await request(app.getHttpServer())
+        .get('/v1/wallets/transactions?currency=NGN')
+        .set('Authorization', `Bearer ${sender.token}`)
+        .expect(200);
+      return res.body.entries.find((e: { id: string }) => e.id === entryId);
+    };
+
+    expect((await historyOf())?.status).toBe('settled');
+
+    await raise(sender, {
+      entry_id: entryId,
+      reason: 'not_received',
+      detail: 'still waiting',
+    }).expect(200);
+
+    expect((await historyOf())?.status).toBe('disputed');
   });
 });

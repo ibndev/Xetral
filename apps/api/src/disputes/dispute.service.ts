@@ -205,9 +205,10 @@ export class DisputeService {
       id: string;
       user_id: string;
       user_uuid: string;
+      entry_id: string;
       currency: string;
     }>(
-      `SELECT d.id, d.user_id, u.uuid AS user_uuid,
+      `SELECT d.id, d.user_id, u.uuid AS user_uuid, d.entry_id,
               -- The currency of the customer's OWN leg in the disputed entry.
               -- Refunding in any other would be a currency conversion nobody
               -- quoted, and on an FX trade the entry carries two.
@@ -243,6 +244,13 @@ export class DisputeService {
         // again refunds once — the ledger answers `replayed: true` and the
         // UPDATE below then finds the dispute already resolved.
         idempotencyKey: `dispute-refund:${decision.idempotency_key}`,
+        // THE CHARGE THIS ANSWERS. Without it the refund is a floating credit:
+        // money appearing in the wallet with nothing in the books saying what
+        // it was for, so `entry_status` cannot report the disputed entry as
+        // refunded and the customer reads a debit and an unexplained credit.
+        // The id is the one the claim was raised against, so it is never a
+        // guess — `disputes.entry_id` is a foreign key.
+        reversesEntryId: dispute.entry_id,
         kind: 'dispute_refund',
         occurredAt: new Date(),
         description: 'dispute upheld',

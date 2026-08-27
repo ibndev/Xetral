@@ -91,10 +91,17 @@ export interface PostingIntent {
 
 export interface LedgerIntent {
   /**
-   * The entry this one reverses. Required when `kind` is 'reversal' and
-   * forbidden otherwise — `journal_entries` has a CHECK saying exactly that,
-   * and a self-referencing FK so a reversal can never point at an entry that
-   * does not exist.
+   * The entry this one acts upon.
+   *
+   * REQUIRED for 'reversal' and 'dispute_refund', OPTIONAL for 'card_refund',
+   * and forbidden for every other kind — `journal_entries` has a CHECK saying
+   * exactly that, and a self-referencing FK so an answering entry can never
+   * point at one that does not exist.
+   *
+   * Without this a refund is a floating credit: money arriving in a wallet
+   * with nothing in the books tying it to the charge it answers, so nothing
+   * can derive that the charge WAS refunded and the customer reads a debit
+   * and an unexplained credit.
    *
    * A mistake is corrected by appending one of these, never by editing
    * history. That is what makes the ledger auditable rather than merely
@@ -151,15 +158,28 @@ export class UnbalancedIntentError extends InvalidEntryError {}
  * errors in different currencies cancel out and pass.
  */
 export function assertBalanced(intent: LedgerIntent): void {
-  // Mirrors the `reversal_has_target` CHECK. Caught here so the error names the
-  // code that built the entry, rather than surfacing as a constraint violation
-  // from inside a transaction several layers away.
-  const isReversal = intent.kind === 'reversal';
-  if (isReversal !== (intent.reversesEntryId !== undefined)) {
+  // Mirrors the `entry_target_is_consistent` CHECK in 023. Caught here so the
+  // error names the code that built the entry, rather than surfacing as a
+  // constraint violation from inside a transaction several layers away.
+  //
+  // The three kinds do not share one obligation, and the difference is not
+  // tidiness: a reversal or a dispute refund is a statement ABOUT a specific
+  // entry and we always hold its id, so one without a target is money from
+  // nowhere. A card refund comes from a merchant weeks later through a
+  // provider payload whose shape is not ours to guarantee — refusing it for a
+  // missing link would turn worse reporting into missing money.
+  const named = intent.reversesEntryId !== undefined;
+  const mustName = intent.kind === 'reversal' || intent.kind === 'dispute_refund';
+  const mayName = mustName || intent.kind === 'card_refund';
+
+  if (mustName && !named) {
     throw new UnbalancedIntentError(
-      isReversal
-        ? `entry '${intent.idempotencyKey}' is a reversal but names no entry to reverse`
-        : `entry '${intent.idempotencyKey}' names an entry to reverse but is kind '${intent.kind}'`,
+      `entry '${intent.idempotencyKey}' is a '${intent.kind}' but names no entry it acts upon`,
+    );
+  }
+  if (named && !mayName) {
+    throw new UnbalancedIntentError(
+      `entry '${intent.idempotencyKey}' names an entry to act upon but is kind '${intent.kind}'`,
     );
   }
 

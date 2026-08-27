@@ -128,6 +128,22 @@ export interface WebhookContext {
    *  because mapping a provider customer to a Xetral user is not the adapter's
    *  business. */
   readonly ownerId: string;
+
+  /**
+   * The journal entry a REFUND answers, when the caller could find one.
+   *
+   * Resolved by the caller for the same reason `ownerId` is: turning Bitnob's
+   * `authorization_id` into one of our entry ids is a database lookup, and an
+   * adapter that queried would stop being a pure translation of a payload.
+   *
+   * OPTIONAL, and that is the decision rather than an oversight. A merchant
+   * refund arrives days or weeks after the settlement through a payload whose
+   * shape is not ours to guarantee, so the link may simply not be there.
+   * Refusing the refund for a missing link would turn worse reporting into
+   * money the customer is owed and does not get; `entry_status` reports what
+   * it can and says nothing it cannot.
+   */
+  readonly refundsEntryId?: string;
 }
 
 /**
@@ -159,7 +175,7 @@ export function toLedgerIntent(
   envelope: BitnobWebhookEnvelope,
   context: WebhookContext,
 ): LedgerIntent | undefined {
-  const { ownerId } = context;
+  const { ownerId, refundsEntryId } = context;
 
   if (envelope.data.currency.toUpperCase() !== 'USD') {
     throw new ProviderContractError(
@@ -254,6 +270,10 @@ export function toLedgerIntent(
           remainderMicro === 0n
             ? base.metadata
             : { ...base.metadata, remainder_micro: remainderMicro.toString() },
+        // The charge this answers, when the caller found it. Omitted rather
+        // than null: `LedgerIntent` treats the key's presence as the claim,
+        // and the CHECK in 023 permits a card refund either way.
+        ...(refundsEntryId === undefined ? {} : { reversesEntryId: refundsEntryId }),
         kind: 'card_refund',
         description: describe('refund', envelope),
         postings: legs(amount, float, card),

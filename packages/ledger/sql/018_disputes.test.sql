@@ -174,20 +174,24 @@ END $$;
 DO $$
 DECLARE
     v_id BIGINT; v_staff BIGINT; v_b BIGINT; v_wb BIGINT;
-    v_loss BIGINT; v_refund BIGINT;
+    v_loss BIGINT; v_refund BIGINT; v_charge BIGINT;
 BEGIN
     SELECT id INTO v_staff FROM users WHERE email = 'dispute-staff@example.ng';
     SELECT id INTO v_b     FROM users WHERE email = 'dispute-b@example.ng';
     SELECT id INTO v_wb    FROM accounts
      WHERE owner_type = 'user' AND owner_id = v_b AND kind = 'customer_wallet';
-    SELECT id INTO v_id    FROM disputes WHERE status = 'open' LIMIT 1;
+    SELECT id, entry_id INTO v_id, v_charge
+      FROM disputes WHERE status = 'open' LIMIT 1;
 
     SELECT id INTO v_loss FROM accounts
      WHERE kind = 'expense_dispute_loss' AND currency = 'NGN';
 
-    -- A real dispute_refund entry, crediting the WRONG customer.
-    INSERT INTO journal_entries (idempotency_key, kind, occurred_at, description)
-    VALUES ('p18:wrong-refund', 'dispute_refund', now(), 'to the wrong person')
+    -- A real dispute_refund entry, naming the right charge and crediting the
+    -- WRONG customer. The target is set deliberately: since 023 an unattached
+    -- dispute refund is refused by a CHECK, and a block that tripped over
+    -- THAT would report PASS while never reaching the trigger it exists for.
+    INSERT INTO journal_entries (idempotency_key, kind, occurred_at, description, reverses_id)
+    VALUES ('p18:wrong-refund', 'dispute_refund', now(), 'to the wrong person', v_charge)
     RETURNING id INTO v_refund;
     INSERT INTO postings (journal_entry_id, account_id, amount_minor, currency) VALUES
       (v_refund, v_wb,    50000, 'NGN'),
@@ -208,17 +212,20 @@ END $$;
 DO $$
 DECLARE
     v_id BIGINT; v_staff BIGINT; v_a BIGINT; v_wa BIGINT;
-    v_loss BIGINT; v_refund BIGINT; v_sum BIGINT;
+    v_loss BIGINT; v_refund BIGINT; v_sum BIGINT; v_charge BIGINT; v_status TEXT;
 BEGIN
     SELECT id INTO v_staff FROM users WHERE email = 'dispute-staff@example.ng';
     SELECT id INTO v_a     FROM users WHERE email = 'dispute-a@example.ng';
     SELECT id INTO v_wa    FROM accounts
      WHERE owner_type = 'user' AND owner_id = v_a AND kind = 'customer_wallet';
     SELECT id INTO v_loss  FROM accounts WHERE kind = 'expense_dispute_loss' AND currency = 'NGN';
-    SELECT id INTO v_id    FROM disputes WHERE status = 'open' LIMIT 1;
+    SELECT id, entry_id INTO v_id, v_charge
+      FROM disputes WHERE status = 'open' LIMIT 1;
 
-    INSERT INTO journal_entries (idempotency_key, kind, occurred_at, description)
-    VALUES ('p18:refund', 'dispute_refund', now(), 'dispute upheld')
+    -- The refund NAMES THE CHARGE. Before 023 it could not, and the credit
+    -- landed in the wallet with nothing in the books saying what it answered.
+    INSERT INTO journal_entries (idempotency_key, kind, occurred_at, description, reverses_id)
+    VALUES ('p18:refund', 'dispute_refund', now(), 'dispute upheld', v_charge)
     RETURNING id INTO v_refund;
     INSERT INTO postings (journal_entry_id, account_id, amount_minor, currency) VALUES
       (v_refund, v_wa,    50000, 'NGN'),
@@ -236,6 +243,14 @@ BEGIN
     IF v_sum <> 0 THEN
         RAISE EXCEPTION 'TEST FAILED: the refund entry does not balance (%)', v_sum;
     END IF;
+    -- And the disputed charge now READS as refunded, which is the whole point
+    -- of linking it: a customer seeing a debit and an unexplained credit
+    -- cannot tell they are the same event.
+    SELECT status INTO v_status FROM entry_status WHERE id = v_charge;
+    IF v_status <> 'refunded' THEN
+        RAISE EXCEPTION 'TEST FAILED: the refunded charge reads %', v_status;
+    END IF;
+
     RAISE NOTICE 'PASS: an upheld dispute is an APPENDED entry, and it balances';
 END $$;
 

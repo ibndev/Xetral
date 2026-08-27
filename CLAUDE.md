@@ -465,6 +465,34 @@ Schema: `packages/ledger/sql/017_transfer_velocity.sql`. Limiter in
   inside the current Lagos day — somebody paid monthly for a year is not a
   stranger because this month's rent went out this morning.
 
+### What later happened to an entry — non-obvious rules
+
+Schema: `packages/ledger/sql/023_entry_status.sql`.
+
+- **`reverses_id` means "the entry this one acts upon", and the CHECK is
+  per kind.** It used to be a BICONDITIONAL on `kind = 'reversal'`, which meant
+  a refund COULD NOT NAME WHAT IT REFUNDS — so every `dispute_refund` and
+  `card_refund` since Phase 1 was a floating credit, and nothing could derive
+  that a charge had been refunded.
+- **A reversal and a refund are different claims about the world.** A reversal
+  says it did not happen; a refund says it did, correctly, and the money is
+  going back. Collapsing them tells a customer the wrong one.
+- **A reversal and a dispute refund MUST name their target; a card refund MAY.**
+  The asymmetry is the decision: a merchant refund arrives weeks later through
+  a payload whose shape is not ours to guarantee, and refusing it for a missing
+  link turns worse reporting into money the customer is owed and does not get.
+- **The status is a VIEW, never a column.** A stored `status` is a second copy
+  of the ledger and drifts the first time a flow forgets to update it — the
+  same reason balances are computed from postings and the velocity rules read
+  postings rather than metadata.
+- **`refunded` beats `disputed` in the CASE.** An upheld dispute is both, and
+  the refund is the one that changed the balance; `disputed` is reserved for a
+  claim still open, which is the state where somebody is waiting on us.
+- Resolving Bitnob's `authorization_id` to one of our entry ids happens in
+  `CardWebhookService`, **scoped to the card** — `provider_txn_id` is unique
+  per card, not globally, so an unscoped match could attach one customer's
+  refund to another customer's charge.
+
 ### Disputes — non-obvious rules
 
 Schema: `packages/ledger/sql/018_disputes.sql`.
@@ -884,7 +912,8 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/018_disputes.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/019_retention.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/020_balance_reconciliation.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/021_flow_velocity.sql
-psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/022_least_privilege.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/023_entry_status.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/003_cards.test.sql
@@ -905,7 +934,8 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/017_transfer_velocity.t
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/018_disputes.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/019_retention.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/020_balance_reconciliation.test.sql
-psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/022_least_privilege.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/023_entry_status.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,
 # Redis for the rate-limiter contract.

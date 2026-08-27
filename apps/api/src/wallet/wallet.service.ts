@@ -79,6 +79,11 @@ export class WalletService {
         amount: toMajor({ amount: row.amountMinor, currency }),
         currency: row.currency,
         occurred_at: row.occurredAt.toISOString(),
+        // What later happened to it. A customer whose charge was reversed or
+        // refunded previously read a debit and an unexplained credit, with
+        // nothing saying the two were the same event.
+        status: row.status,
+        answered_by: row.answeredBy,
       })),
       next_cursor: rows.length === options.limit ? (rows[rows.length - 1]?.postingId ?? null) : null,
     };
