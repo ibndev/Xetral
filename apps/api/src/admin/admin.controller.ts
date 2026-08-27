@@ -19,6 +19,7 @@ import { SettingsService } from '../settings/settings.service.js';
 import { ProviderCredentialService } from '../settings/provider-credentials.service.js';
 import { MonitoringService } from '../risk/monitoring.service.js';
 import { CaseService } from '../risk/case.service.js';
+import { CardService } from '../cards/card.service.js';
 import { KycService } from '../kyc/kyc.service.js';
 import { ErrorRecorder } from '../observability/error-recorder.service.js';
 import { kycReviewSchema } from '../kyc/dto.js';
@@ -71,6 +72,10 @@ const resolutionSchema = z.object({
   resolution: z.string().trim().min(10).max(1000),
 });
 
+const staffFreezeSchema = z.object({
+  reason: z.string().trim().min(5).max(500),
+});
+
 const tierSchema = z.object({
   // 0 registered, 1 verified, 2 enhanced. A number rather than a name, because
   // the ordering is the meaning — the trigger refuses a jump that skips the
@@ -121,6 +126,7 @@ export class AdminController {
     private readonly credentialStore: ProviderCredentialService,
     @Inject(MonitoringService) private readonly monitoring: MonitoringService,
     @Inject(CaseService) private readonly cases: CaseService,
+    @Inject(CardService) private readonly cards: CardService,
     @Inject(KycService) private readonly kyc: KycService,
     @Inject(ErrorRecorder) private readonly errors: ErrorRecorder,
   ) {}
@@ -245,6 +251,48 @@ export class AdminController {
       parsed.data.reason,
       ipOf(request),
     );
+  }
+
+  /* -------------------------------- cards ------------------------------ */
+
+  /** One card's whole life: every status change and who caused it. Four digits
+   *  of the number and no more — this screen is read over shoulders. */
+  @Get('cards/:id')
+  async card(@Param('id') id: string): Promise<unknown> {
+    return this.admin.cardHistory(id);
+  }
+
+  /**
+   * Freezes a card on a customer's behalf, with a reason.
+   *
+   * No staff TERMINATE, deliberately: freezing stops spending and the customer
+   * can undo it, while terminating moves their money and cannot be undone.
+   */
+  @Post('cards/:id/freeze')
+  @HttpCode(204)
+  async freezeCard(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ): Promise<void> {
+    const parsed = staffFreezeSchema.safeParse(body);
+    if (!parsed.success) throw invalid(parsed.error.issues);
+
+    const actor = claims(request).sub;
+    await this.cards.freezeAsStaff(id, actor, parsed.data.reason);
+
+    const ip = ipOf(request);
+    await this.audit.record({
+      actorId: actor,
+      action: 'card.freeze',
+      subjectType: 'card',
+      subjectId: id,
+      detail: {},
+      // A customer WILL ring back to ask why their card stopped working, and
+      // "a member of staff froze it" is not an answer.
+      reason: parsed.data.reason,
+      ...(ip === undefined ? {} : { ip }),
+    });
   }
 
   /**

@@ -159,6 +159,8 @@ describe('the privileged surface is declared as privileged', () => {
   it('lists exactly the routes only staff can reach', () => {
     expect(staffRoutes.map((r) => `${r.method} ${r.path} (${r.role})`).sort()).toEqual([
       'GET /v1/admin/audit (admin)',
+      // A card's whole life, for the agent on the phone.
+      'GET /v1/admin/cards/:id (support)',
       // Provider credentials. `admin` on all three: the write decides whether
       // money can move at all, and the reads are a map of which integrations
       // are live.
@@ -189,6 +191,9 @@ describe('the privileged surface is declared as privileged', () => {
       // recurrence reopens the fingerprint by itself.
       // Upholding a dispute pays money out of our own account, so it takes a
       // PIN and — through the guard — a fresh second factor.
+      // Freezing only. There is deliberately no staff terminate: it moves the
+      // customer's money and cannot be undone.
+      'POST /v1/admin/cards/:id/freeze (compliance)',
       'POST /v1/admin/credentials/:provider/:name (admin)',
       'POST /v1/admin/disputes/:id/resolve (dispute_reviewer)',
       'POST /v1/admin/errors/:fingerprint/resolve (admin)',

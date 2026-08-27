@@ -192,6 +192,53 @@ Schema: `packages/ledger/sql/003_cards.sql`.
   a moment later makes the retry succeed. Acknowledging would drop a real spend
   from the books to save log noise.
 
+### Card lifecycle and holds — non-obvious rules
+
+Schema: `packages/ledger/sql/030_card_lifecycle.sql` and
+`031_card_settlements.sql`.
+
+- **A SETTLEMENT MAY EXCEED ITS AUTHORIZATION, and taking the whole amount from
+  `customer_pending` made that impossible to post.** Only the hold is in
+  pending, so the overdraft guard refused every over-settlement — Bitnob
+  retried for ever and the spend never reached the books. The entry now
+  releases the hold from pending and takes the excess from the card's own
+  balance, which is what economically happened; if the card cannot cover it,
+  the existing rethrow applies and a person looks.
+- **A settlement naming an authorization we do not hold is REFUSED, not
+  acknowledged.** Nothing is in pending to release, so acknowledging would drop
+  a real spend permanently. Webhooks arrive out of order and the authorization
+  landing a moment later makes the retry succeed — the same rule Phase 5
+  records about an authorization the card cannot cover.
+- **A lost settlement webhook is invisible to everything else.** The money sits
+  in `customer_pending`, the ledger balances, `ledger_drift` reports nothing
+  and every test stays green. `card_holds_stuck` is the only thing that sees
+  it, and it COUNTS rather than resolves: settling invents a spend the provider
+  never confirmed, expiring hands back money that may have been spent.
+- **`card_hold_window_days` is 16, deliberately longer than fourteen.** Bitnob
+  settles up to 7–14 BUSINESS days out, so a shorter window is a false alarm
+  every fortnight — and an alert people learn to ignore is worse than none.
+- **The stuck-hold check rides on the balance reconciliation sweep**, not its
+  own. It asks the same question, and every worker interval is one more thing
+  an operator can forget to set on exactly one instance.
+- **`card_settlements` is a separate table, not columns on the
+  authorization.** That row records what the duplicate guard saw at the moment
+  of the charge; writing to it days later would also touch a row 010 counts,
+  which is how a redelivered settlement becomes a second authorization for the
+  purpose of freezing a card.
+- **Every card status change is recorded by trigger, attributed by the
+  service.** The trigger cannot know who, so it writes `system` and the service
+  completes the row in the SAME transaction — apart, a process dying between
+  them would leave a real change attributed to nobody.
+- **A replacement links to what it replaced, and only for a TERMINATED card of
+  the SAME customer.** Otherwise a customer holds two live cards where one is
+  described as the successor of the other, leaving the leaked number spendable.
+- **Reissue terminates FIRST.** Issuing first would leave a customer holding a
+  live replacement AND a live compromised card if the termination then failed —
+  the exact state they came to escape.
+- **Staff can freeze a card and deliberately cannot terminate one.** Freezing
+  stops spending and the customer can undo it; terminating moves their money
+  and cannot be undone.
+
 ### Purchases (bills, eSIM, numbers) — non-obvious rules
 
 Schema: `packages/ledger/sql/004_purchases.sql`. One table for every "buy a thing
@@ -1188,6 +1235,8 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/027_risk_signals.seed.s
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/028_risk_cases.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/029_kyc_tiers.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/029_kyc_tiers.seed.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/030_card_lifecycle.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/031_card_settlements.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -1216,6 +1265,8 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/026_provider_credential
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/027_risk_signals.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/028_risk_cases.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/029_kyc_tiers.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/030_card_lifecycle.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/031_card_settlements.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

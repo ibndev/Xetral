@@ -15,6 +15,18 @@ export const fundCardSchema = z.object({
   idempotency_key: z.string().trim().min(8).max(128),
 });
 
+/**
+ * Replacing a card whose number the customer no longer trusts.
+ *
+ * Carries no amount: the replacement is funded back to whatever the old card
+ * held, so "replace this card" cannot be misread as "and change the balance".
+ */
+export const reissueCardSchema = z.object({
+  name_on_card: z.string().trim().min(2).max(64),
+  transaction_pin: z.string().min(1).max(32),
+  idempotency_key: z.string().trim().min(8).max(128),
+});
+
 /** Freeze carries no PIN: it is the protective action, and asking a customer
  *  whose card is being used fraudulently to remember a PIN first is hostile.
  *  Unfreeze and terminate DO require one — see routes.ts. */

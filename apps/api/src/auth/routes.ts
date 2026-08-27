@@ -121,6 +121,11 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       .authenticated('POST', '/v1/cards/:id/reveal', { pin: true })
       .authenticated('POST', '/v1/cards/:id/freeze', { pin: false })
       .authenticated('POST', '/v1/cards/:id/unfreeze', { pin: true })
+      // Replacing a card. A PIN, because it terminates the old one — and the
+      // whole point of the flow is that the customer no longer trusts that
+      // card, which is exactly when somebody else may be holding their
+      // session.
+      .authenticated('POST', '/v1/cards/:id/reissue', { pin: true })
       .authenticated('POST', '/v1/cards/:id/terminate', { pin: true })
 
       // Airtime, data, utilities, eSIMs, numbers.
@@ -206,6 +211,19 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // authenticator ends up on somebody's desk — the lesson the staff second
       // factor already records. Closing takes one, because it resolves every
       // signal attached and is the act a regulator inspects.
+      // CARDS, for the agent on the phone to a customer.
+      //
+      // Reading is `support`: a declined-card call is the commonest support
+      // conversation there is, and it was previously one nobody on this side
+      // could follow. The view carries four digits of the number and no more.
+      //
+      // FREEZING is `compliance`, and there is deliberately no staff
+      // terminate. Freezing stops spending and the customer can undo it;
+      // terminating moves their money and cannot be undone, and there is no
+      // support conversation in which doing that without them is right.
+      .staff('GET', '/v1/admin/cards/:id', { pin: false, role: 'support' })
+      .staff('POST', '/v1/admin/cards/:id/freeze', { pin: true, role: 'compliance' })
+
       // A customer's verification tier. `compliance`, not `support`: it decides
       // how much money may leave an account in a day, which is the same kind
       // of decision as approving the identity behind it.

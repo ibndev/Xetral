@@ -315,7 +315,7 @@ export class CardService {
     this.#assertUsable(row);
 
     const updated = await this.cards.freeze(row.provider_card_id);
-    await this.#setStatus(row.id, updated.status);
+    await this.#setStatusBy(row.id, updated.status, 'customer', userUuid);
     // Recorded as the CUSTOMER's freeze, so unfreezing later can tell them
     // this was their own doing rather than an incident they slept through.
     await this.protection.record(row.id, 'customer', 'customer_request', null);
@@ -329,7 +329,7 @@ export class CardService {
     }
 
     const updated = await this.cards.unfreeze(row.provider_card_id);
-    await this.#setStatus(row.id, updated.status);
+    await this.#setStatusBy(row.id, updated.status, 'customer', userUuid);
     // The freeze record is closed, not deleted: "was this card ever frozen
     // automatically, and when" has to stay answerable months later, which is
     // the whole reason the table is append-only.
@@ -354,10 +354,7 @@ export class CardService {
 
     await this.cards.terminate(row.provider_card_id);
 
-    await this.pool.query(
-      `UPDATE cards SET status = 'terminated', terminated_at = now() WHERE id = $1::bigint`,
-      [row.id],
-    );
+    await this.#terminateRow(row.id, 'customer', userUuid);
 
     const remaining = await this.#cardBalance(userId);
     if (remaining > 0n) {
@@ -375,6 +372,151 @@ export class CardService {
     }
 
     return this.get(userUuid, cardUuid);
+  }
+
+  /**
+   * A support agent freezing a card, with a reason.
+   *
+   * FREEZE ONLY, and terminate deliberately absent. Freezing stops spending
+   * and is reversible by the customer; terminating moves their money and
+   * cannot be undone, and there is no support conversation in which doing that
+   * to somebody's card without them is the right call. An agent watching
+   * fraudulent charges land needs the first and never the second.
+   *
+   * The reason is required by the CHECK in 030 as well as by the endpoint,
+   * because a customer WILL ring back to ask why their card stopped working
+   * and "a member of staff froze it" is not an answer.
+   */
+  async freezeAsStaff(cardUuid: string, staffUuid: string, reason: string): Promise<void> {
+    const found = await this.pool.query<CardRow>(
+      `SELECT id, uuid, user_id, provider_card_id, status, currency,
+              last4, expiry_month, expiry_year
+         FROM cards WHERE uuid = $1::uuid`,
+      [cardUuid],
+    );
+    const row = found.rows[0];
+    if (row === undefined) throw new NotFoundException({ error: 'card_not_found' });
+    if (row.status === 'terminated') {
+      throw new ConflictException({ error: 'card_terminated' });
+    }
+    if (row.status === 'frozen') return;
+
+    const updated = await this.cards.freeze(row.provider_card_id);
+    await this.#setStatusBy(row.id, updated.status, 'staff', staffUuid, reason);
+    // Recorded in the protection table too, so `cards_frozen_automatically`
+    // and this agree about why a card is frozen. Without it the customer's own
+    // unfreeze path reads a freeze it cannot explain.
+    await this.protection.record(row.id, 'staff', 'support_action', null);
+  }
+
+  /**
+   * Replaces a card whose number the customer can no longer trust.
+   *
+   * ONE OPERATION FROM THEIR SIDE, and three underneath: the old card is
+   * terminated (which returns its balance to the wallet, as termination
+   * always does), a new one is issued, and the two are linked. Without the
+   * link their history reads as an unexplained termination followed by an
+   * unrelated new card, and the money that moved between them looks like two
+   * transactions rather than one continuation.
+   *
+   * THE ORDER IS THE OLD CARD FIRST, deliberately, and it is the opposite of
+   * what convenience suggests. Issuing first would leave a customer holding a
+   * live replacement AND a live compromised card if the termination then
+   * failed — which is the exact state they came here to get out of. Killing
+   * the leaked number first means the worst case is a customer with no card
+   * and their money in their wallet, which is recoverable by asking again.
+   *
+   * The replacement is funded from the wallet to the same balance the old card
+   * held, so "replace this card" does not silently also mean "empty it".
+   */
+  async reissue(
+    userUuid: string,
+    cardUuid: string,
+    input: { nameOnCard: string; idempotencyKey: string },
+  ): Promise<CardView> {
+    await this.settings.assertServiceEnabled('cards');
+    const { userId, row } = await this.#ownedCard(userUuid, cardUuid);
+
+    if (row.status === 'terminated') {
+      // Already dead. Reissuing against it is still the right request — the
+      // customer wants a working card — so this is not refused, but the
+      // balance to carry over is whatever the card account holds now.
+      this.#logger.log(`reissuing against already-terminated card ${row.uuid}`);
+    }
+
+    // What the old card held, read BEFORE terminating returns it to the
+    // wallet. Read after, it would always be zero and every replacement would
+    // arrive empty.
+    const carried = await this.#cardBalance(userId);
+
+    if (row.status !== 'terminated') {
+      await this.cards.terminate(row.provider_card_id);
+      await this.#terminateRow(row.id, 'customer', userUuid, 'replaced by a new card');
+      if (carried > 0n) {
+        await this.ledger.post({
+          idempotencyKey: `card-terminate:${row.uuid}`,
+          kind: 'card_termination',
+          occurredAt: new Date(),
+          description: 'card replaced, balance returned',
+          metadata: { card_id: row.uuid },
+          postings: [
+            posting(cardAccount(userId), { amount: -carried, currency: 'USD' }),
+            posting(walletAccount(userId), { amount: carried, currency: 'USD' }),
+          ],
+        });
+      }
+    }
+
+    const providerCustomerId = await this.#providerCustomerId(userId);
+    const issued = await this.cards.issue({
+      ownerId: userId,
+      providerCustomerId,
+      nameOnCard: input.nameOnCard,
+      initialFunding: { amount: 0n, currency: 'USD' },
+    });
+
+    const client = await this.pool.connect();
+    let replacement: CardRow;
+    try {
+      await client.query('BEGIN');
+      replacement = await this.#insertCard(client, userId, issued, row.id);
+      // The event the INSERT trigger just wrote says 'issued' by 'system'.
+      // Naming it a REISSUE is what separates "the customer wanted another
+      // card" from "we replaced one whose number leaked", which are different
+      // facts about the same row.
+      await client.query(
+        `UPDATE card_events e
+            SET kind = 'reissued', actor = 'customer', actor_id = u.id
+           FROM users u
+          WHERE u.uuid = $2::uuid
+            AND e.id = (SELECT max(id) FROM card_events WHERE card_id = $1::bigint)`,
+        [replacement.id, userUuid],
+      );
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      if (isUniqueViolation(error)) {
+        const existing = await this.#cardByProviderId(issued.providerCardId);
+        if (existing !== undefined) return this.#toView(existing);
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    // Funded back to what the old card held, so replacing a card does not
+    // silently empty it. Keyed on the customer's own attempt, so a retry that
+    // reaches here twice funds once.
+    if (carried > 0n) {
+      await this.#postCardFunding(
+        userId,
+        { amount: carried, currency: 'USD' },
+        `card-reissue:${input.idempotencyKey}`,
+        replacement.uuid,
+      );
+    }
+
+    return this.#toView(replacement);
   }
 
   /* ---------------------------------------------------------------- */
@@ -405,11 +547,17 @@ export class CardService {
     }
   }
 
-  async #insertCard(client: PoolClient, userId: string, card: VirtualCard): Promise<CardRow> {
+  async #insertCard(
+    client: PoolClient,
+    userId: string,
+    card: VirtualCard,
+    replacesCardId?: string,
+  ): Promise<CardRow> {
     const inserted = await client.query<CardRow>(
       `INSERT INTO cards (user_id, provider, provider_card_id, currency,
-                          last4, expiry_month, expiry_year, status)
-       VALUES ($1::bigint, $2, $3, 'USD', $4, $5, $6, $7::card_status)
+                          last4, expiry_month, expiry_year, status,
+                          replaces_card_id)
+       VALUES ($1::bigint, $2, $3, 'USD', $4, $5, $6, $7::card_status, $8::bigint)
        RETURNING id, uuid, user_id, provider_card_id, status, currency,
                  last4, expiry_month, expiry_year`,
       [
@@ -420,6 +568,7 @@ export class CardService {
         card.expiryMonth,
         card.expiryYear,
         card.status,
+        replacesCardId ?? null,
       ],
     );
     const row = inserted.rows[0];
@@ -432,6 +581,98 @@ export class CardService {
       cardId,
       status,
     ]);
+  }
+
+  /**
+   * Changes a card's status and says WHO did it, in one transaction.
+   *
+   * The trigger in 030 writes an event for every status change, which is what
+   * makes the record impossible to skip — but a trigger cannot know whether a
+   * customer, a support agent or an automatic protection caused it, so it
+   * writes `system` and this completes the row.
+   *
+   * ONE TRANSACTION, so the two cannot diverge. Left apart, a process dying in
+   * between would leave a real change attributed to nobody — and "the system
+   * did it" would then be a claim the record makes about actions people took.
+   */
+  /**
+   * Terminates a card row and says who did it, in one transaction.
+   *
+   * `terminated_at` and the status move together because 003's CHECK demands
+   * it, and the attribution rides along for the same reason `#setStatusBy`
+   * exists: a termination attributed to nobody is one nobody can explain to
+   * the customer who asks why their card stopped working.
+   */
+  async #terminateRow(
+    cardId: string,
+    actor: 'customer' | 'staff',
+    actorUuid: string,
+    reason?: string,
+  ): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        `UPDATE cards SET status = 'terminated', terminated_at = now() WHERE id = $1::bigint`,
+        [cardId],
+      );
+      await this.#attributeLatest(client, cardId, actor, actorUuid, reason);
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async #setStatusBy(
+    cardId: string,
+    status: string,
+    actor: 'customer' | 'staff',
+    actorUuid: string,
+    reason?: string,
+  ): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(`UPDATE cards SET status = $2::card_status WHERE id = $1::bigint`, [
+        cardId,
+        status,
+      ]);
+      await this.#attributeLatest(client, cardId, actor, actorUuid, reason);
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Names the actor on the event the trigger just wrote.
+   *
+   * Scoped to the card and to the newest row, so two concurrent changes to
+   * DIFFERENT cards cannot attribute each other's. Two concurrent changes to
+   * the SAME card would be a customer racing themselves, and the transaction
+   * above serialises them.
+   */
+  async #attributeLatest(
+    client: PoolClient,
+    cardId: string,
+    actor: 'customer' | 'staff',
+    actorUuid: string,
+    reason?: string,
+  ): Promise<void> {
+    await client.query(
+      `UPDATE card_events e
+          SET actor = $2::card_actor, actor_id = u.id, reason = $3
+         FROM users u
+        WHERE u.uuid = $4::uuid
+          AND e.id = (SELECT max(id) FROM card_events WHERE card_id = $1::bigint)`,
+      [cardId, actor, reason ?? null, actorUuid],
+    );
   }
 
   /**

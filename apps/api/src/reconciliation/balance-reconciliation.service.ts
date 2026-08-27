@@ -35,6 +35,8 @@ export interface BalanceSweepReport {
   readonly checked: number;
   readonly differences: number;
   readonly skipped: number;
+  /** Card holds past the settlement window with no outcome recorded. */
+  readonly stuckHolds: number;
 }
 
 @Injectable()
@@ -89,7 +91,7 @@ export class BalanceReconciliationService implements OnApplicationShutdown {
    * asked while reading as though it guarded the work.
    */
   async sweep(): Promise<BalanceSweepReport> {
-    const empty = { checked: 0, differences: 0, skipped: 0 };
+    const empty = { checked: 0, differences: 0, skipped: 0, stuckHolds: 0 };
     if (this.balances === undefined) return empty;
 
     const lock = await this.pool.connect();
@@ -193,7 +195,42 @@ export class BalanceReconciliationService implements OnApplicationShutdown {
       await this.#alert(differences);
     }
 
-    return { checked, differences, skipped };
+    /* ---- holds that never resolved ---- */
+    //
+    // On this sweep rather than its own, deliberately. It asks the same
+    // question — does the provider agree with us — and every worker interval
+    // is one more thing an operator can forget to set on exactly one instance.
+    // This one's absence would be invisible: the money sits in
+    // `customer_pending`, the ledger balances perfectly, and nothing reports a
+    // thing.
+    const stuckHolds = await this.#stuckHolds();
+    if (stuckHolds > 0) {
+      this.#logger.error(
+        `${stuckHolds} card hold(s) past the settlement window with no outcome; ` +
+          `read card_holds_stuck`,
+      );
+      await this.#alertStuckHolds(stuckHolds);
+    }
+
+    return { checked, differences, skipped, stuckHolds };
+  }
+
+  /**
+   * How many holds are past the window with no settlement and no expiry.
+   *
+   * COUNTED AND NEVER RESOLVED. The two things this could do automatically are
+   * both wrong: settling it invents a spend the provider never confirmed, and
+   * expiring it hands money back that may have been spent. A hold this old is
+   * either a lost webhook or an expiry nobody told us about, and by the time
+   * it is this old, guessing is exactly what a person is needed to avoid — the
+   * same rule the purchase reconciler follows about a provider that still says
+   * `pending`.
+   */
+  async #stuckHolds(): Promise<number> {
+    const result = await this.pool.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM card_holds_stuck`,
+    );
+    return Number(result.rows[0]?.n ?? '0');
   }
 
   /** What our books say the provider holds, in minor units. */
@@ -269,6 +306,31 @@ export class BalanceReconciliationService implements OnApplicationShutdown {
         occurrences: String(count),
         severity: 'error',
         fingerprint: 'balance-drift',
+      },
+    });
+  }
+
+  async #alertStuckHolds(count: number): Promise<void> {
+    const to = this.config.operationsEmail;
+    if (to === undefined) return;
+
+    await this.notifications.enqueueDetached({
+      userId: null,
+      recipient: to,
+      // Keyed by the hour, like the drift alert: a sweep every few minutes
+      // must not mail somebody every few minutes about the same holds.
+      idempotencyKey: `stuck-holds:${new Date().toISOString().slice(0, 13)}`,
+      request: {
+        kind: 'operations_alert',
+        headline: `${count} card hold(s) never settled`,
+        detail:
+          'Money is sitting in customer_pending past the provider settlement window. ' +
+          'The customer cannot spend it and the ledger balances, so nothing else ' +
+          'reports this. Nothing has been resolved automatically — read ' +
+          'card_holds_stuck and ask Bitnob what happened to each.',
+        occurrences: String(count),
+        severity: 'error',
+        fingerprint: 'stuck-card-holds',
       },
     });
   }

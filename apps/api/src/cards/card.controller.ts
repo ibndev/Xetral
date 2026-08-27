@@ -15,7 +15,7 @@ import { CardService } from './card.service.js';
 import type { CardSecretsView, CardView } from './card.service.js';
 import { CardWebhookService } from './webhook.service.js';
 import type { WebhookOutcome } from './webhook.service.js';
-import { fundCardSchema, issueCardSchema } from './dto.js';
+import { fundCardSchema, issueCardSchema, reissueCardSchema } from './dto.js';
 
 @Controller('v1/cards')
 export class CardController {
@@ -105,6 +105,29 @@ export class CardController {
     @Param('id') id: string,
   ): Promise<CardView> {
     return this.cards.unfreeze(subjectOf(request), id);
+  }
+
+  /**
+   * Replaces a card. Takes a PIN, because it terminates the old one.
+   */
+  @Post(':id/reissue')
+  @HttpCode(200)
+  async reissue(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ): Promise<CardView> {
+    const parsed = reissueCardSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException({
+        error: 'invalid_request',
+        fields: parsed.error.issues.map((i) => i.path.join('.')),
+      });
+    }
+    return this.cards.reissue(subjectOf(request), id, {
+      nameOnCard: parsed.data.name_on_card,
+      idempotencyKey: parsed.data.idempotency_key,
+    });
   }
 
   @Post(':id/terminate')

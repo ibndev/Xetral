@@ -22,6 +22,9 @@ export type AdminAction =
      directions: raising decides how much money may leave in a day, and
      lowering takes something away from a customer. */
   | 'user.tier'
+  /* A card frozen by staff. A reason is required: the customer will ring back
+     to ask why their card stopped working. */
+  | 'card.freeze'
   | 'kyc.approve'
   | 'kyc.reject'
   | 'deposit.attribute'
@@ -64,6 +67,7 @@ export interface AuditEntry {
     | 'provider_credential'
     | 'risk_signal'
     | 'risk_case'
+    | 'card'
     | 'dispute';
   readonly subjectId: string;
   readonly detail?: Record<string, unknown>;

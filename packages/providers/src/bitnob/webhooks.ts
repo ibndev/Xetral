@@ -144,6 +144,25 @@ export interface WebhookContext {
    * it can and says nothing it cannot.
    */
   readonly refundsEntryId?: string;
+
+  /**
+   * What the AUTHORIZATION held, in minor units, when this event is a
+   * settlement resolving one.
+   *
+   * A settlement may legitimately exceed its authorization — a tip added after
+   * the card was presented, a currency conversion settled at a different rate
+   * — and only the hold's own amount is sitting in `customer_pending`. Without
+   * this the entry tries to move the settled amount out of pending, the
+   * overdraft guard refuses it, and the webhook is rethrown for ever: Bitnob
+   * retries, the spend never reaches our books, and the customer keeps money
+   * they actually spent.
+   *
+   * Resolved by the CALLER, because it is a database lookup. Absent when the
+   * settlement names no authorization we hold, in which case the whole amount
+   * comes from pending and the guard decides — which is the old behaviour, and
+   * correct, because we have no basis for saying any of it was held.
+   */
+  readonly authorizedMinor?: bigint;
 }
 
 /**
@@ -175,7 +194,7 @@ export function toLedgerIntent(
   envelope: BitnobWebhookEnvelope,
   context: WebhookContext,
 ): LedgerIntent | undefined {
-  const { ownerId, refundsEntryId } = context;
+  const { ownerId, refundsEntryId, authorizedMinor } = context;
 
   if (envelope.data.currency.toUpperCase() !== 'USD') {
     throw new ProviderContractError(
@@ -227,11 +246,52 @@ export function toLedgerIntent(
 
     case BITNOB_EVENTS.cardSettlement: {
       const amount = microToUsdExact(micro);
+
+      /*
+       * A SETTLEMENT CAN EXCEED ITS AUTHORIZATION, and only the hold is in
+       * `customer_pending`. A tip added after the card was presented is the
+       * ordinary case; a currency conversion settling at a different rate is
+       * the other.
+       *
+       * So the entry releases the HOLD from pending and takes any excess from
+       * the card's own balance — which is what economically happened: the
+       * customer was charged more than was held for them. Three legs rather
+       * than two, and it still sums to zero in USD.
+       *
+       * Taking the whole amount from pending instead is what this did before,
+       * and the overdraft guard refused every over-settlement — so Bitnob
+       * retried for ever and the spend never reached our books at all.
+       *
+       * If the card cannot cover the excess the guard still refuses, and the
+       * existing rethrow applies: that is a real overspend and it needs a
+       * person, which is exactly the case `InsufficientFundsError` is for
+       * here.
+       */
+      const held =
+        authorizedMinor === undefined || authorizedMinor >= amount.amount
+          ? amount.amount
+          : authorizedMinor;
+      const excess = amount.amount - held;
+
       intent = {
         ...base,
         kind: 'card_settlement',
         description: describe('settlement', envelope),
-        postings: legs(amount, pending, float),
+        postings:
+          excess === 0n
+            ? legs(amount, pending, float)
+            : [
+                posting(pending, negateUsd(money(held, 'USD'))),
+                posting(card, negateUsd(money(excess, 'USD'))),
+                posting(float, amount),
+              ],
+        ...(excess === 0n
+          ? {}
+          : {
+              // Recorded, because a settlement above its hold is worth being
+              // able to find later without recomputing it from two tables.
+              metadata: { ...base.metadata, over_settled_minor: excess.toString() },
+            }),
       };
       break;
     }

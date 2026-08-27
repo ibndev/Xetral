@@ -47,6 +47,14 @@ export interface AdminUserDetail {
   readonly balances: readonly Record<string, unknown>[];
   readonly devices: readonly Record<string, unknown>[];
   readonly status_history: readonly Record<string, unknown>[];
+  /** Every tier this customer has held, and who moved them. */
+  readonly tier_history: readonly Record<string, unknown>[];
+  /** What their CURRENT tier allows, per currency, so an operator looking at a
+   *  refused transfer does not have to hold the grid in their head. */
+  readonly tier_limits: readonly Record<string, unknown>[];
+  /** Their cards. Four digits of the number and no more — the same amount the
+   *  database stores. */
+  readonly cards: readonly Record<string, unknown>[];
 }
 
 /** Mirrors `SettingView` on the server, field for field. It did not, once:
@@ -397,6 +405,24 @@ export class AdminClient {
   ): Promise<Record<string, unknown>> {
     return this.#post(`/v1/admin/risk/signals/${encodeURIComponent(id)}/resolve`, {
       resolution,
+      transaction_pin: pin,
+    });
+  }
+
+  /* -------------------------------- cards ------------------------------ */
+
+  /** One card's whole life. Carries four digits of the number and no more —
+   *  there is no endpoint that returns a PAN to anybody but the customer who
+   *  proved a PIN. */
+  async card(id: string): Promise<Record<string, unknown>> {
+    return this.#get(`/v1/admin/cards/${encodeURIComponent(id)}`);
+  }
+
+  /** Freezes a card on a customer's behalf. There is deliberately no staff
+   *  terminate: it moves their money and cannot be undone. */
+  async freezeCard(id: string, reason: string, pin: string): Promise<void> {
+    await this.#post(`/v1/admin/cards/${encodeURIComponent(id)}/freeze`, {
+      reason,
       transaction_pin: pin,
     });
   }

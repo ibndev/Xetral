@@ -140,7 +140,7 @@ export class AdminService {
     const row = found.rows[0];
     if (row === undefined) throw new NotFoundException({ error: 'user_not_found' });
 
-    const [profile, balances, devices, statusHistory, tierHistory, tierLimits] =
+    const [profile, balances, devices, statusHistory, tierHistory, tierLimits, cards] =
       await Promise.all([
       this.pool.query(
         `SELECT u.uuid AS id, u.email, u.status, u.created_at, u.kyc_tier,
@@ -183,6 +183,20 @@ export class AdminService {
           WHERE u.id = $1::bigint ORDER BY l.currency`,
         [row.id],
       ),
+      // THE CARDS, which support could not see at all. A customer ringing
+      // about a declined card was previously a conversation nobody on this
+      // side could follow — no status, no history, and no way to tell whether
+      // the card had been frozen and by whom.
+      //
+      // From `card_history`, which carries `last4` and nothing more of the
+      // number: this screen is read over shoulders and screenshotted into
+      // tickets.
+      this.pool.query(
+        `SELECT card_id AS id, last4, currency, status, created_at, terminated_at,
+                replaces_card_id, replaced_by_card_id, events
+           FROM card_history WHERE user_id = $1::bigint`,
+        [row.id],
+      ),
     ]);
 
     return {
@@ -192,7 +206,40 @@ export class AdminService {
       status_history: statusHistory.rows,
       tier_history: tierHistory.rows,
       tier_limits: tierLimits.rows,
+      cards: cards.rows,
     };
+  }
+
+  /**
+   * One card's whole life, for the agent on the phone to a customer.
+   *
+   * Every status change with who caused it, so "was this card frozen at the
+   * time, and who unfroze it?" — the first question in any card dispute — has
+   * an answer. Carries four digits of the number and no more, which is all
+   * `cards` stores.
+   */
+  async cardHistory(cardUuid: string): Promise<Record<string, unknown>> {
+    const card = await this.pool.query<{ id: string }>(
+      `SELECT id FROM cards WHERE uuid = $1::uuid`,
+      [cardUuid],
+    );
+    const id = card.rows[0]?.id;
+    if (id === undefined) throw new NotFoundException({ error: 'card_not_found' });
+
+    const [summary, events] = await Promise.all([
+      this.pool.query(`SELECT * FROM card_history WHERE card_id = $1::uuid`, [cardUuid]),
+      this.pool.query(
+        `SELECT e.kind::text AS kind, e.actor::text AS actor, e.reason, e.created_at,
+                u.email AS actor_email
+           FROM card_events e
+           LEFT JOIN users u ON u.id = e.actor_id
+          WHERE e.card_id = $1::bigint
+          ORDER BY e.id`,
+        [id],
+      ),
+    ]);
+
+    return { ...(summary.rows[0] ?? {}), events: events.rows };
   }
 
   /**
