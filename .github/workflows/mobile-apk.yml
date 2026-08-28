@@ -144,7 +144,7 @@ jobs:
           cache: npm
 
       - name: Set up the JDK this React Native expects
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           # 17, not the newest. React Native's Gradle plugin and AGP are pinned
