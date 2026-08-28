@@ -194,15 +194,63 @@ jobs:
       # thousands of accounts, and none of the findings worth having here need
       # one — they are about headers, methods, and what an unauthenticated
       # caller can reach.
+
+      # RUN DIRECTLY, not through `zaproxy/action-baseline`.
+      #
+      # That action reported this app as `FAIL-NEW: 0 ... PASS: 68` and then
+      # failed the job anyway, on `Create Artifact Container failed: The
+      # artifact name zap_scan is not valid` — it bundles a deprecated
+      # uploader that the runner no longer accepts. So the red X said nothing
+      # about the application and everything about the action, which is the
+      # worst kind of failing check: it trains a reader to stop looking.
+      #
+      # The image is the same one the action wraps. What is lost is the
+      # action's issue-writing, which was already switched off.
+      #
+      # TARGETED AT `/health`, deliberately. The API's root correctly answers
+      # 404 — it renders nothing and has no index — and ZAP's spider treats a
+      # seed URL that is not 200 as an error, so the scan opened with a line
+      # reading like a fault in the app. `/health` is a real 200 carrying the
+      # same headers every other response carries, which is what this scan is
+      # actually reading.
       - name: Baseline scan
-        uses: zaproxy/action-baseline@v0.12.0
-        with:
-          target: 'http://127.0.0.1:3100'
+        run: |
+          mkdir -p /tmp/zap
+          # The image runs as uid 1000 and writes its report into the mount.
+          chmod 777 /tmp/zap
           # Passive only. An ACTIVE scan against a money API sends requests
           # designed to change state, and this one is wired to a real ledger
           # schema in every environment where it would be worth running.
-          cmd_options: '-a -I -j'
-          # The findings are the output. A red X here would be a red X on
-          # every push about a sign-in page behaving like a sign-in page.
-          fail_action: false
-          allow_issue_writing: false
+          #
+          # `-I` so a warning is not an error, and `|| true` so nothing here
+          # can fail the build: the findings are the output. A red X would be
+          # a red X on every push about a sign-in page behaving like one.
+          docker run --rm --network host \
+            -v /tmp/zap:/zap/wrk/:rw \
+            ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py \
+              -t http://127.0.0.1:3100/health \
+              -a -I -j \
+              -r report.html -w report.md \
+            | tee /tmp/zap/console.txt || true
+
+      - name: Report
+        if: always()
+        run: |
+          {
+            echo '### ZAP baseline'
+            echo
+            echo 'Advisory. Blocking assertions about the running app live in `ci.yml`.'
+            echo
+            echo '```'
+            # The summary line, and whatever the scan had to say before it.
+            tail -60 /tmp/zap/console.txt 2>/dev/null || echo 'no console output'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: zap-baseline
+          path: /tmp/zap/
+          if-no-files-found: warn
