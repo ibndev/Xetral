@@ -18,8 +18,13 @@ INSERT INTO consent_documents (kind, version, body_sha256, summary) VALUES
    'The terms on which Xetral holds and moves your money, including what '
    'happens when something goes wrong and how to complain.'),
 
-  ('privacy', '2026-08-25',
-   '75eeb427edf1b3fd6750ea77ff6eb5662caf2418a60fdc38dad0c3a42dc165e8',
+  -- Republished when the rights section stopped describing a form to write
+  -- to and started describing a screen that works. Retiring the August 25
+  -- version puts every existing customer on `consent_outstanding`, which is
+  -- the mechanism doing its job rather than a nuisance: a change nobody was
+  -- asked about is a change nobody agreed to.
+  ('privacy', '2026-08-28',
+   '7d1f89e9da0b2dbd16d30befbebd40fb9b9580ed14f2dc4139f89d5b25599cb0',
    'What personal data we hold, why, how long we keep it, and the rights you '
    'have over it under the NDPA.'),
 

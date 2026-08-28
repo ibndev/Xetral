@@ -169,6 +169,9 @@ describe('the privileged surface is declared as privileged', () => {
       'GET /v1/admin/consents (compliance)',
       'GET /v1/admin/credentials (admin)',
       'GET /v1/admin/credentials/:provider/:name/rotations (admin)',
+      // Data requests. `compliance`, and the acting routes take a PIN —
+      // erasing is the one action here that cannot be undone by appending.
+      'GET /v1/admin/data-requests (compliance)',
       // The complaints queue. Its own role rather than the gift card
       // reviewer's — a different job with a different risk.
       'GET /v1/admin/disputes (dispute_reviewer)',
@@ -201,6 +204,8 @@ describe('the privileged surface is declared as privileged', () => {
       // customer's money and cannot be undone.
       'POST /v1/admin/cards/:id/freeze (compliance)',
       'POST /v1/admin/credentials/:provider/:name (admin)',
+      'POST /v1/admin/data-requests/:id/erase (compliance)',
+      'POST /v1/admin/data-requests/:id/resolve (compliance)',
       'POST /v1/admin/disputes/:id/resolve (dispute_reviewer)',
       'POST /v1/admin/errors/:fingerprint/resolve (admin)',
       'POST /v1/admin/giftcards/:id/clawback (giftcard_reviewer)',

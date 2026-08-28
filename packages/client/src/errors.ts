@@ -91,6 +91,14 @@ const API_ERROR_CODES = [
      wrong". */
   'consent_not_withdrawable',
   'consent_document_missing',
+  /* Data rights. `erasure_blocked` is deliberately one code for two very
+     different reasons — a balance, or an open investigation — because the API
+     answers them identically: tipping off is an offence, and a
+     distinguishable refusal is a way to learn you are under review. */
+  'erasure_blocked',
+  'request_already_open',
+  'request_not_found',
+  'not_an_erasure_request',
   /* One person, one account. Answered to a REVIEWER at approval, never to the
      customer at submission — a form that said "that BVN is already
      registered" would confirm to anybody holding a stolen BVN that its owner

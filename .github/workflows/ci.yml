@@ -118,6 +118,7 @@ jobs:
             -f packages/ledger/sql/032_tax.sql \
             -f packages/ledger/sql/033_consent.sql \
             -f packages/ledger/sql/033_consent.seed.sql \
+            -f packages/ledger/sql/034_data_rights.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       - name: Ledger and identity invariants
@@ -159,6 +160,7 @@ jobs:
                    packages/ledger/sql/031_card_settlements.test.sql \
                    packages/ledger/sql/032_tax.test.sql \
                    packages/ledger/sql/033_consent.test.sql \
+                   packages/ledger/sql/034_data_rights.test.sql \
                    packages/ledger/sql/099_least_privilege.test.sql; do
             echo "== $f"
             psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
@@ -230,6 +232,7 @@ jobs:
             -f packages/ledger/sql/032_tax.sql \
             -f packages/ledger/sql/033_consent.sql \
             -f packages/ledger/sql/033_consent.seed.sql \
+            -f packages/ledger/sql/034_data_rights.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       # ------------------------------------------------------------------
@@ -401,6 +404,12 @@ jobs:
           # for a customer, and a 404 there is an opt-out nobody can reach.
           check "consent is mounted" 401 http://127.0.0.1:3100/v1/consents
           check "consent queue is mounted" 401 http://127.0.0.1:3100/v1/admin/consents
+
+          # A customer's own data. The export is a POST so it cannot be
+          # triggered by a link or land in a browser history, and it carries a
+          # PIN in its body — so 401 here proves it is mounted and gated.
+          check "data export is mounted" 401 http://127.0.0.1:3100/v1/me/export -X POST
+          check "data requests are mounted" 401 http://127.0.0.1:3100/v1/admin/data-requests
 
           # Reading a card number. Guarded, so 401 rather than 404 — and this
           # is the route whose ABSENCE was the bug: every card issued since

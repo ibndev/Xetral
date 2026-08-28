@@ -32,6 +32,16 @@ export function messageFor(error: unknown): string {
       // The honest answer rather than a silent failure. Withdrawing the terms
       // is closing the account, which moves money and has its own path.
       return 'You cannot withdraw this while your account is open. Close the account instead.';
+    case 'erasure_blocked':
+      // ONE MESSAGE for two reasons, matching the API. The other reason is an
+      // open investigation, and telling a customer that is an offence — so
+      // the wording has to be true of a balance and say nothing about the
+      // other case.
+      return 'We cannot action this while your account still holds money or is under review. Empty the account and try again, or contact support.';
+    case 'request_already_open':
+      return 'You already have a request open. We will answer it by the date shown.';
+    case 'request_not_found':
+      return 'That request is no longer open.';
     case 'consent_document_missing':
       // An operator's problem, not the customer's — and saying so is better
       // than blaming them for a document nobody published.

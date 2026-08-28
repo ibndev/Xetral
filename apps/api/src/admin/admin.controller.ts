@@ -17,6 +17,7 @@ import { AdminService } from './admin.service.js';
 import { AuditService } from './audit.service.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { ConsentService } from '../consent/consent.service.js';
+import { DataRightsService } from '../datarights/data-rights.service.js';
 import { ProviderCredentialService } from '../settings/provider-credentials.service.js';
 import { MonitoringService } from '../risk/monitoring.service.js';
 import { CaseService } from '../risk/case.service.js';
@@ -117,6 +118,15 @@ const listQuery = z.object({
   before: z.string().regex(/^[0-9]+$/).optional(),
 });
 
+const resolveDataRequestSchema = z.object({
+  status: z.enum(['completed', 'refused']),
+  /* Twenty characters, matching the CHECK. A queue cleared with one-word
+     outcomes is indistinguishable from one nobody worked, and this is the
+     only part of the answer a regulator can inspect. */
+  outcome: z.string().trim().min(20).max(2000),
+  transaction_pin: z.string().optional(),
+});
+
 const taxQuery = z.object({
   months: z.coerce.number().int().min(1).max(36).default(12),
 });
@@ -128,6 +138,7 @@ export class AdminController {
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(SettingsService) private readonly settings: SettingsService,
     @Inject(ConsentService) private readonly consentService: ConsentService,
+    @Inject(DataRightsService) private readonly rights: DataRightsService,
     @Inject(ProviderCredentialService)
     private readonly credentialStore: ProviderCredentialService,
     @Inject(MonitoringService) private readonly monitoring: MonitoringService,
@@ -588,6 +599,80 @@ export class AdminController {
       this.consentService.outstanding(100),
     ]);
     return { summary, outstanding };
+  }
+
+  /* ----------------------------- data rights ---------------------------- */
+
+  /**
+   * Requests for a copy of somebody's data, or for it to be erased.
+   *
+   * Worst deadline first. A statutory window is one of the few deadlines here
+   * whose consequence is regulatory rather than an unhappy customer.
+   */
+  @Get('data-requests')
+  async dataRequests(): Promise<{ requests: readonly unknown[] }> {
+    return { requests: await this.rights.due() };
+  }
+
+  /**
+   * Carries out an erasure.
+   *
+   * The one action in this system that CANNOT BE UNDONE BY APPENDING, which is
+   * why it takes a PIN and why a person decides it. The database refuses while
+   * the customer holds a balance or is under investigation, and the refusal is
+   * relayed unchanged — distinguishing the two here would reintroduce the
+   * tipping-off the schema went out of its way to avoid.
+   */
+  @Post('data-requests/:id/erase')
+  @HttpCode(200)
+  async eraseCustomer(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+  ): Promise<unknown> {
+    const actor = claims(request).sub;
+    const completed = await this.rights.completeErasure(id, actor);
+
+    const ip = ipOf(request);
+    await this.audit.record({
+      actorId: actor,
+      action: 'data.erase',
+      subjectType: 'data_request',
+      subjectId: id,
+      detail: {},
+      // Destructive, so a reason is required by CHECK. The outcome IS the
+      // reason: it names what went and what stayed.
+      reason: String(completed['outcome']),
+      ...(ip === undefined ? {} : { ip }),
+    });
+    return completed;
+  }
+
+  /** Closes a request answered some other way — an export sent, or a refusal
+   *  with its reason. */
+  @Post('data-requests/:id/resolve')
+  @HttpCode(200)
+  async resolveDataRequest(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ): Promise<unknown> {
+    const parsed = resolveDataRequestSchema.safeParse(body);
+    if (!parsed.success) throw invalid(parsed.error.issues);
+
+    const actor = claims(request).sub;
+    const resolved = await this.rights.resolve(id, actor, parsed.data.status, parsed.data.outcome);
+
+    const ip = ipOf(request);
+    await this.audit.record({
+      actorId: actor,
+      action: 'data.resolve',
+      subjectType: 'data_request',
+      subjectId: id,
+      detail: { status: parsed.data.status },
+      reason: parsed.data.outcome,
+      ...(ip === undefined ? {} : { ip }),
+    });
+    return resolved;
   }
 
   @Get('settings')

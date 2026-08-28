@@ -25,7 +25,7 @@ export const metadata: Metadata = {
  */
 export default function Privacy() {
   return (
-    <LegalPage title="Privacy notice" updated="25 August 2026">
+    <LegalPage title="Privacy notice" updated="28 August 2026">
       <p>
         This notice explains what Xetral collects about you, why, how long it is
         kept and what you can ask us to do with it. It is written to match what
@@ -165,7 +165,16 @@ export default function Privacy() {
         </li>
       </ul>
       <p>
-        Write to <strong>[dpo@ address]</strong>. We answer within 30 days.
+        You can do the first two yourself, now:{' '}
+        <strong>Settings &rarr; Your data</strong> downloads a copy of
+        everything we hold, and the same page asks us to erase it. An erasure
+        request is answered by a person, and the answer names what was deleted
+        and what we are required to keep — with the date it stops being kept.
+      </p>
+      <p>
+        For anything else, write to <strong>[dpo@ address]</strong>. We answer
+        every request within 30 days, and we record when it was made and when
+        it was answered so that we can show we did.
       </p>
 
       <h2>Keeping it safe</h2>

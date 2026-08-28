@@ -67,6 +67,7 @@ export default function Settings() {
 
       <SetPin />
       <Consents />
+      <YourData />
     </Shell>
   );
 }
@@ -248,6 +249,138 @@ function Consents() {
       )}
 
       {error !== undefined && <p className="error">{error}</p>}
+    </div>
+  );
+}
+
+/**
+ * A copy of your data, and asking for it to be erased.
+ *
+ * THE EXPORT ASKS FOR THE PIN, unlike everything else a customer reads. It is
+ * every balance, every transaction and every place they have signed in from in
+ * one file — and the screen says why, because an unexplained extra step reads
+ * as friction rather than as protection.
+ *
+ * ERASURE IS A REQUEST AND SAYS SO. Presenting it as a button that deletes
+ * everything would be a promise the law does not let us keep: AML requires
+ * five years of transaction records after an account closes. Telling a
+ * customer that up front is the difference between an honest limit and a
+ * broken promise, and the retained list below comes from the same table the
+ * deletion job reads.
+ */
+function YourData() {
+  const client = useXetral();
+  const requests = useLoad(() => client.myDataRequests(), [client]);
+  const scope = useLoad(() => client.erasureScope(), [client]);
+  const { busy, error, done, run } = useSubmit();
+  const [pin, setPin] = useState('');
+
+  const retained = scope.data?.filter((row) => row.scope === 'retained') ?? [];
+
+  return (
+    <div className="card">
+      <h2>Your data</h2>
+      <p className="lead">
+        You can download everything we hold about you, and you can ask us to
+        erase it.
+      </p>
+
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          void run(async () => {
+            const data = await client.exportMyData(pin);
+            setPin('');
+            /* Built and revoked in the browser. The file never touches a
+               server of ours a second time, and the object URL is released
+               immediately so it cannot be reopened from history. */
+            const url = URL.createObjectURL(
+              new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }),
+            );
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = 'xetral-my-data.json';
+            link.click();
+            URL.revokeObjectURL(url);
+            return 'Your data has been downloaded.';
+          });
+        }}
+      >
+        <label>
+          Transaction PIN
+          <input
+            type="password"
+            inputMode="numeric"
+            autoComplete="off"
+            value={pin}
+            onChange={(e) => setPin(e.target.value)}
+            required
+          />
+          <span className="hint">
+            This one file has every balance, every transaction and every place
+            you have signed in from. We ask for your PIN because it is the
+            thing somebody who stole your session would not have.
+          </span>
+        </label>
+        <button type="submit" disabled={busy}>
+          {busy ? 'Preparing…' : 'Download my data'}
+        </button>
+      </form>
+
+      <h2 style={{ marginTop: 28 }}>Erasure</h2>
+      <p className="lead">
+        Ask us to erase your data and a person will action it. Some of it we
+        are required by law to keep for a period after your account closes —
+        that is listed below, and it is deleted automatically when the period
+        ends.
+      </p>
+
+      {retained.length > 0 && (
+        <ul className="hint">
+          {retained.slice(0, 6).map((row) => (
+            <li key={row.table_name}>{row.rationale}</li>
+          ))}
+        </ul>
+      )}
+
+      <button
+        type="button"
+        className="ghost"
+        disabled={busy}
+        onClick={() => {
+          void run(async () => {
+            await client.requestMyData('erasure');
+            requests.reload();
+            return 'We have your request and will respond within the statutory period.';
+          });
+        }}
+      >
+        Ask for erasure
+      </button>
+
+      {requests.data !== undefined && requests.data.length > 0 && (
+        <table style={{ marginTop: 16 }}>
+          <thead>
+            <tr>
+              <th>Request</th>
+              <th>Status</th>
+              <th>Due by</th>
+            </tr>
+          </thead>
+          <tbody>
+            {requests.data.map((row) => (
+              <tr key={row.uuid}>
+                <td>{row.kind === 'erasure' ? 'Erasure' : 'Copy of my data'}</td>
+                <td>{row.status}</td>
+                <td>{new Date(row.deadline_at).toLocaleDateString()}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {error !== undefined && <p className="error">{error}</p>}
+      {done !== undefined && <p className="ok">{done}</p>}
     </div>
   );
 }

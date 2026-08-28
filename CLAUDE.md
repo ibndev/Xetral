@@ -338,6 +338,65 @@ queue at `/admin/consents`.
   correct resting state, not a task; listing it would turn "declined" into a
   queue somebody works through.
 
+### Data rights — non-obvious rules
+
+Schema: `packages/ledger/sql/034_data_rights.sql`. Service in
+`apps/api/src/datarights/data-rights.service.ts`, screen at `/settings`, queue
+at `/admin/data-requests`.
+
+- **The privacy notice promised both rights and NOTHING implemented either.** A
+  notice describing rights that do not exist is worse than one promising less:
+  it is a commitment already being broken, in writing, on the page a regulator
+  reads first.
+- **THE EXPORT NAMES EVERY COLUMN.** A generic exporter walking a table list is
+  a data-exfiltration primitive — add a table holding a sealed BVN or a token
+  hash and it ships in the next export with nothing failing. Every query is
+  written out, and `data-rights.e2e.test.ts` scans a real export's SERIALISED
+  body for the password hash, the PIN hash and the PIN. Over the whole body,
+  because what is being guarded against is a field nobody thought to name.
+- **The export takes the transaction PIN**, unlike every other read. It is
+  every balance, every transaction and every place they have signed in from in
+  one file — the read a stolen session most wants, and the one whose
+  consequence outlives the fifteen minutes an access token lasts. It is a POST
+  so it cannot be triggered by a link or land in a browser history.
+- **ASKING costs no PIN**, for the reason raising a dispute costs none: the
+  customer most likely to ask is one who has just found somebody else in their
+  account. Nothing is destroyed by asking.
+- **Erasure is a REQUEST, and a person decides.** AML requires five years of
+  records after a relationship ends; the NDPA forbids keeping personal data
+  longer than needed. Granting fully deletes the financial record; refusing
+  fully treats a legal right as an inconvenience. So what can lawfully go,
+  goes, and what must stay is NAMED with why.
+- **`erasure_scope` is COMPUTED from `retention_decisions`** — the same table
+  the deletion sweep reads — so the promise made to a customer and the job that
+  keeps it cannot describe different systems. `derive` is NOT erasable: a
+  derived table's fate is its parent's, and reading it as erasable promised
+  that `account_balances` could be deleted.
+- **The erasure function names the rows it touches.** A deletion driven by a
+  table that view returns would be a deletion job whose behaviour is changed by
+  an INSERT — the reason `apply_retention()` has no dynamic SQL either. It
+  never touches the ledger.
+- **It REFUSES on a balance or an open case, WITH THE SAME MESSAGE.** Erasing
+  the person we owe money to loses the creditor rather than discharging the
+  debt; and tipping off is an offence, so a distinguishable refusal would be a
+  way to learn you are under review. The API collapses both to
+  `erasure_blocked` for the same reason.
+- **Sign-in history is NOT deleted by erasure.** 019's trigger refuses a DELETE
+  inside the retention window, and is right to: an erasure request that emptied
+  that table could be used by whoever committed a takeover to erase the
+  evidence of it. It is `purge`, so it does age out — a "we must keep this
+  until" rather than a refusal.
+- **The email becomes a TOMBSTONE, not a null.** `users.email` is how a
+  duplicate account is refused, and a null would let the same address open a
+  second one while the first is still on record.
+- **The deadline is the database's and cannot be moved**, and
+  `data_request_response_days` is capped at 30 — the setting can only be used
+  to answer FASTER. A deadline an operator can extend is not a deadline.
+- **`data.erase` is in 009's destructive list.** It is the one action in the
+  system that cannot be undone by appending, so it is the last one that should
+  be exempt from having to say why — and the reason recorded is the outcome
+  itself, which is the answer the customer receives.
+
 ### Purchases (bills, eSIM, numbers) — non-obvious rules
 
 Schema: `packages/ledger/sql/004_purchases.sql`. One table for every "buy a thing
@@ -1339,6 +1398,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/031_card_settlements.sq
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/032_tax.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/033_consent.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/033_consent.seed.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/034_data_rights.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -1371,6 +1431,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/030_card_lifecycle.test
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/031_card_settlements.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/032_tax.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/033_consent.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/034_data_rights.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

@@ -158,6 +158,28 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       .authenticated('GET', '/v1/consents', { pin: false })
       .authenticated('POST', '/v1/consents', { pin: false })
 
+      /*
+       * A customer's own data.
+       *
+       * The EXPORT declares `pin: true`, unlike every other read here. It is
+       * every balance, every transaction, every device and every place they
+       * have signed in from, in one file — the single read a stolen session
+       * most wants, and the one whose consequence outlives the fifteen minutes
+       * an access token lasts.
+       *
+       * ASKING costs no PIN, for the reason raising a dispute costs none: the
+       * customer most likely to ask is one who has just found somebody else in
+       * their account. Nothing is destroyed by asking.
+       *
+       * It is a POST rather than a GET so it cannot be triggered by a link, or
+       * cached, or land in a browser history — and because it carries a PIN in
+       * its body.
+       */
+      .authenticated('POST', '/v1/me/export', { pin: true })
+      .authenticated('GET', '/v1/me/requests', { pin: false })
+      .authenticated('POST', '/v1/me/requests', { pin: false })
+      .authenticated('GET', '/v1/me/erasure-scope', { pin: false })
+
       // ---- The operations backend -------------------------------------
       //
       // Every route below is staff-only, and route-coverage.test.ts fails the
@@ -175,6 +197,12 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // because it is the same question as an outstanding KYC review: a
       // customer the platform is processing without a current basis.
       .staff('GET', '/v1/admin/consents', { pin: false, role: 'compliance' })
+      // Data requests. `compliance`, and the acting route takes a PIN: an
+      // erasure is the one action in the system that cannot be undone by
+      // appending.
+      .staff('GET', '/v1/admin/data-requests', { pin: false, role: 'compliance' })
+      .staff('POST', '/v1/admin/data-requests/:id/erase', { pin: true, role: 'compliance' })
+      .staff('POST', '/v1/admin/data-requests/:id/resolve', { pin: true, role: 'compliance' })
       .staff('GET', '/v1/admin/stuck', { pin: false, role: 'support' })
 
       .staff('GET', '/v1/admin/users', { pin: false, role: 'support' })

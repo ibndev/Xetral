@@ -245,6 +245,16 @@ export interface AdminConsentReport {
   }[];
 }
 
+export interface AdminDataRequest {
+  readonly uuid: string;
+  readonly kind: string;
+  readonly requested_at: string;
+  readonly deadline_at: string;
+  readonly user_uuid: string;
+  readonly email: string | null;
+  readonly overdue: boolean;
+}
+
 export class AdminClient {
   readonly #baseUrl: string;
   readonly #session: Session;
@@ -393,6 +403,40 @@ export class AdminClient {
   async clawbackGiftCard(id: string, reason: string, pin: string): Promise<Record<string, unknown>> {
     return this.#post(`/v1/admin/giftcards/${encodeURIComponent(id)}/clawback`, {
       reason,
+      transaction_pin: pin,
+    });
+  }
+
+  /* ----------------------------- data rights ---------------------------- */
+
+  /** Requests for a copy of somebody's data, or for it to be erased. Worst
+   *  deadline first: a statutory window is one of the few here whose
+   *  consequence is regulatory rather than an unhappy customer. */
+  async dataRequests(): Promise<readonly AdminDataRequest[]> {
+    const body = await this.#get<{ requests: AdminDataRequest[] }>('/v1/admin/data-requests');
+    return body.requests;
+  }
+
+  /** Carries out an erasure. The one action in this system that cannot be
+   *  undone by appending, which is why it takes a PIN. */
+  async eraseCustomer(id: string, pin: string): Promise<Record<string, unknown>> {
+    return this.#post(`/v1/admin/data-requests/${encodeURIComponent(id)}/erase`, {
+      transaction_pin: pin,
+    });
+  }
+
+  /** Closes a request answered some other way. The outcome is required and
+   *  must be twenty characters: a queue cleared with one-word answers is
+   *  indistinguishable from one nobody worked. */
+  async resolveDataRequest(
+    id: string,
+    status: 'completed' | 'refused',
+    outcome: string,
+    pin: string,
+  ): Promise<Record<string, unknown>> {
+    return this.#post(`/v1/admin/data-requests/${encodeURIComponent(id)}/resolve`, {
+      status,
+      outcome,
       transaction_pin: pin,
     });
   }

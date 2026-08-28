@@ -189,6 +189,27 @@ export interface ConsentState {
   }[];
 }
 
+export interface DataRequest {
+  readonly uuid: string;
+  readonly kind: string;
+  readonly status: string;
+  readonly requested_at: string;
+  /** Ours and not movable. A process that can push its own deadline out has
+   *  no deadline, and this one is statutory. */
+  readonly deadline_at: string;
+  readonly completed_at?: string | null;
+  /** What was actually done, in words. For an erasure this names what went
+   *  AND what had to stay — an answer listing only the deletions would read
+   *  as a complete erasure, which it deliberately is not. */
+  readonly outcome?: string | null;
+}
+
+export interface ErasureScopeRow {
+  readonly table_name: string;
+  readonly scope: 'erasable' | 'retained';
+  readonly rationale: string;
+}
+
 export interface KycLimits {
   /** 0 registered, 1 verified, 2 enhanced. */
   readonly tier: number;
@@ -458,6 +479,41 @@ export class XetralClient {
    */
   async kycLimits(): Promise<KycLimits> {
     return this.#get<KycLimits>('/v1/kyc/limits');
+  }
+
+  /* ------------------------------ data rights --------------------------- */
+
+  /**
+   * A copy of everything held about this customer.
+   *
+   * TAKES THE TRANSACTION PIN, unlike every other read on this client. It is
+   * every balance, every transaction and every place they have signed in from
+   * in one document — the single read a stolen session most wants, and the one
+   * whose consequence outlives the access token that fetched it.
+   */
+  async exportMyData(transactionPin: string): Promise<Record<string, unknown>> {
+    return this.#post<Record<string, unknown>>('/v1/me/export', {
+      transaction_pin: transactionPin,
+    });
+  }
+
+  /** Asks for a copy or for erasure. NO PIN: the customer most likely to ask
+   *  is one who has just found somebody else in their account. */
+  async requestMyData(kind: 'export' | 'erasure'): Promise<DataRequest> {
+    return this.#post<DataRequest>('/v1/me/requests', { kind });
+  }
+
+  async myDataRequests(): Promise<readonly DataRequest[]> {
+    const body = await this.#get<{ requests: DataRequest[] }>('/v1/me/requests');
+    return body.requests;
+  }
+
+  /** What can be erased and what cannot, with the reason. Published to the
+   *  customer, because being refused with no way to learn what would change is
+   *  what turns a right into a support ticket. */
+  async erasureScope(): Promise<readonly ErasureScopeRow[]> {
+    const body = await this.#get<{ scope: ErasureScopeRow[] }>('/v1/me/erasure-scope');
+    return body.scope;
   }
 
   /* -------------------------------- consent ----------------------------- */

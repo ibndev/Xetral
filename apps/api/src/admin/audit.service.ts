@@ -50,7 +50,12 @@ export type AdminAction =
   /* A compliance case opened and closed. Closing carries the summary as its
      reason, which is the same text every signal the case covered gets. */
   | 'risk.case_open'
-  | 'risk.case_close';
+  | 'risk.case_close'
+  /* A customer's data erased on request. THE ONE ACTION HERE THAT CANNOT BE
+     UNDONE BY APPENDING, so it is in the schema's destructive list and its
+     reason is the outcome itself — what went, and what had to stay. */
+  | 'data.erase'
+  | 'data.resolve';
 
 export interface AuditEntry {
   /** The actor's UUID, as it appears in an access token. Resolved to the
@@ -68,7 +73,8 @@ export interface AuditEntry {
     | 'risk_signal'
     | 'risk_case'
     | 'card'
-    | 'dispute';
+    | 'dispute'
+    | 'data_request';
   readonly subjectId: string;
   readonly detail?: Record<string, unknown>;
   readonly reason?: string;

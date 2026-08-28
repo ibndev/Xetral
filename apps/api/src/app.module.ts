@@ -51,6 +51,8 @@ import { SettingsService } from './settings/settings.service.js';
 import { TaxService } from './tax/tax.service.js';
 import { ConsentService } from './consent/consent.service.js';
 import { ConsentController } from './consent/consent.controller.js';
+import { DataRightsService } from './datarights/data-rights.service.js';
+import { DataRightsController } from './datarights/data-rights.controller.js';
 import { ProviderCredentialService } from './settings/provider-credentials.service.js';
 import { AuditService } from './admin/audit.service.js';
 import { AdminService } from './admin/admin.service.js';
@@ -627,6 +629,7 @@ export class AppModule {
         HealthController,
         KycController,
         ConsentController,
+        DataRightsController,
         AdminController,
         DisputeController,
         AdminDisputeController,
@@ -692,6 +695,7 @@ export class AppModule {
         SettingsService,
         TaxService,
         ConsentService,
+        DataRightsService,
         ProviderCredentialService,
         AuditService,
         AdminService,
