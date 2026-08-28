@@ -13,7 +13,10 @@ actually catches people out, because a phone cannot reach `localhost`.
 git clone https://github.com/ibndev/Xetral && cd Xetral
 npm install
 
-# Postgres 16, with the migrations applied IN ORDER.
+# Postgres 16, with the migrations applied IN ORDER. This list is the one in
+# CLAUDE.md, which is where it is maintained — it had drifted to stopping at
+# 019, and a database missing half the schema fails at the first request
+# rather than at migration time.
 createdb xetral
 for f in packages/ledger/sql/001_ledger.sql \
          packages/identity/sql/002_identity.sql \
@@ -34,7 +37,29 @@ for f in packages/ledger/sql/001_ledger.sql \
          packages/ledger/sql/016_card_reveals.sql \
          packages/ledger/sql/017_transfer_velocity.sql \
          packages/ledger/sql/018_disputes.sql \
-         packages/ledger/sql/019_retention.sql; do
+         packages/ledger/sql/019_retention.sql \
+         packages/ledger/sql/020_balance_reconciliation.sql \
+         packages/ledger/sql/021_flow_velocity.sql \
+         packages/ledger/sql/023_entry_status.sql \
+         packages/ledger/sql/024_sign_in_events.sql \
+         packages/ledger/sql/025_bvn_uniqueness.sql \
+         packages/ledger/sql/026_provider_credentials.sql \
+         packages/ledger/sql/026_provider_credentials.seed.sql \
+         packages/ledger/sql/027_risk_signals.sql \
+         packages/ledger/sql/027_risk_signals.seed.sql \
+         packages/ledger/sql/028_risk_cases.sql \
+         packages/ledger/sql/029_kyc_tiers.sql \
+         packages/ledger/sql/029_kyc_tiers.seed.sql \
+         packages/ledger/sql/030_card_lifecycle.sql \
+         packages/ledger/sql/031_card_settlements.sql \
+         packages/ledger/sql/032_tax.sql \
+         packages/ledger/sql/033_consent.sql \
+         packages/ledger/sql/033_consent.seed.sql \
+         packages/ledger/sql/034_data_rights.sql \
+         packages/ledger/sql/035_price_publication.sql \
+         packages/ledger/sql/036_attention.sql \
+         packages/ledger/sql/037_provider_health.sql \
+         packages/ledger/sql/099_least_privilege.sql; do
   psql -d xetral -v ON_ERROR_STOP=1 -f "$f"
 done
 ```
@@ -45,6 +70,12 @@ as authoritative — without it every one of them falls back to a default the
 app was not configured with.
 
 Install **Expo Go** on the phone, from the Play Store.
+
+**The app targets Expo SDK 54.** Expo Go ships one SDK version at a time and
+refuses a project built for a different one — which is the whole of the "it
+will not open on my phone" symptom, and it says so in small type on a screen
+nobody reads. If the store's Expo Go is newer than 54, the SDK here is what
+has to move; there is no way to make an older project run in a newer Expo Go.
 
 ## Every time
 

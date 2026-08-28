@@ -564,6 +564,25 @@ Review in `apps/mobile/SECURITY.md`, cover in `src/screen-privacy.tsx`.
   never accepts "passed Face ID" in place of a PIN.
 - **It has still never been run on hardware**, and the document says so. The
   `AppState` ordering the cover depends on is a claim only a device settles.
+- **BUT CI NOW BUNDLES IT**, which is the part that does not need hardware and
+  had never been done. The SDK 52 → 54 upgrade turned up two failures that
+  neither the compiler nor a unit test can see: `app.json` listed
+  `expo-screen-capture` under `plugins` and that package has never shipped a
+  config plugin, so `expo config` — and therefore `expo prebuild` — died; and
+  `metro.config.js` set `disableHierarchicalLookup`, so the first dependency
+  npm left NESTED rather than hoisted could not be resolved, reported as
+  `Unable to resolve module webidl-conversions` from a file this app does not
+  import.
+- **`nodeModulesPaths` and the module walk are not a pair.** The first is what
+  lets a workspace reach the hoisted root; the second is what lets a hoisted
+  package reach its own nested duplicate. The Expo monorepo recipe that
+  disables the walk is for isolated installs, and applying it to an npm
+  workspace breaks the bundle on the first version conflict anywhere in the
+  tree.
+- **Expo Go ships ONE SDK version**, so "it will not open on my phone" is
+  usually a version mismatch and the only direction that fixes it is forward.
+  One React across both apps now: SDK 54 wants 19.1.0 and the web app was
+  pinned to 19.0.0, which is what made `npm install` refuse.
 
 ### Scanning the running app — non-obvious rules
 

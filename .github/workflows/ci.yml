@@ -562,3 +562,41 @@ jobs:
           if [ "$webfail" != "0" ]; then
             exit 1
           fi
+
+      # ------------------------------------------------------------------
+      # And the third artifact, which nothing here had ever built.
+      #
+      # `apps/mobile` is typechecked and unit tested, and neither can see
+      # whether it BUNDLES. Two failures in the SDK 54 upgrade were invisible
+      # to both: `app.json` listed `expo-screen-capture` as a config plugin
+      # and that package has never shipped one, so `expo prebuild` died before
+      # writing a manifest; and `metro.config.js` disabled hierarchical module
+      # resolution, so the first dependency npm left nested — not one this app
+      # imports — could not be found. Both are the same shape as the three
+      # controllers that were imported and never mounted: correct-looking
+      # configuration that only a run refutes.
+      #
+      # It cannot be run on hardware from CI, and `apps/mobile/SECURITY.md`
+      # says so. This is the part that can be: the config evaluates, and Metro
+      # produces a bundle for both platforms.
+      # ------------------------------------------------------------------
+      - name: Bundle the mobile app
+        working-directory: apps/mobile
+        run: |
+          # Evaluates every config plugin, including `with-lan-cleartext`.
+          npx expo config --type public > /dev/null
+          echo "app config evaluates, plugins included"
+
+          for platform in android ios; do
+            npx expo export --platform "$platform" --output-dir "/tmp/expo-$platform" > "/tmp/expo-$platform.log" 2>&1 || {
+              echo "::error::the mobile app does not bundle for $platform"
+              tail -40 "/tmp/expo-$platform.log"
+              exit 1
+            }
+            bundle=$(find "/tmp/expo-$platform/_expo/static/js/$platform" -name '*.hbc' -o -name '*.js' | head -1)
+            if [ -z "$bundle" ]; then
+              echo "::error::expo export reported success for $platform and produced no bundle"
+              exit 1
+            fi
+            echo "ok: $platform bundle at $bundle"
+          done

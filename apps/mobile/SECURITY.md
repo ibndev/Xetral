@@ -128,6 +128,12 @@ cost, which is paid by every customer rather than by the attacker.
 
 - **Run it.** Everything above is a reading. The screen cover in particular is
   a claim about `AppState` transition order that only a device can settle.
+  What CI now settles is narrower and was previously not settled at all: the
+  app config evaluates and Metro produces a bundle for both platforms. The
+  SDK 54 upgrade found two failures that only that step can see — `app.json`
+  named a config plugin the package does not ship, and `metro.config.js`
+  disabled the module walk that a nested dependency needs — and neither is
+  visible to the compiler or to a unit test.
 - **Confirm the Android switcher is actually blank** with a release build, not
   a debug one — `FLAG_SECURE` behaviour has differed across OEM launchers.
 - **Confirm the iOS cover paints before the snapshot.** If it does not, the
