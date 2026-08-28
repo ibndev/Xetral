@@ -539,6 +539,32 @@ wrapper in `apps/api/src/observability/provider-health.service.ts`, screen at
   Tuesday is a queue nobody is working; a queue of forty turning over hourly is
   a busy morning. Alerting on depth alone gets both wrong.
 
+### The mobile app — non-obvious rules
+
+Review in `apps/mobile/SECURITY.md`, cover in `src/screen-privacy.tsx`.
+
+- **The app switcher was writing balances to disk.** Both platforms photograph
+  the screen when the app leaves the foreground, and the picture goes to a
+  cache directory a backup or whoever picks the phone up can read without
+  unlocking the app.
+- **The two platforms need different answers.** Android takes `FLAG_SECURE` via
+  `preventScreenCaptureAsync()` and that covers screenshots, recording and the
+  switcher. **iOS cannot block a screenshot at all**, by Apple's design — so
+  the UI is covered on `inactive`, which is the state the switcher raises
+  BEFORE `background`. Listening for `background` covers the screen after the
+  picture has been taken.
+- **An opaque cover, not a blur.** A blurred balance is still a picture of the
+  shape of one, and the digit count is what a glance reads.
+- **Certificate pinning and root detection are declined, with reasons written
+  down** rather than not thought about. Pinning against a Cloudflare
+  certificate breaks the app on a rotation nobody here controls, and on a
+  device compromised enough for either to matter the attacker can read the
+  screen anyway. The effort goes into assuming the device may be compromised:
+  the PIN behind the OS gate, tokens `THIS_DEVICE_ONLY`, and a server that
+  never accepts "passed Face ID" in place of a PIN.
+- **It has still never been run on hardware**, and the document says so. The
+  `AppState` ordering the cover depends on is a claim only a device settles.
+
 ### Scanning the running app — non-obvious rules
 
 `ci.yml`'s boot probes, and the `dynamic` job in `scan.yml`.
