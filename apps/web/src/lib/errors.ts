@@ -28,6 +28,14 @@ export function messageFor(error: unknown): string {
       return error.detail ?? 'That PIN is not allowed. Use six digits that are not a simple pattern.';
     case 'transaction_pin_required':
       return 'Enter your transaction PIN.';
+    case 'consent_not_withdrawable':
+      // The honest answer rather than a silent failure. Withdrawing the terms
+      // is closing the account, which moves money and has its own path.
+      return 'You cannot withdraw this while your account is open. Close the account instead.';
+    case 'consent_document_missing':
+      // An operator's problem, not the customer's — and saying so is better
+      // than blaming them for a document nobody published.
+      return 'We cannot record that right now. Please try again shortly.';
     case 'insufficient_funds':
       return 'Your balance will not cover this.';
     case 'invalid_amount':

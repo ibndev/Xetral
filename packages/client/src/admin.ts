@@ -230,6 +230,21 @@ export interface AdminTaxReport {
   }[];
 }
 
+export interface AdminConsentReport {
+  readonly summary: readonly {
+    readonly kind: string;
+    readonly version: string;
+    readonly customers: string;
+  }[];
+  readonly outstanding: readonly {
+    readonly uuid: string;
+    readonly email: string | null;
+    readonly kind: string;
+    readonly version: string;
+    readonly published_at: string;
+  }[];
+}
+
 export class AdminClient {
   readonly #baseUrl: string;
   readonly #session: Session;
@@ -380,6 +395,18 @@ export class AdminClient {
       reason,
       transaction_pin: pin,
     });
+  }
+
+  /* ------------------------------- consent ------------------------------ */
+
+  /**
+   * Who has not agreed to the words currently in force.
+   *
+   * Empty is the resting state, and it fills the moment a notice is
+   * republished — which is exactly when somebody needs to look at it.
+   */
+  async consents(): Promise<AdminConsentReport> {
+    return this.#get<AdminConsentReport>('/v1/admin/consents');
   }
 
   /* --------------------------------- tax -------------------------------- */

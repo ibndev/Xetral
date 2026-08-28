@@ -28,6 +28,8 @@ import { SettingsService } from '../settings/settings.service.js';
 import { NotificationService } from '../notifications/notification.service.js';
 import { lagosTime } from './password-reset.service.js';
 import { SignInEventService } from './sign-in-events.service.js';
+import { ConsentService } from '../consent/consent.service.js';
+import type { ConsentContext } from '../consent/consent.service.js';
 import type { SignInOrigin } from './sign-in-events.service.js';
 
 export interface TokenPair {
@@ -105,6 +107,7 @@ export class AuthService {
     @Inject(SettingsService) private readonly settings: SettingsService,
     @Inject(NotificationService) private readonly notifications: NotificationService,
     @Inject(SignInEventService) private readonly signIns: SignInEventService,
+    @Inject(ConsentService) private readonly consents: ConsentService,
   ) {}
 
   /**
@@ -120,7 +123,7 @@ export class AuthService {
    * and a provider identity is a KYC decision. Creating either here would mean
    * a signup form quietly performing a regulated step.
    */
-  async register(input: RegisterRequest): Promise<TokenPair> {
+  async register(input: RegisterRequest, context: ConsentContext = {}): Promise<TokenPair> {
     if (!(await this.settings.registrationEnabled())) {
       // A flag rather than a deploy, so an abuse wave can be stopped in
       // seconds without taking the platform down for existing customers.
@@ -171,6 +174,19 @@ export class AuthService {
         `INSERT INTO user_credentials (user_id, password_hash) VALUES ($1::bigint, $2)`,
         [user.id, passwordHash],
       );
+
+      /*
+       * ON THIS TRANSACTION, so an account cannot exist without a record of
+       * what its owner agreed to and the record cannot exist without the
+       * account. Written afterwards on its own connection, a crash in the gap
+       * leaves a customer whose consent we cannot demonstrate — and that is
+       * precisely the customer somebody will later ask about.
+       *
+       * The terms and the privacy notice only. Marketing is refused here by
+       * CHECK, because bundling a mailing list into "create account" is not
+       * consent to the mailing list whatever the button said.
+       */
+      await this.consents.recordRegistration(client, user.id, context);
 
       const device = await this.#resolveDevice(client, user.id, input.device);
       const pair = await this.#openSession(client, user, device);

@@ -66,6 +66,7 @@ export default function Settings() {
       </div>
 
       <SetPin />
+      <Consents />
     </Shell>
   );
 }
@@ -157,5 +158,96 @@ function SetPin() {
         somebody with your unlocked phone guessing it.
       </p>
     </form>
+  );
+}
+
+/**
+ * What this customer has agreed to.
+ *
+ * THE WITHDRAWAL IS THE SAME CONTROL AS THE GRANT — one toggle, no
+ * confirmation step, no PIN. Consent that is harder to withdraw than to give
+ * is not freely given, and a screen that puts an extra dialog in front of
+ * turning something OFF is exactly how that happens without anybody deciding
+ * it.
+ *
+ * The terms and the privacy notice are shown and not toggleable, which is the
+ * honest presentation: withdrawing them means closing the account, and a
+ * switch that silently refused would be worse than none.
+ */
+function Consents() {
+  const client = useXetral();
+  const state = useLoad(() => client.consents(), [client]);
+  const { busy, error, run } = useSubmit();
+
+  const marketing = state.data?.documents.find((d) => d.kind === 'marketing_email');
+
+  return (
+    <div className="card">
+      <h2>What you have agreed to</h2>
+      <p className="lead">
+        We keep a record of which version of each document you agreed to, and
+        when. You can see it here.
+      </p>
+
+      {state.loading && <p className="spinner">Loading…</p>}
+      {state.error !== undefined && <p className="error">{state.error}</p>}
+
+      {state.data?.documents
+        .filter((doc) => doc.kind !== 'marketing_email')
+        .map((doc) => {
+          const record = state.data?.consents.find((c) => c.kind === doc.kind);
+          return (
+            <div className="row" key={doc.kind}>
+              <span className="muted">
+                {doc.kind === 'terms' ? 'Terms of service' : 'Privacy notice'}
+              </span>
+              <span>
+                {record === undefined ? (
+                  <Link href={`/legal/${doc.kind}`}>Not recorded — please read</Link>
+                ) : record.covers_current ? (
+                  <>
+                    Agreed {new Date(record.occurred_at).toLocaleDateString()}{' '}
+                    <span className="muted">(version {record.version})</span>
+                  </>
+                ) : (
+                  /* They agreed, but to different words. Saying "agreed" here
+                     would treat a superseded consent as a current one. */
+                  <Link href={`/legal/${doc.kind}`}>
+                    Updated since you agreed — please read
+                  </Link>
+                )}
+              </span>
+            </div>
+          );
+        })}
+
+      {marketing !== undefined && (
+        <label className="row" style={{ alignItems: 'flex-start', gap: 12 }}>
+          <input
+            type="checkbox"
+            checked={marketing.agreed}
+            disabled={busy}
+            onChange={(event) => {
+              const granted = event.target.checked;
+              void run(async () => {
+                await client.setConsent('marketing_email', granted);
+                state.reload();
+                return granted ? 'You will hear from us.' : 'We will stop emailing you.';
+              });
+            }}
+          />
+          <span>
+            {marketing.summary}
+            <span className="hint" style={{ display: 'block' }}>
+              Turning this off takes effect immediately. It never affects
+              security alerts or receipts — those are not marketing, and you
+              cannot be opted out of being told somebody signed in as you.
+            </span>
+          </span>
+        </label>
+      )}
+
+      {error !== undefined && <p className="error">{error}</p>}
+    </div>
   );
 }

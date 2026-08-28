@@ -65,7 +65,10 @@ export class AuthController {
   @Post('register')
   @HttpCode(201)
   @UseGuards(LoginRateLimitGuard)
-  async register(@Body() body: unknown): Promise<TokenPair> {
+  async register(
+    @Body() body: unknown,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<TokenPair> {
     const parsed = registerSchema.safeParse(body);
     if (!parsed.success) {
       throw new BadRequestException({
@@ -73,7 +76,13 @@ export class AuthController {
         fields: parsed.error.issues.map((issue) => issue.path.join('.')),
       });
     }
-    return this.auth.register(parsed.data);
+    // Describes the consent this creates, and decides nothing. The signup form
+    // shows the terms and the privacy notice above the button; without these
+    // two fields, "they agreed" would be a claim with nothing behind it.
+    return this.auth.register(parsed.data, {
+      ip: request.ip,
+      userAgent: request.headers['user-agent'],
+    });
   }
 
   @Post('login')

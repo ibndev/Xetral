@@ -147,6 +147,17 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       .authenticated('GET', '/v1/kyc/limits', { pin: false })
       .authenticated('POST', '/v1/kyc', { pin: false })
 
+      /*
+       * What a customer agreed to, and the one call that changes it.
+       *
+       * `pin: false` on BOTH, deliberately. Consent that is harder to withdraw
+       * than to give is not freely given, so stopping the email cannot be
+       * gated on a factor a customer may not remember — and nothing here moves
+       * money.
+       */
+      .authenticated('GET', '/v1/consents', { pin: false })
+      .authenticated('POST', '/v1/consents', { pin: false })
+
       // ---- The operations backend -------------------------------------
       //
       // Every route below is staff-only, and route-coverage.test.ts fails the
@@ -160,6 +171,10 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // figure. `finance`, so a support agent looking up a card cannot also
       // read the returns.
       .staff('GET', '/v1/admin/tax', { pin: false, role: 'finance' })
+      // Who has not agreed to the words currently in force. `compliance`,
+      // because it is the same question as an outstanding KYC review: a
+      // customer the platform is processing without a current basis.
+      .staff('GET', '/v1/admin/consents', { pin: false, role: 'compliance' })
       .staff('GET', '/v1/admin/stuck', { pin: false, role: 'support' })
 
       .staff('GET', '/v1/admin/users', { pin: false, role: 'support' })

@@ -82,6 +82,15 @@ const API_ERROR_CODES = [
      see until it was taught to read one. */
   'already_verified',
   'review_in_progress',
+  /* Consent. `consent_not_withdrawable` is the honest refusal for the terms
+     and the privacy notice: withdrawing them is closing the account, which
+     moves money and has its own path — a screen that just failed silently
+     would read as a bug. `consent_document_missing` means nothing is
+     published to agree TO, which is an operator's problem and not the
+     customer's, so it needs its own words rather than "something went
+     wrong". */
+  'consent_not_withdrawable',
+  'consent_document_missing',
   /* One person, one account. Answered to a REVIEWER at approval, never to the
      customer at submission — a form that said "that BVN is already
      registered" would confirm to anybody holding a stolen BVN that its owner

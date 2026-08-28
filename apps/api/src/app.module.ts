@@ -49,6 +49,8 @@ import { StaffTotpService } from './auth/staff-totp.service.js';
 import { HealthController } from './health/health.controller.js';
 import { SettingsService } from './settings/settings.service.js';
 import { TaxService } from './tax/tax.service.js';
+import { ConsentService } from './consent/consent.service.js';
+import { ConsentController } from './consent/consent.controller.js';
 import { ProviderCredentialService } from './settings/provider-credentials.service.js';
 import { AuditService } from './admin/audit.service.js';
 import { AdminService } from './admin/admin.service.js';
@@ -624,6 +626,7 @@ export class AppModule {
         FxController,
         HealthController,
         KycController,
+        ConsentController,
         AdminController,
         DisputeController,
         AdminDisputeController,
@@ -688,6 +691,7 @@ export class AppModule {
         StaffTotpService,
         SettingsService,
         TaxService,
+        ConsentService,
         ProviderCredentialService,
         AuditService,
         AdminService,

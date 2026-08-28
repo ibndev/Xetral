@@ -163,6 +163,32 @@ export interface KycStatus {
  * amount the API sends. A zero here is a real limit, not a missing value: an unverified account may move no crypto at all, because a
  * chain transaction is the one movement nobody can recall.
  */
+/** The kinds a customer can be asked about. Only the mailing list can be
+ *  withdrawn — refusing the terms is closing the account, which is a
+ *  different action with its own path. */
+export type ConsentKind = 'terms' | 'privacy' | 'marketing_email';
+
+export interface ConsentRecord {
+  readonly kind: string;
+  readonly granted: boolean;
+  /** WHICH WORDS. A consent that records only "yes" cannot answer the
+   *  question that matters once a notice is republished. */
+  readonly version: string;
+  readonly occurred_at: string;
+  readonly covers_current: boolean;
+}
+
+export interface ConsentState {
+  readonly consents: readonly ConsentRecord[];
+  /** What is published now, and whether this customer has agreed to it. */
+  readonly documents: readonly {
+    readonly kind: string;
+    readonly version: string;
+    readonly summary: string;
+    readonly agreed: boolean;
+  }[];
+}
+
 export interface KycLimits {
   /** 0 registered, 1 verified, 2 enhanced. */
   readonly tier: number;
@@ -432,6 +458,25 @@ export class XetralClient {
    */
   async kycLimits(): Promise<KycLimits> {
     return this.#get<KycLimits>('/v1/kyc/limits');
+  }
+
+  /* -------------------------------- consent ----------------------------- */
+
+  /** What this customer has agreed to, and what is currently published. */
+  async consents(): Promise<ConsentState> {
+    return this.#get<ConsentState>('/v1/consents');
+  }
+
+  /**
+   * Grants or withdraws.
+   *
+   * ONE CALL EITHER WAY, and no transaction PIN. Consent that is harder to
+   * withdraw than to give is not freely given, so there is deliberately no
+   * separate `withdraw` method and no confirmation step for a client to add
+   * on one side and not the other.
+   */
+  async setConsent(kind: ConsentKind, granted: boolean): Promise<ConsentRecord> {
+    return this.#post<ConsentRecord>('/v1/consents', { kind, granted });
   }
 
   async submitKyc(input: {

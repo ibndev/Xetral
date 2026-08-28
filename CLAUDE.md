@@ -290,6 +290,54 @@ report at `/admin/tax`.
   which is exactly the error a reviewer deciding whether something is
   reportable cannot see.
 
+### Consent — non-obvious rules
+
+Schema: `packages/ledger/sql/033_consent.sql`, seeded by `033_consent.seed.sql`.
+Service in `apps/api/src/consent/consent.service.ts`, screen at `/settings`,
+queue at `/admin/consents`.
+
+- **Consent was a SENTENCE ON A PAGE.** "By creating an account you agree to
+  our terms and privacy notice" is the right thing to show a customer and it is
+  not a record. Nothing said that a particular person agreed to a particular
+  version at a particular moment, so the question the NDPA actually asks —
+  demonstrate that this person consented — had no answer at all.
+- **A WITHDRAWAL IS A NEW ROW, never an edit.** If granting could be erased,
+  "had they consented on the day we mailed them?" becomes a claim about the
+  present rather than about history. The current position is a VIEW
+  (`customer_consents`), for the same reason `entry_status` is one.
+- **Consent is to a VERSION, and the row stores a HASH of the words.** A URL
+  describes today's page; a hash describes what was agreed to.
+  `consent-documents.test.ts` recomputes it from the published page and fails
+  the build on a drift — so editing the terms without republishing is red,
+  with one obvious fix that also asks every customer again.
+- **Documents are append-only: retire and republish.** Editing one in place
+  rewrites what every past customer is recorded as having agreed to — the gift
+  card rate card lesson, applied to something a court would read. Retirement is
+  final, and a partial unique index keeps exactly one live document per kind.
+- **MARKETING CANNOT BE BUNDLED into signing up**, by CHECK: a record whose
+  source is `registration` cannot be a marketing consent. One "I agree"
+  covering the terms and a mailing list is not consent to the mailing list,
+  whatever the button said — so the signup form has no checkbox and could not
+  usefully grow one.
+- **Only marketing can be WITHDRAWN**, also by CHECK. The asymmetry is a
+  statement: withdrawing the terms is closing the account, which moves money
+  and has its own path — recording it here would leave a customer holding a
+  balance under terms they are recorded as refusing.
+- **Withdrawing is the same call as granting, with NO PIN.** Consent that is
+  harder to withdraw than to give is not freely given, and there is
+  deliberately no separate `withdraw()` for a client to guard on one side only.
+- **AND IT GATES SOMETHING.** The outbox refuses a `marketing`-class message
+  to a customer with no live grant, BY TRIGGER — a consent nothing reads is a
+  checkbox, the lesson Tier 1 records about `crypto_enabled`. Security and
+  transactional mail is untouched: unsubscribing must never withhold a reset
+  link.
+- **Registration records on the registration's OWN transaction.** Apart, a
+  crash in the gap leaves a customer whose consent cannot be shown — precisely
+  the customer somebody will ask about.
+- **`consent_outstanding` excludes marketing.** Not having opted in is the
+  correct resting state, not a task; listing it would turn "declined" into a
+  queue somebody works through.
+
 ### Purchases (bills, eSIM, numbers) — non-obvious rules
 
 Schema: `packages/ledger/sql/004_purchases.sql`. One table for every "buy a thing
@@ -1289,6 +1337,8 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/029_kyc_tiers.seed.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/030_card_lifecycle.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/031_card_settlements.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/032_tax.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/033_consent.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/033_consent.seed.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -1320,6 +1370,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/029_kyc_tiers.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/030_card_lifecycle.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/031_card_settlements.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/032_tax.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/033_consent.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

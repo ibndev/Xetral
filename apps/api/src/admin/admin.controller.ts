@@ -16,6 +16,7 @@ import type { AuthenticatedRequest } from '../auth/auth.guard.js';
 import { AdminService } from './admin.service.js';
 import { AuditService } from './audit.service.js';
 import { SettingsService } from '../settings/settings.service.js';
+import { ConsentService } from '../consent/consent.service.js';
 import { ProviderCredentialService } from '../settings/provider-credentials.service.js';
 import { MonitoringService } from '../risk/monitoring.service.js';
 import { CaseService } from '../risk/case.service.js';
@@ -126,6 +127,7 @@ export class AdminController {
     @Inject(AdminService) private readonly admin: AdminService,
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(SettingsService) private readonly settings: SettingsService,
+    @Inject(ConsentService) private readonly consentService: ConsentService,
     @Inject(ProviderCredentialService)
     private readonly credentialStore: ProviderCredentialService,
     @Inject(MonitoringService) private readonly monitoring: MonitoringService,
@@ -565,6 +567,27 @@ export class AdminController {
     const parsed = taxQuery.safeParse(query);
     if (!parsed.success) throw invalid(parsed.error.issues);
     return this.admin.tax(parsed.data.months);
+  }
+
+  /* ------------------------------- consent ------------------------------ */
+
+  /**
+   * Who has not agreed to the words currently in force.
+   *
+   * Empty is the resting state and fills the moment a notice is republished —
+   * which is exactly when somebody needs to see it, because a change nobody
+   * was asked about is a change nobody agreed to.
+   */
+  @Get('consents')
+  async consents(): Promise<{
+    summary: readonly unknown[];
+    outstanding: readonly unknown[];
+  }> {
+    const [summary, outstanding] = await Promise.all([
+      this.consentService.outstandingSummary(),
+      this.consentService.outstanding(100),
+    ]);
+    return { summary, outstanding };
   }
 
   @Get('settings')

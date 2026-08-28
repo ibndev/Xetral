@@ -164,6 +164,9 @@ describe('the privileged surface is declared as privileged', () => {
       // Provider credentials. `admin` on all three: the write decides whether
       // money can move at all, and the reads are a map of which integrations
       // are live.
+      // Who has not agreed to the words currently in force. `compliance`,
+      // the same question as an outstanding KYC review.
+      'GET /v1/admin/consents (compliance)',
       'GET /v1/admin/credentials (admin)',
       'GET /v1/admin/credentials/:provider/:name/rotations (admin)',
       // The complaints queue. Its own role rather than the gift card
