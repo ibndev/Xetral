@@ -319,7 +319,7 @@ jobs:
 
       # Always, release or not. The artifact is the audit trail and the
       # fallback for anybody who would rather not create a release.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.apk.outputs.name }}
           path: ${{ steps.apk.outputs.name }}
