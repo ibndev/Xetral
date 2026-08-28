@@ -1,10 +1,17 @@
 # Running the mobile app
 
-You do **not** need a USB cable. Expo serves the app over your Wi-Fi and the
-phone scans a QR code. A cable is the fallback for when the network will not
-cooperate, not the normal path.
+**This app does not run in Expo Go, and cannot.** Expo Go ships one SDK version
+at a time and contains only the native modules Expo chose — so a project on any
+other SDK refuses to open, and one with its own native modules could never work
+there at all. What replaces it is a **development build**: this app's own APK,
+with `expo-dev-client` inside it, which you install once and then point at a
+Metro server exactly the way Expo Go was pointed at one.
 
-What you do need is the API reachable from the phone — which is the part that
+You still do **not** need a USB cable. The development build asks for the
+address of your machine over the network, and everything after that — fast
+refresh, the dev menu, reloading on save — behaves as it always did.
+
+What you do need is the API reachable from the phone, which is the part that
 actually catches people out, because a phone cannot reach `localhost`.
 
 ## Once, on your laptop
@@ -69,13 +76,26 @@ feature flags are rows in `platform_settings`, and the API treats that table
 as authoritative — without it every one of them falls back to a default the
 app was not configured with.
 
-Install **Expo Go** on the phone, from the Play Store.
+## Once, on the phone: the development build
 
-**The app targets Expo SDK 54.** Expo Go ships one SDK version at a time and
-refuses a project built for a different one — which is the whole of the "it
-will not open on my phone" symptom, and it says so in small type on a screen
-nobody reads. If the store's Expo Go is newer than 54, the SDK here is what
-has to move; there is no way to make an older project run in a newer Expo Go.
+Build it in GitHub → **Actions** → **Android APK** → **Run workflow**, with
+`variant` set to **development**. Leave `api_url` empty — the workflow refuses
+it for this variant, because a development build's JavaScript is bundled by
+Metro on your machine and the address comes from there. About ten minutes.
+
+When it finishes, the run summary links to a **release page**. Open that link
+on the phone, tap the `.apk`, and allow the install. Android warns about
+anything not from the Play Store; that prompt is normal.
+
+You only repeat this when the NATIVE side changes — a new Expo SDK, a new
+package with native code, a change to `app.json`. Editing TypeScript never
+needs a rebuild.
+
+> The APK is signed with Android's standard **debug key**, which ships in
+> Expo's template. That is deliberate here: the signature is identical on every
+> machine and every run, so a new build installs over the old one instead of
+> being refused. It is also a publicly known key, so this must never be what
+> goes to the Play Store.
 
 ## Every time
 
@@ -108,16 +128,23 @@ Check it from the phone's browser before going further:
 `{"error":"invalid_token"}`. If it times out, the laptop's firewall is blocking
 port 3100 — that, not Expo, is the problem.
 
-**3. Start Expo, pointed at that address.**
+**3. Start Metro, pointed at that address.**
 
 ```bash
-cd apps/mobile
-EXPO_PUBLIC_API_URL=http://192.168.1.20:3100 npx expo start
+EXPO_PUBLIC_API_URL=http://192.168.1.20:3100 npm start --workspace @xetral/mobile
 ```
 
-Scan the QR code with the camera. If the phone and laptop are on networks that
-cannot see each other — guest Wi-Fi, or a VPN on the laptop — add `--tunnel`,
-which routes through Expo's servers and is slower but works from anywhere.
+`npm start` runs `expo start --dev-client`, which serves the development build
+rather than Expo Go. Open **Xetral** on the phone and either scan the QR code
+or type the Metro address into the launcher.
+
+If the phone and laptop are on networks that cannot see each other — guest
+Wi-Fi, or a VPN on the laptop — add `--tunnel`, which routes through Expo's
+servers and is slower but works from anywhere.
+
+`EXPO_PUBLIC_API_URL` is read **here**, not in the APK build: Metro inlines it
+into the bundle it serves, so changing the API address is a matter of
+restarting Metro rather than rebuilding anything.
 
 **4. Create an account to sign in with.** There is no sign-up screen yet, so
 seed one directly:
@@ -142,13 +169,10 @@ is almost always one of:
   the write. That is the correct behaviour: storing the PIN with nothing
   guarding it would be worse than not storing it.
 
-If Expo Go misbehaves on the biometric path specifically, a **development
-build** removes the ambiguity — that is the case where the cable is genuinely
-useful:
-
-```bash
-npx expo run:android    # phone plugged in, USB debugging on
-```
+This is one of the things a development build settles that Expo Go could not:
+Expo Go carries its own copy of these modules, so a failure there was never
+conclusively about this app. The development build contains exactly the native
+code `app.json` asks for, so what it does is what a shipped build will do.
 
 ## What to actually try
 
@@ -165,13 +189,26 @@ npx expo run:android    # phone plugged in, USB debugging on
 
 ---
 
-# Installing a built APK on an Android phone
+# The other build: a standalone APK
 
-For testing the app on a phone with no laptop attached to it. The APK is built
-by the **Android APK** workflow in GitHub Actions, because building one needs
-the Android SDK and the SDK is only distributed from `dl.google.com` — a host
-many sandboxed environments cannot reach at all. A GitHub runner has the whole
-toolchain already.
+The development build above needs Metro running. A **preview** build does not —
+the JavaScript is inside it, so it installs and runs on its own. That is what
+you hand to somebody who is not going to start a dev server.
+
+Both come from the same **Android APK** workflow, which runs in GitHub Actions
+because building an Android app needs the Android SDK and the SDK is only
+distributed from `dl.google.com` — a host many sandboxed environments cannot
+reach at all. A GitHub runner has the whole toolchain already.
+
+| | development | preview |
+|---|---|---|
+| JavaScript comes from | Metro, on your machine | inside the APK |
+| Needs a laptop running | yes | no |
+| `api_url` input | refused — Metro decides | required, and baked in |
+| Rebuild when TS changes | no | yes |
+| What it replaces | Expo Go | a test flight |
+
+The rest of this section is about **preview**.
 
 ## 1. Give the phone something to talk to
 
@@ -224,22 +261,31 @@ In GitHub → **Actions** → **Android APK** → **Run workflow**:
 
 | Input | What to put |
 |---|---|
+| `variant` | `preview` |
 | `api_url` | the address from step 1, e.g. `http://192.168.1.20:3100` |
-| `variant` | `release` — it bundles the JavaScript and runs on its own. `debug` needs a Metro server on your machine. |
+| `publish_release` | leave on, so the phone can download the file directly |
 
 It takes about ten minutes.
 
 ## 3. Install it
 
-Open the finished run, download the APK from **Artifacts**, and open the file on
-the phone. Android will ask you to allow installs from your browser or files
-app; that prompt is normal for anything not from the Play Store.
+The run summary links to a **release page**. Open that link on the phone and tap
+the `.apk`.
 
-The APK is signed with Android's standard **debug key**, which ships in Expo's
-template. That is deliberate for a test build: the signature is identical on
-every machine and every run, so a new build installs over the old one instead of
-being refused. It is also a publicly known key, so this APK must never be what
-goes to the Play Store — a real release needs its own keystore.
+That is a release asset rather than an Actions artifact, and the difference is
+the whole reason it exists: an artifact is a **zip behind a login**, so getting
+it onto a phone means signing in to GitHub in a mobile browser, downloading an
+archive, finding something that will unpack it, and only then installing. A
+release asset is the `.apk` itself. The artifact is still uploaded, as the
+record and as the fallback.
+
+Android will ask you to allow installs from your browser or files app; that
+prompt is normal for anything not from the Play Store, and Play Protect will
+warn once.
+
+Both variants share one application id and one signing key, so **installing
+either replaces the other** — you cannot have the development build and a
+preview build on the phone at the same time.
 
 ## What you can exercise, and what you cannot
 

@@ -623,6 +623,58 @@ Review in `apps/mobile/SECURITY.md`, cover in `src/screen-privacy.tsx`.
   usually a version mismatch and the only direction that fixes it is forward.
   One React across both apps now: SDK 54 wants 19.1.0 and the web app was
   pinned to 19.0.0, which is what made `npm install` refuse.
+- **AND EXPO GO IS NO LONGER THE TARGET AT ALL.** It carries only the native
+  modules Expo chose, so it could never run this app's own — and the SDK
+  mismatch above is a recurring tax for a thing that was always a stand-in.
+  `expo-dev-client` makes the development build this app's OWN binary, pointed
+  at Metro the same way. `npm start` is `expo start --dev-client`; `start:go`
+  keeps the old behaviour for a quick look at a screen with no native
+  dependency.
+- **THE TWO ANDROID VARIANTS DIFFER IN WHERE THE JAVASCRIPT COMES FROM**, and
+  that is why they take different inputs. A `preview` APK is bundled in CI, so
+  `EXPO_PUBLIC_API_URL` is baked in and the phone cannot be told later. A
+  `development` build is bundled by Metro on the developer's machine every
+  time they press save, so the address comes from the shell Metro was started
+  in — and the workflow REFUSES an `api_url` for it rather than ignoring one,
+  because a build somebody believes is pointed at an address it knows nothing
+  about fails as a sign-in against the wrong host.
+- **The APK is published as a RELEASE ASSET, not an Actions artifact.** An
+  artifact is a zip behind a login: on a phone that is a GitHub sign-in, an
+  archive, an unpacker, then an install. A release asset is the `.apk` itself,
+  one tap. It is a PRERELEASE so a test build never becomes the latest release
+  of a platform that has not shipped.
+- **THE APK ASKED FOR THREE PERMISSIONS NOTHING USES**, and had since the
+  first build. `SYSTEM_ALERT_WINDOW`, `READ_EXTERNAL_STORAGE` and
+  `WRITE_EXTERNAL_STORAGE` come from Expo's android TEMPLATE, not from any
+  package here — so no diff ever showed them. "Display over other apps" on a
+  banking app is a permission a customer can see and reasonably refuse to
+  install over. `android.blockedPermissions` removes them, and the workflow
+  ASSERTS the generated manifest in both directions, because a typo in that
+  list would take out biometrics and present as "Face ID does not work on
+  Android".
+- **NO WORKFLOW INPUT REACHES A SHELL THROUGH `${{ }}`.** An expression in a
+  `run:` block is pasted in as TEXT before bash sees it, so a value carrying a
+  quote and a semicolon is a command — and the APK job holds a token with
+  `contents: write`. CodeQL flagged it high, correctly: `workflow_dispatch`
+  narrows WHO can supply a value, it does not make the value safe. Through
+  `env:` it is data. The URL character check next to it is not that defence;
+  it is the step doing its own job, refusing an address that cannot work.
+- **THE APK WORKFLOW HAD NEVER ONCE BEEN RUN**, and the first run failed at
+  `mergeDebugResources` after three and a half minutes: `with-lan-cleartext.js`
+  wrote `expo prebuild --clean` into an XML COMMENT, and **two consecutive
+  hyphens are illegal there**. The file is generated into gitignored
+  `android/`, so it appeared in no diff; the only reader was aapt2, on a
+  runner, in a step nobody associates with a config plugin. The plugin now
+  REFUSES such a comment at prebuild — seconds, and it names the line.
+- **`userInterfaceStyle` was declared and ignored.** `expo prebuild` said so on
+  every run — `Install expo-system-ui to enable this feature` — and nobody was
+  reading prebuild output because nobody ran prebuild locally. Theming worked
+  anyway because `theme.ts` reads `useColorScheme`, so the only real cost was a
+  white flash before the dark palette painted.
+- **Both variants share one application id and one debug key**, so installing
+  either replaces the other. That is Expo's template rather than a decision
+  here, and it is written down because the symptom — a development build
+  vanishing when a preview is installed — otherwise reads as a broken build.
 
 ### Scanning the running app — non-obvious rules
 
