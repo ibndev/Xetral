@@ -76,13 +76,24 @@ jobs:
 
     steps:
       - name: Refuse an address the phone cannot reach
+        # EVERY INPUT REACHES THE SHELL THROUGH `env`, NEVER THROUGH `${{ }}`.
+        # An expression interpolated into a `run:` block is pasted in as TEXT
+        # before bash sees it, so a value containing a quote and a semicolon
+        # is a command — and this job holds a token with `contents: write`.
+        # CodeQL flagged exactly that on the first version of this file, and it
+        # was right: `workflow_dispatch` narrows who can supply the value, it
+        # does not make the value safe. As an environment variable it is data.
+        #
         # Checked BEFORE forty minutes of Gradle rather than discovered after
         # installing the result. `localhost` inside an APK is the handset
         # itself, so the app would start perfectly and reach nothing — which
         # looks like a broken app rather than a wrong build input.
+        env:
+          VARIANT: ${{ inputs.variant }}
+          API_URL: ${{ inputs.api_url }}
         run: |
-          variant='${{ inputs.variant }}'
-          url='${{ inputs.api_url }}'
+          variant="$VARIANT"
+          url="$API_URL"
 
           if [ "$variant" = 'development' ]; then
             if [ -n "$url" ]; then
@@ -104,6 +115,18 @@ jobs:
             echo "::error::a preview APK has the address bundled into it, so api_url is required"
             exit 1
           fi
+          # Nothing but the characters a URL is made of. As an environment
+          # variable a quote is already inert, so this is not the injection
+          # defence — that is `env:` above. It is this step doing its stated
+          # job: an address with a space or a semicolon in it cannot work, and
+          # saying so now is better than baking it into a bundle.
+          case "$url" in
+            *[!A-Za-z0-9:/._~%?=@+-]*)
+              echo "::error::api_url contains a character no URL should:"
+              echo "::error::  $url"
+              exit 1 ;;
+          esac
+
           case "$url" in
             http://localhost*|https://localhost*|http://127.0.0.1*|https://127.0.0.1*)
               echo "::error::$url points at the phone itself. Use the address the"
@@ -195,10 +218,11 @@ jobs:
         # log would suggest otherwise.
         env:
           EXPO_PUBLIC_API_URL: ${{ inputs.variant == 'preview' && inputs.api_url || '' }}
+          VARIANT: ${{ inputs.variant }}
         run: |
           cd apps/mobile/android
           chmod +x gradlew
-          if [ '${{ inputs.variant }}' = 'development' ]; then
+          if [ "$VARIANT" = 'development' ]; then
             # assembleDebug, which is what makes it a development build: the
             # dev launcher from expo-dev-client is only in the debug variant.
             ./gradlew assembleDebug --no-daemon
@@ -208,25 +232,30 @@ jobs:
 
       - name: Name the file after what is in it
         id: apk
+        env:
+          VARIANT: ${{ inputs.variant }}
         run: |
           src=$(find apps/mobile/android/app/build/outputs/apk -name '*.apk' | head -1)
           if [ -z "$src" ]; then echo "::error::gradle produced no APK"; exit 1; fi
-          name="xetral-${{ inputs.variant }}-${GITHUB_SHA::7}.apk"
+          name="xetral-${VARIANT}-${GITHUB_SHA::7}.apk"
           cp "$src" "$name"
           {
             echo "name=$name"
-            echo "tag=apk-${{ inputs.variant }}-${GITHUB_SHA::7}"
+            echo "tag=apk-${VARIANT}-${GITHUB_SHA::7}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Write the notes the release page shows
         if: ${{ inputs.publish_release }}
+        env:
+          VARIANT: ${{ inputs.variant }}
+          API_URL: ${{ inputs.api_url }}
         # Built in a FILE rather than inline. The first version nested a
         # heredoc inside a command substitution inside a double-quoted
         # argument, and its closing delimiter was indented — which does not
         # terminate an unquoted heredoc, so the step would have hung rather
         # than failed. Shell quoting is not the place to be clever.
         run: |
-          if [ '${{ inputs.variant }}' = 'development' ]; then
+          if [ "$VARIANT" = 'development' ]; then
             cat > /tmp/notes.md <<'EOF'
           Loads its JavaScript from a Metro server **you** run, so it replaces
           Expo Go rather than the deployed app. On the machine with the repo:
@@ -242,7 +271,7 @@ jobs:
           else
             cat > /tmp/notes.md <<EOF
           Standalone: the JavaScript is inside it, and it talks to
-          \`${{ inputs.api_url }}\`. Nothing else needs to be running.
+          \`${API_URL}\`. Nothing else needs to be running.
           EOF
           fi
           cat >> /tmp/notes.md <<EOF
@@ -267,22 +296,25 @@ jobs:
         # platform that has not shipped.
         env:
           GH_TOKEN: ${{ github.token }}
+          VARIANT: ${{ inputs.variant }}
+          APK_NAME: ${{ steps.apk.outputs.name }}
+          APK_TAG: ${{ steps.apk.outputs.tag }}
         run: |
-          tag='${{ steps.apk.outputs.tag }}'
+          tag="$APK_TAG"
           # Deleted first, so re-running for the same commit replaces the file
           # rather than failing on a tag that already exists.
           gh release delete "$tag" --yes --cleanup-tag 2>/dev/null || true
-          gh release create "$tag" "${{ steps.apk.outputs.name }}" \
+          gh release create "$tag" "$APK_NAME" \
             --prerelease \
             --target "$GITHUB_SHA" \
-            --title "Xetral ${{ inputs.variant }} build ${GITHUB_SHA::7}" \
+            --title "Xetral $VARIANT build ${GITHUB_SHA::7}" \
             --notes-file /tmp/notes.md
           url=$(gh release view "$tag" --json url --jq .url)
           {
             echo "### APK published"
             echo
             echo "**[Open the release page]($url)** on the phone and tap"
-            echo "\`${{ steps.apk.outputs.name }}\`."
+            echo "\`$APK_NAME\`."
           } >> "$GITHUB_STEP_SUMMARY"
 
       # Always, release or not. The artifact is the audit trail and the
@@ -297,13 +329,19 @@ jobs:
           if-no-files-found: error
 
       - name: Say what was built and what to do with it
+        env:
+          VARIANT: ${{ inputs.variant }}
+          API_URL: ${{ inputs.api_url }}
+          APK_NAME: ${{ steps.apk.outputs.name }}
         run: |
+          if [ "$VARIANT" = 'preview' ]; then talks="\`$API_URL\`"
+          else talks='whatever Metro is started with'; fi
           {
             echo "| | |"
             echo "|---|---|"
-            echo "| File | \`${{ steps.apk.outputs.name }}\` |"
-            echo "| Size | $(du -h '${{ steps.apk.outputs.name }}' | cut -f1) |"
-            echo "| Variant | \`${{ inputs.variant }}\` |"
-            echo "| Talks to | ${{ inputs.variant == 'preview' && format('`{0}`', inputs.api_url) || 'whatever Metro is started with' }} |"
+            echo "| File | \`$APK_NAME\` |"
+            echo "| Size | $(du -h "$APK_NAME" | cut -f1) |"
+            echo "| Variant | \`$VARIANT\` |"
+            echo "| Talks to | $talks |"
             echo "| Commit | \`${GITHUB_SHA::7}\` |"
           } >> "$GITHUB_STEP_SUMMARY"

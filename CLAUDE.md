@@ -652,6 +652,13 @@ Review in `apps/mobile/SECURITY.md`, cover in `src/screen-privacy.tsx`.
   ASSERTS the generated manifest in both directions, because a typo in that
   list would take out biometrics and present as "Face ID does not work on
   Android".
+- **NO WORKFLOW INPUT REACHES A SHELL THROUGH `${{ }}`.** An expression in a
+  `run:` block is pasted in as TEXT before bash sees it, so a value carrying a
+  quote and a semicolon is a command — and the APK job holds a token with
+  `contents: write`. CodeQL flagged it high, correctly: `workflow_dispatch`
+  narrows WHO can supply a value, it does not make the value safe. Through
+  `env:` it is data. The URL character check next to it is not that defence;
+  it is the step doing its own job, refusing an address that cannot work.
 - **THE APK WORKFLOW HAD NEVER ONCE BEEN RUN**, and the first run failed at
   `mergeDebugResources` after three and a half minutes: `with-lan-cleartext.js`
   wrote `expo prebuild --clean` into an XML COMMENT, and **two consecutive
