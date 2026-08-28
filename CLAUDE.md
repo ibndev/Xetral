@@ -504,6 +504,41 @@ wrapper in `apps/api/src/observability/provider-health.service.ts`, screen at
 - **The fulfilment map is watched per provider**, not as one: VTpass being down
   is not Airalo being down, and one health row for all three would say neither.
 
+### Metrics — non-obvious rules
+
+`apps/api/src/observability/metrics.{service,controller}.ts`, at `GET /metrics`.
+
+- **`/health` says the process is alive and `/ready` says the database
+  answers.** Neither says whether the ledger is moving, a worker has stopped or
+  a queue has been growing for six hours — and the worker failures here are
+  silent by construction: `NOTIFICATION_INTERVAL_SECONDS` unset means rows
+  accumulate, the API keeps saying "check your email", and nothing is sent.
+- **PUBLIC IN THE POLICY, GUARDED BY ITS OWN TOKEN** — the webhook shape,
+  because a scraper has no session to present. It is not public in effect: it
+  carries queue depths, provider health and what is owed to customers, and a
+  non-zero drift figure published openly tells somebody the books are
+  inconsistent before we have noticed.
+- **No `METRICS_TOKEN` means 404, not 401.** An unconfigured endpoint that
+  answered 401 confirms to a prober that it exists; with no token there is
+  nothing to authorise against. Defaulting to open was never an option — an
+  endpoint that works is one nobody checks the guard on.
+- **It is NOT unmetered.** `/health` and `/ready` are, because what polls them
+  hardest is the load balancer deciding whether the instance lives. A scrape
+  runs aggregate queries and its credential is checked inside the handler, so
+  unmetered would be a way to make the database work with no credential at all.
+- **Measured from the views that already exist, never from counters this
+  service keeps.** A counter is a second copy of the truth — and it means a
+  queue added to `admin_work_queue` is scraped automatically, which is 036's
+  guarantee extended to monitoring.
+- **Cached for ten seconds, because it is not free.** The queue view aggregates
+  twenty-three sources and one scans postings; a fifteen-second scraper would
+  run that all day, which is a way of taking a system down while watching it.
+- **Amounts are MINOR UNITS and say so in the name.** Prometheus samples are
+  floats, so a naira balance in major units would be a float holding money.
+- **Queue AGE as well as depth.** A queue of three that has been three since
+  Tuesday is a queue nobody is working; a queue of forty turning over hourly is
+  a busy morning. Alerting on depth alone gets both wrong.
+
 ### Purchases (bills, eSIM, numbers) — non-obvious rules
 
 Schema: `packages/ledger/sql/004_purchases.sql`. One table for every "buy a thing

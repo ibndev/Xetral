@@ -79,6 +79,20 @@ export interface ApiConfig {
   readonly bitnobWebhookSecret: string | undefined;
 
   /**
+   * The bearer token a metrics scraper must present.
+   *
+   * UNDEFINED MEANS THE ENDPOINT DOES NOT EXIST, rather than meaning it is
+   * open. `/metrics` publishes queue depths, provider health and what the
+   * platform owes customers — a business-intelligence leak to anything that
+   * can route to the instance, and worse: a non-zero `ledger_drift` published
+   * openly tells somebody the books are inconsistent before we have noticed.
+   *
+   * Defaulting to open is the failure that would never be found, because an
+   * endpoint that works is an endpoint nobody checks the guard on.
+   */
+  readonly metricsToken: string | undefined;
+
+  /**
    * Keys for sealing what must be stored but not stored in the clear: an
    * electricity token, an eSIM activation code.
    *
@@ -693,6 +707,7 @@ export function loadConfig(env: Env): ApiConfig {
     bitnobBaseUrl: optional(env, 'BITNOB_BASE_URL'),
     bitnobApiKey: optional(env, 'BITNOB_API_KEY'),
     bitnobWebhookSecret: optional(env, 'BITNOB_WEBHOOK_SECRET'),
+    metricsToken: optional(env, 'METRICS_TOKEN'),
     encryptionKeyring: parseEncryptionKeyring(env),
     kycBlindIndexKey: parseBlindIndexKey(env),
     vtpassBaseUrl: optional(env, 'VTPASS_BASE_URL'),

@@ -64,6 +64,9 @@ export function testApiConfig(databaseUrl: string, overrides: Partial<ApiConfig>
     bitnobBaseUrl: undefined,
     bitnobApiKey: undefined,
     bitnobWebhookSecret: undefined,
+    // Undefined by default, so a suite that does not name it gets the
+    // production-shaped answer: the endpoint is not there at all.
+    metricsToken: undefined,
     // A real keyring, not undefined: a suite that never seals anything cannot
     // catch a sealing path that was silently skipped.
     encryptionKeyring: { current: sealing, accepted: [sealing] },

@@ -30,6 +30,23 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
         'readiness for the load balancer; reports only ready or not ready',
       )
 
+      /*
+       * Metrics. Public HERE and guarded by its own bearer token inside the
+       * controller — the shape the webhooks use, because a scraper has no
+       * session to present.
+       *
+       * It is emphatically not public in effect: it publishes queue depths,
+       * provider health and what the platform owes customers. With no
+       * `METRICS_TOKEN` configured the route answers 404 rather than 401, so
+       * an unconfigured deployment does not advertise that it is there.
+       */
+      .public(
+        'GET',
+        '/metrics',
+        'scraped by monitoring, which has no session; guarded by METRICS_TOKEN ' +
+          'inside the handler and absent entirely when that is unset',
+      )
+
       .public(
         'POST',
         '/v1/auth/register',

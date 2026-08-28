@@ -62,6 +62,19 @@ export function rateClassOf(
 
 const PROBE_PATHS = new Set(['/health', '/ready']);
 
+/*
+ * `/metrics` is deliberately NOT in that set.
+ *
+ * The probes are unmetered because what polls them hardest is the load
+ * balancer deciding whether this instance lives, and rate limiting it makes a
+ * busy instance fail its own health check. A metrics scrape is different: it
+ * runs aggregate queries, it is reachable by anything that can route here, and
+ * its bearer check happens inside the handler — so an unmetered one would be a
+ * way to make the database do real work without any credential at all. It
+ * falls through to the public class, which is far above any real scrape
+ * interval.
+ */
+
 @Injectable()
 export class RequestRateLimiter {
   constructor(

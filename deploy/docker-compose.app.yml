@@ -21,6 +21,17 @@ services:
       # compose file would otherwise start a production topology in staging
       # mode, with the provider guards relaxed.
       XETRAL_ENVIRONMENT: production
+      # SET IT, or /metrics answers 404 and nothing is watching. Unset is the
+      # deliberate default rather than an oversight: an open metrics endpoint
+      # publishes queue depths, provider health and what is owed to customers
+      # to anything that can route here, so it exists only when somebody has
+      # decided it should.
+      #
+      # Both processes carry it. The worker is the one whose failure is
+      # silent — rows accumulate, the API keeps saying "check your email", and
+      # nothing is ever sent — so scraping the API alone would watch the half
+      # that complains loudly on its own.
+      METRICS_TOKEN: '${METRICS_TOKEN:-}'
       RECONCILE_INTERVAL_SECONDS: ''
       DEPOSIT_RECONCILE_INTERVAL_SECONDS: ''
       CRYPTO_RECONCILE_INTERVAL_SECONDS: ''
@@ -78,6 +89,7 @@ services:
       # compliance queue is simply empty — which looks exactly like a quiet
       # week. A default means it runs unless somebody deliberately blanks it.
       RISK_MONITOR_INTERVAL_SECONDS: '${RISK_MONITOR_INTERVAL_SECONDS:-900}'
+      METRICS_TOKEN: '${METRICS_TOKEN:-}'
     deploy:
       replicas: 1
     depends_on:

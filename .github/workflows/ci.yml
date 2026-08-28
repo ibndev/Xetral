@@ -427,6 +427,13 @@ jobs:
           check "price publication is mounted" 401 http://127.0.0.1:3100/v1/admin/prices
           check "provider health is mounted" 401 http://127.0.0.1:3100/v1/admin/providers
 
+          # Metrics with no METRICS_TOKEN set, which is how the bundle boots
+          # here. 404 rather than 401 is the assertion: an unconfigured
+          # endpoint must not advertise that it exists, and an endpoint that
+          # defaulted to OPEN would publish queue depths and customer
+          # liability to anything that could route to it.
+          check "metrics is absent without a token" 404 http://127.0.0.1:3100/metrics
+
           # Reading a card number. Guarded, so 401 rather than 404 — and this
           # is the route whose ABSENCE was the bug: every card issued since
           # Phase 5 was unusable because nothing could show its number.

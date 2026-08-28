@@ -82,6 +82,8 @@ import { FxService } from './fx/fx.service.js';
 import { NotificationService } from './notifications/notification.service.js';
 import { ErrorRecorder } from './observability/error-recorder.service.js';
 import { ProviderHealthService, watched } from './observability/provider-health.service.js';
+import { MetricsService } from './observability/metrics.service.js';
+import { MetricsController } from './observability/metrics.controller.js';
 import { ErrorRecordingFilter } from './observability/error.filter.js';
 import { ErrorAlertService } from './observability/error-alert.service.js';
 import { NotificationWorker } from './notifications/notification.worker.js';
@@ -629,6 +631,7 @@ export class AppModule {
         CryptoWebhookController,
         FxController,
         HealthController,
+        MetricsController,
         KycController,
         ConsentController,
         DataRightsController,
@@ -759,6 +762,7 @@ export class AppModule {
         DepositLifecycle,
         ErrorRecorder,
         ProviderHealthService,
+        MetricsService,
         ErrorAlertService,
         ErrorAlertLifecycle,
         NotificationService,

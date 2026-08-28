@@ -104,6 +104,9 @@ describe('the public surface is small and justified', () => {
     // in review rather than merged as one line among forty.
     expect(audit.map((r) => `${r.method} ${r.path}`).sort()).toEqual([
       'GET /health',
+      // Scraped by monitoring, which has no session. Guarded by METRICS_TOKEN
+      // inside the handler and absent entirely when that is unset.
+      'GET /metrics',
       'GET /ready',
       'POST /v1/auth/login',
       // Account recovery. Public because a customer who has lost their
