@@ -127,6 +127,25 @@ ALTER FUNCTION apply_retention() SECURITY DEFINER;
 REVOKE ALL ON FUNCTION apply_retention() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION apply_retention() TO xetral_app;
 
+/*
+ * AND ERASURE, which is the second function that must delete and was missed.
+ *
+ * 034 gave a customer the right to have their data erased, and the app role
+ * deliberately holds no DELETE — so `erase_customer_personal_data` failed with
+ * `permission denied for table biometric_enrollments` the moment it ran as
+ * anything but the owner. It passed locally and failed in CI for exactly that
+ * reason: CI connects as `xetral_app` and a development database does not.
+ *
+ * The collision is the design working. The app cannot delete a row any other
+ * way, so what may be erased is decided by the body of a function that NAMES
+ * every table it touches and contains no dynamic SQL — the same property that
+ * makes `apply_retention()` safe to hand this power to, and the reason neither
+ * of them can reach the ledger.
+ */
+ALTER FUNCTION erase_customer_personal_data(BIGINT) SECURITY DEFINER;
+REVOKE ALL ON FUNCTION erase_customer_personal_data(BIGINT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION erase_customer_personal_data(BIGINT) TO xetral_app;
+
 /**
  * The same for every function that writes where a trigger otherwise refuses.
  *
