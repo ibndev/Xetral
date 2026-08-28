@@ -84,4 +84,36 @@ export interface CryptoPort {
   /** The reconciliation path. A send that timed out may or may not have been
    *  broadcast, and only the provider knows which. */
   withdrawalStatus(reference: string): Promise<WithdrawalReceipt>;
+
+  /**
+   * Deposits the provider has recorded for one of our addresses.
+   *
+   * The equivalent of `FundingPort.listDeposits`, and it exists for the same
+   * failure: a webhook that never arrives. Money is on a chain, the provider
+   * saw it, and nothing is retrying — so waiting does not help and the only
+   * remedy is to ASK.
+   *
+   * Withdrawals had a sweep from the start and deposits did not, which meant a
+   * lost deposit event was money that never reached a balance and nothing in
+   * the system would ever notice.
+   */
+  listDeposits(address: string): Promise<readonly ProviderCryptoDeposit[]>;
+}
+
+/**
+ * A deposit as the provider reports it, independent of any webhook.
+ *
+ * `providerReference` is the provider's id for the deposit — the same value a
+ * webhook carries as `data.id`, and the thing both paths key on so a sweep and
+ * a late redelivery cannot credit the same money twice.
+ */
+export interface ProviderCryptoDeposit {
+  readonly providerReference: string;
+  readonly txHash: string;
+  readonly outputIndex?: number;
+  readonly asset: Currency;
+  readonly network: CryptoNetwork;
+  readonly amountMinor: bigint;
+  readonly confirmations: number;
+  readonly occurredAt: Date;
 }

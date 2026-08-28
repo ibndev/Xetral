@@ -130,9 +130,11 @@ DECLARE v_user BIGINT;
 BEGIN
     SELECT id INTO v_user FROM users WHERE email = 'op-customer@example.ng';
     INSERT INTO kyc_submissions
-      (user_id, full_name, date_of_birth, phone, bvn_sealed, bvn_last4, address)
+      (user_id, full_name, date_of_birth, phone, bvn_sealed, bvn_last4, address,
+       bvn_fingerprint)
     VALUES (v_user, 'Adebayo Oluwaseun', '1990-01-01', '+2348030000000',
-            '22212345678', '5678', '12 Awolowo Road, Lagos');
+            '22212345678', '5678', '12 Awolowo Road, Lagos',
+            'v1:' || repeat('a', 64));
     RAISE EXCEPTION 'TEST FAILED: a plaintext BVN reached a row';
 EXCEPTION
     WHEN check_violation THEN
@@ -146,15 +148,19 @@ DECLARE v_user BIGINT;
 BEGIN
     SELECT id INTO v_user FROM users WHERE email = 'op-customer@example.ng';
     INSERT INTO kyc_submissions
-      (user_id, full_name, date_of_birth, phone, bvn_sealed, bvn_last4, address)
+      (user_id, full_name, date_of_birth, phone, bvn_sealed, bvn_last4, address,
+       bvn_fingerprint)
     VALUES (v_user, 'Adebayo Oluwaseun', '1990-01-01', '+2348030000000',
-            'v1:sealed', '5678', '12 Awolowo Road, Lagos');
+            'v1:sealed', '5678', '12 Awolowo Road, Lagos',
+            'v1:' || repeat('a', 64));
 
     BEGIN
         INSERT INTO kyc_submissions
-          (user_id, full_name, date_of_birth, phone, bvn_sealed, bvn_last4, address)
+          (user_id, full_name, date_of_birth, phone, bvn_sealed, bvn_last4, address,
+           bvn_fingerprint)
         VALUES (v_user, 'Adebayo O.', '1990-01-01', '+2348030000000',
-                'v1:sealed2', '5678', '12 Awolowo Road, Lagos');
+                'v1:sealed2', '5678', '12 Awolowo Road, Lagos',
+                'v1:' || repeat('a', 64));
         RAISE EXCEPTION 'TEST FAILED: a customer had two open submissions';
     EXCEPTION
         WHEN unique_violation THEN

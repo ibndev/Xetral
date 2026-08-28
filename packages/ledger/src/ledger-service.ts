@@ -62,6 +62,18 @@ export interface HistoryEntry {
   readonly amountMinor: bigint;
   readonly currency: string;
   readonly occurredAt: Date;
+
+  /**
+   * What later happened to this entry: 'settled', 'disputed', 'reversed' or
+   * 'refunded'. Read from the `entry_status` view, so it is DERIVED from the
+   * books rather than stored on the row — a stored copy drifts the first time
+   * a flow forgets to update it, and a history that says 'settled' about a
+   * refunded charge is worse than one that says nothing.
+   */
+  readonly status: string;
+  /** The entry that answered this one — a reversal or a refund — so a client
+   *  can present the pair rather than two unrelated lines. */
+  readonly answeredBy: string | null;
 }
 
 /** Postgres SQLSTATEs this service translates rather than leaks. */
@@ -388,12 +400,19 @@ export class LedgerService {
       amount_minor: string;
       currency: string;
       occurred_at: Date;
+      status: string;
+      answered_by: string | null;
     }>(
+      // `entry_status` is a view, so this join costs one extra index lookup per
+      // row and cannot disagree with the postings. Joining a stored status
+      // column would be cheaper and would eventually be wrong.
       `SELECT p.id AS posting_id, e.uuid, e.kind, e.description,
-              p.amount_minor, p.currency, e.occurred_at
+              p.amount_minor, p.currency, e.occurred_at,
+              s.status, s.answered_by
          FROM postings p
          JOIN accounts a        ON a.id = p.account_id
          JOIN journal_entries e ON e.id = p.journal_entry_id
+         JOIN entry_status s    ON s.id = e.id
         WHERE a.owner_id = $1::bigint
           AND a.kind = 'customer_wallet'
           AND p.currency = $2
@@ -411,6 +430,8 @@ export class LedgerService {
       currency: row.currency,
       occurredAt: row.occurred_at,
       postingId: row.posting_id,
+      status: row.status,
+      answeredBy: row.answered_by,
     }));
   }
 }
@@ -428,11 +449,16 @@ function normalBalanceFor(kind: AccountRef['kind']): 'debit' | 'credit' {
     case 'customer_card':
     case 'customer_pending':
     case 'liability_customer_funds':
+    // Tax collected and not yet remitted. A liability, so a credit balance:
+    // charging VAT increases what we owe, and remitting it reduces it.
+    case 'liability_tax_payable':
     case 'revenue_fees':
     case 'revenue_fx_spread':
       return 'credit';
     case 'provider_float':
     case 'expense_provider_cost':
+    // A dispute we upheld is money we spent, the same as a provider's bill.
+    case 'expense_dispute_loss':
     // A gift card we have bought and not yet resold is an asset we hold, the
     // same as a float balance at a provider — and separate from one because a
     // code sitting in inventory is not money at a provider, and reconciling

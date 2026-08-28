@@ -1,0 +1,26 @@
+# The backup sidecar.
+#
+# `postgres:16-alpine` gives `pg_basebackup`; the two things it does not give
+# are what turn a local tarball into a backup: something to encrypt with, and
+# something to ship with.
+#
+# The Postgres MAJOR VERSION is pinned to match the server it backs up.
+# `pg_basebackup` from a different major refuses to talk to the server, and it
+# refuses at 3am on the first night after an upgrade rather than at build time.
+FROM postgres:16-alpine
+
+# age — https://github.com/FiloSottile/age
+#   Encrypts to a PUBLIC KEY. The database host holds only the public half, so
+#   a compromise of this node yields the backups but not their contents. GPG
+#   would do the same job with ten times the surface and a keyring to manage;
+#   age has one flag and no configuration to get subtly wrong.
+#
+# rclone — https://rclone.org
+#   Speaks S3, B2, R2 and a dozen others, so choosing a provider later is a
+#   config change rather than a rewrite of this script.
+RUN apk add --no-cache age rclone ca-certificates
+
+COPY backup.sh /backup.sh
+RUN chmod +x /backup.sh
+
+ENTRYPOINT ["/bin/sh", "/backup.sh"]

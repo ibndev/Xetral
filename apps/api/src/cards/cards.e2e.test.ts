@@ -10,13 +10,14 @@ import { hashPassword } from '@xetral/identity';
 import { LedgerService, posting } from '@xetral/ledger';
 import type { AccountRef } from '@xetral/ledger';
 import { BITNOB_EVENTS } from '@xetral/providers';
-import type { CardPort, OperationOutcome, VirtualCard } from '@xetral/providers';
+import type { CardPort, CardSecrets, OperationOutcome, VirtualCard } from '@xetral/providers';
 import { usd } from '@xetral/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { AppModule } from '../app.module.js';
 import type { ApiConfig } from '../config.js';
 import { systemClock } from '../tokens.js';
 import { testApiConfig } from '../test-support/api-config.js';
+import { enrolAndElevate } from '../test-support/staff-totp.js';
 
 /**
  * Virtual USD cards end to end: issue, fund, freeze, terminate, and the
@@ -76,6 +77,17 @@ class FakeCardPort implements CardPort {
     this.#maybeFail();
     return this.fundOutcome;
   }
+  async reveal(): Promise<CardSecrets> {
+    this.calls.push('reveal');
+    this.#maybeFail();
+    return {
+      pan: '4242424242424242',
+      cvv: '123',
+      expiryMonth: 11,
+      expiryYear: 2030,
+      nameOnCard: 'A Customer',
+    };
+  }
   async freeze(id: string): Promise<VirtualCard> {
     this.calls.push('freeze');
     this.#maybeFail();
@@ -133,6 +145,13 @@ async function onboard(): Promise<Customer> {
      VALUES ($1, 'bitnob', $2)`,
     [userId, `cus_${randomUUID()}`],
   );
+  // AND THE TIER, because KYC approval sets both in ONE transaction.
+  //
+  // This fixture stands in for that approval, and a fixture that performs
+  // half of an atomic operation is a fixture that tests a state production
+  // cannot reach — here, a customer whom every provider accepts and whose
+  // ceiling is still an unverified account's.
+  await pool.query(`UPDATE users SET kyc_tier = 1 WHERE id = $1::bigint`, [userId]);
 
   const login = await request(app.getHttpServer())
     .post('/v1/auth/login')
@@ -211,19 +230,30 @@ async function deliverWebhook(
   event: string,
   providerCardId: string,
   amountMicro: string,
-  options: { signature?: string } = {},
+  options: {
+    signature?: string;
+    /** The provider's id for THIS transaction. Passed when a later event has
+     *  to name it — a settlement carries the authorization's id, which is how
+     *  the two halves of one card spend are connected. */
+    txnId?: string;
+    /** The authorization this event resolves. */
+    authorizationId?: string;
+  } = {},
 ): Promise<request.Response> {
   const raw = JSON.stringify({
     event_id: `evt_${randomUUID()}`,
     event,
     created_at: new Date().toISOString(),
     data: {
-      id: `txn_${randomUUID()}`,
+      id: options.txnId ?? `txn_${randomUUID()}`,
       card_id: providerCardId,
       customer_id: 'cus_x',
       amount: amountMicro,
       currency: 'USD',
       merchant: 'Netflix',
+      ...(options.authorizationId === undefined
+        ? {}
+        : { authorization_id: options.authorizationId }),
     },
   });
 
@@ -646,5 +676,621 @@ describe('the auth/settlement webhooks', () => {
   it('leaves no drift behind', async () => {
     const drift = await pool.query(`SELECT COUNT(*)::int AS n FROM ledger_drift`);
     expect(drift.rows[0]?.n).toBe(0);
+  });
+});
+
+describe('revealing a card', () => {
+  const reveal = (customer: Customer, cardId: string, body: Record<string, unknown> = {}) =>
+    request(app.getHttpServer())
+      .post(`/v1/cards/${cardId}/reveal`)
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send({ transaction_pin: PIN, ...body });
+
+  it('returns the number, the CVV and the expiry', async () => {
+    // The gap this closes: `003_cards.sql` stores `last4` and an expiry and
+    // nothing else, so every card issued since Phase 5 was unusable — there
+    // was no way for a customer to read the number.
+    const customer = await onboard();
+    await fundWallet(customer.userId, 100_00);
+    const card = await issueCard(customer, '10.00');
+
+    const res = await reveal(customer, card.id).expect(200);
+
+    expect(res.body.pan).toBe('4242424242424242');
+    expect(res.body.cvv).toBe('123');
+    expect(res.body.expiry_month).toBe(11);
+    expect(res.body.expiry_year).toBe(2030);
+  });
+
+  it('asks for the PIN', async () => {
+    // A card number, a CVV and an expiry together are everything needed to
+    // spend online, and unlike a transfer there is no ledger entry afterwards
+    // for anybody to notice.
+    const customer = await onboard();
+    await fundWallet(customer.userId, 100_00);
+    const card = await issueCard(customer, '10.00');
+
+    const res = await request(app.getHttpServer())
+      .post(`/v1/cards/${card.id}/reveal`)
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send({});
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('transaction_pin_required');
+  });
+
+  it('refuses another customer card', async () => {
+    const owner = await onboard();
+    const stranger = await onboard();
+    await fundWallet(owner.userId, 100_00);
+    const card = await issueCard(owner, '10.00');
+
+    const res = await reveal(stranger, card.id);
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe('card_not_found');
+  });
+
+  it('STORES NOTHING — the number is nowhere in the database', async () => {
+    // The whole design in one assertion. The reveal is a pass-through: the
+    // schema has no column that could hold a PAN, so this is a property of
+    // the database rather than a rule somebody has to keep.
+    const customer = await onboard();
+    await fundWallet(customer.userId, 100_00);
+    const card = await issueCard(customer, '10.00');
+    await reveal(customer, card.id).expect(200);
+
+    const cardRow = await pool.query<Record<string, unknown>>(
+      `SELECT * FROM cards WHERE uuid = $1`,
+      [card.id],
+    );
+    const revealRow = await pool.query<Record<string, unknown>>(
+      `SELECT * FROM card_reveals WHERE card_id = (SELECT id FROM cards WHERE uuid = $1)`,
+      [card.id],
+    );
+
+    const everything = JSON.stringify([cardRow.rows, revealRow.rows]);
+    expect(everything).not.toContain('4242424242424242');
+    expect(everything).not.toContain('"123"');
+    // And the record of the reveal DOES exist — the fact, never the contents.
+    expect(revealRow.rows).toHaveLength(1);
+  });
+
+  it('records who asked, so an investigator can answer when it was last shown', async () => {
+    const customer = await onboard();
+    await fundWallet(customer.userId, 100_00);
+    const card = await issueCard(customer, '10.00');
+    await reveal(customer, card.id).expect(200);
+
+    const row = await pool.query<{ user_id: string; revealed_at: Date }>(
+      `SELECT user_id, revealed_at FROM card_reveals
+        WHERE card_id = (SELECT id FROM cards WHERE uuid = $1)`,
+      [card.id],
+    );
+    expect(row.rows[0]?.user_id).toBe(customer.userId);
+    expect(row.rows[0]?.revealed_at).toBeInstanceOf(Date);
+  });
+
+  it('stops after five reveals of one card', async () => {
+    // A reveal endpoint is a PAN oracle for anybody holding a stolen session.
+    // The ceiling counts ROWS rather than an in-memory counter, because an
+    // attacker's loop outlives a pod restart and a counter does not.
+    const customer = await onboard();
+    await fundWallet(customer.userId, 100_00);
+    const card = await issueCard(customer, '10.00');
+
+    for (let i = 0; i < 5; i += 1) {
+      await reveal(customer, card.id).expect(200);
+    }
+
+    const blocked = await reveal(customer, card.id);
+    expect(blocked.status).toBe(429);
+    expect(blocked.body.error).toBe('too_many_reveals');
+  });
+
+  it('stops a session walking through every card on the account', async () => {
+    // The per-card ceiling would never see this: five reveals each across
+    // three cards is fifteen numbers and no single card over its limit.
+    const customer = await onboard();
+    await fundWallet(customer.userId, 500_00);
+
+    const cards = [
+      await issueCard(customer, '10.00'),
+      await issueCard(customer, '10.00'),
+      await issueCard(customer, '10.00'),
+    ];
+
+    let refusals = 0;
+    for (const card of cards) {
+      for (let i = 0; i < 5; i += 1) {
+        const res = await reveal(customer, card.id);
+        if (res.status === 429) refusals += 1;
+      }
+    }
+    expect(refusals).toBeGreaterThan(0);
+  });
+
+  it('refuses a terminated card', async () => {
+    // Its number is dead at the provider, so revealing would either fail or
+    // hand back something that no longer works — and a customer would spend an
+    // afternoon trying to use it.
+    const customer = await onboard();
+    await fundWallet(customer.userId, 100_00);
+    const card = await issueCard(customer, '10.00');
+
+    await request(app.getHttpServer())
+      .post(`/v1/cards/${card.id}/terminate`)
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send({ transaction_pin: PIN })
+      .expect(200);
+
+    const res = await reveal(customer, card.id);
+    expect(res.status).toBe(422);
+    expect(res.body.error).toBe('card_terminated');
+  });
+
+  it('still reveals a FROZEN card', async () => {
+    // Freezing stops spending, not looking. Refusing would push a customer to
+    // unfreeze the card just to read it, which is the opposite of what the
+    // freeze was for.
+    const customer = await onboard();
+    await fundWallet(customer.userId, 100_00);
+    const card = await issueCard(customer, '10.00');
+
+    await request(app.getHttpServer())
+      .post(`/v1/cards/${card.id}/freeze`)
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send({})
+      .expect(200);
+
+    await reveal(customer, card.id).expect(200);
+  });
+});
+
+describe('a card history', () => {
+  const eventsOf = async (
+    cardUuid: string,
+  ): Promise<readonly { kind: string; actor: string; actor_id: string | null }[]> =>
+    (
+      await pool.query<{ kind: string; actor: string; actor_id: string | null }>(
+        `SELECT e.kind::text AS kind, e.actor::text AS actor, e.actor_id::text
+           FROM card_events e
+           JOIN cards c ON c.id = e.card_id
+          WHERE c.uuid = $1::uuid
+          ORDER BY e.id`,
+        [cardUuid],
+      )
+    ).rows;
+
+  it('records every status change, and who caused it', async () => {
+    // `cards` carries three timestamps and no actor, so a card frozen on
+    // Monday and unfrozen on Tuesday had ONE `updated_at` and nothing saying
+    // which happened or who did it. The first question in every card dispute
+    // — "was this frozen at the time, and who unfroze it?" — had no answer.
+    const customer = await onboard();
+    await fundWallet(customer.userId, 100_00);
+    const card = await issueCard(customer, '10.00');
+
+    await request(app.getHttpServer())
+      .post(`/v1/cards/${card.id}/freeze`)
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send({})
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .post(`/v1/cards/${card.id}/unfreeze`)
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send({ transaction_pin: PIN })
+      .expect(200);
+
+    const events = await eventsOf(card.id);
+    expect(events.map((e) => e.kind)).toEqual(['issued', 'frozen', 'unfrozen']);
+
+    // And the two the customer caused name the customer. Lifting a freeze is a
+    // different event from activating, which is the distinction a dispute
+    // turns on.
+    expect(events[1]).toMatchObject({ actor: 'customer', actor_id: customer.userId });
+    expect(events[2]).toMatchObject({ actor: 'customer', actor_id: customer.userId });
+
+    // The issue event is still `system`: nothing yet attributes it, and the
+    // honest answer is that something created this card and did not say who.
+    expect(events[0]).toMatchObject({ actor: 'system', actor_id: null });
+  });
+});
+
+describe('replacing a card', () => {
+  it('kills the old number, carries the balance, and links the pair', async () => {
+    const customer = await onboard();
+    await fundWallet(customer.userId, 200_00);
+    const old = await issueCard(customer, '40.00');
+
+    const res = await request(app.getHttpServer())
+      .post(`/v1/cards/${old.id}/reissue`)
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send({
+        name_on_card: 'Ada Obi',
+        transaction_pin: PIN,
+        idempotency_key: randomUUID(),
+      })
+      .expect(200);
+
+    const replacement = res.body.id as string;
+    expect(replacement).not.toBe(old.id);
+
+    // THE LEAKED NUMBER IS DEAD. Issuing first would have left the customer
+    // holding a live replacement AND a live compromised card if the
+    // termination then failed — the exact state they came here to escape.
+    const oldRow = await pool.query<{ status: string }>(
+      `SELECT status::text FROM cards WHERE uuid = $1::uuid`,
+      [old.id],
+    );
+    expect(oldRow.rows[0]?.status).toBe('terminated');
+
+    // The balance came with it, so replacing a card does not silently empty
+    // it.
+    expect(res.body.balance).toBe('40.00');
+
+    // And the pair reads in both directions, so the history is one card's life
+    // rather than an unexplained termination and an unrelated new card.
+    const linked = await pool.query<{ replaces: string | null; replaced_by: string | null }>(
+      `SELECT replaces_card_id::text AS replaces, replaced_by_card_id::text AS replaced_by
+         FROM card_history WHERE card_id = $1::uuid`,
+      [replacement],
+    );
+    expect(linked.rows[0]?.replaces).toBe(old.id);
+  });
+
+  it('calls the new card a REISSUE, not an ordinary issue', async () => {
+    // Two different facts about the same row: "the customer wanted another
+    // card" and "we replaced one whose number leaked".
+    const customer = await onboard();
+    await fundWallet(customer.userId, 100_00);
+    const old = await issueCard(customer, '10.00');
+
+    const res = await request(app.getHttpServer())
+      .post(`/v1/cards/${old.id}/reissue`)
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send({
+        name_on_card: 'Ada Obi',
+        transaction_pin: PIN,
+        idempotency_key: randomUUID(),
+      })
+      .expect(200);
+
+    const kinds = await pool.query<{ kind: string }>(
+      `SELECT e.kind::text AS kind FROM card_events e
+         JOIN cards c ON c.id = e.card_id
+        WHERE c.uuid = $1::uuid ORDER BY e.id`,
+      [res.body.id],
+    );
+    expect(kinds.rows[0]?.kind).toBe('reissued');
+
+    // The old card's termination says why, rather than reading as a customer
+    // who simply stopped using it.
+    const reason = await pool.query<{ reason: string | null }>(
+      `SELECT e.reason FROM card_events e
+         JOIN cards c ON c.id = e.card_id
+        WHERE c.uuid = $1::uuid AND e.kind = 'terminated'`,
+      [old.id],
+    );
+    expect(reason.rows[0]?.reason).toContain('replaced');
+  });
+
+  it('refuses to reissue somebody else card', async () => {
+    const owner = await onboard();
+    const stranger = await onboard();
+    await fundWallet(owner.userId, 100_00);
+    const card = await issueCard(owner, '10.00');
+
+    const res = await request(app.getHttpServer())
+      .post(`/v1/cards/${card.id}/reissue`)
+      .set('Authorization', `Bearer ${stranger.token}`)
+      .send({
+        name_on_card: 'Someone Else',
+        transaction_pin: PIN,
+        idempotency_key: randomUUID(),
+      });
+    expect(res.status).toBe(404);
+  });
+});
+
+describe('what support can see and do', () => {
+  /** A compliance operator, enrolled and elevated — every staff route needs a
+   *  second factor, including the read-only ones. */
+  async function makeOperator(role: string): Promise<Customer> {
+    const person = await onboard();
+    await pool.query(
+      `INSERT INTO staff_roles (user_id, role, granted_by) VALUES ($1, $2::staff_role, $1)
+       ON CONFLICT DO NOTHING`,
+      [person.userId, role],
+    );
+    await enrolAndElevate(app, pool, person.token, person.userId);
+    return person;
+  }
+
+  it('shows a card, its history, and never the number', async () => {
+    // A customer ringing about a declined card was a conversation nobody on
+    // this side could follow: no status, no history, no way to tell whether
+    // the card had been frozen or by whom.
+    const operator = await makeOperator('support');
+    const customer = await onboard();
+    await fundWallet(customer.userId, 100_00);
+    const card = await issueCard(customer, '10.00');
+
+    await request(app.getHttpServer())
+      .post(`/v1/cards/${card.id}/freeze`)
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send({})
+      .expect(200);
+
+    const res = await request(app.getHttpServer())
+      .get(`/v1/admin/cards/${card.id}`)
+      .set('Authorization', `Bearer ${operator.token}`)
+      .expect(200);
+
+    expect(res.body.status).toBe('frozen');
+    expect((res.body.events as { kind: string }[]).map((e) => e.kind)).toEqual([
+      'issued',
+      'frozen',
+    ]);
+    // Four digits and no more. This response is read over shoulders and
+    // screenshotted into tickets.
+    expect(String(res.body.last4)).toMatch(/^[0-9]{4}$/);
+    expect(JSON.stringify(res.body)).not.toMatch(/[0-9]{12,}/);
+  });
+
+  it('lets compliance freeze a card, and records why', async () => {
+    const operator = await makeOperator('compliance');
+    const customer = await onboard();
+    await fundWallet(customer.userId, 100_00);
+    const card = await issueCard(customer, '10.00');
+
+    await request(app.getHttpServer())
+      .post(`/v1/admin/cards/${card.id}/freeze`)
+      .set('Authorization', `Bearer ${operator.token}`)
+      .send({
+        reason: 'customer reports charges they did not make',
+        transaction_pin: PIN,
+      })
+      .expect(204);
+
+    const events = await pool.query<{ kind: string; actor: string; reason: string | null }>(
+      `SELECT e.kind::text AS kind, e.actor::text AS actor, e.reason
+         FROM card_events e JOIN cards c ON c.id = e.card_id
+        WHERE c.uuid = $1::uuid ORDER BY e.id DESC LIMIT 1`,
+      [card.id],
+    );
+    expect(events.rows[0]).toMatchObject({ kind: 'frozen', actor: 'staff' });
+    // A customer WILL ring back to ask why their card stopped working, and
+    // "a member of staff froze it" is not an answer.
+    expect(events.rows[0]?.reason).toContain('did not make');
+  });
+
+  it('refuses a freeze with no reason', async () => {
+    const operator = await makeOperator('compliance');
+    const customer = await onboard();
+    await fundWallet(customer.userId, 100_00);
+    const card = await issueCard(customer, '10.00');
+
+    const res = await request(app.getHttpServer())
+      .post(`/v1/admin/cards/${card.id}/freeze`)
+      .set('Authorization', `Bearer ${operator.token}`)
+      .send({ reason: 'x', transaction_pin: PIN });
+    expect(res.status).toBe(400);
+  });
+
+  it('has NO staff terminate at all', async () => {
+    // Not a missing endpoint — a decision. Freezing stops spending and the
+    // customer can undo it; terminating moves their money and cannot be
+    // undone, and there is no support conversation in which doing that
+    // without them is right. The guard denies an undeclared route.
+    const operator = await makeOperator('compliance');
+    const customer = await onboard();
+    await fundWallet(customer.userId, 100_00);
+    const card = await issueCard(customer, '10.00');
+
+    const res = await request(app.getHttpServer())
+      .post(`/v1/admin/cards/${card.id}/terminate`)
+      .set('Authorization', `Bearer ${operator.token}`)
+      .send({ reason: 'because I can', transaction_pin: PIN });
+    expect(res.status).toBeGreaterThanOrEqual(400);
+  });
+
+  it('is refused to a signed-in customer', async () => {
+    const customer = await onboard();
+    const other = await onboard();
+    await fundWallet(other.userId, 100_00);
+    const card = await issueCard(other, '10.00');
+
+    const res = await request(app.getHttpServer())
+      .get(`/v1/admin/cards/${card.id}`)
+      .set('Authorization', `Bearer ${customer.token}`);
+    expect(res.status).toBe(403);
+  });
+});
+
+describe('the two halves of a card spend', () => {
+  const stuckHolds = async (cardUuid: string): Promise<number> =>
+    Number(
+      (
+        await pool.query<{ n: string }>(
+          `SELECT count(*)::text AS n FROM card_holds_stuck WHERE card_id = $1::uuid`,
+          [cardUuid],
+        )
+      ).rows[0]?.n ?? '0',
+    );
+
+  /** Ages a hold past the settlement window, because waiting sixteen days is
+   *  not a test. The window itself is asserted by the invariant suite. */
+  const age = async (providerTxnId: string): Promise<void> => {
+    await pool.query(
+      `UPDATE card_authorizations SET occurred_at = now() - interval '40 days'
+        WHERE provider_txn_id = $1`,
+      [providerTxnId],
+    );
+  };
+
+  it('connects a settlement to the hold it resolves', async () => {
+    // Before this the two halves were never connected: the authorization
+    // recorded its entry, the settlement posted its own, and nothing could
+    // answer "which holds are still open?".
+    const customer = await onboard();
+    await fundWallet(customer.userId, 200_00);
+    const card = await issueCard(customer, '50.00');
+
+    const authTxn = `txn_auth_${randomUUID()}`;
+    expect((await deliverWebhook(BITNOB_EVENTS.cardAuthorization, card.providerCardId, '10000000', {
+      txnId: authTxn,
+    })).status).toBe(200);
+
+    expect((await deliverWebhook(BITNOB_EVENTS.cardSettlement, card.providerCardId, '10000000', {
+      authorizationId: authTxn,
+    })).status).toBe(200);
+
+    const closed = await pool.query<{ outcome: string; amount_minor: string }>(
+      `SELECT s.outcome::text, s.amount_minor::text
+         FROM card_settlements s
+         JOIN card_authorizations a ON a.id = s.authorization_id
+        WHERE a.provider_txn_id = $1`,
+      [authTxn],
+    );
+    expect(closed.rows[0]).toMatchObject({ outcome: 'settled', amount_minor: '1000' });
+  });
+
+  it('reports a hold whose settlement never came', async () => {
+    // THE FAILURE NOTHING ELSE SEES. The money sits in customer_pending: the
+    // customer cannot spend it, the ledger balances perfectly, and
+    // `ledger_drift` reports nothing at all.
+    const customer = await onboard();
+    await fundWallet(customer.userId, 200_00);
+    const card = await issueCard(customer, '50.00');
+
+    const authTxn = `txn_lost_${randomUUID()}`;
+    expect((await deliverWebhook(BITNOB_EVENTS.cardAuthorization, card.providerCardId, '10000000', {
+      txnId: authTxn,
+    })).status).toBe(200);
+
+    // Young: not yet anybody's problem.
+    expect(await stuckHolds(card.id)).toBe(0);
+
+    await age(authTxn);
+    expect(await stuckHolds(card.id)).toBe(1);
+  });
+
+  it('stops reporting it once the settlement finally arrives', async () => {
+    // A late webhook is the commonest cause, and the queue has to empty when
+    // one turns up — otherwise the list only ever grows and stops being read.
+    const customer = await onboard();
+    await fundWallet(customer.userId, 200_00);
+    const card = await issueCard(customer, '50.00');
+
+    const authTxn = `txn_late_${randomUUID()}`;
+    expect((await deliverWebhook(BITNOB_EVENTS.cardAuthorization, card.providerCardId, '10000000', {
+      txnId: authTxn,
+    })).status).toBe(200);
+    await age(authTxn);
+    expect(await stuckHolds(card.id)).toBe(1);
+
+    expect((await deliverWebhook(BITNOB_EVENTS.cardSettlement, card.providerCardId, '10000000', {
+      authorizationId: authTxn,
+    })).status).toBe(200);
+    expect(await stuckHolds(card.id)).toBe(0);
+  });
+
+  it('records a settlement that does not match what was authorised', async () => {
+    // A tip added after the card was presented is a few percent; a settlement
+    // many times the authorisation is a merchant error or a compromised
+    // terminal, and nothing compared the two before.
+    const customer = await onboard();
+    await fundWallet(customer.userId, 500_00);
+    const card = await issueCard(customer, '200.00');
+
+    const authTxn = `txn_tip_${randomUUID()}`;
+    // Authorised $10.00.
+    expect((await deliverWebhook(BITNOB_EVENTS.cardAuthorization, card.providerCardId, '10000000', {
+      txnId: authTxn,
+    })).status).toBe(200);
+    // Settled $40.00.
+    expect((await deliverWebhook(BITNOB_EVENTS.cardSettlement, card.providerCardId, '40000000', {
+      authorizationId: authTxn,
+    })).status).toBe(200);
+
+    const differences = await pool.query<{ authorised_minor: string; settled_minor: string }>(
+      `SELECT authorised_minor::text, settled_minor::text
+         FROM card_settlement_differences WHERE card_id = $1::uuid`,
+      [card.id],
+    );
+    expect(differences.rows[0]).toMatchObject({
+      authorised_minor: '1000',
+      settled_minor: '4000',
+    });
+  });
+
+  it('REFUSES a settlement for a hold it has no record of, so it is retried', async () => {
+    // Written the other way round first, and the assertion was wrong.
+    //
+    // A settlement naming an authorization this card never saw means we missed
+    // the authorization webhook. There is nothing in `customer_pending` to
+    // release, so the entry cannot post at all — and acknowledging would drop
+    // a real spend from the books permanently. Rethrowing makes Bitnob retry,
+    // and webhooks arrive out of order: the authorization landing a moment
+    // later makes the retry succeed on its own. That is the rule this codebase
+    // already states about an authorization the card cannot cover, and it
+    // applies unchanged here.
+    const customer = await onboard();
+    await fundWallet(customer.userId, 200_00);
+    const card = await issueCard(customer, '50.00');
+
+    expect(
+      (
+        await deliverWebhook(BITNOB_EVENTS.cardSettlement, card.providerCardId, '10000000', {
+          authorizationId: 'txn_this_card_never_saw',
+        })
+      ).status,
+    ).toBe(500);
+  });
+
+  it('succeeds on the retry once the missing authorization arrives', async () => {
+    // The reason refusing above is right rather than merely strict: the
+    // ordering fixes itself, and a provider that keeps retrying is what makes
+    // that possible.
+    const customer = await onboard();
+    await fundWallet(customer.userId, 200_00);
+    const card = await issueCard(customer, '50.00');
+
+    const authTxn = `txn_ooo_${randomUUID()}`;
+
+    // The settlement first, out of order.
+    expect(
+      (
+        await deliverWebhook(BITNOB_EVENTS.cardSettlement, card.providerCardId, '10000000', {
+          authorizationId: authTxn,
+        })
+      ).status,
+    ).toBe(500);
+
+    expect(
+      (
+        await deliverWebhook(BITNOB_EVENTS.cardAuthorization, card.providerCardId, '10000000', {
+          txnId: authTxn,
+        })
+      ).status,
+    ).toBe(200);
+
+    // Bitnob's retry, which now finds the hold it needs.
+    expect(
+      (
+        await deliverWebhook(BITNOB_EVENTS.cardSettlement, card.providerCardId, '10000000', {
+          authorizationId: authTxn,
+        })
+      ).status,
+    ).toBe(200);
+
+    const closed = await pool.query<{ outcome: string }>(
+      `SELECT s.outcome::text FROM card_settlements s
+         JOIN card_authorizations a ON a.id = s.authorization_id
+        WHERE a.provider_txn_id = $1`,
+      [authTxn],
+    );
+    expect(closed.rows[0]?.outcome).toBe('settled');
   });
 });

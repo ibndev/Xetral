@@ -8,6 +8,7 @@ import type {
   CryptoAddress,
   CryptoNetwork,
   CryptoPort,
+  ProviderCryptoDeposit,
   SendRequest,
   WithdrawalQuote,
   WithdrawalReceipt,
@@ -35,7 +36,32 @@ export const BITNOB_CRYPTO_ENDPOINTS = {
   quoteSend: '/wallets/send/quote',
   send: '/wallets/send',
   transaction: (reference: string) => `/transactions/${reference}`,
+  /** CONFIRM BEFORE GO-LIVE, with the rest of this table. Every path here was
+   *  a plausible guess once and every one of them was wrong. */
+  addressTransactions: (address: string) => `/addresses/${address}/transactions`,
 } as const;
+
+/**
+ * The provider's transaction list for one address.
+ *
+ * `amount` is `unknown` deliberately: `z.number()` would accept a value
+ * JSON.parse has already rounded and hand it over looking valid. It is
+ * narrowed by `parseMinor` and nowhere else.
+ */
+const depositListResponse = z.object({
+  data: z.array(
+    z.object({
+      id: z.string().min(1),
+      tx_hash: z.string().min(1),
+      output_index: z.number().int().nonnegative().nullish(),
+      currency: z.string().min(1),
+      chain: z.string().min(1),
+      amount: z.unknown(),
+      confirmations: z.number().int().nonnegative(),
+      created_at: z.string().min(1),
+    }),
+  ),
+});
 
 const addressResponse = z.object({
   data: z.object({
@@ -163,6 +189,51 @@ export class BitnobCryptoAdapter implements CryptoPort {
     });
 
     return this.#toReceipt(payload);
+  }
+
+  /**
+   * Deposits the provider has recorded against one of our addresses.
+   *
+   * Amounts go through `parseMinor`, the same narrowing the send receipt and
+   * the webhooks use — NOT the USD micro-unit conversion. Crypto minor units
+   * are per asset (BTC 8 places, USDT 6), and a value past MAX_SAFE_INTEGER is
+   * refused rather than coerced, because by then JSON.parse has already
+   * rounded and the lost unit is unrecoverable.
+   */
+  async listDeposits(address: string): Promise<readonly ProviderCryptoDeposit[]> {
+    const payload = await this.#client.request(
+      'GET',
+      BITNOB_CRYPTO_ENDPOINTS.addressTransactions(address),
+    );
+
+    const parsed = depositListResponse.safeParse(payload);
+    if (!parsed.success) {
+      throw new ProviderContractError(
+        PROVIDER,
+        `address transaction list does not match the expected shape: ${issues(parsed.error)}`,
+        parsed.error,
+      );
+    }
+
+    return parsed.data.data.map((row) => {
+      const occurredAt = new Date(row.created_at);
+      if (Number.isNaN(occurredAt.getTime())) {
+        throw new ProviderContractError(PROVIDER, `unparseable created_at '${row.created_at}'`);
+      }
+
+      return {
+        providerReference: row.id,
+        txHash: row.tx_hash,
+        ...(row.output_index === null || row.output_index === undefined
+          ? {}
+          : { outputIndex: row.output_index }),
+        asset: row.currency.toUpperCase() as Currency,
+        network: row.chain.toLowerCase() as CryptoNetwork,
+        amountMinor: parseMinor(row.amount),
+        confirmations: row.confirmations,
+        occurredAt,
+      };
+    });
   }
 
   async withdrawalStatus(reference: string): Promise<WithdrawalReceipt> {

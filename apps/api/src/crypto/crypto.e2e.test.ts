@@ -14,6 +14,7 @@ import type {
   CryptoAddress,
   CryptoNetwork,
   CryptoPort,
+  ProviderCryptoDeposit,
   SendRequest,
   WithdrawalQuote,
   WithdrawalReceipt,
@@ -26,6 +27,8 @@ import type { ApiConfig } from '../config.js';
 import { CryptoReconciliationService } from './crypto-reconciliation.service.js';
 import { systemClock } from '../tokens.js';
 import { testApiConfig } from '../test-support/api-config.js';
+import { CryptoDepositReconciliationService } from './crypto-deposit-reconciliation.service.js';
+import { SettingsService } from '../settings/settings.service.js';
 
 /**
  * Crypto, end to end.
@@ -94,6 +97,14 @@ class FakeCryptoPort implements CryptoPort {
     return this.sendAnswer;
   }
 
+  /** Deposits the provider would report for an address. Empty unless a test
+   *  seeds one, so no suite is surprised by a deposit it did not create. */
+  readonly deposits = new Map<string, ProviderCryptoDeposit[]>();
+
+  async listDeposits(address: string): Promise<readonly ProviderCryptoDeposit[]> {
+    return this.deposits.get(address) ?? [];
+  }
+
   async withdrawalStatus(_reference: string): Promise<WithdrawalReceipt> {
     if (this.statusAnswer instanceof Error) throw this.statusAnswer;
     return this.statusAnswer;
@@ -145,6 +156,13 @@ async function onboard(kyc = true): Promise<Customer> {
        VALUES ($1::bigint, 'bitnob', $2)`,
       [userId, `cus_${userId}`],
     );
+    // AND THE TIER, because KYC approval sets both in ONE transaction.
+    //
+    // This fixture stands in for that approval, and a fixture that performs
+    // half of an atomic operation is a fixture that tests a state production
+    // cannot reach — here, a customer whom every provider accepts and whose
+    // ceiling is still an unverified account's.
+    await pool.query(`UPDATE users SET kyc_tier = 1 WHERE id = $1::bigint`, [userId]);
   }
 
   const login = await request(app.getHttpServer())
@@ -244,11 +262,35 @@ async function usdtBalance(
   );
 }
 
+/**
+ * Every setting these assertions depend on, PINNED rather than inherited.
+ *
+ * The suites share one database and run in file order, and a suite that
+ * narrows a limit does not put it back. `flow-velocity.e2e.test.ts` pins the
+ * USDT ceiling to 10 USDT to reach it without a hundred postings — so whether
+ * this file passes depended on whether it happened to run first, and it stopped
+ * doing so the day two unrelated e2e files were added and the order shifted.
+ *
+ * The fix is the one `spending-limits.e2e.test.ts` already records: a suite
+ * asserting on exact behaviour states what it needs. Inheriting is what makes a
+ * green run a coincidence.
+ */
+const PINNED: Readonly<Record<string, string>> = {
+  crypto_daily_limit_usdt_minor: '100000000000',
+  crypto_daily_limit_btc_minor: '100000000000',
+  crypto_withdrawal_count_hourly: '100',
+};
+
 beforeAll(async () => {
   pool = new pg.Pool({ connectionString: DATABASE_URL, max: 8 });
   ledger = new LedgerService(pool);
   port = new FakeCryptoPort();
   app = await boot(makeConfig());
+
+  for (const [key, value] of Object.entries(PINNED)) {
+    await pool.query(`UPDATE platform_settings SET value = $2 WHERE key = $1`, [key, value]);
+  }
+  await app.get(SettingsService).refresh();
 });
 
 afterAll(async () => {
@@ -541,3 +583,124 @@ describe('reconciling a withdrawal nobody answered for', () => {
     expect(await usdtBalance(customer)).toMatchObject({ pending: '51.000000' });
   });
 });
+
+describe('reconciling a deposit nobody told us about', () => {
+  it('credits pending for a deposit only the provider knows about', async () => {
+    // The failure this closes: money on a chain, the provider has it, the
+    // webhook was lost, and nothing was retrying. Before the sweep existed
+    // this deposit never reached a balance and nothing would ever notice.
+    const customer = await onboard();
+    const address = (await getAddress(customer).expect(200)).body.address as string;
+    const reference = `cxd_lost_${randomUUID()}`;
+
+    port.deposits.set(address, [
+      {
+        providerReference: reference,
+        txHash: `0x${randomUUID().replace(/-/g, '')}`,
+        asset: 'USDT',
+        network: 'tron',
+        amountMinor: 250_000_000n,
+        confirmations: 1,
+        occurredAt: new Date(),
+      },
+    ]);
+
+    const report = await app.get(CryptoDepositReconciliationService).sweep();
+    expect(report.seen).toBeGreaterThanOrEqual(1);
+
+    // PENDING, not spendable — the sweep must not skip the confirmation rule
+    // just because it found the deposit a different way.
+    const balances = await request(app.getHttpServer())
+      .get('/v1/wallets')
+      .set('Authorization', `Bearer ${customer.token}`)
+      .expect(200);
+    const usdt = balances.body.balances.find((b: { currency: string }) => b.currency === 'USDT');
+    expect(usdt?.pending).toBe('250.000000');
+    expect(usdt?.spendable ?? '0.000000').toBe('0.000000');
+  });
+
+  it('a late webhook for a swept deposit does not credit it twice', async () => {
+    // The reason both paths key on the DEPOSIT rather than the webhook
+    // delivery. The NGN rail had this exact bug: the sweep keyed on data.id
+    // and the webhook on event_id, so a sweep followed by a redelivery
+    // credited the customer twice.
+    const customer = await onboard();
+    const address = (await getAddress(customer).expect(200)).body.address as string;
+    const reference = `cxd_late_${randomUUID()}`;
+    const txHash = `0x${randomUUID().replace(/-/g, '')}`;
+
+    port.deposits.set(address, [
+      {
+        providerReference: reference,
+        txHash,
+        asset: 'USDT',
+        network: 'tron',
+        amountMinor: 100_000_000n,
+        confirmations: 1,
+        occurredAt: new Date(),
+      },
+    ]);
+
+    await app.get(CryptoDepositReconciliationService).sweep();
+    const afterSweep = await pendingUsdt(customer);
+
+    // Same deposit, a webhook delivery the sweep never saw.
+    await chainEvent(
+      'crypto.deposit.pending',
+      address,
+      { id: reference, tx_hash: txHash, amount: '100000000', confirmations: 1 },
+      `evt_${randomUUID()}`,
+    );
+
+    expect(await pendingUsdt(customer)).toBe(afterSweep);
+  });
+
+  it('promotes a held deposit whose confirmation event never arrived', async () => {
+    // The other half. The seen event landed, the confirmation did not, and
+    // the customer's money would sit unspendable for ever.
+    const customer = await onboard();
+    const address = (await getAddress(customer).expect(200)).body.address as string;
+    const reference = `cxd_stuck_${randomUUID()}`;
+    const txHash = `0x${randomUUID().replace(/-/g, '')}`;
+
+    await chainEvent(
+      'crypto.deposit.pending',
+      address,
+      { id: reference, tx_hash: txHash, amount: '75000000', confirmations: 1 },
+    );
+    expect(await pendingUsdt(customer)).toBe('75.000000');
+
+    // The provider now reports it well past the threshold.
+    port.deposits.set(address, [
+      {
+        providerReference: reference,
+        txHash,
+        asset: 'USDT',
+        network: 'tron',
+        amountMinor: 75_000_000n,
+        confirmations: 200,
+        occurredAt: new Date(),
+      },
+    ]);
+
+    const report = await app.get(CryptoDepositReconciliationService).sweep();
+    expect(report.confirmed).toBeGreaterThanOrEqual(1);
+
+    const balances = await request(app.getHttpServer())
+      .get('/v1/wallets')
+      .set('Authorization', `Bearer ${customer.token}`)
+      .expect(200);
+    const usdt = balances.body.balances.find((b: { currency: string }) => b.currency === 'USDT');
+    expect(usdt?.spendable).toBe('75.000000');
+    expect(usdt?.pending).toBe('0.000000');
+  });
+});
+
+async function pendingUsdt(customer: Customer): Promise<string> {
+  const res = await request(app.getHttpServer())
+    .get('/v1/wallets')
+    .set('Authorization', `Bearer ${customer.token}`)
+    .expect(200);
+  const usdt = res.body.balances.find((b: { currency: string }) => b.currency === 'USDT');
+  return (usdt?.pending as string | undefined) ?? '0.000000';
+}

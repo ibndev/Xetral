@@ -9,8 +9,10 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import type { Pool } from 'pg';
-import { seal } from '@xetral/identity';
-import type { Keyring } from '@xetral/identity';
+import { blindIndex, seal } from '@xetral/identity';
+import { toMajor } from '@xetral/shared';
+import type { Currency } from '@xetral/shared';
+import type { BlindIndexKey, Keyring } from '@xetral/identity';
 import { API_CONFIG, DATABASE } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
 import { AuditService } from '../admin/audit.service.js';
@@ -74,6 +76,62 @@ export class KycService {
     return row === undefined ? null : toView(row);
   }
 
+  /**
+   * What this customer's verification currently allows them to move.
+   *
+   * A CUSTOMER-FACING surface, and it is the half that makes tiers a product
+   * rather than a trap. Without it, somebody refused for exceeding a ceiling
+   * is told "daily_limit_exceeded" and has no way to learn that the answer is
+   * to finish verifying — which turns a control into a support ticket, and a
+   * customer who cannot move their own money into one who does not know why.
+   *
+   * Amounts are MAJOR-UNIT DECIMAL STRINGS, like every other amount that
+   * crosses this boundary. They were minor units, and the web page formatted
+   * them as major — so a customer whose naira ceiling is N50,000 was told it
+   * was N5,000,000, and the number they were being refused against was the one
+   * they could not see. Mapping here rather than on the page keeps this
+   * endpoint the same shape as every other, which is what stops the next
+   * screen making the same mistake.
+   *
+   * `toMajor` is per currency: two places for naira, six for USDT, eight for
+   * BTC, and never a hardcoded two.
+   */
+  async limits(userUuid: string): Promise<{
+    readonly tier: number;
+    readonly limits: readonly { readonly currency: string; readonly daily_limit: string }[];
+    readonly next_tier: number | null;
+  }> {
+    const userId = await this.#userId(userUuid);
+    const result = await this.pool.query<{
+      kyc_tier: number;
+      currency: string;
+      daily_limit_minor: string;
+    }>(
+      `SELECT u.kyc_tier, l.currency, l.daily_limit_minor::text
+         FROM users u
+         JOIN kyc_tier_limits l ON l.tier = u.kyc_tier
+        WHERE u.id = $1::bigint
+        ORDER BY l.currency`,
+      [userId],
+    );
+
+    const tier = result.rows[0]?.kyc_tier ?? 0;
+    return {
+      tier,
+      limits: result.rows.map((row) => ({
+        currency: row.currency,
+        daily_limit: toMajor({
+          amount: BigInt(row.daily_limit_minor),
+          currency: row.currency as Currency,
+        }),
+      })),
+      // Tier 2 is an administrator's judgement about source of funds, not
+      // something a customer can apply for — so the next tier they can reach
+      // by their own action is 1, and above that there is nothing to offer.
+      next_tier: tier === 0 ? 1 : null,
+    };
+  }
+
   async submit(userUuid: string, body: KycBody): Promise<KycView> {
     const userId = await this.#userId(userUuid);
 
@@ -101,8 +159,9 @@ export class KycService {
 
     const inserted = await this.pool.query<KycRow>(
       `INSERT INTO kyc_submissions
-         (user_id, full_name, date_of_birth, phone, bvn_sealed, bvn_last4, address)
-       VALUES ($1::bigint, $2, $3::date, $4, $5, $6, $7)
+         (user_id, full_name, date_of_birth, phone, bvn_sealed, bvn_last4, address,
+          bvn_fingerprint)
+       VALUES ($1::bigint, $2, $3::date, $4, $5, $6, $7, $8)
        RETURNING id, uuid, user_id, status::text, full_name, bvn_last4,
                  rejection_reason, created_at`,
       [
@@ -115,6 +174,11 @@ export class KycService {
         seal(body.bvn, this.#keyring()),
         body.bvn.slice(-4),
         body.address,
+        // Deterministic and keyed, so two accounts on one BVN collide in the
+        // unique index while nobody reading this table learns a BVN. The
+        // sealed column cannot do this job: its IV is random, so one BVN
+        // sealed twice is two different strings.
+        blindIndex(body.bvn, this.#blindIndexKey()),
       ],
     );
 
@@ -185,9 +249,36 @@ export class KycService {
         [row.user_id, `xetral-${row.uuid}`],
       );
 
+      // VERIFIED, in the same transaction as the approval. A customer marked
+      // approved whose ceiling never moved is verified on paper and still
+      // limited to an unverified account's daily total — which they discover
+      // on their first real transfer, and support cannot explain.
+      //
+      // Only from 0. An enhanced customer whose identity is re-reviewed must
+      // not be silently demoted to tier 1 by a routine approval; taking a tier
+      // away is an administrator's deliberate act, and the WHERE clause is
+      // what makes that true rather than remembered.
+      await client.query(
+        `UPDATE users SET kyc_tier = 1 WHERE id = $1::bigint AND kyc_tier < 1`,
+        [row.user_id],
+      );
+
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');
+      // ONE PERSON, ONE ACCOUNT. `kyc_one_approved_per_bvn` refuses a second
+      // approved submission on the same BVN, and it is the database that
+      // refuses rather than a check up here — a reviewer working a queue at
+      // speed is exactly who a pre-check races. The collision is visible in
+      // `kyc_bvn_collisions` before they click; this is what happens if they
+      // did not look, or if two reviewers clicked at once.
+      if (
+        error !== null &&
+        typeof error === 'object' &&
+        (error as { constraint?: string }).constraint === 'kyc_one_approved_per_bvn'
+      ) {
+        throw new ConflictException({ error: 'bvn_already_verified' });
+      }
       throw error;
     } finally {
       client.release();
@@ -244,6 +335,23 @@ export class KycService {
   }
 
   /* ------------------------------ helpers ------------------------------ */
+
+  /**
+   * REFUSES rather than skipping the fingerprint.
+   *
+   * The same shape as `#keyring()` above and for the same reason: a submission
+   * written without one would slip past `kyc_one_approved_per_bvn`, and
+   * nothing anywhere would fail. A control that switches itself off when a
+   * configuration value is missing is worse than no control, because it is
+   * trusted.
+   */
+  #blindIndexKey(): BlindIndexKey {
+    const key = this.config.kycBlindIndexKey;
+    if (key === undefined) {
+      throw new ServiceUnavailableException({ error: 'encryption_not_configured' });
+    }
+    return key;
+  }
 
   #keyring(): Keyring {
     const keyring = this.config.encryptionKeyring;

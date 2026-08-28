@@ -104,8 +104,16 @@ describe('the public surface is small and justified', () => {
     // in review rather than merged as one line among forty.
     expect(audit.map((r) => `${r.method} ${r.path}`).sort()).toEqual([
       'GET /health',
+      // Scraped by monitoring, which has no session. Guarded by METRICS_TOKEN
+      // inside the handler and absent entirely when that is unset.
+      'GET /metrics',
       'GET /ready',
       'POST /v1/auth/login',
+      // Account recovery. Public because a customer who has lost their
+      // password has no session to present; both answer 204 and neither
+      // issues a token.
+      'POST /v1/auth/password/forgot',
+      'POST /v1/auth/password/reset',
       'POST /v1/auth/refresh',
       'POST /v1/auth/register',
       'POST /v1/webhooks/bitnob',
@@ -154,26 +162,84 @@ describe('the privileged surface is declared as privileged', () => {
   it('lists exactly the routes only staff can reach', () => {
     expect(staffRoutes.map((r) => `${r.method} ${r.path} (${r.role})`).sort()).toEqual([
       'GET /v1/admin/audit (admin)',
+      // A card's whole life, for the agent on the phone.
+      'GET /v1/admin/cards/:id (support)',
+      // Provider credentials. `admin` on all three: the write decides whether
+      // money can move at all, and the reads are a map of which integrations
+      // are live.
+      // Who has not agreed to the words currently in force. `compliance`,
+      // the same question as an outstanding KYC review.
+      'GET /v1/admin/consents (compliance)',
+      'GET /v1/admin/credentials (admin)',
+      'GET /v1/admin/credentials/:provider/:name/rotations (admin)',
+      // Data requests. `compliance`, and the acting routes take a PIN —
+      // erasing is the one action here that cannot be undone by appending.
+      'GET /v1/admin/data-requests (compliance)',
+      // The complaints queue. Its own role rather than the gift card
+      // reviewer's — a different job with a different risk.
+      'GET /v1/admin/disputes (dispute_reviewer)',
       'GET /v1/admin/drift (finance)',
+      // What is currently failing. `admin` because an error message describes
+      // how the platform is built.
+      'GET /v1/admin/errors (admin)',
       'GET /v1/admin/giftcards/queue (giftcard_reviewer)',
       'GET /v1/admin/kyc (compliance)',
       'GET /v1/admin/overview (support)',
+      'GET /v1/admin/prices (finance)',
+      // The compliance queue, on the role that already reviews identity.
+      // Provider health. `support` — see routes.ts.
+      'GET /v1/admin/providers (support)',
+      // What this deployment has not been told yet. `admin` rather than
+      // `support`, because it names every flow that is off and every
+      // credential that is absent — a map of where the platform is soft.
+      'GET /v1/admin/readiness (admin)',
+      'GET /v1/admin/risk/cases (compliance)',
+      'GET /v1/admin/risk/cases/:id (compliance)',
+      'GET /v1/admin/risk/signals (compliance)',
       'GET /v1/admin/settings (finance)',
       'GET /v1/admin/settings/:key/history (finance)',
       'GET /v1/admin/staff (admin)',
       'GET /v1/admin/stuck (support)',
       'GET /v1/admin/suspense (finance)',
+      // What was collected on a revenue authority's behalf is a finance
+      // figure, not a support one.
+      'GET /v1/admin/tax (finance)',
       'GET /v1/admin/users (support)',
       'GET /v1/admin/users/:id (support)',
+      // Acknowledging a failure. No PIN: it hides nothing, because a
+      // recurrence reopens the fingerprint by itself.
+      // Upholding a dispute pays money out of our own account, so it takes a
+      // PIN and — through the guard — a fresh second factor.
+      // Freezing only. There is deliberately no staff terminate: it moves the
+      // customer's money and cannot be undone.
+      'POST /v1/admin/cards/:id/freeze (compliance)',
+      'POST /v1/admin/credentials/:provider/:name (admin)',
+      'POST /v1/admin/data-requests/:id/erase (compliance)',
+      'POST /v1/admin/data-requests/:id/resolve (compliance)',
+      'POST /v1/admin/disputes/:id/resolve (dispute_reviewer)',
+      'POST /v1/admin/errors/:fingerprint/resolve (admin)',
       'POST /v1/admin/giftcards/:id/clawback (giftcard_reviewer)',
       'POST /v1/admin/giftcards/:id/reveal (giftcard_reviewer)',
       'POST /v1/admin/giftcards/:id/review (giftcard_reviewer)',
       'POST /v1/admin/kyc/:id/review (compliance)',
+      // Publishing a price. `finance`, and every write takes a PIN — nothing
+      // in the application ever wrote either price table before this.
+      'POST /v1/admin/prices/:id/retire (finance)',
+      'POST /v1/admin/prices/fx (finance)',
+      'POST /v1/admin/prices/giftcard (finance)',
+      // Opening and noting take no PIN; closing does, because it resolves
+      // every signal the case covers.
+      'POST /v1/admin/risk/cases (compliance)',
+      'POST /v1/admin/risk/cases/:id/close (compliance)',
+      'POST /v1/admin/risk/cases/:id/notes (compliance)',
+      'POST /v1/admin/risk/signals/:id/resolve (compliance)',
       'POST /v1/admin/settings/:key (finance)',
       'POST /v1/admin/staff/grant (admin)',
       'POST /v1/admin/staff/revoke (admin)',
       'POST /v1/admin/suspense/:id/attribute (finance)',
       'POST /v1/admin/users/:id/status (compliance)',
+      // Deciding how much money may leave an account in a day.
+      'POST /v1/admin/users/:id/tier (compliance)',
     ]);
   });
 });

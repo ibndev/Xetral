@@ -21,14 +21,32 @@ shipped, that is called out explicitly.
 | 10 — Multi-currency + FX / remittance | ✅ | Bitnob credentials to go live |
 | 11 — Mobile and web clients | ✅ | |
 | 12 — Pre-deployment audit | ✅ | Bitnob credentials to go live |
+| 13 — Closing the audit's findings | ✅ | all four tiers landed |
 
-All eleven phases are built, and a **pre-deployment audit** (Phase 12) closed
-what building them phase by phase had left between the phases. Every money flow
+All eleven phases are built, a **pre-deployment audit** (Phase 12) closed what
+building them phase by phase had left between the phases, and **Phase 13** is
+working through what that audit found, in the order the findings would cost
+money — all four tiers are now closed. Every money flow
 has an HTTP surface, a customer screen and an operations screen in front of it;
 Bitnob's live credentials are the only thing between the card, crypto and FX
 flows and production traffic.
 
 ---
+
+---
+
+## Before it takes real money
+
+Each phase below ends with its own **"an operator must"** paragraph. Those are
+kept as the record of why each item exists — but the operational list is now
+one thing, in one place, and it is checked by the build:
+
+- **`deploy/GO-LIVE.md`** — what the categories mean and what order to work in.
+- **`apps/api/src/golive/go-live-checklist.ts`** — the list itself, as data.
+  `go-live.test.ts` fails the build if it and the code disagree in either
+  direction.
+- **`GET /v1/admin/readiness`** — the same list asked of a running deployment.
+
 
 ## Phase 0 — Foundation ✅
 
@@ -1167,3 +1185,280 @@ record 0 → 125, and find both in the audit log.
 person (the first grant has no `admin` to make it, so it is an `INSERT`), then
 grant the narrower roles through the dashboard; review every row in
 `platform_settings`; and set the four worker intervals on exactly one instance.
+
+---
+
+## Phase 13 — Closing the audit's findings ✅
+
+Not a feature. The pre-deployment audit produced a list; this is that list
+being worked through, sequenced by what each gap would cost rather than by
+what it would take to build.
+
+### Tier 1 — the holes that were open right now ✅
+
+| File | What it is |
+|---|---|
+| `packages/ledger/sql/011_ledger_immutability.sql` | the append-only rule, finally enforced |
+| `apps/api/src/settings/kill-switches.test.ts` | proof that a switch does something |
+| `apps/api/src/crypto/crypto-deposit-reconciliation.service.ts` | the sweep deposits never had |
+| `deploy/docker-compose.app.yml` | the workers, on one instance |
+
+1. **`001_ledger.sql` has said "no UPDATE, no DELETE, ever" in a comment since
+   Phase 1, and nothing enforced it.** The audit ran the UPDATE against a live
+   database and moved ₦5,000 into a wallet out of nowhere. `apply_posting_to_balance`
+   fires on INSERT only, so the materialised balance did not follow and the
+   books silently disagreed with themselves. Every OTHER append-only rule in
+   this schema had a trigger; the ledger was the one relying on convention.
+2. **`crypto_enabled` and `fx_enabled` were rows nothing read.** An operator
+   could switch crypto off during a provider incident, watch the dashboard
+   confirm it, and withdrawals would keep going out. Worse than no switch,
+   because it is trusted exactly when it matters. Nothing in the type system
+   catches an unused accessor, so a scanner test does.
+3. **Withdrawals had a reconciliation sweep from the day they shipped and
+   deposits did not.** A lost deposit webhook was money on a chain that would
+   never reach a balance, with nothing retrying.
+4. **And a double credit, found on the way.** The funding webhook keyed its
+   idempotency on `event_id` — which identifies a DELIVERY — while the
+   reconciliation sweep only ever learns `data.id`, which identifies the
+   MONEY. A sweep beating a delayed redelivery credited the customer twice.
+   An existing test claimed to cover this and passed: its "late webhook" had
+   no `account_number`, so it resolved to no owner and landed in suspense.
+   Both paths key on `data.id` now.
+
+### Tier 2 — the platform could not be operated without these ✅
+
+| File | What it is |
+|---|---|
+| `packages/providers/src/ports/notification.ts` | the email port, and the retry rule it inverts |
+| `packages/identity/sql/012_notifications.sql` | the outbox, sealed and append-only |
+| `packages/identity/sql/013_password_reset.sql` | the way back into an account |
+| `packages/identity/src/totp.ts` | RFC 6238, against its own vectors |
+| `packages/identity/sql/014_staff_totp.sql` | the second factor, and the replay guard |
+| `packages/ledger/sql/015_error_events.sql` | knowing something is broken |
+| `deploy/standby/verify-restore.sql` | proof that a backup is a ledger |
+
+**There was no email of any kind.** No provider, no port, no template — and
+therefore no password reset, so a customer who forgot their password had no
+route back to their money at all. That is the gap the whole tier hangs off.
+
+Findings from building it:
+
+1. **A transactional outbox, because email is both the least reliable
+   component and the carrier of the most dangerous credential.** Sending inside
+   the transaction mails receipts for money that then rolls back; sending after
+   it loses messages when the process dies in the gap. A row written in the
+   same transaction has neither problem.
+2. **The outbox would otherwise be a list of live account-takeover links.** A
+   rendered reset email contains a bearer token, so the body is sealed under
+   the same `^v[0-9]+:` CHECK that guards electricity tokens — and a DELIVERED
+   message has its body erased.
+3. **One rule is inverted for this port alone: a notification timeout IS
+   retryable.** Everywhere else a timeout means do nothing and reconcile,
+   because we cannot tell whether the provider acted. Here, not sending is
+   worse than sending twice.
+4. **`enqueueBestEffort` needs a SAVEPOINT, not a try/catch.** Any error inside
+   a Postgres transaction poisons it, so the obvious "a receipt is worth less
+   than the transfer" implementation takes the transfer down with it.
+5. **`available` is not `deliverable`, and only booting found it.** With a
+   keyring but no provider, enqueueing succeeds and nothing drains it — so
+   `/password/forgot` answered 204 and told a locked-out customer to check an
+   inbox nothing would reach.
+6. **TOTP is hand-written, which is allowed here and was not for Keccak.** The
+   rule is never write the primitive and never trust an implementation no
+   published vector has judged; RFC 6238 ships six vectors and the suite runs
+   all of them.
+7. **Demanding a fresh code per action is unusable, and the tests are what
+   showed it.** Codes are single-use and change every thirty seconds, so a
+   reviewer working a queue is refused on their second approval — and the
+   predictable outcome is a shared authenticator on somebody's desk, which is
+   worse than no second factor because it looks like control. A verified code
+   elevates the SESSION for ten minutes; the PIN is still required throughout.
+8. **`claims.sub` is a UUID and the new queries cast it to bigint**, so the
+   entire staff surface answered 500. A SQL string is invisible to TypeScript —
+   the same shape as the freeze that wrote to a table called `sessions`.
+9. **The TypeScript union and the Postgres enum drifted, and only an insert
+   proved it.** `operations_alert` typechecked, passed every unit test, and
+   failed on the first real enqueue. Phase 3's finding about `EntryKind`, in a
+   new place; there is a test that writes every declared kind now.
+10. **Sixteen guard tests were SKIPPING rather than failing.** The guard gained
+    a dependency the probe module did not provide, `beforeAll` threw, and
+    vitest reported the suite as skipped. A green summary line with a smaller
+    number in it.
+11. **A backup nobody has restored is a hope with a cron entry.** The drill was
+    run for real — a genuine base backup, encrypted, decrypted, recovered into
+    a live instance — and then deliberately broken. With one posting deleted,
+    every structural check still passed: "204 entries, 423 postings" reads as
+    entirely plausible. Only the per-currency balance check caught it.
+12. **`pg_basebackup` does not copy the configuration on a Debian layout**,
+    because it lives outside PGDATA. The restore fails with an error that reads
+    like a corrupt archive. Worth knowing before an incident rather than during
+    one.
+
+### Tier 3 — the product did not work, and nowhere was safe to find out ✅
+
+| File | What it is |
+|---|---|
+| `packages/providers/src/ports/card.ts` | `CardSecrets`, deliberately not part of a card |
+| `packages/ledger/sql/016_card_reveals.sql` | that a reveal happened, never what it showed |
+| `apps/api/src/cards/card.service.ts` | the two ceilings, counted in rows |
+| `apps/api/src/config.ts` | the environment, and what staging refuses |
+| `apps/api/src/environment.test.ts` | the refusals, as tests |
+| `deploy/docker-compose.staging.yml` | one box, sandbox providers, no route to anything real |
+
+**Every virtual card issued since Phase 5 was unusable.** `003_cards.sql`
+stores `last4` and an expiry and nothing else — correctly, because a database
+dump must not contain PANs — with the consequence that there was no way for a
+customer to see the number: no port method, no endpoint, nothing to call. A
+card you cannot read is not a product.
+
+Findings from building it:
+
+1. **The reveal is a PASS-THROUGH, and every other decision follows from
+   that.** Fetched from the provider, handed to a customer who proved a PIN,
+   and dropped. "Never stored" is a property of the schema rather than a rule
+   somebody keeps: there is no column that could hold a card number, and the
+   test asserts `card_reveals` has none whose name could tempt anybody.
+2. **`CardSecrets` is a separate type from `VirtualCard` at every layer.** As
+   optional members of the ordinary card view, a PAN would ride along in every
+   listing, every cached response and every log line that serialises a card —
+   and nothing would fail on the day it did. Two types means a card number
+   only reaches code that named it.
+3. **The rate limit is counted in ROWS, not in memory.** An attacker's loop
+   outlives a pod restart and an in-process counter does not. There are two
+   ceilings because they catch different things: per card, and per customer —
+   the second is what sees a stolen session walking through every card on an
+   account, which a per-card limit never does. Both were proved load-bearing
+   by removing them and watching the test fail.
+4. **A frozen card can still be revealed; a terminated one cannot.** Freezing
+   stops spending, not looking — a customer disputing charges still needs to
+   read the number. A terminated card's number is dead at the provider.
+5. **Bitnob's card response shape was not what the adapter required, and only
+   a probe found it.** Their SDK reads `cardNumber`, `cvv2` and a single
+   `expiry`; the schema here demanded `last4`, `expiry_month` and
+   `expiry_year`, and an SDK-shaped payload threw `unexpected card shape`.
+   The read accepts both now. Being tolerant on a read costs nothing; being
+   wrong costs every card. Phase 3's lesson again — a table of plausible
+   constants passes tests written from the same assumptions.
+6. **A staging environment whose only protection is "we set different
+   variables" is one variable away from test traffic moving real money.** Both
+   protections here are REFUSALS. `XETRAL_ENVIRONMENT` is required with no
+   default, and when it says `staging` the API exits at boot if any provider
+   URL points at a live host, naming every offender at once so three mistakes
+   are not three deploys. Verified against the built bundle both ways.
+7. **The second refusal is about email, and it is the one a restored backup
+   makes urgent.** A staging database is usually restored from production,
+   because that is the only way to test against realistic data — and the
+   moment it is, the outbox worker holds every real customer's address and a
+   queue of messages about transfers that never happened. It will send them,
+   and it cannot be un-sent. Delivery is confined to `NOTIFICATION_ALLOWLIST`,
+   which is EMPTY by default, and a message to anyone else is ABANDONED rather
+   than retried: the address will not become allowed by waiting.
+8. **A test can fail for the harness rather than the product, and both are
+   worth fixing.** The staging e2e suite minted a fresh keyring per app, so
+   the staging worker could not open what the main app had sealed — while the
+   two negative tests passed, because the allowlist check runs before
+   decryption. A green pair either side of a broken one.
+
+### Tier 4 — the gaps that were nobody's emergency ✅
+
+| File | What it is |
+|---|---|
+| `apps/api/src/auth/request-rate-limit.service.ts` | a ceiling on every route, derived not declared |
+| `apps/web/src/lib/forwarded.ts` | the header without which every web customer is one client |
+| `packages/ledger/sql/017_transfer_velocity.sql` | what an account takeover looks like |
+| `packages/ledger/sql/018_disputes.sql` | somewhere to say "I did not do this" |
+| `packages/ledger/sql/019_retention.sql` | the only job here whose purpose is deletion |
+| `apps/web/src/app/legal/` | the notice, rendered from the schema |
+| `.github/dependabot.yml` | knowing about a package before the news does |
+
+Nothing here was on fire, which is why it was last. Each item is a control the
+platform was operating without and would have missed on a specific bad day.
+
+Findings from building it:
+
+1. **Only three endpoints had a rate limit, and the limit on one of them was a
+   denial of service against our own customers.** Login, registration and
+   password reset were capped; every other route — history, card details,
+   transfers — was unbounded, so a stolen session could read an account as fast
+   as the network allowed. Worse, the web app reached the API over a
+   server-side `fetch` and forwarded no client address, so its per-IP bucket
+   was ONE bucket for every web customer at once. Probed against the built
+   bundle: three logins with three different `x-forwarded-for` values each got
+   their own bucket; three carrying none — what the app was sending — shared
+   one, and the third was refused. At the production default the thirty-first
+   sign-in from the whole web app in any fifteen minutes was being turned away.
+2. **The rate class is DERIVED from the policy, not declared per route**, and
+   the asymmetry is the argument. A forgotten authorisation declaration gives a
+   403 somebody fixes that morning; a forgotten rate limit gives nothing at all
+   until the day it is abused. Forgetting fails open, so it has to be
+   impossible rather than discouraged.
+3. **It is keyed on the customer, and that is a Nigeria-specific decision.**
+   Carriers here put whole subscriber pools behind a handful of addresses, so a
+   per-address ceiling tight enough to stop one stolen session refuses a
+   network, and one loose enough not to is not a ceiling.
+4. **A daily total is blind to the shape of a takeover.** It does not look like
+   one large transfer; it looks like several ordinary ones to people the
+   customer has never paid, minutes apart, each fitting under the ceiling until
+   the account is empty. The velocity rules count instead of measuring — which
+   also means they need no currency, unlike the kobo limit.
+5. **Velocity REFUSES rather than freezing, and that is the difference from
+   the card protections rather than an inconsistency.** A card authorization is
+   a notification: the network approved it before we heard, so only the next
+   one can be protected. A transfer has not happened yet, so the correct action
+   is to not do it.
+6. **A dispute posts nothing when raised.** A claim is an assertion about a
+   fact, not a fact. Crediting on the strength of one makes "dispute
+   everything" a free withdrawal, and reversing that credit later takes money
+   from a customer who has spent it — the same line the gift card flow draws
+   between an offer and a transaction.
+7. **There is no clawback from the recipient, and its absence is a decision.**
+   A bank can reach into the other side because both sides sit in one regulated
+   system with a process behind it. We cannot, so an upheld dispute is our
+   loss, posted to its own expense account rather than netted against revenue —
+   which means somebody has to look at the number.
+8. **Retention is two laws pulling opposite ways.** AML says keep five years;
+   the NDPA says do not keep longer than needed. `retention_coverage` lists
+   every table against its decision and the invariant suite fails on an
+   UNDECIDED row, in both directions — because a deletion job is a list of what
+   somebody thought of, and the tables nobody thought of are the ones that
+   accumulate customer data for years.
+9. **Two append-only triggers refused the sweep and were right in different
+   ways.** `staff_totp_used_steps` grows without bound for no purpose, so its
+   trigger now permits deleting a row older than the window in which a code
+   could still be presented — and nothing else. `card_reveals` was going to be
+   purged and is not: a trail a scheduled job can delete from is one an
+   intruder can prune, and the way to hold less there is to store less.
+10. **The privacy notice is rendered from the schema.** A notice written once
+    from a template describes what somebody intended, and the gap opens
+    silently because nothing checks a paragraph. A test reads
+    `019_retention.sql` and fails the build if any period the page quotes
+    disagrees with the setting the sweep reads.
+11. **The dependency scan found a real one on its first run.** `apps/web` was
+    on Next 15.1.3, carrying an authorization-bypass-in-middleware advisory —
+    and this app's CSP, with the nonce that makes the page hydrate, lives in
+    middleware. Every 15.x release is in the affected range, so it was an
+    upgrade to 16.
+12. **Next 16 defaults to Turbopack, which cannot resolve this repo's `.js`
+    specifiers.** `resolveExtensions` appends to a bare specifier and does
+    nothing for one already carrying `.js`; `experimental.extensionAlias` is
+    accepted, printed as active, and ignored. The first failure was `Call
+    retries were exceeded`, which says nothing about module resolution. The
+    build declares `--webpack`, because dropping the extensions would fix the
+    web build by breaking every other workspace. The same trap
+    `@nestjs/common/constants` and `@noble/hashes/sha3` set, in a third place.
+13. **The gate is scoped to what serves customer traffic, and the exclusion is
+    written down.** A repo-wide audit reports thirty findings, nearly all in
+    the Expo and Metro toolchain, and failing on those trains everybody to skip
+    the step. `apps/mobile` is named in the workflow as deliberately excluded
+    rather than left as a gap.
+14. **Two tests passed for the wrong reason and were rewritten.** A dispute
+    invariant asserted the deadline was immutable while updating zero rows,
+    because an earlier block had resolved the only open one. A retention test
+    ran two sweeps with `Promise.all` and found no contention, because a sweep
+    finishes in milliseconds — the lock is now genuinely held by another
+    connection while the sweep is asked to run.
+
+**Before publishing, an operator must:** replace the bracketed company name,
+registered address, DPO address and NDPC reference in `apps/web/src/app/legal/`,
+have the terms reviewed by a Nigerian lawyer, grant `dispute_reviewer` to real
+people, and set `RETENTION_INTERVAL_SECONDS` on exactly one instance.

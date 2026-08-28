@@ -33,6 +33,10 @@ export type StaffRole =
   | 'compliance'
   /** Moves suspense money, changes fees and limits. */
   | 'finance'
+  /** Answers customer disputes, and pays out when one is upheld. Its own role
+   *  rather than the gift card reviewer's: a different job with a different
+   *  risk, and holding both should be a staffing decision. */
+  | 'dispute_reviewer'
   /** All of the above, plus granting roles. */
   | 'admin';
 

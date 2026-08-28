@@ -1276,3 +1276,94 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
 .verify-body h2 { font-size: 17px; margin: 2px 0 6px; }
 .verify-body p { margin: 0 0 8px; color: var(--text-2); font-size: 14px; }
 .verify-body .btn { margin-top: 6px; }
+
+/* ---------------------------------------------------------------------------
+   Legal pages.
+
+   Reachable without signing in — a privacy notice behind a session is one
+   nobody can read before deciding whether to open an account, which is the
+   moment it exists for. So these carry their own frame rather than the app
+   shell, and are the only pages here that are pure reading.
+
+   Measured rather than full-width: long lines of legal text are hard enough
+   without being 1400 pixels wide.
+--------------------------------------------------------------------------- */
+.legal-shell {
+  min-height: 100dvh;
+  background: var(--bg);
+}
+
+.legal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.legal-body {
+  max-width: 68ch;
+  margin: 0 auto;
+  padding: 32px 20px 72px;
+  color: var(--text-2);
+  line-height: 1.65;
+}
+
+.legal-body h1 { color: var(--text); margin: 0; }
+.legal-body h2 {
+  color: var(--text);
+  font-size: 18px;
+  margin: 34px 0 10px;
+}
+.legal-body p  { margin: 0 0 14px; }
+.legal-body ul { margin: 0 0 16px; padding-left: 20px; }
+.legal-body li { margin: 0 0 9px; }
+.legal-body strong { color: var(--text); }
+.legal-body a { color: var(--accent-600); }
+
+/* The retention table is the widest thing on the page and the one a reader
+   most needs intact. It scrolls inside its own box so the page body never
+   scrolls sideways on a phone. */
+.legal-table-wrap {
+  overflow-x: auto;
+  margin: 0 0 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+
+.legal-table {
+  width: 100%;
+  min-width: 520px;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.legal-table th,
+.legal-table td {
+  text-align: left;
+  vertical-align: top;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.legal-table thead th {
+  color: var(--text);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: var(--surface-2);
+}
+
+.legal-table tbody th { color: var(--text); font-weight: 600; }
+.legal-table tr:last-child th,
+.legal-table tr:last-child td { border-bottom: 0; }
+
+.legal-foot {
+  display: flex;
+  gap: 18px;
+  margin-top: 44px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  font-size: 14px;
+}

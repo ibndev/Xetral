@@ -248,6 +248,91 @@ describe('display_amount can never reach a posting', () => {
   });
 });
 
+describe('a settlement larger than its hold', () => {
+  const settle = (authorizedMinor?: bigint): LedgerIntent => {
+    const parsed = parseWebhook(
+      body({ event_id: 's1', event: BITNOB_EVENTS.cardSettlement }, { amount: '40000000' }),
+    );
+    const intent = toLedgerIntent(parsed, {
+      ownerId: OWNER,
+      ...(authorizedMinor === undefined ? {} : { authorizedMinor }),
+    });
+    if (intent === undefined) throw new Error('expected an intent');
+    return intent;
+  };
+
+  it('takes the hold from pending and the excess from the card', () => {
+    // A settlement CAN exceed its authorization — a tip added after the card
+    // was presented, a currency conversion settled at a different rate — and
+    // only the hold is in `customer_pending`.
+    //
+    // Authorised $10.00, settled $40.00: release the $10 hold, take the $30
+    // excess from the card's own balance, and the provider gets $40. That is
+    // what economically happened.
+    const intent = settle(1000n);
+    expect(byKind(intent)).toEqual({
+      customer_pending: -1000n,
+      customer_card: -3000n,
+      provider_float: 4000n,
+    });
+    expect(() => assertBalanced(intent)).not.toThrow();
+    expect(intent.metadata['over_settled_minor']).toBe('3000');
+  });
+
+  it('takes it all from pending when the settlement fits the hold', () => {
+    // The ordinary case, which is nearly all of them: two legs, no excess, and
+    // no metadata claiming an overspend that did not happen.
+    const intent = settle(4000n);
+    expect(byKind(intent)).toEqual({ customer_pending: -4000n, provider_float: 4000n });
+    expect(intent.metadata['over_settled_minor']).toBeUndefined();
+  });
+
+  it('takes it all from pending when it knows of no hold', () => {
+    // No basis for claiming any of it was held, so the overdraft guard
+    // decides — which refuses, so Bitnob retries, and a late authorization
+    // makes the retry succeed on its own.
+    const intent = settle();
+    expect(byKind(intent)).toEqual({ customer_pending: -4000n, provider_float: 4000n });
+  });
+});
+
+describe('a refund naming the charge it answers', () => {
+  const refund = (refundsEntryId?: string): LedgerIntent => {
+    const parsed = parseWebhook(body({ event_id: 'r1', event: BITNOB_EVENTS.cardRefund }));
+    const intent = toLedgerIntent(parsed, {
+      ownerId: OWNER,
+      ...(refundsEntryId === undefined ? {} : { refundsEntryId }),
+    });
+    if (intent === undefined) throw new Error('expected an intent');
+    return intent;
+  };
+
+  it('carries the entry id the caller resolved', () => {
+    // Resolved by the CALLER, because turning Bitnob's authorization id into
+    // one of our entry ids is a database lookup and this adapter is a pure
+    // translation of a payload — the same division that keeps `ownerId` out
+    // of here.
+    expect(refund('4242').reversesEntryId).toBe('4242');
+  });
+
+  it('omits the key entirely when the caller found nothing', () => {
+    // Omitted rather than set to null or undefined: `LedgerIntent` treats the
+    // key's PRESENCE as the claim that this entry answers another, and an
+    // explicit undefined would read the same to a caller and differently to a
+    // `in` check.
+    expect('reversesEntryId' in refund()).toBe(false);
+  });
+
+  it('still posts when there is no link', () => {
+    // The decision this asymmetry exists for. A merchant refund arrives days
+    // or weeks after the settlement through a payload whose shape is not ours
+    // to guarantee; refusing it for a missing link would turn worse reporting
+    // into money the customer is owed and does not get.
+    expect(() => assertBalanced(refund())).not.toThrow();
+    expect(byKind(refund())).toEqual({ provider_float: -2500n, customer_card: 2500n });
+  });
+});
+
 describe('amounts arriving badly', () => {
   it('refuses a settlement that is not a whole number of cents', () => {
     expect(() =>

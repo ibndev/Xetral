@@ -153,6 +153,27 @@ Access tokens are **not JWTs**, deliberately — see the header comment in
 
 Schema: `packages/ledger/sql/003_cards.sql`.
 
+- **A card number is a PASS-THROUGH and is never stored.** `003_cards.sql` has
+  no column that could hold one, which is what makes that structural. The
+  reveal fetches from the provider, hands the value to a customer who proved a
+  PIN, and drops it; `card_reveals` records THAT it happened, never what it
+  showed. Every card issued since Phase 5 was unusable until this existed.
+- **`CardSecrets` is a separate type from `VirtualCard`, deliberately.** As
+  optional members of the card view a PAN would ride along in every listing and
+  every log line that serialises a card — and nothing would fail on the day it
+  did.
+- **The reveal is rate limited by ROWS, not by memory**, per card and per
+  customer. An attacker's loop outlives a pod restart; an in-process counter
+  does not. The per-customer ceiling is what catches a stolen session walking
+  through every card on an account, which a per-card limit never sees.
+- **A frozen card can still be revealed; a terminated one cannot.** Freezing
+  stops spending, not looking. A terminated card's number is dead at the
+  provider, so revealing it hands a customer something that cannot work.
+- **Bitnob's card response shape is NOT settled.** Their SDK reads
+  `cardNumber`, `cvv2` and a single `expiry`; this adapter's schema required
+  `last4`, `expiry_month` and `expiry_year`, and the SDK-shaped payload threw.
+  The read accepts both, because being tolerant on a read costs nothing and
+  being wrong costs every card.
 - The card's balance shown to a customer comes from the **ledger**, not from
   asking Bitnob. A provider figure can lag a settlement by days; reconciliation
   compares the two deliberately.
@@ -170,6 +191,497 @@ Schema: `packages/ledger/sql/003_cards.sql`.
   the provider retries: webhooks arrive out of order and a funding event landing
   a moment later makes the retry succeed. Acknowledging would drop a real spend
   from the books to save log noise.
+
+### Card lifecycle and holds — non-obvious rules
+
+Schema: `packages/ledger/sql/030_card_lifecycle.sql` and
+`031_card_settlements.sql`.
+
+- **A SETTLEMENT MAY EXCEED ITS AUTHORIZATION, and taking the whole amount from
+  `customer_pending` made that impossible to post.** Only the hold is in
+  pending, so the overdraft guard refused every over-settlement — Bitnob
+  retried for ever and the spend never reached the books. The entry now
+  releases the hold from pending and takes the excess from the card's own
+  balance, which is what economically happened; if the card cannot cover it,
+  the existing rethrow applies and a person looks.
+- **A settlement naming an authorization we do not hold is REFUSED, not
+  acknowledged.** Nothing is in pending to release, so acknowledging would drop
+  a real spend permanently. Webhooks arrive out of order and the authorization
+  landing a moment later makes the retry succeed — the same rule Phase 5
+  records about an authorization the card cannot cover.
+- **A lost settlement webhook is invisible to everything else.** The money sits
+  in `customer_pending`, the ledger balances, `ledger_drift` reports nothing
+  and every test stays green. `card_holds_stuck` is the only thing that sees
+  it, and it COUNTS rather than resolves: settling invents a spend the provider
+  never confirmed, expiring hands back money that may have been spent.
+- **`card_hold_window_days` is 16, deliberately longer than fourteen.** Bitnob
+  settles up to 7–14 BUSINESS days out, so a shorter window is a false alarm
+  every fortnight — and an alert people learn to ignore is worse than none.
+- **The stuck-hold check rides on the balance reconciliation sweep**, not its
+  own. It asks the same question, and every worker interval is one more thing
+  an operator can forget to set on exactly one instance.
+- **`card_settlements` is a separate table, not columns on the
+  authorization.** That row records what the duplicate guard saw at the moment
+  of the charge; writing to it days later would also touch a row 010 counts,
+  which is how a redelivered settlement becomes a second authorization for the
+  purpose of freezing a card.
+- **Every card status change is recorded by trigger, attributed by the
+  service.** The trigger cannot know who, so it writes `system` and the service
+  completes the row in the SAME transaction — apart, a process dying between
+  them would leave a real change attributed to nobody.
+- **A replacement links to what it replaced, and only for a TERMINATED card of
+  the SAME customer.** Otherwise a customer holds two live cards where one is
+  described as the successor of the other, leaving the leaked number spendable.
+- **Reissue terminates FIRST.** Issuing first would leave a customer holding a
+  live replacement AND a live compromised card if the termination then failed —
+  the exact state they came to escape.
+- **Staff can freeze a card and deliberately cannot terminate one.** Freezing
+  stops spending and the customer can undo it; terminating moves their money
+  and cannot be undone.
+
+### Tax — non-obvious rules
+
+Schema: `packages/ledger/sql/032_tax.sql`. Split in `apps/api/src/tax/tax.service.ts`,
+report at `/admin/tax`.
+
+- **Every naira of every fee used to go to `revenue_fees`.** Part of a fee
+  charged by a Nigerian company for a service is VAT, which is not our money at
+  all, and there was no account anywhere that could hold money collected and
+  owed onward. A finance team filing a return had nothing to file FROM.
+- **TAX IS A LIABILITY, NOT REVENUE.** `liability_tax_payable`, never
+  `revenue_fees`. Booking it as revenue overstates what the business earned and
+  understates what it owes — both errors pointing the flattering way.
+- **VAT ships ON and the transfer levy ships OFF, and the difference in
+  defaults is the point.** VAT-inclusive is a BOOKING correction: the customer
+  pays what they always paid and we stop calling all of it revenue, so leaving
+  it off means knowingly recording a wrong number. A levy CHANGES WHAT A
+  CUSTOMER IS CHARGED, so the machinery ships complete and the decision does
+  not ship at all.
+- **The inclusive split is `gross × rate / (10000 + rate)`, not
+  `gross × rate / 10000`.** The second is the exclusive formula and
+  over-collects on every fee. `splitInclusiveTax()` in `@xetral/shared` is the
+  one place it lives.
+- **Tax rounds UP, in both modes**, so we can never under-remit. The fraction
+  goes to the revenue authority rather than to us — the opposite direction from
+  the FX spread, and stated at both call sites for the same reason.
+- **VAT is charged on the FEE, never on the amount being transferred.** What is
+  taxed is the service, not the money moving.
+- **The levy is NAIRA ONLY**, threshold-gated, and flat. It is published in
+  kobo and is a statement about naira; applying a kobo figure to dollars
+  because both are integers is the same mistake as adding kobo to cents.
+- **`tax_collections` is written on the ENTRY'S OWN transaction**, through
+  `post()`'s `onEntry` hook, so a collection cannot exist without its posting
+  and a posting cannot exist without its record. `ON CONFLICT DO NOTHING`,
+  because a retried transfer is a replay at the ledger and must be one here.
+- **Nothing collected is NO ROW.** A row saying zero is indistinguishable from
+  one somebody forgot to write, and the ledger refuses a zero-amount posting
+  for the same reason — which is also why the fee, the tax and the levy are
+  three conditional legs rather than one.
+- **`tax_remittance_drift` reports ONE direction.** Remitting reduces the
+  balance without being a collection, so a balance below what was collected is
+  a payment, not a discrepancy. More held than collected means a path posted
+  the money and forgot the record.
+- **Neither figure is tax advice.** The rate, the levy and its threshold are
+  rows an operator reviews, the same as `risk_thresholds`.
+- **`formatMinor` is what the admin surface uses, never `formatAmount`.** The
+  two look identical at a call site and differ by a factor of a hundred:
+  `formatAmount` takes MAJOR units and the views return `*_minor`. The
+  compliance queue had been rendering ₦500,000,000 for a ₦5,000,000 transfer,
+  which is exactly the error a reviewer deciding whether something is
+  reportable cannot see.
+
+### Consent — non-obvious rules
+
+Schema: `packages/ledger/sql/033_consent.sql`, seeded by `033_consent.seed.sql`.
+Service in `apps/api/src/consent/consent.service.ts`, screen at `/settings`,
+queue at `/admin/consents`.
+
+- **Consent was a SENTENCE ON A PAGE.** "By creating an account you agree to
+  our terms and privacy notice" is the right thing to show a customer and it is
+  not a record. Nothing said that a particular person agreed to a particular
+  version at a particular moment, so the question the NDPA actually asks —
+  demonstrate that this person consented — had no answer at all.
+- **A WITHDRAWAL IS A NEW ROW, never an edit.** If granting could be erased,
+  "had they consented on the day we mailed them?" becomes a claim about the
+  present rather than about history. The current position is a VIEW
+  (`customer_consents`), for the same reason `entry_status` is one.
+- **Consent is to a VERSION, and the row stores a HASH of the words.** A URL
+  describes today's page; a hash describes what was agreed to.
+  `consent-documents.test.ts` recomputes it from the published page and fails
+  the build on a drift — so editing the terms without republishing is red,
+  with one obvious fix that also asks every customer again.
+- **Documents are append-only: retire and republish.** Editing one in place
+  rewrites what every past customer is recorded as having agreed to — the gift
+  card rate card lesson, applied to something a court would read. Retirement is
+  final, and a partial unique index keeps exactly one live document per kind.
+- **MARKETING CANNOT BE BUNDLED into signing up**, by CHECK: a record whose
+  source is `registration` cannot be a marketing consent. One "I agree"
+  covering the terms and a mailing list is not consent to the mailing list,
+  whatever the button said — so the signup form has no checkbox and could not
+  usefully grow one.
+- **Only marketing can be WITHDRAWN**, also by CHECK. The asymmetry is a
+  statement: withdrawing the terms is closing the account, which moves money
+  and has its own path — recording it here would leave a customer holding a
+  balance under terms they are recorded as refusing.
+- **Withdrawing is the same call as granting, with NO PIN.** Consent that is
+  harder to withdraw than to give is not freely given, and there is
+  deliberately no separate `withdraw()` for a client to guard on one side only.
+- **AND IT GATES SOMETHING.** The outbox refuses a `marketing`-class message
+  to a customer with no live grant, BY TRIGGER — a consent nothing reads is a
+  checkbox, the lesson Tier 1 records about `crypto_enabled`. Security and
+  transactional mail is untouched: unsubscribing must never withhold a reset
+  link.
+- **Registration records on the registration's OWN transaction.** Apart, a
+  crash in the gap leaves a customer whose consent cannot be shown — precisely
+  the customer somebody will ask about.
+- **`consent_outstanding` excludes marketing.** Not having opted in is the
+  correct resting state, not a task; listing it would turn "declined" into a
+  queue somebody works through.
+
+### Data rights — non-obvious rules
+
+Schema: `packages/ledger/sql/034_data_rights.sql`. Service in
+`apps/api/src/datarights/data-rights.service.ts`, screen at `/settings`, queue
+at `/admin/data-requests`.
+
+- **The privacy notice promised both rights and NOTHING implemented either.** A
+  notice describing rights that do not exist is worse than one promising less:
+  it is a commitment already being broken, in writing, on the page a regulator
+  reads first.
+- **THE EXPORT NAMES EVERY COLUMN.** A generic exporter walking a table list is
+  a data-exfiltration primitive — add a table holding a sealed BVN or a token
+  hash and it ships in the next export with nothing failing. Every query is
+  written out, and `data-rights.e2e.test.ts` scans a real export's SERIALISED
+  body for the password hash, the PIN hash and the PIN. Over the whole body,
+  because what is being guarded against is a field nobody thought to name.
+- **The export takes the transaction PIN**, unlike every other read. It is
+  every balance, every transaction and every place they have signed in from in
+  one file — the read a stolen session most wants, and the one whose
+  consequence outlives the fifteen minutes an access token lasts. It is a POST
+  so it cannot be triggered by a link or land in a browser history.
+- **ASKING costs no PIN**, for the reason raising a dispute costs none: the
+  customer most likely to ask is one who has just found somebody else in their
+  account. Nothing is destroyed by asking.
+- **Erasure is a REQUEST, and a person decides.** AML requires five years of
+  records after a relationship ends; the NDPA forbids keeping personal data
+  longer than needed. Granting fully deletes the financial record; refusing
+  fully treats a legal right as an inconvenience. So what can lawfully go,
+  goes, and what must stay is NAMED with why.
+- **`erasure_scope` is COMPUTED from `retention_decisions`** — the same table
+  the deletion sweep reads — so the promise made to a customer and the job that
+  keeps it cannot describe different systems. `derive` is NOT erasable: a
+  derived table's fate is its parent's, and reading it as erasable promised
+  that `account_balances` could be deleted.
+- **The erasure function names the rows it touches.** A deletion driven by a
+  table that view returns would be a deletion job whose behaviour is changed by
+  an INSERT — the reason `apply_retention()` has no dynamic SQL either. It
+  never touches the ledger.
+- **It REFUSES on a balance or an open case, WITH THE SAME MESSAGE.** Erasing
+  the person we owe money to loses the creditor rather than discharging the
+  debt; and tipping off is an offence, so a distinguishable refusal would be a
+  way to learn you are under review. The API collapses both to
+  `erasure_blocked` for the same reason.
+- **Sign-in history is NOT deleted by erasure.** 019's trigger refuses a DELETE
+  inside the retention window, and is right to: an erasure request that emptied
+  that table could be used by whoever committed a takeover to erase the
+  evidence of it. It is `purge`, so it does age out — a "we must keep this
+  until" rather than a refusal.
+- **The email becomes a TOMBSTONE, not a null.** `users.email` is how a
+  duplicate account is refused, and a null would let the same address open a
+  second one while the first is still on record.
+- **The deadline is the database's and cannot be moved**, and
+  `data_request_response_days` is capped at 30 — the setting can only be used
+  to answer FASTER. A deadline an operator can extend is not a deadline.
+- **`data.erase` is in 009's destructive list.** It is the one action in the
+  system that cannot be undone by appending, so it is the last one that should
+  be exempt from having to say why — and the reason recorded is the outcome
+  itself, which is the answer the customer receives.
+
+### Publishing a price — non-obvious rules
+
+Schema: `packages/ledger/sql/035_price_publication.sql`. Service in
+`apps/api/src/pricing/pricing.service.ts`, screen at `/admin/prices`.
+
+- **NOTHING IN THE APPLICATION EVER WROTE EITHER PRICE TABLE.**
+  `fx_spread_policies` and `giftcard_rate_cards` are read on every quote and
+  were only ever populated by hand. An unpublished FX pair is refused rather
+  than quoted from a default — right, and it means a fresh deployment converts
+  nothing; gift cards are worse, because the flag can be switched on and the
+  first customer quote 404s. `psql` on production was the only way out.
+- **Writing them from a FORM is a different threat model from a prompt.** At a
+  prompt an operator composes the whole statement and can see the table; in a
+  form they see one band and press a button, twice, on a Friday.
+- **TWO LIVE GIFT CARD BANDS MAY NOT OVERLAP**, by EXCLUDE constraint.
+  `#liveRate` selects on `BETWEEN` and then `ORDER BY effective_from DESC LIMIT
+  1`, so an overlap is not an error — the newer band silently reprices the
+  shared range. A `LIMIT 1` resolving an ambiguity is an ambiguity the schema
+  should not have allowed. The range is `'[]'`, inclusive at both ends, because
+  the query is.
+- **An EXCLUDE rather than a unique index**, because the thing refused is a
+  range overlap. Phase 8's "`ON CONFLICT` cannot target an EXCLUDE" mattered
+  there because issuing a virtual account races itself; nothing races here, and
+  the right answer to a collision is to refuse and say what it overlaps.
+- **There is no update endpoint.** Both tables are append-only by trigger:
+  changing a price is retiring one and publishing another, which keeps every
+  past quote reproducible.
+- **`price.retire` is in 009's must-say-why list and `price.publish` is not.**
+  Retiring looks like tidying and its effect is that the flow refuses every
+  customer until a replacement exists. Requiring prose to set a number people
+  set weekly is how a required field becomes the word "update".
+- **Each FX DIRECTION is published separately.** A rate is a ratio, and "minor
+  units per major unit" collapses in one direction — so NGN→USD and USD→NGN are
+  two policies, and an operator who forgets the reverse learns it from
+  `published_prices` rather than from a customer.
+- **`prices_without_an_author` finds prices written at a prompt.** `created_by`
+  stays nullable — rows already exist, and a migration refusing to apply over
+  them would be worse than an unattributed price — so the gap is made visible
+  instead.
+
+### What needs attention — non-obvious rules
+
+Schema: `packages/ledger/sql/036_attention.sql`.
+
+- **`admin_work_queue` named FIVE sources and was written in Phase 12** —
+  before disputes, monitoring, cases, stuck card holds, consent, data requests
+  and three drift views existed. Every one of those shipped with its own view
+  and none reached the overview, so an operator saw five empty queues and
+  reasonably concluded there was nothing to do. An incomplete list that looks
+  complete is trusted; that is worse than no overview.
+- **The fix is not a longer list, it is that a short one fails the build.**
+  `attention_sources` classifies EVERY view — `queue`, `watch` or `internal` —
+  and `attention_coverage` reports an UNDECIDED one and an ORPHANED one, both
+  directions, the same shape as `retention_coverage` and for the same reason:
+  the queue nobody thought of is the one that silently fills.
+- **The queue is WRITTEN OUT, one arm per source, with no dynamic SQL.** An
+  overview assembled by looping over `attention_sources` would be an overview
+  whose behaviour changes with an INSERT — the rule `apply_retention()` and
+  `erase_customer_personal_data()` follow.
+- **Every arm is an unconditional aggregate, so an empty queue still emits a
+  row.** "consent: 0 waiting" says the queue was checked; an absent row says
+  nothing at all, and the two look identical on a dashboard. It is also what
+  makes the coverage comparison exact in both directions.
+- **A `queue` must carry a name and a `watch` must not**, by CHECK, so the
+  classification and the overview cannot drift apart.
+- **A rationale is at least twenty characters.** `internal` is the cheap
+  answer, and a one-word reason is how a view that does need working gets filed
+  under it.
+
+### Going live — non-obvious rules
+
+The list is `apps/api/src/golive/go-live-checklist.ts`; the prose is
+`deploy/GO-LIVE.md`; the same list asked of a running deployment is
+`GET /v1/admin/readiness`.
+
+- **Every phase ended with its own "an operator must" paragraph** — six in
+  `PHASES.md` alone, more here, more in migration headers. Each correct, and
+  together not a checklist, because nothing listed them and nothing noticed a
+  seventh being written.
+- **THE LIST IS DATA AND THE BUILD CHECKS IT**, in both directions:
+  `go-live.test.ts` fails on a variable `config.ts` reads that the checklist
+  does not name, AND on an entry for something that no longer exists — the
+  second matters as much, because an operator told to set a variable that does
+  nothing will stop trusting the rest.
+- **`platform_settings` is seeded by FOURTEEN migrations**, 009 through 037,
+  not by one seed file. The first reader here scanned `009_admin.seed.sql`,
+  found nineteen keys of fifty-four, and looked plausible. That spread is why
+  nobody had a complete list.
+- **Category `silent` is the one that justifies the whole thing.**
+  `NOTIFICATION_INTERVAL_SECONDS` unset means the outbox fills, the API keeps
+  saying "check your email", and nothing is sent. Nothing errors, because
+  writing the row succeeded.
+- **`default-is-deliberate` is a decision RECORDED, not an omission.** Without
+  a way to say "considered, nothing needed", the honest thing to do with a
+  defensible default is leave it off the list — which is how a list stops being
+  one. The same shape as `attention_sources` requiring a rationale for
+  `internal`.
+- **The readiness check REPORTS and never refuses.** One that could stop the
+  API starting would be a new way to take the platform down at 3am, and what
+  genuinely cannot be missing already refuses at boot in `config.ts`.
+- **It answers for the PROCESS THAT SERVED IT, and says so.** Workers run in
+  their own container, so every interval reads `unset-here` on the api and is
+  correctly set on the worker. A check that claimed to speak for the whole
+  deployment would report nine false findings on every production instance.
+- **It carries no secret and no value**, only whether something is set. The
+  e2e asserts the ROW SHAPE rather than scanning for something key-shaped —
+  the scan version failed on `risk_dormant_days` containing `sk_`, which is
+  the trouble with pattern-matching for secrets in either direction.
+
+### Provider health — non-obvious rules
+
+Schema: `packages/ledger/sql/037_provider_health.sql`. Recorder and port
+wrapper in `apps/api/src/observability/provider-health.service.ts`, screen at
+`/admin/providers`.
+
+- **Every kill switch has to be flipped BY HAND, which means noticing first**
+  — and nothing recorded whether a provider call succeeded, so the first
+  reliable signal that a provider had stopped answering was a customer.
+- **A REJECTION IS NOT ILL HEALTH.** `ProviderRejectedError` means they
+  understood and refused: insufficient float, a frozen card, a declined
+  authorization. It is counted and deliberately excluded from the failure rate
+  — an alert that fires every time a card is declined is one people mute.
+  Unavailable, timed out and contract are the health signals.
+- **A CONTRACT ERROR IS THE ONE THAT PAGES.** They changed their API, the same
+  request fails for ever, and no amount of waiting helps. `contract_broken` is
+  its own column for that reason.
+- **BUCKETS, not one row per call**, maintained by one `ON CONFLICT DO UPDATE`
+  — the `record_error` shape, because a row per call is the log 015 exists to
+  avoid.
+- **Recording can never fail the call it records.** Every error out of the
+  write is swallowed, and the write is fire-and-forget: awaiting it would put a
+  database round trip in front of every provider response.
+- **A minimum call count is what stops a quiet endpoint reading as an outage.**
+  One failure out of one is a 100% failure rate and says nothing.
+- **THERE IS NO AUTOMATIC DISABLE, deliberately.** A flapping provider would
+  switch off a flow nobody meant to stop; re-enabling needs a person anyway, so
+  the automation only adds a surprise on the way in; and the switches exist to
+  be used deliberately during an incident by somebody who understands it. What
+  was missing was never the flipping — it was knowing.
+- **Ports are wrapped at the INJECTION BOUNDARY, once, with a Proxy.** Seven
+  hand-written wrappers would drift the way three hand-written contract suites
+  do, and a method added to a port later would silently stop being watched. It
+  leaves synchronous methods alone, because `supportsVerification()` is a type
+  guard and not a provider call.
+- **The fulfilment map is watched per provider**, not as one: VTpass being down
+  is not Airalo being down, and one health row for all three would say neither.
+
+### Metrics — non-obvious rules
+
+`apps/api/src/observability/metrics.{service,controller}.ts`, at `GET /metrics`.
+
+- **`/health` says the process is alive and `/ready` says the database
+  answers.** Neither says whether the ledger is moving, a worker has stopped or
+  a queue has been growing for six hours — and the worker failures here are
+  silent by construction: `NOTIFICATION_INTERVAL_SECONDS` unset means rows
+  accumulate, the API keeps saying "check your email", and nothing is sent.
+- **PUBLIC IN THE POLICY, GUARDED BY ITS OWN TOKEN** — the webhook shape,
+  because a scraper has no session to present. It is not public in effect: it
+  carries queue depths, provider health and what is owed to customers, and a
+  non-zero drift figure published openly tells somebody the books are
+  inconsistent before we have noticed.
+- **No `METRICS_TOKEN` means 404, not 401.** An unconfigured endpoint that
+  answered 401 confirms to a prober that it exists; with no token there is
+  nothing to authorise against. Defaulting to open was never an option — an
+  endpoint that works is one nobody checks the guard on.
+- **It is NOT unmetered.** `/health` and `/ready` are, because what polls them
+  hardest is the load balancer deciding whether the instance lives. A scrape
+  runs aggregate queries and its credential is checked inside the handler, so
+  unmetered would be a way to make the database work with no credential at all.
+- **Measured from the views that already exist, never from counters this
+  service keeps.** A counter is a second copy of the truth — and it means a
+  queue added to `admin_work_queue` is scraped automatically, which is 036's
+  guarantee extended to monitoring.
+- **Cached for ten seconds, because it is not free.** The queue view aggregates
+  twenty-three sources and one scans postings; a fifteen-second scraper would
+  run that all day, which is a way of taking a system down while watching it.
+- **Amounts are MINOR UNITS and say so in the name.** Prometheus samples are
+  floats, so a naira balance in major units would be a float holding money.
+- **Queue AGE as well as depth.** A queue of three that has been three since
+  Tuesday is a queue nobody is working; a queue of forty turning over hourly is
+  a busy morning. Alerting on depth alone gets both wrong.
+
+### The mobile app — non-obvious rules
+
+Review in `apps/mobile/SECURITY.md`, cover in `src/screen-privacy.tsx`.
+
+- **The app switcher was writing balances to disk.** Both platforms photograph
+  the screen when the app leaves the foreground, and the picture goes to a
+  cache directory a backup or whoever picks the phone up can read without
+  unlocking the app.
+- **The two platforms need different answers.** Android takes `FLAG_SECURE` via
+  `preventScreenCaptureAsync()` and that covers screenshots, recording and the
+  switcher. **iOS cannot block a screenshot at all**, by Apple's design — so
+  the UI is covered on `inactive`, which is the state the switcher raises
+  BEFORE `background`. Listening for `background` covers the screen after the
+  picture has been taken.
+- **An opaque cover, not a blur.** A blurred balance is still a picture of the
+  shape of one, and the digit count is what a glance reads.
+- **Certificate pinning and root detection are declined, with reasons written
+  down** rather than not thought about. Pinning against a Cloudflare
+  certificate breaks the app on a rotation nobody here controls, and on a
+  device compromised enough for either to matter the attacker can read the
+  screen anyway. The effort goes into assuming the device may be compromised:
+  the PIN behind the OS gate, tokens `THIS_DEVICE_ONLY`, and a server that
+  never accepts "passed Face ID" in place of a PIN.
+- **It has still never been run on hardware**, and the document says so. The
+  `AppState` ordering the cover depends on is a claim only a device settles.
+- **BUT CI NOW BUNDLES IT**, which is the part that does not need hardware and
+  had never been done. The SDK 52 → 54 upgrade turned up two failures that
+  neither the compiler nor a unit test can see: `app.json` listed
+  `expo-screen-capture` under `plugins` and that package has never shipped a
+  config plugin, so `expo config` — and therefore `expo prebuild` — died; and
+  `metro.config.js` set `disableHierarchicalLookup`, so the first dependency
+  npm left NESTED rather than hoisted could not be resolved, reported as
+  `Unable to resolve module webidl-conversions` from a file this app does not
+  import.
+- **`nodeModulesPaths` and the module walk are not a pair.** The first is what
+  lets a workspace reach the hoisted root; the second is what lets a hoisted
+  package reach its own nested duplicate. The Expo monorepo recipe that
+  disables the walk is for isolated installs, and applying it to an npm
+  workspace breaks the bundle on the first version conflict anywhere in the
+  tree.
+- **Expo Go ships ONE SDK version**, so "it will not open on my phone" is
+  usually a version mismatch and the only direction that fixes it is forward.
+  One React across both apps now: SDK 54 wants 19.1.0 and the web app was
+  pinned to 19.0.0, which is what made `npm install` refuse.
+
+### Scanning the running app — non-obvious rules
+
+`ci.yml`'s boot probes, and the `dynamic` job in `scan.yml`.
+
+- **The specific assertions BLOCK; the scanner REPORTS.** Each `check` in
+  ci.yml names a failure this application has actually had — a controller
+  imported and never mounted, a CSP that stops the page hydrating, a webhook
+  answering 500 instead of 401. A baseline scan finds things true of every
+  sign-in page, and failing on those teaches everybody to skip the step.
+- **The API had NO HSTS and the web app always did**, which looked harmless
+  because both sit behind the same edge. They do not have the same clients:
+  `apps/mobile` talks to the API origin directly, so the protection the web app
+  enjoyed never reached the clients holding a customer's PIN in a Keychain. A
+  header that exists only because of a setting in another system is a header
+  nobody owns.
+- **The two apps' `Referrer-Policy` differ deliberately.** The API sends
+  `no-referrer` because it renders nothing; the web app sends
+  `strict-origin-when-cross-origin`, because a browser app needs same-origin
+  referrers to work and what it must never do is send a path carrying a card id
+  to another site.
+- **The dynamic scan runs against a schema-less database, passively.** An
+  active scan sends requests designed to change state, and this API is wired to
+  a real ledger in every environment where running one would be worth anything.
+
+### Static analysis — non-obvious rules
+
+Rules in `.semgrep/xetral.yml`, probe in `.semgrep/probe/`, workflow in
+`.github/workflows/scan.yml`.
+
+- **The generic rulesets cannot know this system's rules.** CodeQL and
+  Semgrep's own packs find well-known bug classes and are worth running. They
+  cannot find "only the ledger writes postings" or "money is never a float",
+  and until now every one of those was enforced by a person reading a diff.
+- **The five local rules BLOCK; the generic ones REPORT.** A generic ruleset
+  over a repo this size finds things in fixtures and build tooling, and failing
+  on those trains everybody to skip the step — the same argument the dependency
+  audit makes. When a generic finding matters it gets written into
+  `xetral.yml`, where it does block.
+- **A rule that matches nothing looks exactly like a rule that finds nothing.**
+  `.semgrep/probe/violations.ts.probe` is deliberately broken code, one
+  violation per rule, and CI fails if fewer than all of them fire. That is not
+  hypothetical: `no-secret-in-a-log-line` was written as a folded YAML scalar,
+  which turns every newline into a SPACE — the regex matched nothing at all and
+  read perfectly correctly in review.
+- **A rule that fires on correct code is worse than no rule**, because the fix
+  is an ignore comment and the next real finding gets the same treatment. Every
+  pattern was run against the whole tree and tightened until it reported only
+  what it should: `spread`, `fee` and `price` are NOT in the float rule's name
+  list, because those are usually basis points or a catalogue label.
+- **The four `nosemgrep` comments each say why at the site.** Two are dynamic
+  WHERE clauses where every value goes through `params`; two are the demo
+  seeder, which skips the service but not the database's own guards.
+- **Prefer AST patterns to regexes** — the first float rule reported its own
+  explanatory comment as a violation.
+- **Three of the five caught something real the day they were written**:
+  `format()` rendered a naira balance past 2^53 as ₦90,071,992,547,409,940.00,
+  and `displayRate` rendered USD-per-naira as **"0.00"** — Phase 10 finding 1's
+  collapse, in the display layer, in two copies of one calculation.
 
 ### Purchases (bills, eSIM, numbers) — non-obvious rules
 
@@ -407,6 +919,504 @@ Schema: `packages/ledger/sql/009_admin.sql`, seeded by `009_admin.seed.sql`.
   immediately, and the money stays owed to the customer. Conflating the two is
   how a support action becomes a seizure.
 
+### Rate limiting and transfer velocity — non-obvious rules
+
+Schema: `packages/ledger/sql/017_transfer_velocity.sql`. Limiter in
+`apps/api/src/auth/request-rate-limit.service.ts`.
+
+- **The rate class is DERIVED from the route's policy, never declared.** A
+  forgotten authorisation declaration gives a 403 somebody fixes that morning;
+  a forgotten rate limit gives nothing at all until the day it is abused.
+  Forgetting fails open, so it must be impossible rather than discouraged.
+- **Authenticated requests are counted per CUSTOMER, not per address.**
+  Nigerian carriers put whole subscriber pools behind a handful of addresses,
+  so a per-address ceiling tight enough to stop a stolen session refuses a
+  network. The tight limits on public routes are the per-identifier buckets in
+  `login-rate-limit.guard.ts`, which NAT does not blur.
+- **The limiter runs after the bearer check and BEFORE the PIN.** A PIN is
+  verified with scrypt, deliberately slowly; a flood reaching it would spend
+  that cost on every request and the limiter would be what brought the box down.
+- **`/health` and `/ready` are unmetered.** What polls them hardest is the load
+  balancer deciding whether this instance lives.
+- **The web edge must forward `x-forwarded-for`, COPIED not appended.** Without
+  it every web customer is one client to the limiter. Appending would make the
+  header one hop longer than a mobile request's, and `TRUST_PROXY_HOPS` cannot
+  be right for both.
+- **Transfer velocity counts, it does not measure.** How many strangers a
+  customer is paying today, and how many transfers in the last hour. A count
+  carries no units, so both apply in EVERY currency — unlike the daily kobo
+  ceiling, which is a statement about naira alone.
+- **It refuses; it does not freeze.** A card authorization already happened
+  when we hear about it, so only the next one can be protected. A transfer has
+  not, so the correct action is to not do it.
+- **Read from POSTINGS, never from an entry's metadata.** A control that
+  depends on a key some flow remembered to set is a control that switches
+  itself off silently.
+- A recipient is **new today** when the FIRST time they were ever paid falls
+  inside the current Lagos day — somebody paid monthly for a year is not a
+  stranger because this month's rent went out this morning.
+
+### What later happened to an entry — non-obvious rules
+
+Schema: `packages/ledger/sql/023_entry_status.sql`.
+
+- **`reverses_id` means "the entry this one acts upon", and the CHECK is
+  per kind.** It used to be a BICONDITIONAL on `kind = 'reversal'`, which meant
+  a refund COULD NOT NAME WHAT IT REFUNDS — so every `dispute_refund` and
+  `card_refund` since Phase 1 was a floating credit, and nothing could derive
+  that a charge had been refunded.
+- **A reversal and a refund are different claims about the world.** A reversal
+  says it did not happen; a refund says it did, correctly, and the money is
+  going back. Collapsing them tells a customer the wrong one.
+- **A reversal and a dispute refund MUST name their target; a card refund MAY.**
+  The asymmetry is the decision: a merchant refund arrives weeks later through
+  a payload whose shape is not ours to guarantee, and refusing it for a missing
+  link turns worse reporting into money the customer is owed and does not get.
+- **The status is a VIEW, never a column.** A stored `status` is a second copy
+  of the ledger and drifts the first time a flow forgets to update it — the
+  same reason balances are computed from postings and the velocity rules read
+  postings rather than metadata.
+- **`refunded` beats `disputed` in the CASE.** An upheld dispute is both, and
+  the refund is the one that changed the balance; `disputed` is reserved for a
+  claim still open, which is the state where somebody is waiting on us.
+- Resolving Bitnob's `authorization_id` to one of our entry ids happens in
+  `CardWebhookService`, **scoped to the card** — `provider_txn_id` is unique
+  per card, not globally, so an unscoped match could attach one customer's
+  refund to another customer's charge.
+
+### Sign-in events — non-obvious rules
+
+Schema: `packages/ledger/sql/024_sign_in_events.sql`. Service in
+`apps/api/src/auth/sign-in-events.service.ts`.
+
+- **The FAILURES are the half that was missing.** A password sprayed across
+  four hundred accounts produced four hundred refusals and no rows at all, so
+  the attack easiest to see from outside was the one nothing here could see.
+- **A success is recorded on the login's OWN transaction; a failure is not.**
+  `login()` throws on a refusal and its transaction rolls back, so a failure
+  written on that client is a failure that is never written — and a
+  'succeeded' row that commits while its session rolls back is a claim that
+  somebody signed in when nobody did. Hence two methods, not one with a flag.
+- **The country comes from Cloudflare's `CF-IPCountry`, not a geo-IP lookup.**
+  The edge already computes it, so there is no provider to keep current and
+  nothing extra to be down. It is trusted on exactly the terms
+  `x-forwarded-for` is: it describes a sign-in and never authorises one.
+- **The identifier is stored as a SHA-256 hash.** A failed attempt against an
+  address that matched no account is somebody else's email, put there by
+  whoever guessed it; in the clear this table is a list of addresses under
+  attack.
+- **Familiarity is read from SUCCESSES only, and asked before the current
+  event is written.** Either mistake silences the alert permanently — counting
+  failures makes one guess enough to make an address familiar; writing first
+  makes every place familiar the moment it is used.
+- **An unplaceable sign-in raises nothing.** A missing address must not
+  manufacture an alert on every request from a client we cannot place.
+- **`new_location` is sent only when the DEVICE is already known.** A takeover
+  normally arrives on new hardware and `new_device` covers it; this is the case
+  that message cannot see. Sending both would mail the customer twice about one
+  event.
+- **Credential stuffing is counted on DISTINCT identifiers, not attempts.** The
+  login limiter already caps attempts per identifier, which is what makes an
+  attacker spread across identifiers — so the spread is what is worth counting.
+- **A shared address is a lead, not a verdict.** Nigerian carriers put whole
+  subscriber pools behind a handful of addresses — the same fact that made the
+  request limiter count per customer. A shared DEVICE is the much stronger
+  claim.
+- Append-only, with 019's one relaxation: an UPDATE is refused at any age, and
+  a DELETE only for rows past `retention_sign_in_events_days` — the same
+  setting `apply_retention()` reads, so the sweep and the trigger cannot
+  disagree about which rows are still evidence.
+
+### One person, one account — non-obvious rules
+
+Schema: `packages/ledger/sql/025_bvn_uniqueness.sql`. Primitive in
+`packages/identity/src/blind-index.ts`.
+
+- **Every per-customer control assumes a person cannot become several
+  customers.** The daily ceiling, the new-recipient count, the hourly
+  velocity — all per customer, and all meaningless if one BVN can open twenty
+  accounts. Nothing stopped that.
+- **`bvn_sealed` cannot answer "is this BVN already here?"** The envelope's IV
+  is random, so one BVN sealed twice is two different strings. `bvn_last4`
+  collides one submission in ten thousand, so a rule built on it would refuse
+  honest customers.
+- **A blind index is an HMAC, and the key is what makes it safe.** A BVN is
+  eleven digits: an unkeyed digest of one is a few hours of hashing away from
+  being the BVN.
+- **`KYC_BLIND_INDEX_KEY` is SEPARATE from the encryption keyring.** A blind
+  index cannot have two live keys — matching requires exactly one — so
+  rotating it means recomputing every fingerprint with
+  `scripts/backfill-bvn-fingerprint.mjs`. Tying it to a keyring that rotates
+  for unrelated reasons would break the control at whatever moment somebody
+  rotated the other thing.
+- **The column is NOT NULL, and 025 REFUSES to apply to a database that
+  already holds submissions.** A nullable fingerprint is the silent-off
+  failure: one submission written without one slips past the unique index and
+  nothing fails. The BVNs are sealed, so only the application can backfill.
+- **It refuses at APPROVAL, not at submission.** A form answering "that BVN is
+  already registered" confirms, to anybody holding a stolen BVN, that its
+  owner banks here. `kyc_bvn_collisions` shows the reviewer the collision
+  first — and carries no BVN and no fingerprint.
+- **The unique index is partial on `approved`.** Pending must be accepted so a
+  reviewer can decide; rejected must not block a customer whose first
+  photograph was unreadable.
+- **`kyc_blind_index_versions` must report exactly one version**, and the
+  invariant suite fails otherwise. While two are in use the index cannot see
+  across the boundary and two accounts on one BVN are both approvable.
+
+### Provider credentials — non-obvious rules
+
+Schema: `packages/ledger/sql/026_provider_credentials.sql`, seeded by
+`026_provider_credentials.seed.sql`. Screen at `/admin/credentials`.
+
+- **A secret is NOT a `platform_settings` row**, and the reason is two features
+  of that table. `platform_settings_history` records every value a row has ever
+  held, and `POST /v1/admin/settings/:key` writes the new value into the
+  append-only audit log. Both are exactly right for a fee; applied to an API
+  key, rotating one would leave the compromised value in two tables that can
+  never be scrubbed.
+- **A credential goes IN and never comes back out over HTTP.** There is no
+  endpoint that returns one — not sealed, not masked. `secretFor()` is for an
+  adapter, in process; `status()` is what the dashboard sees. An e2e asserts
+  the key appears in no admin response body.
+- **The hint is FOUR characters, by CHECK.** "Just enough to recognise it"
+  becomes "most of it" the first time somebody is debugging in a hurry, and
+  then a dashboard screenshot carries a working credential — the same lesson
+  `cards.last4` records.
+- **The rotation log records WHO AND WHEN AND NEVER WHAT**, is written by
+  trigger rather than by the endpoint (so a psql prompt cannot skip it), and is
+  append-only.
+- **The database is authoritative; the environment is the fallback** — the same
+  order as settings, and the reason a key can be replaced during an incident
+  without a deploy. It fails silently the other way, so bootstrap names every
+  environment credential the database is overriding.
+- **The cache is FIVE seconds, not thirty.** The reason to replace one of these
+  is usually that it has leaked, and a key that keeps working for half a minute
+  after an operator revoked it is not revoked. `set()` clears its own entry.
+- **A slot must exist in the catalogue**, or the paste is refused. A credential
+  nothing reads is one an operator believes is live.
+- **`in_use = FALSE` marks a slot documented ahead of its adapter** — Dojah's
+  are, today. The key is stored safely and read by nothing, and both the API
+  and the dashboard say so, because a filled box on an operations screen reads
+  as "this is running".
+
+### Transaction monitoring — non-obvious rules
+
+Schema: `packages/ledger/sql/027_risk_signals.sql`, seeded by
+`027_risk_signals.seed.sql`. Worker in `apps/api/src/risk/monitoring.service.ts`,
+queue at `/admin/risk`.
+
+- **A signal is an OBSERVATION, never a verdict.** Nothing here refuses,
+  freezes or holds — it runs after the fact by construction. The controls that
+  ACT (the daily ceiling, the velocity rules, the card freezes) run before
+  money moves and are tuned to almost never fire, because a false positive
+  there refuses a customer their own money. Monitoring can afford to be far
+  more suspicious because a false positive costs a reviewer a minute.
+- **Every rule reads POSTINGS**, and `027_risk_signals.test.sql` fails the
+  build if `detect_risk_signals()` mentions `metadata`. A control depending on
+  a key some flow remembered to set switches itself off the first time a new
+  flow forgets — and nothing fails when monitoring stops working.
+- **Thresholds are per currency, in `risk_thresholds`, not in settings keys.**
+  An amount carries units; a kobo figure applied to USDT because both are
+  integers is the same mistake as adding kobo to cents. `risk_currency_coverage`
+  reports a currency the ledger holds and this file does not watch, and the
+  invariant suite fails on one — unmonitored has to be a visible state.
+- **`large_value_minor` is a REGULATORY figure and the seed's is a starting
+  point.** It must be set to what the NFIU currently requires; a programme
+  running on a number somebody copied from a migration is a finding.
+- **The daily transfer ceiling ships EQUAL to the NGN reporting threshold**, so
+  out of the box no single transfer can reach it and `large_value` fires on
+  transfers only if an operator moves one of the two. That is not a fault in
+  either — the ceiling stops the transaction the threshold reports, and the
+  rule still fires on deposits, card settlements and crypto.
+- **`notable_minor` is the floor the proportional rules need.** Without it an
+  account moving ₦2,000 in and out fires `rapid_passthrough` daily, and a rule
+  people learn to ignore is worse than none — the lesson 015 records about
+  alerting. Proved load-bearing by lowering it and watching a test go red.
+- **Every insert is `ON CONFLICT (signal_key) DO NOTHING`**, so the sweep is
+  idempotent and the advisory lock is an optimisation rather than a correctness
+  requirement.
+- **A signal is immutable except for its resolution, and a resolution is
+  final** — with a person and a reason, both by CHECK. A queue cleared with
+  one-word reasons is indistinguishable from one nobody worked, and the reason
+  is the only part a regulator can inspect.
+- **`RISK_MONITOR_INTERVAL_SECONDS` absent is the silent failure.** Nothing
+  errors; the queue is simply empty, which looks exactly like a quiet week. It
+  has a DEFAULT on the worker for that reason, unlike the retention sweep.
+
+### Compliance cases — non-obvious rules
+
+Schema: `packages/ledger/sql/028_risk_cases.sql`. Service in
+`apps/api/src/risk/case.service.ts`, screen at `/admin/risk/cases`.
+
+- **Closing a case resolves every signal attached to it, by trigger.** That is
+  the point of a case rather than a convenience: a reviewer with five signals
+  and one story who closes each separately produces a record claiming five
+  unrelated reviews happened. The summary becomes each signal's resolution, so
+  the trail says the same true thing about all of them.
+- **TIPPING OFF IS AN OFFENCE, and it shapes the schema.** Nothing here has a
+  customer-facing surface — no endpoint returns a case to its subject and no
+  notification kind could mention one. `028_risk_cases.test.sql` fails the
+  build if a template appears whose name could tell a customer they are under
+  investigation.
+- **Signals attach through a JOIN TABLE, not a `case_id` column.** 027 makes a
+  signal immutable; adding a column would mean relaxing that trigger, and
+  "immutable except for the fields we later needed" is how immutability stops
+  being a property.
+- **One open case per customer**, by partial unique index. Two reviewers
+  investigating one person separately, each seeing half the signals, is exactly
+  the failure a case file prevents.
+- **A signal can only be attached to a case about the SAME customer**, by
+  trigger — otherwise one mistyped id puts another customer's transaction into
+  an investigation that then describes somebody never involved.
+- **The deadline is the database's clock and cannot be supplied or moved**, the
+  same rule 018 applies to a dispute. Here it is a regulator's reporting window
+  rather than a courtesy.
+- **A `reported` outcome REQUIRES its reference**, by CHECK. A report nobody
+  can point at is one nobody can prove was filed.
+- **A closed case takes no new notes and cannot reopen.** New information opens
+  a new case — otherwise a file decided on one set of facts reads as though it
+  was decided on another.
+- **The sweep opens a case when a customer accrues
+  `risk_case_auto_open_signals` open signals**, with `opened_by` NULL. Noticing
+  a pattern otherwise means somebody sorting the queue by customer and
+  counting, which is the work nobody does at four in the afternoon — and the
+  queue says "opened by the sweep", because counting and judging are different
+  starting points.
+- **Opening and noting take NO PIN; closing does.** A reviewer writes several
+  notes per case, and demanding the factor on each is how a shared
+  authenticator ends up on a desk — the lesson 014 records.
+
+### Verification tiers — non-obvious rules
+
+**Every e2e fixture that stands in for KYC approval must set the tier too.**
+Approval writes `provider_customers` AND `users.kyc_tier` in one transaction; a
+fixture doing only the first describes a customer whom every provider accepts
+and whose ceiling is an unverified account's — a state production cannot reach.
+A suite whose subject is a different control (the flow ceilings, the monitoring
+rules) needs a tier high enough not to confound it, because the limit in force
+is the LOWER of the two.
+
+**A suite must PIN what its assertions depend on.** The e2e files share one
+database and run in file order with `fileParallelism: false`, and a suite that
+narrows a limit does not put it back. `flow-velocity` pins the USDT ceiling to
+10 USDT; `crypto` passed only while it happened to run first, and stopped the
+day two unrelated files shifted the order. Never change a shared setting
+mid-test: for the length of that test every other suite is subject to it.
+
+### Verification tiers — non-obvious rules
+
+Schema: `packages/ledger/sql/029_kyc_tiers.sql`, seeded by
+`029_kyc_tiers.seed.sql`. Enforced in `wallet/spending-limits.service.ts`.
+
+- **Every ceiling used to be ONE NUMBER for everybody.** A customer who had
+  typed an email address that morning was allowed exactly what a customer whose
+  documents a person had read was allowed — wrong in both directions.
+- **Three tiers, because three have a REAL PATH to them.** 0 registered, 1
+  granted by KYC approval, 2 granted by an administrator who established source
+  of funds. The CBN's phone-verified tier is deliberately absent: nothing here
+  verifies a phone, so it would be a tier no customer could be in.
+- **The ceiling in force is the LOWER of the tier's and the flow's.** A tier
+  does not replace `transfer_daily_limit_kobo`, it competes with it — so
+  raising somebody's tier can never let them past a limit an operator tightened
+  during an incident, and tightening one can never be undone by a tier.
+- **`kyc_tier` DEFAULTS TO 0.** A path that forgets to set one produces the
+  least trusted account, not the most. A default of 1 would mean a registration
+  endpoint that skipped verification handed out verified limits and nothing
+  failed.
+- **The tier is read on EVERY check, not cached.** The reason to lower one is
+  usually that something is wrong with the account, and a ceiling that keeps
+  its old value for thirty seconds has not been lowered.
+- **A missing limits row returns undefined, never zero.** Zero is a real limit
+  — it is how "no crypto without an identity" is expressed — so collapsing the
+  two would turn a coverage gap into a customer who cannot move their own
+  money, indistinguishably.
+- **`kyc_tier_coverage` must be complete**, and the invariant suite fails on a
+  gap. There is deliberately no fallback, so a gap would not be a smaller limit
+  but none at all.
+- **Each tier rests on the one below it, by trigger.** 0 → 2 is refused: giving
+  enhanced due diligence to somebody whose identity was never checked makes the
+  higher ceiling rest on nothing. Going DOWN is unrestricted — finding out we
+  were wrong must never be harder than the mistake.
+- **KYC approval sets the tier in the SAME transaction**, and only `WHERE
+  kyc_tier < 1` — a routine re-review must not silently demote an enhanced
+  customer.
+- **The customer can see their own ceiling** at `GET /v1/kyc/limits`. Being
+  refused with no way to learn what would change is what turns a control into a
+  support ticket.
+- **A tier does NOT cap a balance**, and that absence is a decision. Capping one
+  means refusing money that has already arrived, and the only honest answers —
+  hold it in suspense, or send it back — are products with support paths and
+  customer messages. Inventing one inside a limits migration is the wrong place
+  to decide it.
+
+### Disputes — non-obvious rules
+
+Schema: `packages/ledger/sql/018_disputes.sql`.
+
+```
+Raise     (nothing)                            a claim, not a transaction
+Accept    expense_dispute_loss -> wallet       we bear it; APPENDED
+Reject    (nothing)                            no entry ever existed
+Withdraw  (nothing)                            the customer changed their mind
+```
+
+- **Raising posts nothing.** A claim is an assertion about a fact, not a fact.
+  Crediting on one makes "dispute everything" a free withdrawal, and reversing
+  that credit later takes money from a customer who has spent it.
+- **There is NO clawback from the recipient**, and its absence is a decision. A
+  bank can reach into the other side because both sides sit inside one
+  regulated system; we cannot, and debiting our own customer on our own say-so
+  would overdraw somebody who may have done nothing wrong. An upheld dispute is
+  our loss, posted to its own expense account rather than netted against
+  revenue — so somebody has to look at the number.
+- **A customer cannot dispute an entry they have no leg in**, enforced by
+  trigger and read from postings. The API answers the SAME 404 for "not yours"
+  and "does not exist": distinguishing them turns the complaints form into a
+  way to enumerate other people's transactions.
+- **The deadline is the database's clock**, cannot be supplied and cannot be
+  moved. A process that can push its own deadline out has no deadline.
+- **An outcome is final.** Reopening an accepted dispute pays the refund twice;
+  reopening a rejected one erases that it was refused. New evidence raises a
+  NEW dispute — which the partial unique index deliberately permits.
+- **Raising and withdrawing take NO transaction PIN.** The customer most likely
+  to raise one has just discovered somebody else is in their account, and
+  demanding the factor that person may already have is worst exactly then.
+- `/v1/admin/disputes` uses its **own** `dispute_reviewer` role, not the gift
+  card reviewer's.
+
+### Data retention — non-obvious rules
+
+Schema: `packages/ledger/sql/019_retention.sql`. Worker in
+`apps/api/src/retention/retention.service.ts`.
+
+- **Two laws pull opposite ways.** AML requires records of a relationship for
+  five years after it ends; the NDPA forbids keeping personal data longer than
+  needed. A policy implementing one is the one that gets a licence looked at.
+- **This is the only scheduled job whose purpose is to destroy data**, so the
+  ledger is protected structurally: `apply_retention()` does not NAME a ledger
+  table, and there is no dynamic SQL, because a deletion job whose behaviour is
+  changed by an INSERT is changed by an INSERT.
+- **`retention_coverage` lists every table against its decision**, and the
+  invariant suite fails on an UNDECIDED row in both directions. A deletion job
+  is a list of what somebody thought of; the tables nobody thought of are the
+  ones that accumulate customer data for years.
+- **Never delete a PENDING notification or a LIVE token.** The first drops a
+  password reset somebody is waiting on; the second signs a customer out for
+  housekeeping. Both have tests.
+- **`card_reveals` is kept, deliberately.** A trail a scheduled job can delete
+  from is one an intruder can prune. The way to hold less there is to store
+  less, which it already does.
+- **`staff_totp_used_steps` is the one relaxation of an append-only rule**, and
+  only for rows older than the window in which a code could still be presented.
+  An UPDATE stays refused outright at any age.
+- **The privacy notice is rendered from this schema.** `retention-table.test.ts`
+  fails the build if a period the page quotes disagrees with the setting the
+  sweep reads. A notice nothing checks describes what somebody intended.
+
+### Notifications — non-obvious rules
+
+Schema: `packages/identity/sql/012_notifications.sql`. The outbox, the port
+(`ports/notification.ts`) and the Resend adapter.
+
+- **Nothing sends inline.** A message is a ROW written in the SAME transaction
+  as the event that owed it. Sending inside the transaction mails receipts for
+  money that then rolls back; sending after it loses messages when the process
+  dies in the gap; either way a slow provider becomes a slow login.
+- **The body is SEALED** (`^v[0-9]+:` CHECK) and a delivered message has its
+  body ERASED. A rendered password reset email contains a live bearer token, so
+  an unsealed outbox is a list of account-takeover links; the safest place for a
+  spent secret is nowhere.
+- **A notification timeout IS retryable** — the only place in this codebase
+  where that is true. For money, not knowing whether the provider acted means
+  do nothing and reconcile. Here, not sending is worse than sending twice, and
+  the provider's idempotency key makes asking again safe. Written down twice
+  because the rest of the codebase trains the opposite instinct.
+- **`enqueueBestEffort` uses a SAVEPOINT**, and that is what makes it
+  best-effort. Any error inside a Postgres transaction poisons it, so a
+  try/catch around the insert takes the customer's transfer down with the
+  receipt reporting it.
+- **`available` is not `deliverable`.** The first asks whether a message can be
+  enqueued (a keyring); the second whether anything will send it (a provider). A
+  flow whose whole purpose is the message must ask the second — password reset
+  asked the first and told locked-out customers to check an inbox nothing would
+  reach.
+- **Every template escapes every interpolated value.** A device platform string
+  or a withdrawal address is outside-controlled, and unescaped it is a script
+  tag in a message the customer has every reason to trust.
+- **Money is grouped by `groupDigits`, never `Intl.NumberFormat`** — the
+  client's rule, in the other place a customer reads an amount.
+- **`coverage.test.ts` fails the build on a template nothing enqueues.** A
+  `new_device` template nobody calls is an account-takeover alert that will
+  never fire.
+
+### Password reset — non-obvious rules
+
+Schema: `packages/identity/sql/013_password_reset.sql`.
+
+- **Consumption is a database function**, for the same reason rotation is:
+  SELECT-then-UPDATE lets two requests carrying one stolen token both reset the
+  password, and the second locks the customer out of the account they just
+  recovered.
+- **Only the hash is stored**, `^[0-9a-f]{64}$`, same as refresh tokens.
+- **Using a token revokes EVERY live session.** Finishing a reset while an
+  intruder is still signed in is theatre.
+- **`/forgot` answers 204 for every valid identifier**, real or not, and mints
+  and hashes a token either way so the two paths do not differ in timing. An
+  endpoint that answers differently turns any address list into a customer list.
+- **`/reset` issues NO tokens.** A leaked link grants a password that can be
+  used, not a live session.
+- **Rate limited on its OWN bucket**, far tighter than login: each accepted
+  request mails somebody who did not ask for it, and a shared counter would stop
+  a customer who mistyped their password from asking for a reset.
+- **The reset link's origin is configuration, never a request header.** A `Host`
+  an attacker controls turns our own email into a credential harvester.
+
+### The staff second factor — non-obvious rules
+
+Schema: `packages/identity/sql/014_staff_totp.sql`. TOTP in
+`packages/identity/src/totp.ts`, verified against RFC 6238's own vectors.
+
+- **Hand-written, and that is not a contradiction.** The rule about crypto is
+  never write the PRIMITIVE and never trust an implementation no published
+  vector has judged. This is a construction over Node's HMAC-SHA1 with six
+  published vectors in the test file. SHA-1 is correct here and only here.
+- **The replay table is the point.** A code is valid for 90 seconds — ample time
+  to read six digits off somebody's screen. The counter value is recorded and a
+  UNIQUE constraint refuses the second attempt.
+- **A CONFIRMED secret cannot be swapped in place.** The quiet attack is a stolen
+  session re-enrolling the factor onto the attacker's authenticator; nothing in
+  the audit log looks odd, because changing phones is normal. Replacing one is an
+  administrator's action.
+- **A verified code ELEVATES THE SESSION for ten minutes.** Demanding a fresh
+  code per action is unusable — codes are single-use and change every thirty
+  seconds, so a reviewer working a queue is refused on their second approval, and
+  the outcome is a shared authenticator on a desk. The PIN is still required on
+  every acting request inside the window.
+- **Enrolment is required on EVERY staff route, reads included.** Gating only the
+  acting half leaves the customer database behind one password.
+- **`claims.sub` is a UUID, not the numeric id.** Every query here resolves it.
+
+### Error capture — non-obvious rules
+
+Schema: `packages/ledger/sql/015_error_events.sql`.
+
+- **The fingerprint is the design.** Errors name what they failed on, so without
+  normalising identifiers out, one bug is a thousand rows and the table is a log.
+  Too coarse and two bugs share a row; neither failure is visible from a green
+  test run.
+- **A 4xx is not an error.** A wrong PIN is the system working, and recording it
+  buries the row that matters.
+- **Recording can never fail the request.** `record_error` is one
+  `ON CONFLICT DO UPDATE`, and the service swallows everything and holds a
+  re-entry guard so a broken database cannot recurse through its own reporter.
+- **The route PATTERN is stored, never the resolved path** — otherwise every
+  customer gets their own fingerprint and their id lands in a table read by
+  everyone on call.
+- **Alerting speaks twice only**: an unseen fingerprint, or one an order of
+  magnitude worse than when we last spoke. "It happened again" is true of every
+  open bug, and a rule people mute is worse than none.
+
 ### apps/api
 
 - `AuthGuard` is registered with `APP_GUARD`, so it runs for **every** route. A
@@ -453,7 +1463,8 @@ Schema: `packages/ledger/sql/009_admin.sql`, seeded by `009_admin.seed.sql`.
 
 Live set: **Bitnob** (NGN virtual accounts, crypto, USDT, stablecoin, virtual
 USD cards, FX),
-**VTpass** (airtime, data, bills), **Airalo** (eSIM), **Twilio** (virtual numbers).
+**VTpass** (airtime, data, bills), **Airalo** (eSIM), **Twilio** (virtual
+numbers), **Resend** (email).
 
 Do **not** reintroduce Reloadly, Maplerad, Anchor, Paystack or ALAT. They appear in
 the reference plugin and are out of scope.
@@ -647,6 +1658,37 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/008_fx.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/009_admin.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/009_admin.seed.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/010_card_protection.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/011_ledger_immutability.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/012_notifications.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/013_password_reset.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/014_staff_totp.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/015_error_events.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/016_card_reveals.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/017_transfer_velocity.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/018_disputes.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/019_retention.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/020_balance_reconciliation.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/021_flow_velocity.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/023_entry_status.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/024_sign_in_events.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/025_bvn_uniqueness.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/026_provider_credentials.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/026_provider_credentials.seed.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/027_risk_signals.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/027_risk_signals.seed.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/028_risk_cases.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/029_kyc_tiers.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/029_kyc_tiers.seed.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/030_card_lifecycle.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/031_card_settlements.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/032_tax.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/033_consent.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/033_consent.seed.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/034_data_rights.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/035_price_publication.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/036_attention.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/037_provider_health.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/003_cards.test.sql
@@ -657,6 +1699,32 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/007_crypto.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/008_fx.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/009_admin.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/010_card_protection.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/011_ledger_immutability.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/012_notifications.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/013_password_reset.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/014_staff_totp.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/015_error_events.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/016_card_reveals.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/017_transfer_velocity.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/018_disputes.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/019_retention.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/020_balance_reconciliation.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/023_entry_status.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/024_sign_in_events.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/025_bvn_uniqueness.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/026_provider_credentials.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/027_risk_signals.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/028_risk_cases.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/029_kyc_tiers.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/030_card_lifecycle.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/031_card_settlements.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/032_tax.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/033_consent.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/034_data_rights.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/035_price_publication.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/036_attention.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/037_provider_health.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,
 # Redis for the rate-limiter contract.
@@ -694,4 +1762,44 @@ mistake from the internet.
   under a second; `deploy/standby/backup.sh` is what survives it.
 - **The single-instance workers** (`RECONCILE_INTERVAL_SECONDS`,
   `DEPOSIT_RECONCILE_INTERVAL_SECONDS`, `CRYPTO_RECONCILE_INTERVAL_SECONDS`,
-  `GIFTCARD_RELEASE_INTERVAL_SECONDS`) go on exactly one instance.
+  `CRYPTO_DEPOSIT_RECONCILE_INTERVAL_SECONDS`,
+  `GIFTCARD_RELEASE_INTERVAL_SECONDS`, `NOTIFICATION_INTERVAL_SECONDS`,
+  `ERROR_ALERT_INTERVAL_SECONDS`, `BALANCE_RECONCILE_INTERVAL_SECONDS`,
+  `RISK_MONITOR_INTERVAL_SECONDS`) go on exactly one instance —
+  `docker-compose.app.yml` does this by blanking them on `api` and setting them
+  on `worker`. `NOTIFICATION_INTERVAL_SECONDS` is the one whose absence is
+  silent in the worst way: rows accumulate, the API answers "check your email",
+  and nothing is ever sent.
+- **Backups are encrypted to a PUBLIC key** the database host cannot decrypt,
+  shipped off the box, and **restored by `standby/restore-drill.sh`** on a
+  schedule. The drill does not stop at "Postgres started" — a truncated copy
+  starts perfectly and is missing a week — it runs `verify-restore.sql`, which
+  asks whether every entry still sums to zero per currency and whether the
+  materialised balances still agree with the postings. An untested backup is a
+  hope with a cron entry.
+
+### Staging — non-obvious rules
+
+Config: `deploy/docker-compose.staging.yml`, `deploy/.env.staging.example`.
+
+- **`XETRAL_ENVIRONMENT` is required and has no default.** Neither default is
+  safe enough to be worth having: a staging box falling back to `production`
+  would merely be strict, while a production box falling back to `staging`
+  would relax the guards protecting real customers.
+- **Staging REFUSES TO BOOT pointed at a live provider**, naming every
+  offending variable at once. Not a warning — the process exits. A staging box
+  that can reach live Bitnob issues real cards and spends real money, and the
+  person who makes that mistake will be copying a production `.env` to get
+  something working quickly. Failing at startup costs a deploy; failing on the
+  first card issue costs a customer.
+- **The notification worker will not email an address outside
+  `NOTIFICATION_ALLOWLIST`, and empty means NOBODY.** A staging database is
+  usually restored from a production backup — the only way to test against
+  realistic data — and the moment it is, the worker holds every real customer's
+  address and a queue of messages about transfers that never happened. Such a
+  message is **abandoned, not retried**: the address will not become allowed by
+  waiting, and leaving it pending buries the messages that could go out.
+- **What staging deliberately does not copy from production is stated in the
+  compose file**: one node, no standby, no backups, workers in-process. What it
+  must copy is the bundle, the migrations, the guard, the CSP and the ledger —
+  a staging environment differing in those proves nothing.

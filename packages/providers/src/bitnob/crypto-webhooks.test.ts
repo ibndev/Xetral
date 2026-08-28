@@ -43,9 +43,15 @@ describe('a deposit that has been SEEN', () => {
     expect(out.intent.postings[1]?.account).toEqual({ kind: 'provider_float', currency: 'USDT' });
   });
 
-  it('keys on the provider event id', async () => {
+  it('keys on the DEPOSIT, not the webhook delivery', async () => {
+    // `event_id` identifies a delivery; `data.id` identifies the money. The
+    // reconciliation sweep only ever learns `data.id` — a lost webhook has no
+    // event id for it to know — so keying on the delivery would let a sweep
+    // and a late redelivery credit the same deposit twice. The NGN rail had
+    // exactly that bug, and its test passed because the late webhook it sent
+    // resolved to no owner and landed in suspense.
     const out = await handleCryptoDeposit(parseCryptoWebhook(body()), context());
-    expect(out.intent.idempotencyKey).toBe('bitnob:evt_cx_1');
+    expect(out.intent.idempotencyKey).toBe('bitnob:cxd_1:seen');
   });
 });
 
@@ -68,12 +74,14 @@ describe('a deposit that has been CONFIRMED', () => {
   });
 
   it('uses a DIFFERENT idempotency key from the seen phase', async () => {
-    // Derived from the same event. Without the suffix the confirmation would
-    // replay the seen entry and the money would never become spendable.
+    // Derived from the same DEPOSIT. Without the suffix the confirmation
+    // would replay the seen entry and the money would never become spendable;
+    // keyed on the deposit rather than the delivery, a sweep and a late
+    // webhook agree on both phases.
     const seen = await handleCryptoDeposit(parseCryptoWebhook(body()), context());
     const done = await handleCryptoDeposit(parseCryptoWebhook(confirmed()), context());
     expect(done.intent.idempotencyKey).not.toBe(seen.intent.idempotencyKey);
-    expect(done.intent.idempotencyKey).toBe('bitnob:evt_cx_1:confirmed');
+    expect(done.intent.idempotencyKey).toBe('bitnob:cxd_1:confirmed');
   });
 });
 

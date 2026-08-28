@@ -67,9 +67,98 @@ they will bite:
    instance. Running them everywhere is safe for the ledger — advisory locks
    serialise the sweeps — and rude to every provider.
 
+## Staging
+
+`docker-compose.staging.yml` and `.env.staging.example`. One box: API, web,
+Postgres and Redis together, with sandbox providers.
+
+It runs the same bundle, the same migrations, the same guard and the same
+ledger as production, because a staging environment that differs in those
+proves nothing. What it deliberately does NOT have is a standby, backups, or a
+separate database node — there are no customer deposits here, so the reasoning
+that makes production three machines has nothing to protect.
+
+Two protections are worth knowing about because they are refusals, not
+warnings:
+
+**It cannot reach a live provider.** With `XETRAL_ENVIRONMENT=staging`, the
+API refuses to start if `BITNOB_BASE_URL` or `VTPASS_BASE_URL` points at a
+live host. Failing at boot costs a deploy; failing on the first card issue
+spends a real customer's money and looks like a bug in staging. The mistake
+this catches is a specific one — copying a production `.env` to get a box
+working quickly — and it is made by people in a hurry, which is when nobody
+reads carefully.
+
+**It cannot email real customers.** A staging database is usually restored
+from a production backup, because that is the only way to test against
+realistic data. From that moment the outbox worker holds every real customer's
+address and a queue of messages about transfers that never happened, and it
+will send them. `NOTIFICATION_ALLOWLIST` is the set of addresses that may be
+reached, matched by suffix; unset means nobody, which is the direction to be
+wrong in.
+
+`GET /health` names the environment, because staging and production are
+identical in every visible respect — which is what makes staging worth having
+and also what makes "which one am I looking at?" a question people get wrong
+under pressure.
+
+    curl -s localhost:3000/health
+    {"status":"ok","environment":"staging","uptime_seconds":41}
+
+Generate FRESH secrets. A staging box holding production's access-token key
+can mint tokens the real API accepts; sharing the encryption key lets it open
+production's sealed envelopes.
+
+## Recovery objectives and migration rollback
+
+[`RECOVERY.md`](./RECOVERY.md). Two numbers and one stance, derived from the
+configuration in this directory rather than asserted — including the one place
+the configuration does not support the objective: only base backups go
+off-site, so if the primary and the standby are both lost the newest thing
+anywhere else is up to a day old.
+
 ## Failing over
 
 `standby/promote.sh`, and read its header first. Promotion is not reversible
 without a rebuild, and promoting while the old primary is still writing gives
 two databases that both believe they are authoritative — which for a ledger
 means two divergent sets of postings and no way to say which is real.
+
+## The application's database role
+
+The API must NOT connect as the role that owns the schema, and this is the one
+deployment step where the reason is worth reading rather than skimming.
+
+`011_ledger_immutability.sql` puts a trigger on `journal_entries` and
+`postings` that refuses every UPDATE and DELETE. A table's OWNER can turn that
+trigger off:
+
+```sql
+ALTER TABLE postings DISABLE TRIGGER USER;   -- ALTER TABLE
+UPDATE postings SET amount_minor = amount_minor + 500000;
+```
+
+So while the application owns those tables, the immutability guarantee is
+really "nobody runs two statements" — one injection reaching a second
+statement, or one migration written in a hurry, and financial history is
+rewritable with nothing left behind but a drift figure.
+
+`022_least_privilege.sql` creates `xetral_app`, which owns nothing, cannot
+create a table, holds no DELETE on any table in the database, and has UPDATE
+revoked on every append-only table. Deletion happens only through
+`apply_retention()`, which runs as the owner and names its tables literally.
+
+**Migrations run as the owner. The application runs as `xetral_app`.**
+
+```bash
+# Once, as the owner, after the migrations:
+psql -d xetral -c "ALTER ROLE xetral_app LOGIN PASSWORD '<generated>'"
+psql -d xetral -c "GRANT CONNECT ON DATABASE xetral TO xetral_app"
+```
+
+Then point `DATABASE_URL` at `xetral_app`. The password is not in any
+migration, because a password in a migration is a password in git.
+
+The whole end-to-end suite is run against this role in CI, so a change that
+needs a privilege the application should not have fails the build rather than
+being discovered in production.

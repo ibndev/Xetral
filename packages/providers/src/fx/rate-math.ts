@@ -105,12 +105,66 @@ export function invert(rate: FxRate): FxRate {
 /**
  * A rate rendered for display: quote major units per ONE base major unit.
  *
- * DISPLAY ONLY, and named so. It goes through a float and must never compute
- * an amount — the ratio is the authority and this is a rendering of it. Same
- * rule as Bitnob's `display_amount`.
+ * EXACT, AND NOT A FLOAT — which it was, and which was wrong in one of the two
+ * directions. `(Number(numerator) / Number(denominator)).toFixed(2)` rendered
+ * USD→NGN as "1650.00" and NGN→USD as **"0.00"**, because USD per naira really
+ * is 0.000606 and two decimal places cannot show it. A customer converting
+ * naira to dollars was shown a rate of zero.
+ *
+ * That is Phase 10 finding 1 in the display layer: "minor units per major unit
+ * works for USD→NGN and collapses in the other direction, where one kobo is
+ * 0.0006 cents." The conversion arithmetic was fixed then; the rendering of it
+ * was not, in two places that had each grown their own copy.
+ *
+ * THE PLACES ARE CHOSEN, not fixed. A rate of 1650 needs two decimals and a
+ * rate of 0.000606 needs seven, so this widens until the figure carries real
+ * digits rather than rounding to nothing — and stops, so a rate is never a
+ * wall of noise.
  */
+const MIN_SIGNIFICANT = 10_000n;
+const MAX_PLACES = 12;
+
 export function displayRate(rate: FxRate, baseExponent: number, quoteExponent: number): string {
-  const scaled =
-    (Number(rate.numerator) / Number(rate.denominator)) * 10 ** (baseExponent - quoteExponent);
-  return scaled.toFixed(Math.max(2, quoteExponent));
+  if (rate.numerator === 0n) return '0';
+
+  let places = Math.max(2, quoteExponent);
+  let scaled = scaleRate(rate, baseExponent, quoteExponent, places);
+
+  // Widen only while the answer would be misleadingly blunt. A large rate
+  // satisfies this on the first pass and keeps its two decimals.
+  while (scaled < MIN_SIGNIFICANT && places < MAX_PLACES) {
+    places += 1;
+    scaled = scaleRate(rate, baseExponent, quoteExponent, places);
+  }
+
+  return insertPoint(scaled, places);
+}
+
+/**
+ * `numerator / denominator * 10^(base - quote)`, rendered at `places` decimal
+ * places, entirely in integers.
+ *
+ * The exponent difference can go either way — NGN→BTC is 2 − 8 — so the power
+ * of ten is applied to whichever side keeps both operands whole. A
+ * `10 ** negative` would be the float this function exists to avoid.
+ */
+function scaleRate(
+  rate: FxRate,
+  baseExponent: number,
+  quoteExponent: number,
+  places: number,
+): bigint {
+  const shift = places + baseExponent - quoteExponent;
+  const numerator =
+    shift >= 0 ? rate.numerator * 10n ** BigInt(shift) : rate.numerator;
+  const denominator =
+    shift >= 0 ? rate.denominator : rate.denominator * 10n ** BigInt(-shift);
+  return numerator / denominator;
+}
+
+/** Puts the decimal point in, without going through a number. */
+function insertPoint(scaled: bigint, places: number): string {
+  if (places === 0) return scaled.toString();
+  const digits = scaled.toString().padStart(places + 1, '0');
+  return `${digits.slice(0, digits.length - places)}.${digits.slice(digits.length - places)}`;
 }

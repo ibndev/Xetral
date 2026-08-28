@@ -13,6 +13,7 @@ import type { ApiConfig } from '../config.js';
 import { GiftCardHoldService } from './hold-release.service.js';
 import { systemClock } from '../tokens.js';
 import { testApiConfig } from '../test-support/api-config.js';
+import { enrolAndElevate } from '../test-support/staff-totp.js';
 
 /**
  * Gift card trading, end to end.
@@ -79,6 +80,13 @@ async function onboard(instance: INestApplication = app): Promise<Customer> {
      VALUES ($1, 'bitnob', $2)`,
     [row.id, `cus_${randomUUID()}`],
   );
+  // AND THE TIER, because KYC approval sets both in ONE transaction.
+  //
+  // This fixture stands in for that approval, and a fixture that performs
+  // half of an atomic operation is a fixture that tests a state production
+  // cannot reach — here, a customer whom every provider accepts and whose
+  // ceiling is still an unverified account's.
+  await pool.query(`UPDATE users SET kyc_tier = 1 WHERE id = $1::bigint`, [row.id]);
 
   const login = await request(instance.getHttpServer())
     .post('/v1/auth/login')
@@ -104,6 +112,9 @@ async function makeReviewer(): Promise<Customer> {
   await pool.query(`INSERT INTO staff_roles (user_id, role) VALUES ($1, 'giftcard_reviewer')`, [
     reviewer.userId,
   ]);
+  // Every staff route now requires a second factor, including the read-only
+  // ones — so a role with no authenticator is a role that cannot be used.
+  await enrolAndElevate(app, pool, reviewer.token, reviewer.userId);
   return reviewer;
 }
 

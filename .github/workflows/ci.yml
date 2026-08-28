@@ -91,7 +91,38 @@ jobs:
           # is written to history. There is nothing to refuse without rows.
           psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
             -f packages/ledger/sql/009_admin.seed.sql \
-            -f packages/ledger/sql/010_card_protection.sql
+            -f packages/ledger/sql/010_card_protection.sql \
+            -f packages/ledger/sql/011_ledger_immutability.sql \
+            -f packages/identity/sql/012_notifications.sql \
+            -f packages/identity/sql/013_password_reset.sql \
+            -f packages/identity/sql/014_staff_totp.sql \
+            -f packages/ledger/sql/015_error_events.sql \
+            -f packages/ledger/sql/016_card_reveals.sql \
+            -f packages/ledger/sql/017_transfer_velocity.sql \
+            -f packages/ledger/sql/018_disputes.sql \
+            -f packages/ledger/sql/019_retention.sql \
+            -f packages/ledger/sql/020_balance_reconciliation.sql \
+            -f packages/ledger/sql/021_flow_velocity.sql \
+            -f packages/ledger/sql/023_entry_status.sql \
+            -f packages/ledger/sql/024_sign_in_events.sql \
+            -f packages/ledger/sql/025_bvn_uniqueness.sql \
+            -f packages/ledger/sql/026_provider_credentials.sql \
+            -f packages/ledger/sql/026_provider_credentials.seed.sql \
+            -f packages/ledger/sql/027_risk_signals.sql \
+            -f packages/ledger/sql/027_risk_signals.seed.sql \
+            -f packages/ledger/sql/028_risk_cases.sql \
+            -f packages/ledger/sql/029_kyc_tiers.sql \
+            -f packages/ledger/sql/029_kyc_tiers.seed.sql \
+            -f packages/ledger/sql/030_card_lifecycle.sql \
+            -f packages/ledger/sql/031_card_settlements.sql \
+            -f packages/ledger/sql/032_tax.sql \
+            -f packages/ledger/sql/033_consent.sql \
+            -f packages/ledger/sql/033_consent.seed.sql \
+            -f packages/ledger/sql/034_data_rights.sql \
+            -f packages/ledger/sql/035_price_publication.sql \
+            -f packages/ledger/sql/036_attention.sql \
+            -f packages/ledger/sql/037_provider_health.sql \
+            -f packages/ledger/sql/099_least_privilege.sql
 
       - name: Ledger and identity invariants
         run: |
@@ -110,7 +141,33 @@ jobs:
                    packages/ledger/sql/007_crypto.test.sql \
                    packages/ledger/sql/008_fx.test.sql \
                    packages/ledger/sql/009_admin.test.sql \
-                   packages/ledger/sql/010_card_protection.test.sql; do
+                   packages/ledger/sql/010_card_protection.test.sql \
+                   packages/ledger/sql/011_ledger_immutability.test.sql \
+                   packages/identity/sql/012_notifications.test.sql \
+                   packages/identity/sql/013_password_reset.test.sql \
+                   packages/identity/sql/014_staff_totp.test.sql \
+                   packages/ledger/sql/015_error_events.test.sql \
+                   packages/ledger/sql/016_card_reveals.test.sql \
+                   packages/ledger/sql/017_transfer_velocity.test.sql \
+                   packages/ledger/sql/018_disputes.test.sql \
+                   packages/ledger/sql/019_retention.test.sql \
+                   packages/ledger/sql/020_balance_reconciliation.test.sql \
+                   packages/ledger/sql/023_entry_status.test.sql \
+                   packages/ledger/sql/024_sign_in_events.test.sql \
+                   packages/ledger/sql/025_bvn_uniqueness.test.sql \
+                   packages/ledger/sql/026_provider_credentials.test.sql \
+                   packages/ledger/sql/027_risk_signals.test.sql \
+                   packages/ledger/sql/028_risk_cases.test.sql \
+                   packages/ledger/sql/029_kyc_tiers.test.sql \
+                   packages/ledger/sql/030_card_lifecycle.test.sql \
+                   packages/ledger/sql/031_card_settlements.test.sql \
+                   packages/ledger/sql/032_tax.test.sql \
+                   packages/ledger/sql/033_consent.test.sql \
+                   packages/ledger/sql/034_data_rights.test.sql \
+                   packages/ledger/sql/035_price_publication.test.sql \
+                   packages/ledger/sql/036_attention.test.sql \
+                   packages/ledger/sql/037_provider_health.test.sql \
+                   packages/ledger/sql/099_least_privilege.test.sql; do
             echo "== $f"
             psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
               -f "$f" 2>&1 | tee "/tmp/$(basename "$f").out"
@@ -154,7 +211,86 @@ jobs:
           # the tests do not set and production would not use.
           psql -h localhost -U xetral -d xetral -v ON_ERROR_STOP=1 \
             -f packages/ledger/sql/009_admin.seed.sql \
-            -f packages/ledger/sql/010_card_protection.sql
+            -f packages/ledger/sql/010_card_protection.sql \
+            -f packages/ledger/sql/011_ledger_immutability.sql \
+            -f packages/identity/sql/012_notifications.sql \
+            -f packages/identity/sql/013_password_reset.sql \
+            -f packages/identity/sql/014_staff_totp.sql \
+            -f packages/ledger/sql/015_error_events.sql \
+            -f packages/ledger/sql/016_card_reveals.sql \
+            -f packages/ledger/sql/017_transfer_velocity.sql \
+            -f packages/ledger/sql/018_disputes.sql \
+            -f packages/ledger/sql/019_retention.sql \
+            -f packages/ledger/sql/020_balance_reconciliation.sql \
+            -f packages/ledger/sql/021_flow_velocity.sql \
+            -f packages/ledger/sql/023_entry_status.sql \
+            -f packages/ledger/sql/024_sign_in_events.sql \
+            -f packages/ledger/sql/025_bvn_uniqueness.sql \
+            -f packages/ledger/sql/026_provider_credentials.sql \
+            -f packages/ledger/sql/026_provider_credentials.seed.sql \
+            -f packages/ledger/sql/027_risk_signals.sql \
+            -f packages/ledger/sql/027_risk_signals.seed.sql \
+            -f packages/ledger/sql/028_risk_cases.sql \
+            -f packages/ledger/sql/029_kyc_tiers.sql \
+            -f packages/ledger/sql/029_kyc_tiers.seed.sql \
+            -f packages/ledger/sql/030_card_lifecycle.sql \
+            -f packages/ledger/sql/031_card_settlements.sql \
+            -f packages/ledger/sql/032_tax.sql \
+            -f packages/ledger/sql/033_consent.sql \
+            -f packages/ledger/sql/033_consent.seed.sql \
+            -f packages/ledger/sql/034_data_rights.sql \
+            -f packages/ledger/sql/035_price_publication.sql \
+            -f packages/ledger/sql/036_attention.sql \
+            -f packages/ledger/sql/037_provider_health.sql \
+            -f packages/ledger/sql/099_least_privilege.sql
+
+      # ------------------------------------------------------------------
+      # Dependency scanning.
+      #
+      # SCOPED TO THE WORKSPACES THAT SERVE CUSTOMER TRAFFIC, and the scoping
+      # is the design. A repo-wide `npm audit` here reports thirty findings,
+      # almost all of them in the Expo and Metro toolchain — build tools that
+      # never run on our servers and never touch a customer's money. Failing
+      # the build on those trains everybody to skip the step, and then the one
+      # finding that IS in the request path scrolls past with the rest. That is
+      # the same reasoning that makes the error alerter speak twice and no more.
+      #
+      # This step found a real one on the day it was written: apps/web was on
+      # Next 15.1.3, which carries an authorization-bypass-in-middleware
+      # advisory — and this app's Content-Security-Policy lives in middleware.
+      #
+      # APPS/MOBILE IS DELIBERATELY NOT IN THIS LIST, said out loud rather than
+      # left as a gap somebody notices later. Expo and Metro are declared as
+      # ordinary dependencies rather than devDependencies, so `--omit=dev`
+      # cannot separate the toolchain from what actually ships in the bundle,
+      # and gating on it would mean this step is permanently red for reasons
+      # nobody can act on. Its findings appear in the advisory step below, and
+      # the day one of them is in a runtime library rather than the CLI it
+      # belongs in this list.
+      # ------------------------------------------------------------------
+      - name: Audit the customer-facing dependency tree
+        run: |
+          set -o pipefail
+          failed=0
+          for w in apps/api apps/web packages/ledger packages/identity \
+                   packages/providers packages/shared packages/client; do
+            echo "== $w"
+            # --omit=dev, because a vulnerability in a test runner is not a
+            # vulnerability in the request path. moderate, because "high only"
+            # on a system holding customer deposits is the wrong threshold.
+            if ! (cd "$w" && npm audit --omit=dev --audit-level=moderate); then
+              echo "::error::$w has a vulnerable production dependency"
+              failed=1
+            fi
+          done
+          exit $failed
+
+      # Reported, never fatal. The build toolchain's findings are worth seeing
+      # and are not worth blocking a deploy over — a rule people mute is worse
+      # than no rule.
+      - name: Report the whole tree (advisory)
+        if: always()
+        run: npm audit --audit-level=high || true
 
       - run: npm run typecheck
 
@@ -165,8 +301,22 @@ jobs:
       # ledger schema. The second is the only check that the adapter's entry
       # kinds and account roles actually exist as enum values -- TypeScript is
       # perfectly happy with a literal the database has never heard of.
-      - name: End-to-end (real Postgres and Redis)
+      # THE E2E SUITE RUNS AS THE RESTRICTED ROLE, not as the schema owner.
+      #
+      # Running it as the owner proves the product works with privileges the
+      # application will not have in production — which is exactly how a query
+      # needing DELETE, or a migration-shaped statement, reaches a deploy.
+      # Doing it this way already caught a test that deleted a settings row.
+      - name: Grant the application role a login
+        run: |
+          psql -h localhost -U xetral -d xetral \
+            -c "ALTER ROLE xetral_app LOGIN PASSWORD 'ci-only'" \
+            -c "GRANT CONNECT ON DATABASE xetral TO xetral_app"
+
+      - name: End-to-end (real Postgres and Redis, as xetral_app)
         run: npm run test:e2e
+        env:
+          DATABASE_URL: postgres://xetral_app:ci-only@localhost:5432/xetral
 
       - run: npm run build
 
@@ -183,6 +333,7 @@ jobs:
         run: |
           ACCESS_TOKEN_KEYS="v1:$(openssl rand -base64 32)" \
           ACCESS_TOKEN_CURRENT_VERSION=v1 \
+          XETRAL_ENVIRONMENT=production \
           PORT=3100 \
           node apps/api/dist/main.js > /tmp/api.log 2>&1 &
           api_pid=$!
@@ -232,6 +383,97 @@ jobs:
               -X POST -H 'content-type: application/json' \
               -H 'x-bitnob-signature: deadbeef' -d '{"event":"probe"}'
           done
+
+          # Account recovery. Both are PUBLIC by necessity — a customer who has
+          # lost their password has no session — so a 404 here means the one
+          # route a locked-out customer can reach is not mounted, and they have
+          # no way back to their money. This instance has no email provider, so
+          # `forgot` refuses honestly with 503 rather than promising a message
+          # nothing would send.
+          check "password reset is mounted" 503 http://127.0.0.1:3100/v1/auth/password/forgot \
+            -X POST -H 'content-type: application/json' -d '{"identifier":"probe@example.ng"}'
+          check "reset consumption is mounted" 401 http://127.0.0.1:3100/v1/auth/password/reset \
+            -X POST -H 'content-type: application/json' \
+            -d '{"token":"not-real","new_password":"a-long-enough-password"}'
+
+          # The staff second factor, and the errors surface. Guarded, so 401
+          # proves each is both mounted and gated — the same claim, for the
+          # routes added since the audit.
+          check "totp enrolment is mounted" 401 http://127.0.0.1:3100/v1/auth/totp/enrol -X POST
+          check "errors surface is mounted" 401 http://127.0.0.1:3100/v1/admin/errors
+
+          # The tax report. Mounted and gated on `finance`, so 401 rather than
+          # 404 — three controllers were once imported into the module and left
+          # out of its `controllers` list, and every one of their routes
+          # answered 404 in the built bundle while the coverage test was green.
+          check "tax report is mounted" 401 http://127.0.0.1:3100/v1/admin/tax
+
+          # Consent. Guarded, so 401 rather than 404 — and the customer route
+          # matters as much as the staff one: withdrawing consent has to work
+          # for a customer, and a 404 there is an opt-out nobody can reach.
+          check "consent is mounted" 401 http://127.0.0.1:3100/v1/consents
+          check "consent queue is mounted" 401 http://127.0.0.1:3100/v1/admin/consents
+
+          # A customer's own data. The export is a POST so it cannot be
+          # triggered by a link or land in a browser history, and it carries a
+          # PIN in its body — so 401 here proves it is mounted and gated.
+          check "data export is mounted" 401 http://127.0.0.1:3100/v1/me/export -X POST
+          check "data requests are mounted" 401 http://127.0.0.1:3100/v1/admin/data-requests
+
+          # Publishing a price. Guarded, so 401 rather than 404 — and the
+          # ABSENCE of this route was the bug: nothing in the application ever
+          # wrote either price table, so FX refused every pair on a fresh
+          # deployment and psql was the only way out.
+          check "price publication is mounted" 401 http://127.0.0.1:3100/v1/admin/prices
+          check "provider health is mounted" 401 http://127.0.0.1:3100/v1/admin/providers
+
+          # Metrics with no METRICS_TOKEN set, which is how the bundle boots
+          # here. 404 rather than 401 is the assertion: an unconfigured
+          # endpoint must not advertise that it exists, and an endpoint that
+          # defaulted to OPEN would publish queue depths and customer
+          # liability to anything that could route to it.
+          check "metrics is absent without a token" 404 http://127.0.0.1:3100/metrics
+
+          # Reading a card number. Guarded, so 401 rather than 404 — and this
+          # is the route whose ABSENCE was the bug: every card issued since
+          # Phase 5 was unusable because nothing could show its number.
+          check "card reveal is mounted" 401 http://127.0.0.1:3100/v1/cards/x/reveal -X POST
+
+          # ------------------------------------------------------------
+          # The headers, asserted rather than assumed.
+          #
+          # Every one of these was already set, and one of them was NOT: the
+          # web app had sent HSTS since it was written and the API never had,
+          # which looked harmless because both sit behind the same edge. They
+          # do not have the same clients — apps/mobile talks to this origin
+          # directly — and a header that exists only because of a setting in
+          # another system is a header nobody owns.
+          # ------------------------------------------------------------
+          header() { # name pattern
+            got=$(curl -s -D - -o /dev/null "http://127.0.0.1:3100/health"                   | grep -i "^$1:" | tr -d '\r' || true)
+            if echo "$got" | grep -qi "$2"; then
+              echo "ok: $1"
+            else
+              echo "::error::$1 missing or wrong on the API: '${got}'"
+              fail=1
+            fi
+          }
+
+          header "strict-transport-security" "max-age=[0-9]"
+          header "x-content-type-options"    "nosniff"
+          header "x-frame-options"           "DENY"
+          header "referrer-policy"           "no-referrer"
+          # Every response here is about one customer's money, so a shared
+          # cache holding one is a shared cache serving it to somebody else.
+          header "cache-control"             "no-store"
+          header "content-security-policy"   "default-src 'none'"
+
+          # And the framework must NOT announce itself: a version number is
+          # free reconnaissance for whoever is scanning for the next advisory.
+          if curl -s -D - -o /dev/null http://127.0.0.1:3100/health | grep -qi '^x-powered-by:'; then
+            echo "::error::the API is advertising its framework in X-Powered-By"
+            fail=1
+          fi
 
           kill "$api_pid" 2>/dev/null || true
 
@@ -291,3 +533,70 @@ jobs:
             exit 1
           fi
           echo "built web app booted and served $total scripts under its CSP nonce"
+
+          # The web app's own headers. It sets these in next.config.mjs and the
+          # CSP in middleware.ts, and the split is easy to break by moving one.
+          webfail=0
+          webheader() { # name pattern
+            got=$(grep -i "^$1:" /tmp/web.headers | tr -d '\r' || true)
+            if echo "$got" | grep -qi "$2"; then
+              echo "ok: $1"
+            else
+              echo "::error::$1 missing or wrong on the web app: '${got}'"
+              webfail=1
+            fi
+          }
+
+          webheader "strict-transport-security" "max-age=[0-9]"
+          webheader "x-content-type-options"    "nosniff"
+          webheader "x-frame-options"           "DENY"
+          # Not `no-referrer` like the API: a browser app needs same-origin
+          # referrers to work. What it must never do is send a path carrying a
+          # card or transaction id to another site.
+          webheader "referrer-policy"           "strict-origin"
+          webheader "permissions-policy"        "camera=()"
+          # `frame-ancestors` is what a modern browser actually enforces;
+          # X-Frame-Options above is for the ones that do not.
+          webheader "content-security-policy"   "frame-ancestors 'none'"
+
+          if [ "$webfail" != "0" ]; then
+            exit 1
+          fi
+
+      # ------------------------------------------------------------------
+      # And the third artifact, which nothing here had ever built.
+      #
+      # `apps/mobile` is typechecked and unit tested, and neither can see
+      # whether it BUNDLES. Two failures in the SDK 54 upgrade were invisible
+      # to both: `app.json` listed `expo-screen-capture` as a config plugin
+      # and that package has never shipped one, so `expo prebuild` died before
+      # writing a manifest; and `metro.config.js` disabled hierarchical module
+      # resolution, so the first dependency npm left nested — not one this app
+      # imports — could not be found. Both are the same shape as the three
+      # controllers that were imported and never mounted: correct-looking
+      # configuration that only a run refutes.
+      #
+      # It cannot be run on hardware from CI, and `apps/mobile/SECURITY.md`
+      # says so. This is the part that can be: the config evaluates, and Metro
+      # produces a bundle for both platforms.
+      # ------------------------------------------------------------------
+      - name: Bundle the mobile app
+        working-directory: apps/mobile
+        run: |
+          # Evaluates every config plugin, including `with-lan-cleartext`.
+          npx expo config --type public > /dev/null
+          echo "app config evaluates, plugins included"
+
+          for platform in android ios; do
+            npx expo export --platform "$platform" --output-dir "/tmp/expo-$platform" > "/tmp/expo-$platform.log" 2>&1 || {
+              echo "::error::the mobile app does not bundle for $platform"
+              tail -40 "/tmp/expo-$platform.log"
+              exit 1
+            }
+            bundle=$(find "/tmp/expo-$platform/_expo/static/js/$platform" -name '*.hbc' -o -name '*.js' | head -1)
+            if [ -z "$bundle" ]; then
+              echo "::error::expo export reported success for $platform and produced no bundle"
+              exit 1
+            fi
+            echo "ok: $platform bundle at $bundle"
+          done

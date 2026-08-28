@@ -1,4 +1,11 @@
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import type { OnApplicationBootstrap } from '@nestjs/common';
 import type { Pool } from 'pg';
 import { API_CONFIG, DATABASE } from '../tokens.js';
@@ -48,6 +55,43 @@ export interface SettingView {
   readonly sensitive: boolean;
   readonly updated_at: string;
 }
+
+/**
+ * Every service that can be switched off, and the accessor that reads its
+ * flag.
+ *
+ * A single list rather than a check written at each call site, because "which
+ * services can be paused" is an operational question with one answer, and the
+ * audit found two flags that existed everywhere except at a call site. Adding
+ * a service here without asserting it somewhere fails `kill-switches.test.ts`.
+ */
+export const KILL_SWITCHES = {
+  crypto: (s: SettingsService) => s.cryptoEnabled(),
+  fx: (s: SettingsService) => s.fxEnabled(),
+  cards: (s: SettingsService) => s.cardsEnabled(),
+  bills: (s: SettingsService) => s.billsEnabled(),
+} as const;
+
+export type KillSwitch = keyof typeof KILL_SWITCHES;
+
+/**
+ * The refusal each switch produces, written out as literals.
+ *
+ * Built with a template — `${service}_disabled` — these codes would be
+ * invisible to `error-codes.test.ts`, which scans the source for
+ * `error: '...'` to prove the API and the client agree on every code a
+ * customer can receive. A code that no scanner can find is a code that
+ * silently drifts out of the client's union and reaches a customer as
+ * "Something went wrong".
+ *
+ * Four lines of repetition buys a greppable code and a checked invariant.
+ */
+const DISABLED_ERROR: Record<KillSwitch, { readonly error: string }> = {
+  crypto: { error: 'crypto_disabled' },
+  fx: { error: 'fx_disabled' },
+  cards: { error: 'cards_disabled' },
+  bills: { error: 'bills_disabled' },
+};
 
 @Injectable()
 export class SettingsService implements OnApplicationBootstrap {
@@ -169,6 +213,41 @@ export class SettingsService implements OnApplicationBootstrap {
     return this.integer('transfer_fee_basis_points', this.config.transferFeeBasisPoints);
   }
 
+  /* ---------------------------------- tax ------------------------------ */
+
+  /**
+   * VAT on FEES, in basis points. Never applied to the amount being
+   * transferred: what is taxed is the service, not the money moving.
+   */
+  async vatBasisPoints(): Promise<number> {
+    return this.integer('vat_basis_points', 750);
+  }
+
+  /** TRUE means a fee is what the customer pays and part of it is VAT, so
+   *  turning VAT on changes the books and not the price. */
+  async vatInclusive(): Promise<boolean> {
+    return this.boolean('vat_inclusive', true);
+  }
+
+  /**
+   * Whether to charge the electronic money transfer levy.
+   *
+   * Defaults FALSE, and the default is the decision: turning it on changes
+   * what customers are charged, and whether it applies to a wallet like this
+   * one is a question for a Nigerian tax adviser rather than for a default.
+   */
+  async transferLevyEnabled(): Promise<boolean> {
+    return this.boolean('transfer_levy_enabled', false);
+  }
+
+  async transferLevyKobo(): Promise<bigint> {
+    return this.bigint('transfer_levy_kobo', 5000n);
+  }
+
+  async transferLevyThresholdKobo(): Promise<bigint> {
+    return this.bigint('transfer_levy_threshold_kobo', 1000000n);
+  }
+
   async depositCeilingKobo(): Promise<bigint> {
     return this.bigint('deposit_ceiling_kobo', this.config.depositCeilingKobo);
   }
@@ -179,6 +258,68 @@ export class SettingsService implements OnApplicationBootstrap {
 
   async purchaseDailyLimitKobo(): Promise<bigint> {
     return this.bigint('purchase_daily_limit_kobo', 200_000_00n);
+  }
+
+  /**
+   * How many people a customer may pay for the FIRST time in one Lagos day.
+   *
+   * A COUNT, so it carries no units and applies in every currency — unlike the
+   * daily ceilings above, which are published in kobo and are therefore
+   * statements about naira and nothing else.
+   */
+  async transferNewRecipientsDaily(): Promise<number> {
+    return this.integer('transfer_new_recipients_daily', 10);
+  }
+
+  /** How many transfers a customer may send in a rolling hour, any currency. */
+  /**
+   * A provider/ledger difference at or below this is not recorded.
+   *
+   * ZERO by default. On a double-entry ledger the correct difference is
+   * nothing, and a tolerance is a decision to stop looking at a class of error.
+   */
+  async balanceToleranceMinor(): Promise<number> {
+    return this.integer('balance_tolerance_minor', 0);
+  }
+
+  async fxDailyLimitKobo(): Promise<bigint> {
+    return this.bigint('fx_daily_limit_kobo', 5_000_000_00n);
+  }
+
+  async giftcardDailyLimitKobo(): Promise<bigint> {
+    return this.bigint('giftcard_daily_limit_kobo', 2_000_000_00n);
+  }
+
+  async cryptoWithdrawalCountHourly(): Promise<number> {
+    return this.integer('crypto_withdrawal_count_hourly', 3);
+  }
+
+  async fxCountHourly(): Promise<number> {
+    return this.integer('fx_count_hourly', 10);
+  }
+
+  async giftcardCountHourly(): Promise<number> {
+    return this.integer('giftcard_count_hourly', 5);
+  }
+
+  /**
+   * The daily withdrawal ceiling for one crypto asset, in ITS OWN minor units.
+   *
+   * Keyed by asset because there is no currency-agnostic amount: USDT has six
+   * decimals and BTC has eight, so one number shared between them would mean
+   * two different things. An asset with no configured row returns undefined —
+   * no ceiling — rather than zero, because a limit nobody set must not refuse
+   * every withdrawal of that asset.
+   */
+  async cryptoDailyLimitMinor(currency: string): Promise<bigint | undefined> {
+    const key = `crypto_daily_limit_${currency.toLowerCase()}_minor`;
+    const raw = await this.text(key, '');
+    if (raw === '' || !/^[0-9]+$/.test(raw)) return undefined;
+    return BigInt(raw);
+  }
+
+  async transferCountHourly(): Promise<number> {
+    return this.integer('transfer_count_hourly', 20);
   }
 
   /**
@@ -203,12 +344,50 @@ export class SettingsService implements OnApplicationBootstrap {
     return this.boolean('gift_cards_enabled', false);
   }
 
+  /*
+   * THE KILL SWITCHES.
+   *
+   * Each of these must be ASSERTED by the service that owns the flow. Two of
+   * them — crypto and FX — existed here, were listed in the admin dashboard,
+   * and were read by nothing at all: an operator could switch crypto off
+   * during a Bitnob incident, watch the dashboard confirm it, and withdrawals
+   * would keep going out. A switch that reports success and changes nothing is
+   * worse than no switch, because it is trusted at exactly the wrong moment.
+   *
+   * `assertServiceEnabled` below is the only sanctioned way to read one, and
+   * `kill-switches.test.ts` fails the build if a service gains a flag without
+   * a call site.
+   */
   async cryptoEnabled(): Promise<boolean> {
     return this.boolean('crypto_enabled', true);
   }
 
   async fxEnabled(): Promise<boolean> {
     return this.boolean('fx_enabled', true);
+  }
+
+  async cardsEnabled(): Promise<boolean> {
+    return this.boolean('cards_enabled', true);
+  }
+
+  async billsEnabled(): Promise<boolean> {
+    return this.boolean('bills_enabled', true);
+  }
+
+  /**
+   * Refuses with a 503 when the named service is switched off.
+   *
+   * `ServiceUnavailableException` rather than a 4xx, deliberately: the request
+   * was well-formed and the customer did nothing wrong. It also means a client
+   * retry is the correct behaviour once the incident is over, and monitoring
+   * sees a service outage rather than a wave of customer errors.
+   *
+   * The error code names the SERVICE, so a screen can say which part of the
+   * product is paused rather than showing one generic message everywhere.
+   */
+  async assertServiceEnabled(service: KillSwitch): Promise<void> {
+    const on = await KILL_SWITCHES[service](this);
+    if (!on) throw new ServiceUnavailableException(DISABLED_ERROR[service]);
   }
 
   async registrationEnabled(): Promise<boolean> {

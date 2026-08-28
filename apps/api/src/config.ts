@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer';
-import type { AccessTokenKey, AccessTokenKeyring, EncryptionKey, Keyring } from '@xetral/identity';
+import type { AccessTokenKey, AccessTokenKeyring, BlindIndexKey, EncryptionKey, Keyring } from '@xetral/identity';
 import type { NgnAmountUnit } from '@xetral/providers';
 import { ACCESS_TOKEN_TTL_SECONDS, REFRESH_TOKEN_TTL_SECONDS } from '@xetral/identity';
 
@@ -18,7 +18,19 @@ export interface RateLimitRule {
   readonly windowSeconds: number;
 }
 
+/**
+ * Which deployment this is.
+ *
+ * REQUIRED, with no default, and the reason is the direction the failure runs
+ * in. A staging instance that fell back to `production` would simply be
+ * strict, which is survivable; a production instance that fell back to
+ * `staging` would relax the guards protecting real customers. Neither default
+ * is safe enough to be worth having, so there is none.
+ */
+export type Environment = 'production' | 'staging' | 'development';
+
 export interface ApiConfig {
+  readonly environment: Environment;
   readonly databaseUrl: string;
   readonly accessTokenKeyring: AccessTokenKeyring;
   readonly accessTokenTtlSeconds: number;
@@ -67,6 +79,20 @@ export interface ApiConfig {
   readonly bitnobWebhookSecret: string | undefined;
 
   /**
+   * The bearer token a metrics scraper must present.
+   *
+   * UNDEFINED MEANS THE ENDPOINT DOES NOT EXIST, rather than meaning it is
+   * open. `/metrics` publishes queue depths, provider health and what the
+   * platform owes customers — a business-intelligence leak to anything that
+   * can route to the instance, and worse: a non-zero `ledger_drift` published
+   * openly tells somebody the books are inconsistent before we have noticed.
+   *
+   * Defaulting to open is the failure that would never be found, because an
+   * endpoint that works is an endpoint nobody checks the guard on.
+   */
+  readonly metricsToken: string | undefined;
+
+  /**
    * Keys for sealing what must be stored but not stored in the clear: an
    * electricity token, an eSIM activation code.
    *
@@ -76,6 +102,24 @@ export interface ApiConfig {
    * the logs would say which rows were written before the key arrived.
    */
   readonly encryptionKeyring: Keyring | undefined;
+
+  /**
+   * The key that fingerprints a BVN so two accounts cannot be opened on one.
+   *
+   * SEPARATE FROM THE ENVELOPE KEYRING, and that is not tidiness. A blind
+   * index cannot have two live keys the way the keyring can — matching
+   * requires exactly one — so its lifecycle is different: rotating it means
+   * recomputing every fingerprint, and until that finishes the uniqueness rule
+   * cannot see across the boundary. Tying it to a key that rotates for
+   * unrelated reasons would break the control silently, at whatever moment
+   * somebody rotated the other thing.
+   *
+   * Optional as config and REQUIRED by the route that writes one, exactly like
+   * the keyring. A submission cannot exist without a sealed BVN, and it now
+   * cannot exist without a fingerprint either — so there is no state in which
+   * this is absent and identity review quietly stops catching duplicates.
+   */
+  readonly kycBlindIndexKey: BlindIndexKey | undefined;
 
   /** VTpass — airtime, data, utilities. `https://vtpass.com` (sandbox:
    *  `https://sandbox.vtpass.com`); the endpoint table adds `/api/...`.
@@ -207,6 +251,133 @@ export interface ApiConfig {
   /** How often withdrawals with an unknown outcome are re-checked. One
    *  instance, same arrangement as the other sweeps. */
   readonly cryptoReconcileIntervalSeconds: number | undefined;
+  /** How often addresses are re-checked for deposits whose webhook never
+   *  arrived. One instance, same arrangement as the other sweeps. */
+  readonly cryptoDepositReconcileIntervalSeconds: number | undefined;
+
+  /**
+   * Email. Optional as a set, and its absence disables PASSWORD RESET
+   * entirely — there is no other way to prove control of an address.
+   *
+   * `notificationFrom` must be an address on a domain whose SPF, DKIM and
+   * DMARC records name the provider. Security mail from an unauthenticated
+   * domain lands in spam, which is indistinguishable from not sending it.
+   */
+  /**
+   * The ceiling on password reset requests.
+   *
+   * Deliberately much tighter than the login limit, and for a different
+   * reason: an accepted request sends an email to somebody who did not ask for
+   * it. Without the per-identifier bucket the endpoint is a mail bomb aimed at
+   * any address, delivered by our own sending domain.
+   */
+  /**
+   * The ceiling on how fast any route may be called.
+   *
+   * One window, five maximums, because the classes differ in what a burst
+   * COSTS rather than in how a burst should be measured. Zero on a class
+   * disables it — which is how liveness stays unmetered.
+   */
+  /**
+   * How often to delete aged data, on exactly one instance.
+   *
+   * Undefined means never, and unlike the other workers that is not dangerous
+   * — nothing is lost, data simply accumulates. It is still wrong: the NDPA
+   * does not permit keeping personal data indefinitely.
+   */
+  readonly retentionIntervalSeconds: number | undefined;
+
+  /**
+   * How often to compare provider balances against the ledger, on exactly one
+   * instance. Undefined means nothing does — and a transaction-level sweep
+   * cannot see money that was never a transaction here.
+   */
+  readonly balanceReconcileIntervalSeconds: number | undefined;
+
+  /**
+   * How often the transaction monitoring rules run. ONE INSTANCE.
+   *
+   * Absent means no monitoring at all, and that absence is invisible from
+   * outside: no request fails, nothing errors, and the compliance queue is
+   * simply empty — which looks exactly like a quiet week. Bootstrap says so
+   * loudly for that reason.
+   */
+  readonly riskMonitorIntervalSeconds: number | undefined;
+
+  readonly requestRateLimit: {
+    readonly windowSeconds: number;
+    readonly publicMax: number;
+    readonly readMax: number;
+    readonly writeMax: number;
+    readonly moneyMax: number;
+    readonly staffMax: number;
+  };
+
+  readonly passwordResetRateLimit: {
+    readonly perIdentifier: RateLimitRule;
+    readonly perIp: RateLimitRule;
+  };
+
+  readonly resendApiKey: string | undefined;
+  readonly notificationFrom: string | undefined;
+  readonly notificationReplyTo: string | undefined;
+  /**
+   * How often queued messages are sent, in seconds.
+   *
+   * Undefined means this instance sends nothing, and exactly one should — the
+   * same arrangement as every other sweep. Bootstrap warns when none does,
+   * because the failure is silent in the worst way: rows accumulate, the API
+   * answers "check your email", and no email is ever sent.
+   */
+  readonly notificationIntervalSeconds: number | undefined;
+
+  /**
+   * The customer-facing origin, used to build links in email.
+   *
+   * Required for password reset and validated as an absolute https URL. A
+   * reset link is followed by a customer who has already been told to expect
+   * it, so a wrong or attacker-supplied origin here is a credential harvester
+   * with our branding on it — which is exactly why it is a deployment value
+   * and never read from a request header.
+   */
+  readonly appBaseUrl: string | undefined;
+  /**
+   * How long a password reset link is good for, in minutes.
+   *
+   * Short, because it is a bearer token that grants account access, and long
+   * enough to survive an email provider queueing it for a few minutes.
+   */
+  readonly passwordResetTtlMinutes: number;
+
+  /**
+   * Where platform failure alerts go, and how often we look.
+   *
+   * Both absent means failures are recorded and nobody is told — which is a
+   * legitimate state for a development box and a serious one in production, so
+   * bootstrap says so out loud rather than leaving it to be discovered.
+   */
+  readonly operationsEmail: string | undefined;
+  readonly errorAlertIntervalSeconds: number | undefined;
+
+  /**
+   * In STAGING, the only addresses email may be sent to.
+   *
+   * A staging database is very often restored from a production backup,
+   * because that is the only way to test against realistic data. The moment it
+   * is, every worker on that box is holding a list of real customers and their
+   * real addresses — and the notification worker will happily mail all of them
+   * about transfers that never happened. That is not a hypothetical failure
+   * mode; it is the classic one, and it reaches people who never consented to
+   * hear from a test system.
+   *
+   * A suffix match rather than exact addresses, so a team can use
+   * `@xetral.com` and plus-addressing without maintaining a list. Empty in
+   * staging means NOTHING is sent, which is the safe direction.
+   *
+   * Ignored entirely in production, where restricting delivery would be the
+   * bug.
+   */
+  readonly notificationAllowlist: readonly string[];
 }
 
 export class ConfigError extends Error {
@@ -355,6 +526,39 @@ function parseEncryptionKeyring(env: Env): Keyring | undefined {
   return { current, accepted };
 }
 
+/**
+ * `v1:<base64>` — ONE key, carrying its own version.
+ *
+ * Not a keyring, deliberately, and not the same parser: a keyring's whole
+ * point is that several keys are accepted at once, which is exactly what a
+ * blind index cannot do. Sharing `parseEncryptionKeyring` would have made it
+ * expressible to configure two, and the second would silently never match
+ * anything.
+ *
+ * At least 32 bytes rather than exactly 32: this keys an HMAC, which takes a
+ * key of any length, unlike AES-256 which takes precisely one.
+ */
+function parseBlindIndexKey(env: Env): BlindIndexKey | undefined {
+  const raw = optional(env, 'KYC_BLIND_INDEX_KEY');
+  if (raw === undefined) return undefined;
+
+  const separator = raw.indexOf(':');
+  if (separator === -1) {
+    throw new ConfigError(`KYC_BLIND_INDEX_KEY must look like 'v1:<base64>'`);
+  }
+  const version = raw.slice(0, separator);
+  if (!/^v[0-9]+$/.test(version)) {
+    throw new ConfigError(`KYC_BLIND_INDEX_KEY version must look like 'v1', got '${version}'`);
+  }
+  const key = Buffer.from(raw.slice(separator + 1), 'base64');
+  if (key.length < 32) {
+    throw new ConfigError(
+      `KYC_BLIND_INDEX_KEY must decode to at least 32 bytes, got ${key.length}`,
+    );
+  }
+  return { version, key };
+}
+
 /** Minor units, parsed from a STRING and never a JSON number — the same rule
  *  as everywhere else money is read from the outside world. */
 function minorUnits(env: Env, key: string): bigint | undefined {
@@ -475,7 +679,10 @@ export function loadConfig(env: Env): ApiConfig {
     );
   }
 
+  const environment = parseEnvironment(env);
+
   return {
+    environment,
     databaseUrl: required(env, 'DATABASE_URL'),
     accessTokenKeyring: parseKeyring(env),
     accessTokenTtlSeconds,
@@ -500,7 +707,9 @@ export function loadConfig(env: Env): ApiConfig {
     bitnobBaseUrl: optional(env, 'BITNOB_BASE_URL'),
     bitnobApiKey: optional(env, 'BITNOB_API_KEY'),
     bitnobWebhookSecret: optional(env, 'BITNOB_WEBHOOK_SECRET'),
+    metricsToken: optional(env, 'METRICS_TOKEN'),
     encryptionKeyring: parseEncryptionKeyring(env),
+    kycBlindIndexKey: parseBlindIndexKey(env),
     vtpassBaseUrl: optional(env, 'VTPASS_BASE_URL'),
     vtpassApiKey: optional(env, 'VTPASS_API_KEY'),
     vtpassSecretKey: optional(env, 'VTPASS_SECRET_KEY'),
@@ -527,5 +736,166 @@ export function loadConfig(env: Env): ApiConfig {
     depositReconcileIntervalSeconds: optionalInteger(env, 'DEPOSIT_RECONCILE_INTERVAL_SECONDS'),
     confirmationsFor: confirmationPolicy(env),
     cryptoReconcileIntervalSeconds: optionalInteger(env, 'CRYPTO_RECONCILE_INTERVAL_SECONDS'),
+    cryptoDepositReconcileIntervalSeconds: optionalInteger(
+      env,
+      'CRYPTO_DEPOSIT_RECONCILE_INTERVAL_SECONDS',
+    ),
+    retentionIntervalSeconds: optionalInteger(env, 'RETENTION_INTERVAL_SECONDS'),
+    balanceReconcileIntervalSeconds: optionalInteger(env, 'BALANCE_RECONCILE_INTERVAL_SECONDS'),
+    riskMonitorIntervalSeconds: optionalInteger(env, 'RISK_MONITOR_INTERVAL_SECONDS'),
+    requestRateLimit: {
+      windowSeconds: integer(env, 'REQUEST_RATE_LIMIT_WINDOW_SECONDS', 60),
+      // Generous, because an unauthenticated request has only an address to
+      // key on and Nigerian mobile traffic shares addresses across a whole
+      // carrier. The tight ceilings on these routes are the per-identifier
+      // buckets in login-rate-limit.guard.ts, which NAT does not blur.
+      publicMax: integer(env, 'REQUEST_RATE_LIMIT_PUBLIC', 120),
+      // A screen opening fires several reads at once, and a customer pulling
+      // to refresh does it again. Loose enough not to be felt by anybody using
+      // the app, tight enough that harvesting an account takes hours.
+      readMax: integer(env, 'REQUEST_RATE_LIMIT_READ', 120),
+      writeMax: integer(env, 'REQUEST_RATE_LIMIT_WRITE', 30),
+      // A customer sending twelve transfers in a minute is doing something
+      // they will remember; a stolen session emptying an account does exactly
+      // this. Deliberately the tightest class.
+      moneyMax: integer(env, 'REQUEST_RATE_LIMIT_MONEY', 12),
+      // Higher than a customer's, because a reviewer working a queue is a
+      // person clicking as fast as they can read, and refusing them mid-queue
+      // is how a backlog becomes a shared login.
+      staffMax: integer(env, 'REQUEST_RATE_LIMIT_STAFF', 90),
+    },
+    passwordResetRateLimit: {
+      // Three per hour per address. Enough for a customer whose first email
+      // went to spam to try again twice; not enough to be a weapon.
+      perIdentifier: {
+        max: integer(env, 'PASSWORD_RESET_RATE_LIMIT_PER_IDENTIFIER', 3),
+        windowSeconds: integer(env, 'PASSWORD_RESET_RATE_LIMIT_WINDOW_SECONDS', 3600),
+      },
+      perIp: {
+        max: integer(env, 'PASSWORD_RESET_RATE_LIMIT_PER_IP', 15),
+        windowSeconds: integer(env, 'PASSWORD_RESET_RATE_LIMIT_WINDOW_SECONDS', 3600),
+      },
+    },
+    resendApiKey: optional(env, 'RESEND_API_KEY'),
+    notificationFrom: optional(env, 'NOTIFICATION_FROM'),
+    notificationReplyTo: optional(env, 'NOTIFICATION_REPLY_TO'),
+    notificationIntervalSeconds: optionalInteger(env, 'NOTIFICATION_INTERVAL_SECONDS'),
+    appBaseUrl: appBaseUrl(env),
+    passwordResetTtlMinutes: integer(env, 'PASSWORD_RESET_TTL_MINUTES', 30),
+    operationsEmail: optional(env, 'OPERATIONS_EMAIL'),
+    errorAlertIntervalSeconds: optionalInteger(env, 'ERROR_ALERT_INTERVAL_SECONDS'),
+    notificationAllowlist: parseAllowlist(env),
   };
+}
+
+/**
+ * Which deployment this is, and what that FORBIDS.
+ *
+ * The guards below are the whole point of naming the environment. A staging
+ * environment whose only protection is "we set different variables" is one
+ * variable away from test traffic moving real money — and the person who makes
+ * that mistake will be copying a production `.env` to get a box working
+ * quickly, which is exactly when nobody is reading carefully.
+ *
+ * So staging REFUSES TO BOOT pointed at a live provider. Failing at startup is
+ * loud and costs a deploy; failing on the first card issue costs a real
+ * customer's money and looks like a bug in staging.
+ */
+function parseEnvironment(env: Env): Environment {
+  const raw = required(env, 'XETRAL_ENVIRONMENT').trim().toLowerCase();
+  if (raw !== 'production' && raw !== 'staging' && raw !== 'development') {
+    throw new ConfigError(
+      `XETRAL_ENVIRONMENT must be production, staging or development, got '${raw}'`,
+    );
+  }
+
+  if (raw === 'staging') assertProviderSandbox(env);
+  return raw;
+}
+
+/**
+ * A provider host that is not a sandbox is the one thing staging must not have.
+ *
+ * Matched on the URL rather than on a flag somebody sets alongside it: the
+ * flag and the URL can disagree, and the URL is the thing that actually
+ * carries the request. Bitnob's own SDK names its two hosts
+ * `https://api.bitnob.co/api/v1` and `https://sandboxapi.bitnob.co/api/v1`, and
+ * VTpass uses `vtpass.com` and `sandbox.vtpass.com`.
+ *
+ * An UNSET provider is fine — an instance with no card configuration serves
+ * everything else and refuses those routes. It is a SET, live one that is
+ * refused.
+ */
+function assertProviderSandbox(env: Env): void {
+  const live: string[] = [];
+
+  const bitnob = optional(env, 'BITNOB_BASE_URL');
+  if (bitnob !== undefined && !/sandbox/i.test(bitnob)) {
+    live.push(`BITNOB_BASE_URL=${bitnob}`);
+  }
+
+  const vtpass = optional(env, 'VTPASS_BASE_URL');
+  if (vtpass !== undefined && !/sandbox/i.test(vtpass)) {
+    live.push(`VTPASS_BASE_URL=${vtpass}`);
+  }
+
+  if (live.length > 0) {
+    throw new ConfigError(
+      `XETRAL_ENVIRONMENT is 'staging' but these point at a LIVE provider: ` +
+        `${live.join(', ')}. A staging instance that can reach production ` +
+        `providers can spend real money and issue real cards. Use the sandbox ` +
+        `hosts, or set XETRAL_ENVIRONMENT=production if this is production.`,
+    );
+  }
+}
+
+/**
+ * Who staging is allowed to email.
+ *
+ * Deliberately NOT defaulted to something permissive. In staging an unset
+ * allowlist means nothing is sent, because the alternative — a staging box
+ * restored from a production backup mailing every real customer — is the
+ * failure this exists to prevent, and it is not one an operator gets to make
+ * by omission.
+ */
+function parseAllowlist(env: Env): readonly string[] {
+  const raw = optional(env, 'NOTIFICATION_ALLOWLIST');
+  if (raw === undefined) return [];
+  return raw
+    .split(',')
+    .map((entry) => entry.trim().toLowerCase())
+    .filter((entry) => entry !== '');
+}
+
+/**
+ * The origin reset links are built from.
+ *
+ * Validated rather than passed through. A reset link is followed by a customer
+ * who has been told to expect it, so a malformed or non-https origin here
+ * produces a link that either does not work or is interceptable — and both
+ * failures land on the one flow a locked-out customer has left.
+ *
+ * `http://localhost` is allowed because development has no certificate;
+ * nothing else non-https is.
+ */
+function appBaseUrl(env: Env): string | undefined {
+  const raw = optional(env, 'APP_BASE_URL');
+  if (raw === undefined) return undefined;
+
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new ConfigError(`APP_BASE_URL must be an absolute URL, got '${raw}'`);
+  }
+  const isLocal = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+  if (url.protocol !== 'https:' && !isLocal) {
+    throw new ConfigError(
+      `APP_BASE_URL must be https (got '${url.protocol}'); password reset links are ` +
+        `bearer tokens and must not travel over plaintext`,
+    );
+  }
+  // Normalised without a trailing slash so link building is a plain
+  // concatenation everywhere rather than each caller guessing.
+  return `${url.origin}${url.pathname.replace(/\/+$/, '')}`;
 }

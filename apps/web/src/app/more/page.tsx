@@ -43,6 +43,16 @@ const GROUPS: readonly {
       { href: '/kyc',      label: 'Identity',  sub: 'Verification status', icon: 'user' },
     ],
   },
+  {
+    // Reachable without signing in too, at /legal/privacy and /legal/terms.
+    // Linked from here as well because a customer looking for "what do they
+    // keep about me?" looks inside the app, not on a marketing page.
+    title: 'Legal',
+    items: [
+      { href: '/legal/privacy', label: 'Privacy', sub: 'What we keep, and for how long', icon: 'shield' },
+      { href: '/legal/terms',   label: 'Terms',   sub: 'How disputes and limits work', icon: 'receipt' },
+    ],
+  },
 ];
 
 export default function More() {

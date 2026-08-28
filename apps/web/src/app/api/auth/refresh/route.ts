@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { apiBaseUrl, COOKIE_OPTIONS, REFRESH_COOKIE } from '@/lib/config';
+import { forwardedFor } from '@/lib/forwarded';
 
 /**
  * Rotate.
@@ -24,7 +25,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   const upstream = await fetch(`${apiBaseUrl()}/v1/auth/refresh`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...forwardedFor(request) },
     body: JSON.stringify({ refresh_token: decodeURIComponent(token) }),
   });
 

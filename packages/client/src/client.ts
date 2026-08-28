@@ -90,6 +90,26 @@ export interface Card {
   readonly balance: string;
 }
 
+/**
+ * What a reveal returns. A SEPARATE type from `Card`, deliberately.
+ *
+ * If these were optional members of `Card`, every list render, every cached
+ * response and every debug log that stringifies a card would carry a PAN
+ * whenever one happened to be present — and nothing would fail on the day it
+ * was. Two types means a card number can only reach code that named it.
+ *
+ * Nothing in this package stores one. It is returned from the call and that is
+ * the end of its life here; a caller that puts it in state is making that
+ * decision visibly.
+ */
+export interface CardSecrets {
+  readonly pan: string;
+  readonly cvv: string;
+  readonly expiry_month: number;
+  readonly expiry_year: number;
+  readonly name_on_card?: string;
+}
+
 export interface Deposit {
   readonly id: string;
   readonly amount: string;
@@ -134,6 +154,73 @@ export interface KycStatus {
   readonly bvn_last4: string;
   readonly rejection_reason: string | null;
   readonly created_at: string;
+}
+
+/**
+ * What a customer's verification tier allows.
+ *
+ * `daily_limit` is a MAJOR-UNIT DECIMAL STRING — "0.00", not "0" — like every
+ * amount the API sends. A zero here is a real limit, not a missing value: an unverified account may move no crypto at all, because a
+ * chain transaction is the one movement nobody can recall.
+ */
+/** The kinds a customer can be asked about. Only the mailing list can be
+ *  withdrawn — refusing the terms is closing the account, which is a
+ *  different action with its own path. */
+export type ConsentKind = 'terms' | 'privacy' | 'marketing_email';
+
+export interface ConsentRecord {
+  readonly kind: string;
+  readonly granted: boolean;
+  /** WHICH WORDS. A consent that records only "yes" cannot answer the
+   *  question that matters once a notice is republished. */
+  readonly version: string;
+  readonly occurred_at: string;
+  readonly covers_current: boolean;
+}
+
+export interface ConsentState {
+  readonly consents: readonly ConsentRecord[];
+  /** What is published now, and whether this customer has agreed to it. */
+  readonly documents: readonly {
+    readonly kind: string;
+    readonly version: string;
+    readonly summary: string;
+    readonly agreed: boolean;
+  }[];
+}
+
+export interface DataRequest {
+  readonly uuid: string;
+  readonly kind: string;
+  readonly status: string;
+  readonly requested_at: string;
+  /** Ours and not movable. A process that can push its own deadline out has
+   *  no deadline, and this one is statutory. */
+  readonly deadline_at: string;
+  readonly completed_at?: string | null;
+  /** What was actually done, in words. For an erasure this names what went
+   *  AND what had to stay — an answer listing only the deletions would read
+   *  as a complete erasure, which it deliberately is not. */
+  readonly outcome?: string | null;
+}
+
+export interface ErasureScopeRow {
+  readonly table_name: string;
+  readonly scope: 'erasable' | 'retained';
+  readonly rationale: string;
+}
+
+export interface KycLimits {
+  /** 0 registered, 1 verified, 2 enhanced. */
+  readonly tier: number;
+  readonly limits: readonly {
+    readonly currency: string;
+    readonly daily_limit: string;
+  }[];
+  /** The next tier this customer can reach BY THEIR OWN ACTION, or null.
+   *  Enhanced is an administrator's judgement about source of funds, so it is
+   *  never offered as something to apply for. */
+  readonly next_tier: number | null;
 }
 
 export interface XetralClientOptions {
@@ -380,6 +467,74 @@ export class XetralClient {
     return body.kyc;
   }
 
+  /**
+   * What this customer's verification currently allows them to move.
+   *
+   * The half that makes tiers a product rather than a trap: somebody refused
+   * for exceeding a ceiling can be shown what it is and how to raise it,
+   * instead of an error code they can do nothing with.
+   *
+   * `daily_limit` is a MAJOR-UNIT DECIMAL STRING, like every amount that
+   * crosses this boundary. Format it; never turn it into a number.
+   */
+  async kycLimits(): Promise<KycLimits> {
+    return this.#get<KycLimits>('/v1/kyc/limits');
+  }
+
+  /* ------------------------------ data rights --------------------------- */
+
+  /**
+   * A copy of everything held about this customer.
+   *
+   * TAKES THE TRANSACTION PIN, unlike every other read on this client. It is
+   * every balance, every transaction and every place they have signed in from
+   * in one document — the single read a stolen session most wants, and the one
+   * whose consequence outlives the access token that fetched it.
+   */
+  async exportMyData(transactionPin: string): Promise<Record<string, unknown>> {
+    return this.#post<Record<string, unknown>>('/v1/me/export', {
+      transaction_pin: transactionPin,
+    });
+  }
+
+  /** Asks for a copy or for erasure. NO PIN: the customer most likely to ask
+   *  is one who has just found somebody else in their account. */
+  async requestMyData(kind: 'export' | 'erasure'): Promise<DataRequest> {
+    return this.#post<DataRequest>('/v1/me/requests', { kind });
+  }
+
+  async myDataRequests(): Promise<readonly DataRequest[]> {
+    const body = await this.#get<{ requests: DataRequest[] }>('/v1/me/requests');
+    return body.requests;
+  }
+
+  /** What can be erased and what cannot, with the reason. Published to the
+   *  customer, because being refused with no way to learn what would change is
+   *  what turns a right into a support ticket. */
+  async erasureScope(): Promise<readonly ErasureScopeRow[]> {
+    const body = await this.#get<{ scope: ErasureScopeRow[] }>('/v1/me/erasure-scope');
+    return body.scope;
+  }
+
+  /* -------------------------------- consent ----------------------------- */
+
+  /** What this customer has agreed to, and what is currently published. */
+  async consents(): Promise<ConsentState> {
+    return this.#get<ConsentState>('/v1/consents');
+  }
+
+  /**
+   * Grants or withdraws.
+   *
+   * ONE CALL EITHER WAY, and no transaction PIN. Consent that is harder to
+   * withdraw than to give is not freely given, so there is deliberately no
+   * separate `withdraw` method and no confirmation step for a client to add
+   * on one side and not the other.
+   */
+  async setConsent(kind: ConsentKind, granted: boolean): Promise<ConsentRecord> {
+    return this.#post<ConsentRecord>('/v1/consents', { kind, granted });
+  }
+
   async submitKyc(input: {
     fullName: string;
     dateOfBirth: string;
@@ -437,6 +592,24 @@ export class XetralClient {
    *  remembering a PIN. Unfreezing and terminating both ask. */
   async freezeCard(id: string): Promise<Card> {
     return this.#post(`/v1/cards/${encodeURIComponent(id)}/freeze`, {});
+  }
+
+  /**
+   * The card number, the CVV and the expiry.
+   *
+   * Takes a PIN because the server does: a number, a CVV and an expiry
+   * together are everything needed to spend online, and unlike a transfer
+   * there is no ledger entry afterwards for anyone to notice.
+   *
+   * The result is deliberately not cached anywhere in this client. Every
+   * reveal is a fresh call that the server records and counts, which is what
+   * makes "when was this number last shown?" answerable — and a cached copy
+   * would quietly make the answer wrong.
+   */
+  async revealCard(id: string, pin: string): Promise<CardSecrets> {
+    return this.#post(`/v1/cards/${encodeURIComponent(id)}/reveal`, {
+      transaction_pin: pin,
+    });
   }
 
   async unfreezeCard(id: string, pin: string): Promise<Card> {

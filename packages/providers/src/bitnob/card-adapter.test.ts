@@ -343,3 +343,122 @@ describe('lifecycle operations', () => {
     expect(calls[0]?.url).toBe('https://api.bitnob.test/api/v1/virtualcards/card/card_77');
   });
 });
+
+/**
+ * The card object exactly as Bitnob's own SDK reads it
+ * (`lib/virtual_card.ts`, `generateVirtualCardObject`): `cardNumber`, `cvv2`
+ * and a single `expiry`.
+ *
+ * This adapter's schema REQUIRED `last4`, `expiry_month` and `expiry_year` —
+ * none of which the SDK mentions — so this exact payload threw `unexpected
+ * card shape`. If the SDK is right about the names, issuing a card failed on
+ * the FIRST REAL CALL, and every test passed because the tests were written
+ * from the same assumption as the schema. That is the failure this provider
+ * already produced once, recorded in Phase 3.
+ *
+ * Which shape is correct cannot be settled from here, so the read accepts
+ * both and these pin the one that was previously rejected.
+ */
+const SDK_SHAPED = {
+  data: {
+    id: 'card_sdk',
+    status: 'active',
+    balance: '1000000',
+    cardNumber: '4111111111111234',
+    cvv2: '123',
+    cardName: 'A Customer',
+    cardType: 'visa',
+    expiry: '11/30',
+  },
+};
+
+describe('the two card response shapes', () => {
+  it('reads a card the SDK-shaped way', async () => {
+    const { adapter } = adapterWith([{ json: SDK_SHAPED }]);
+    const card = await adapter.get('card_sdk');
+
+    expect(card.last4).toBe('1234');
+    expect(card.expiryMonth).toBe(11);
+    expect(card.expiryYear).toBe(2030);
+  });
+
+  it('still reads a card the documented way', async () => {
+    const { adapter } = adapterWith([{ json: cardBody() }]);
+    const card = await adapter.get('card_77');
+
+    expect(card.last4).toBe('4242');
+    expect(card.expiryMonth).toBe(11);
+    expect(card.expiryYear).toBe(2030);
+  });
+
+  it('takes only the last four from a full number, and keeps nothing else', async () => {
+    // The one place a PAN exists on the ordinary read path, and it exists for
+    // the length of one expression: what leaves is four characters, so nothing
+    // downstream can leak what it never received.
+    const { adapter } = adapterWith([{ json: SDK_SHAPED }]);
+    const card = await adapter.get('card_sdk');
+
+    expect(card.last4).toHaveLength(4);
+    // NOT `JSON.stringify`: the balance is a bigint and stringifying one
+    // throws, which is correct behaviour in this codebase rather than a
+    // nuisance to patch. Joining the values reaches every field without
+    // needing a serialiser.
+    expect(Object.values(card).join('|')).not.toContain('4111111111111234');
+  });
+
+  it.each([
+    ['11/30', 11, 2030],
+    ['11/2030', 11, 2030],
+    ['2030-11', 11, 2030],
+    ['9/29', 9, 2029],
+  ])('reads a combined expiry %s', async (raw, month, year) => {
+    const { adapter } = adapterWith([
+      { json: { data: { ...SDK_SHAPED.data, expiry: raw } } },
+    ]);
+    const card = await adapter.get('card_sdk');
+
+    expect(card.expiryMonth).toBe(month);
+    expect(card.expiryYear).toBe(year);
+  });
+
+  it('refuses a card that carries NEITHER shape', async () => {
+    // The honest failure. Accepting a card with no expiry at all would put a
+    // row in `cards` that no customer could use and nothing would explain.
+    const { adapter } = adapterWith([
+      { json: { data: { id: 'card_x', status: 'active', balance: '0' } } },
+    ]);
+    await expect(adapter.get('card_x')).rejects.toBeInstanceOf(ProviderContractError);
+  });
+});
+
+describe('revealing a card', () => {
+  it('returns the number, the CVV and the expiry', async () => {
+    const { adapter } = adapterWith([{ json: SDK_SHAPED }]);
+    const secrets = await adapter.reveal('card_sdk');
+
+    expect(secrets.pan).toBe('4111111111111234');
+    expect(secrets.cvv).toBe('123');
+    expect(secrets.expiryMonth).toBe(11);
+    expect(secrets.expiryYear).toBe(2030);
+    expect(secrets.nameOnCard).toBe('A Customer');
+  });
+
+  it('throws rather than returning half a card', async () => {
+    // A customer shown a number with no CVV has no idea whether the problem is
+    // theirs, and will simply try again. An error tells the truth.
+    const { adapter } = adapterWith([{ json: cardBody() }]);
+    await expect(adapter.reveal('card_77')).rejects.toBeInstanceOf(ProviderContractError);
+  });
+
+  it('keeps the payload out of the error when the shape is wrong', async () => {
+    // Every other parse failure in this adapter names the offending fields.
+    // Doing that here would write a card number into a log line the moment the
+    // response shape shifted.
+    const { adapter } = adapterWith([{ json: { data: { nonsense: true } } }]);
+    const error = await adapter.reveal('card_1').catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ProviderContractError);
+    expect((error as Error).message).not.toContain('nonsense');
+    expect((error as Error).message).toContain('card_1');
+  });
+});

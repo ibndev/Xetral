@@ -17,6 +17,7 @@ import { AppModule } from '../app.module.js';
 import type { ApiConfig } from '../config.js';
 import { systemClock } from '../tokens.js';
 import { testApiConfig } from '../test-support/api-config.js';
+import { SettingsService } from '../settings/settings.service.js';
 
 /**
  * FX and remittance, end to end.
@@ -120,6 +121,13 @@ async function onboard(): Promise<Customer> {
     await hashPassword(PASSWORD),
   ]);
 
+  // VERIFIED, because converting currency is a KYC-gated activity and an
+  // unverified account may move no dollars at all. Set here rather than left
+  // at the default so this fixture describes a customer who could actually
+  // reach these routes — a suite whose fixture is in a state production
+  // refuses is a suite asserting on behaviour nobody will ever see.
+  await pool.query(`UPDATE users SET kyc_tier = 1 WHERE id = $1::bigint`, [userId]);
+
   const login = await request(app.getHttpServer())
     .post('/v1/auth/login')
     .send({
@@ -180,6 +188,11 @@ async function balances(
   return out;
 }
 
+const PINNED: Readonly<Record<string, string>> = {
+  fx_daily_limit_kobo: '10000000000',
+  fx_count_hourly: '200',
+};
+
 beforeAll(async () => {
   pool = new pg.Pool({ connectionString: DATABASE_URL, max: 8 });
   ledger = new LedgerService(pool);
@@ -192,6 +205,13 @@ beforeAll(async () => {
   );
 
   app = await boot(makeConfig());
+
+  // Pinned rather than inherited: the suites share a database and run in file
+  // order, and one that narrows a limit does not put it back.
+  for (const [key, value] of Object.entries(PINNED)) {
+    await pool.query(`UPDATE platform_settings SET value = $2 WHERE key = $1`, [key, value]);
+  }
+  await app.get(SettingsService).refresh();
 });
 
 afterAll(async () => {

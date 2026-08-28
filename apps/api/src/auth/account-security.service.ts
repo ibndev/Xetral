@@ -15,6 +15,9 @@ import {
   verifyPassword,
 } from '@xetral/identity';
 import { DATABASE } from '../tokens.js';
+import { NotificationService } from '../notifications/notification.service.js';
+import type { NotificationRequest } from '../notifications/templates.js';
+import { lagosTime } from './password-reset.service.js';
 
 /**
  * What a customer can do when they think somebody else is in their account.
@@ -44,7 +47,10 @@ import { DATABASE } from '../tokens.js';
 export class AccountSecurityService {
   readonly #logger = new Logger(AccountSecurityService.name);
 
-  constructor(@Inject(DATABASE) private readonly pool: Pool) {}
+  constructor(
+    @Inject(DATABASE) private readonly pool: Pool,
+    @Inject(NotificationService) private readonly notifications: NotificationService,
+  ) {}
 
   /**
    * Every device that has held a session, newest first.
@@ -150,8 +156,45 @@ export class AccountSecurityService {
     );
 
     const count = result.rowCount ?? 0;
-    if (count > 0) this.#logger.warn(`user ${userUuid} signed out ${count} other device(s)`);
+    if (count > 0) {
+      this.#logger.warn(`user ${userUuid} signed out ${count} other device(s)`);
+      // Confirmed by email as well as on screen. This is the action a customer
+      // takes when they believe somebody else is in their account, and the
+      // confirmation is what tells them it worked — including on the phone
+      // they were NOT holding, which is where they will look if it did not.
+      await this.#tell(userUuid, {
+        kind: 'devices_revoked',
+        count,
+        at: lagosTime(),
+      });
+    }
     return count;
+  }
+
+  /**
+   * Enqueue a security alert for a customer identified by uuid.
+   *
+   * Detached: these alerts follow an action that has already committed, and
+   * none of them is worth undoing that action for. A customer who could not be
+   * emailed still had their devices signed out, which was the point.
+   */
+  async #tell(userUuid: string, request: NotificationRequest): Promise<void> {
+    const target = await this.pool.query<{ id: string; email: string | null }>(
+      `SELECT id, email FROM users WHERE uuid = $1`,
+      [userUuid],
+    );
+    const row = target.rows[0];
+    if (row === undefined || row.email === null) return;
+
+    await this.notifications.enqueueDetached({
+      userId: row.id,
+      recipient: row.email,
+      // To the minute. Signing out other devices twice in one minute is one
+      // event as far as a customer is concerned; doing it again tomorrow is
+      // not.
+      idempotencyKey: `${request.kind}:${row.id}:${new Date().toISOString().slice(0, 16)}`,
+      request,
+    });
   }
 
   /**

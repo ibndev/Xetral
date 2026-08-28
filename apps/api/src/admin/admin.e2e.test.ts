@@ -13,6 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../app.module.js';
 import { systemClock } from '../tokens.js';
 import { testApiConfig } from '../test-support/api-config.js';
+import { enrolAndElevate } from '../test-support/staff-totp.js';
 
 /**
  * Registration, identity, and the operations backend, over HTTP.
@@ -85,7 +86,25 @@ async function grant(person: Person, role: string): Promise<void> {
      ON CONFLICT DO NOTHING`,
     [person.userId, role],
   );
+
+  // Every staff route now requires a second factor, including the read-only
+  // ones — so a role with no authenticator is a role that cannot be used.
+  // Enrolment here goes through the real endpoints; see the helper for what
+  // it does and does not exercise.
+  await enrolAndElevate(app, pool, person.token, person.userId);
 }
+
+/**
+ * A DIFFERENT BVN per person, because they are different people.
+ *
+ * One BVN shared across the whole suite worked until `025_bvn_uniqueness.sql`
+ * made one BVN verify one account — at which point the second approval
+ * anywhere in the file would have failed for a reason having nothing to do
+ * with what that test was about. A test whose fixture says two customers are
+ * the same person is a test that will be debugged as a product bug.
+ */
+let bvnCounter = 0;
+const nextBvn = (): string => `223${String(++bvnCounter).padStart(8, '0')}`;
 
 const submitKyc = (person: Person, overrides: Record<string, string> = {}) =>
   request(app.getHttpServer())
@@ -95,7 +114,7 @@ const submitKyc = (person: Person, overrides: Record<string, string> = {}) =>
       full_name: 'Adaeze Okonkwo',
       date_of_birth: '1994-03-11',
       phone: '+2348012345678',
-      bvn: '22345678901',
+      bvn: nextBvn(),
       address: '14 Bode Thomas Street, Surulere, Lagos',
       ...overrides,
     });
@@ -239,19 +258,122 @@ describe('liveness and readiness', () => {
 describe('identity verification', () => {
   it('seals the BVN and returns only its last four digits', async () => {
     const person = await register();
-    const res = await submitKyc(person).expect(200);
+    const bvn = nextBvn();
+    const res = await submitKyc(person, { bvn }).expect(200);
 
-    expect(res.body.bvn_last4).toBe('8901');
-    expect(JSON.stringify(res.body)).not.toContain('22345678901');
+    expect(res.body.bvn_last4).toBe(bvn.slice(-4));
+    expect(JSON.stringify(res.body)).not.toContain(bvn);
 
-    const stored = await pool.query<{ bvn_sealed: string; bvn_last4: string }>(
-      `SELECT bvn_sealed, bvn_last4 FROM kyc_submissions WHERE user_id = $1`,
+    const stored = await pool.query<{
+      bvn_sealed: string;
+      bvn_last4: string;
+      bvn_fingerprint: string;
+    }>(
+      `SELECT bvn_sealed, bvn_last4, bvn_fingerprint
+         FROM kyc_submissions WHERE user_id = $1`,
       [person.userId],
     );
     // Structural, not customary: the CHECK refuses a value without a key
     // version, so a plaintext BVN cannot reach the row even by accident.
     expect(stored.rows[0]?.bvn_sealed).toMatch(/^v[0-9]+:/);
-    expect(stored.rows[0]?.bvn_sealed).not.toContain('22345678901');
+    expect(stored.rows[0]?.bvn_sealed).not.toContain(bvn);
+    // The fingerprint is keyed, so it is not the BVN either — an unkeyed
+    // digest of an eleven-digit number is a few hours of hashing away from
+    // being the number.
+    expect(stored.rows[0]?.bvn_fingerprint).toMatch(/^v[0-9]+:[0-9a-f]{64}$/);
+    expect(stored.rows[0]?.bvn_fingerprint).not.toContain(bvn);
+  });
+
+  it('accepts a second submission on one BVN and REFUSES the second approval', async () => {
+    // One person, one account. Every per-customer control in this platform —
+    // the daily ceiling, the new-recipient count, the hourly velocity — is
+    // only a limit at all if a person cannot cheaply become several customers.
+    //
+    // The submission is accepted deliberately: a form that answered "that BVN
+    // is already registered" would confirm, to anybody holding a stolen BVN,
+    // that its owner banks here. The reviewer decides.
+    const bvn = nextBvn();
+    const reviewer = await register();
+    await grant(reviewer, 'compliance');
+
+    const first = await register();
+    const second = await register();
+    await submitKyc(first, { bvn }).expect(200);
+    await submitKyc(second, { bvn }).expect(200);
+
+    const idOf = async (email: string): Promise<string> => {
+      const queue = await request(app.getHttpServer())
+        .get('/v1/admin/kyc')
+        .set('Authorization', `Bearer ${reviewer.token}`)
+        .expect(200);
+      const row = (queue.body.queue as { id: string; email: string }[]).find(
+        (s) => s.email === email,
+      );
+      if (row === undefined) throw new Error(`no queued submission for ${email}`);
+      return row.id;
+    };
+
+    const review = (id: string) =>
+      request(app.getHttpServer())
+        .post(`/v1/admin/kyc/${id}/review`)
+        .set('Authorization', `Bearer ${reviewer.token}`)
+        .send({ decision: 'approve', transaction_pin: PIN });
+
+    await review(await idOf(first.email)).expect(200);
+
+    const refused = await review(await idOf(second.email));
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toBe('bvn_already_verified');
+
+    // And the second customer is still unverified rather than half-approved:
+    // the refusal rolled back the whole transaction, so no provider mapping
+    // was created either.
+    const mapping = await pool.query(
+      `SELECT 1 FROM provider_customers WHERE user_id = $1`,
+      [second.userId],
+    );
+    expect(mapping.rowCount).toBe(0);
+  });
+
+  it('shows the reviewer the collision before they click', async () => {
+    // The unique index makes the rule true whether or not anybody looks. This
+    // is so the refusal is not a surprise at the moment of approval, and so
+    // the reviewer can see WHICH account holds it — the fact that decides
+    // whether this is fraud or somebody who lost access to their first
+    // account.
+    const bvn = nextBvn();
+    const reviewer = await register();
+    await grant(reviewer, 'compliance');
+
+    const first = await register();
+    await submitKyc(first, { bvn }).expect(200);
+
+    const queue = await request(app.getHttpServer())
+      .get('/v1/admin/kyc')
+      .set('Authorization', `Bearer ${reviewer.token}`)
+      .expect(200);
+    const id = (queue.body.queue as { id: string; email: string }[]).find(
+      (s) => s.email === first.email,
+    )?.id;
+
+    await request(app.getHttpServer())
+      .post(`/v1/admin/kyc/${id ?? ''}/review`)
+      .set('Authorization', `Bearer ${reviewer.token}`)
+      .send({ decision: 'approve', transaction_pin: PIN })
+      .expect(200);
+
+    const second = await register();
+    await submitKyc(second, { bvn }).expect(200);
+
+    const collisions = await pool.query<{
+      pending_user_id: string;
+      approved_user_id: string;
+    }>(
+      `SELECT pending_user_id::text, approved_user_id::text
+         FROM kyc_bvn_collisions WHERE pending_user_id = $1::bigint`,
+      [second.userId],
+    );
+    expect(collisions.rows[0]?.approved_user_id).toBe(first.userId);
   });
 
   it('refuses somebody too young to hold an account', async () => {
@@ -333,6 +455,142 @@ describe('identity verification', () => {
 });
 
 describe('the operations surface', () => {
+  it('shows every queue that has been declared, over HTTP', async () => {
+    /*
+     * THE FAILURE THIS EXISTS TO CATCH is not a wrong number, it is a missing
+     * row. `admin_work_queue` named five sources and was written in Phase 12,
+     * before disputes, monitoring, cases, stuck card holds, consent, data
+     * requests and three drift views existed — so an operator saw five empty
+     * queues and reasonably concluded there was nothing to do.
+     *
+     * The SQL suite proves the view and `attention_sources` agree. This
+     * proves the number reaching a browser is the same one, which is the half
+     * a database test cannot see: three controllers were once imported and
+     * never mounted, and every route answered 404 while a coverage test
+     * reported success.
+     */
+    const support = await register();
+    await grant(support, 'support');
+
+    const res = await request(app.getHttpServer())
+      .get('/v1/admin/overview')
+      .set('Authorization', `Bearer ${support.token}`)
+      .expect(200);
+
+    const queues = res.body.queues as { queue: string; waiting: string }[];
+    const declared = await pool.query<{ queue_name: string }>(
+      `SELECT queue_name FROM attention_sources WHERE decision = 'queue'`,
+    );
+
+    expect(declared.rowCount).toBeGreaterThan(20);
+    expect(queues.map((q) => q.queue).sort()).toEqual(
+      declared.rows.map((r) => r.queue_name).sort(),
+    );
+
+    // An empty queue still reports, because "0 waiting" says it was checked
+    // and an absent row says nothing at all.
+    expect(queues.every((q) => q.waiting !== undefined)).toBe(true);
+  });
+
+  it('reports what this deployment has not been told yet', async () => {
+    /**
+     * The readiness check, against a real database.
+     *
+     * What a unit test cannot settle is whether the two queries it runs match
+     * the schema — `platform_settings` and the join over
+     * `provider_credential_slots` are SQL strings, invisible to the compiler,
+     * and the two failures this codebase has recorded of exactly that shape
+     * (an UPDATE against a table called `sessions`, a UUID cast to bigint)
+     * both answered 500 in production and passed every unit test.
+     */
+    const operator = await register();
+    await grant(operator, 'admin');
+
+    const res = await request(app.getHttpServer())
+      .get('/v1/admin/readiness')
+      .set('Authorization', `Bearer ${operator.token}`)
+      .expect(200);
+
+    const rows = res.body.rows as {
+      name: string;
+      kind: string;
+      state: string;
+      failure: string;
+      ifMissed: string;
+    }[];
+
+    // The whole checklist, not a filtered view of it: an entry that is fine
+    // still has to appear, for the reason `admin_work_queue` emits a row for
+    // an empty queue. "Nothing to do" and "not checked" look identical
+    // otherwise.
+    expect(rows.length).toBeGreaterThan(100);
+    expect(new Set(rows.map((r) => r.kind))).toEqual(
+      new Set(['env', 'setting', 'credential', 'action']),
+    );
+
+    // Every seeded setting resolves, which is what proves the query matched
+    // the schema rather than returning nothing and reading as "all unset".
+    const settings = rows.filter((r) => r.kind === 'setting');
+    expect(settings.length).toBeGreaterThan(40);
+    expect(settings.every((r) => r.state === 'set')).toBe(true);
+
+    // A role granted to a person is not observable from inside the process,
+    // and the check says so rather than guessing.
+    expect(rows.filter((r) => r.kind === 'action').every((r) => r.state === 'not-observable'))
+      .toBe(true);
+
+    // The number an operator acts on.
+    expect(typeof res.body.summary.silentAndUnset).toBe('number');
+    expect(res.body.instance.environment).toBeDefined();
+
+    // AND IT CARRIES NO SECRET. A credential row says whether the slot is
+    // filled and never what is in it — the same rule that means there is no
+    // endpoint anywhere returning a provider key, masked or otherwise. A
+    // readiness screen is exactly where that rule gets quietly broken.
+    //
+    // Asserted on the SHAPE rather than by scanning for something that looks
+    // like a key. The first version searched the body for `sk_` and failed on
+    // `risk_dormant_days`, which is the trouble with pattern-matching for
+    // secrets: it finds prose and would miss a field somebody adds called
+    // `currentValue`.
+    const allowed = new Set(['name', 'kind', 'failure', 'state', 'ifMissed', 'flow']);
+    for (const row of rows as unknown as Record<string, unknown>[]) {
+      const extra = Object.keys(row).filter((k) => !allowed.has(k));
+      expect(extra, `a readiness row carries ${extra.join(', ')}`).toEqual([]);
+    }
+    for (const slot of rows.filter((r) => r.kind === 'credential')) {
+      expect(['set', 'unset']).toContain(slot.state);
+    }
+
+    // A CREDENTIAL SET ONLY IN THE ENVIRONMENT IS SET. The database is
+    // authoritative and the environment is the fallback, so a slot filled by
+    // `BITNOB_API_KEY` alone works — and the first version of this check
+    // joined only against `provider_credentials`, which would have put a
+    // false finding on every deployment that has not yet used the dashboard.
+    const bitnobKey = rows.find((r) => r.name === 'bitnob.api_key');
+    expect(bitnobKey).toBeDefined();
+    const configuredInEnv = (process.env['BITNOB_API_KEY'] ?? '') !== '';
+    const stored = await pool.query(
+      `SELECT 1 FROM provider_credentials WHERE provider = 'bitnob' AND name = 'api_key'`,
+    );
+    expect(bitnobKey?.state).toBe(
+      configuredInEnv || (stored.rowCount ?? 0) > 0 ? 'set' : 'unset',
+    );
+  });
+
+  it('refuses `support` the readiness report', async () => {
+    // It names every flow that is off and every credential that is absent.
+    // `support` reads customer records all day and does not need a map of
+    // where the platform is soft.
+    const support = await register();
+    await grant(support, 'support');
+
+    const res = await request(app.getHttpServer())
+      .get('/v1/admin/readiness')
+      .set('Authorization', `Bearer ${support.token}`);
+    expect(res.status).toBe(403);
+  });
+
   it('refuses a signed-in customer with no role', async () => {
     const customer = await register();
 

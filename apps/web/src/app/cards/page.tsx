@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { formatAmount } from '@xetral/client';
-import type { Card } from '@xetral/client';
+import type { Card, CardSecrets } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { Icon } from '@/ui/icon';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/lib/hooks';
@@ -56,6 +56,23 @@ function CardRow({ card, onChange }: { card: Card; onChange: () => void }) {
   const [open, setOpen] = useState(false);
   const funding = useIdempotencyKey();
   const [amount, setAmount] = useState('');
+  /**
+   * The revealed number, held ONLY while it is on screen.
+   *
+   * Component state, never a store, never `localStorage`, and cleared by the
+   * timer below. A card number that outlives the moment a customer asked for
+   * it is a card number sitting in a tab somebody walks away from.
+   */
+  const [secrets, setSecrets] = useState<CardSecrets | undefined>(undefined);
+
+  // Sixty seconds is long enough to copy a number into a checkout and short
+  // enough that an abandoned tab is not a card on display. The cleanup runs on
+  // unmount too, so navigating away drops it immediately.
+  useEffect(() => {
+    if (secrets === undefined) return undefined;
+    const timer = setTimeout(() => setSecrets(undefined), 60_000);
+    return () => clearTimeout(timer);
+  }, [secrets]);
 
   const badge =
     card.status === 'active' ? 'ok' : card.status === 'frozen' ? 'warn' : 'danger';
@@ -118,6 +135,27 @@ function CardRow({ card, onChange }: { card: Card; onChange: () => void }) {
           <button type="button" className="ghost small" onClick={() => setOpen(!open)}>
             {open ? 'Cancel' : 'Add money'}
           </button>
+
+          {/*
+            Reading the number asks for the PIN, because the server does. A
+            number, a CVV and an expiry together are everything needed to spend
+            online, and unlike a transfer there is no ledger entry afterwards
+            for anyone to notice.
+          */}
+          <button
+            type="button"
+            className="ghost small"
+            disabled={busy || pin === ''}
+            onClick={() =>
+              void run(async () => {
+                setSecrets(await client.revealCard(card.id, pin));
+                setPin('');
+                return 'Showing your card details for one minute.';
+              })
+            }
+          >
+            Show details
+          </button>
         </div>
       )}
 
@@ -174,9 +212,42 @@ function CardRow({ card, onChange }: { card: Card; onChange: () => void }) {
         </div>
       )}
 
+      {secrets !== undefined && (
+        <div className="panel" style={{ marginTop: 12 }}>
+          <div className="row">
+            <span>Card number</span>
+            <strong className="mono">{group(secrets.pan)}</strong>
+          </div>
+          <div className="row">
+            <span>Expiry</span>
+            <strong className="mono">
+              {String(secrets.expiry_month).padStart(2, '0')}/
+              {String(secrets.expiry_year).slice(-2)}
+            </strong>
+          </div>
+          <div className="row">
+            <span>CVV</span>
+            <strong className="mono">{secrets.cvv}</strong>
+          </div>
+          <p className="pending">
+            These details disappear in a minute. Xetral will never ask you for them.
+          </p>
+        </div>
+      )}
+
       {error !== undefined && <p className="error">{error}</p>}
     </div>
   );
+}
+
+/**
+ * Groups a card number in fours, without changing a digit.
+ *
+ * A sixteen-character run is unreadable and mistyped, and mistyping a card
+ * number at a checkout is the failure a customer blames the card for.
+ */
+function group(pan: string): string {
+  return pan.replace(/(.{4})/g, '$1 ').trim();
 }
 
 function Issue({ onIssued }: { onIssued: () => void }) {

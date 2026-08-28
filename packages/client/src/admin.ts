@@ -47,11 +47,93 @@ export interface AdminUserDetail {
   readonly balances: readonly Record<string, unknown>[];
   readonly devices: readonly Record<string, unknown>[];
   readonly status_history: readonly Record<string, unknown>[];
+  /** Every tier this customer has held, and who moved them. */
+  readonly tier_history: readonly Record<string, unknown>[];
+  /** What their CURRENT tier allows, per currency, so an operator looking at a
+   *  refused transfer does not have to hold the grid in their head. */
+  readonly tier_limits: readonly Record<string, unknown>[];
+  /** Their cards. Four digits of the number and no more — the same amount the
+   *  database stores. */
+  readonly cards: readonly Record<string, unknown>[];
 }
 
 /** Mirrors `SettingView` on the server, field for field. It did not, once:
  *  `value_type`/`min_value`/`max_value` here against `type`/`min`/`max` there
  *  rendered every bound as "min undefined" and every boolean as a text box. */
+/**
+ * A provider credential slot, and whether it is filled.
+ *
+ * THERE IS DELIBERATELY NO FIELD HERE THAT COULD HOLD A SECRET. The API has no
+ * endpoint that returns one — not sealed, not masked — so this type could not
+ * carry one even if somebody added the field. `hint` is the last four
+ * characters, which answers "is this the key I pasted?" and nothing else.
+ */
+export interface AdminCredential {
+  readonly provider: string;
+  readonly name: string;
+  readonly label: string;
+  readonly description: string;
+  /** The environment variable this slot falls back to when no row is stored. */
+  readonly env_var: string;
+  /** FALSE for a slot documented ahead of its adapter. A filled box would
+   *  otherwise imply an integration that is running. */
+  readonly in_use: boolean;
+  readonly is_set: boolean;
+  readonly hint: string | null;
+  readonly updated_at: string | null;
+}
+
+/**
+ * A transaction the monitoring rules thought worth a look.
+ *
+ * An OBSERVATION, never a verdict. Nothing was refused, frozen or held because
+ * of this — the rules run after the fact, so anything that must decide before
+ * money moves lives in a ledger precondition instead. What this is, is a queue.
+ */
+export interface AdminRiskSignal {
+  readonly id: string;
+  /** 'large_value', 'structuring', 'rapid_passthrough', 'dormant_reactivation'
+   *  or 'crypto_fast_out'. */
+  readonly rule: string;
+  /** The numbers the rule saw, so a reviewer can check its arithmetic rather
+   *  than trust it. Amounts here are STRINGS in minor units, like every other
+   *  amount that crosses this boundary. */
+  readonly detail: Readonly<Record<string, string>>;
+  readonly observed_at: string;
+  readonly user_uuid: string;
+  readonly email: string | null;
+  readonly user_status: string;
+  /** How many OTHER open signals this customer has. One signal is a
+   *  transaction; several is a pattern. */
+  readonly other_open_signals: number;
+}
+
+/**
+ * One investigation about one customer.
+ *
+ * There is deliberately no customer-facing counterpart to any of this. Tipping
+ * off is an offence, so a case must not be reachable by its subject — not as a
+ * status, not as a message, not through a support agent reading a note.
+ */
+export interface AdminRiskCase {
+  readonly id: string;
+  readonly user_uuid: string;
+  readonly email: string | null;
+  readonly user_status: string;
+  readonly reason: string | null;
+  readonly opened_at: string;
+  readonly due_at: string;
+  readonly overdue: boolean;
+  /** TRUE when the monitoring sweep opened it by counting rather than a person
+   *  by judging — a different starting point, so a reviewer is told which. */
+  readonly opened_by_the_sweep: boolean;
+  readonly opened_by_email: string | null;
+  readonly signals: number;
+  readonly notes: number;
+}
+
+export type AdminCaseOutcome = 'no_action' | 'reported' | 'account_restricted';
+
 export interface AdminSetting {
   readonly key: string;
   readonly value: string;
@@ -115,6 +197,168 @@ export type StaffRole =
   | 'compliance'
   | 'finance'
   | 'admin';
+
+/**
+ * The tax report. Minor units as strings throughout — a return is the last
+ * place a JSON number should be allowed near an amount.
+ */
+export interface AdminTaxReport {
+  readonly collected: readonly {
+    readonly month: string;
+    readonly kind: string;
+    readonly currency: string;
+    readonly transactions: string;
+    readonly collected_minor: string;
+    readonly base_minor: string;
+  }[];
+  readonly revenue: readonly {
+    readonly month: string;
+    readonly account: string;
+    readonly currency: string;
+    readonly amount_minor: string;
+  }[];
+  readonly payable: readonly {
+    readonly currency: string;
+    readonly balance_minor: string;
+  }[];
+  /** Tax held that no collection explains. Empty is the only good answer. */
+  readonly drift: readonly {
+    readonly currency: string;
+    readonly collected_minor: string;
+    readonly held_minor: string;
+    readonly difference_minor: string;
+  }[];
+}
+
+export interface AdminConsentReport {
+  readonly summary: readonly {
+    readonly kind: string;
+    readonly version: string;
+    readonly customers: string;
+  }[];
+  readonly outstanding: readonly {
+    readonly uuid: string;
+    readonly email: string | null;
+    readonly kind: string;
+    readonly version: string;
+    readonly published_at: string;
+  }[];
+}
+
+export interface AdminDataRequest {
+  readonly uuid: string;
+  readonly kind: string;
+  readonly requested_at: string;
+  readonly deadline_at: string;
+  readonly user_uuid: string;
+  readonly email: string | null;
+  readonly overdue: boolean;
+}
+
+export interface AdminPrices {
+  /** Live only: what a customer will be quoted today. */
+  readonly prices: readonly {
+    readonly kind: string;
+    readonly uuid: string;
+    readonly subject: string;
+    readonly price: string;
+    readonly terms: string;
+    readonly effective_from: string;
+  }[];
+  /** Live prices with no author — written at a psql prompt rather than here. */
+  readonly unattributed: readonly {
+    readonly kind: string;
+    readonly uuid: string;
+    readonly subject: string;
+  }[];
+  readonly fx_policies: readonly {
+    readonly uuid: string;
+    readonly base_currency: string;
+    readonly quote_currency: string;
+    readonly spread_basis_points: number;
+    readonly min_base_minor: string;
+    readonly effective_from: string;
+    readonly retired_at: string | null;
+    readonly published_by: string | null;
+  }[];
+  readonly rate_cards: readonly {
+    readonly uuid: string;
+    readonly brand: string;
+    readonly country: string;
+    readonly card_type: string;
+    readonly face_currency: string;
+    readonly payout_currency: string;
+    readonly payout_rate_minor: string;
+    readonly min_face_minor: string;
+    readonly max_face_minor: string;
+    readonly effective_from: string;
+    readonly retired_at: string | null;
+    readonly published_by: string | null;
+  }[];
+}
+
+/**
+ * What a deployment has not been told yet.
+ *
+ * `state` is deliberately four values rather than a boolean. `unset-here` is
+ * the one that matters: a worker interval belongs on ONE instance, so its
+ * absence from the API container is correct and reporting it as a fault would
+ * mean nine false findings on every production deployment.
+ */
+export interface AdminReadinessRow {
+  readonly name: string;
+  readonly kind: 'env' | 'setting' | 'credential' | 'action';
+  readonly failure:
+    | 'refuses-to-boot'
+    | 'refuses-the-first-request'
+    | 'silent'
+    | 'wrong-by-default'
+    | 'default-is-deliberate';
+  readonly state: 'set' | 'unset' | 'unset-here' | 'not-observable';
+  readonly ifMissed: string;
+  readonly flow?: string;
+}
+
+export interface AdminReadiness {
+  readonly instance: { readonly environment: string; readonly hostname: string };
+  readonly rows: readonly AdminReadinessRow[];
+  readonly summary: {
+    readonly unset: number;
+    readonly unsetHere: number;
+    readonly notObservable: number;
+    readonly silentAndUnset: number;
+  };
+}
+
+export interface AdminProviderHealth {
+  readonly degraded: readonly {
+    readonly provider: string;
+    readonly operation: string;
+    readonly attempts: string;
+    readonly failures: string;
+    readonly failure_percent: number;
+    readonly last_error: string | null;
+    /** They changed their API: the same request fails for ever, so waiting
+     *  does not help. The one that should page somebody. */
+    readonly contract_broken: boolean;
+  }[];
+  readonly recent: readonly {
+    readonly provider: string;
+    readonly operation: string;
+    readonly attempts: string;
+    readonly succeeded: string;
+    /** Refusals. NOT counted as ill health: a declined card is the provider
+     *  working. */
+    readonly rejected: string;
+    readonly unavailable: string;
+    readonly timed_out: string;
+    readonly contract: string;
+    readonly failures: string;
+    readonly failure_percent: number;
+    readonly last_seen: string;
+    readonly last_error: string | null;
+  }[];
+}
 
 export class AdminClient {
   readonly #baseUrl: string;
@@ -268,6 +512,163 @@ export class AdminClient {
     });
   }
 
+  /* ----------------------------- data rights ---------------------------- */
+
+  /** Requests for a copy of somebody's data, or for it to be erased. Worst
+   *  deadline first: a statutory window is one of the few here whose
+   *  consequence is regulatory rather than an unhappy customer. */
+  async dataRequests(): Promise<readonly AdminDataRequest[]> {
+    const body = await this.#get<{ requests: AdminDataRequest[] }>('/v1/admin/data-requests');
+    return body.requests;
+  }
+
+  /** Carries out an erasure. The one action in this system that cannot be
+   *  undone by appending, which is why it takes a PIN. */
+  async eraseCustomer(id: string, pin: string): Promise<Record<string, unknown>> {
+    return this.#post(`/v1/admin/data-requests/${encodeURIComponent(id)}/erase`, {
+      transaction_pin: pin,
+    });
+  }
+
+  /** Closes a request answered some other way. The outcome is required and
+   *  must be twenty characters: a queue cleared with one-word answers is
+   *  indistinguishable from one nobody worked. */
+  async resolveDataRequest(
+    id: string,
+    status: 'completed' | 'refused',
+    outcome: string,
+    pin: string,
+  ): Promise<Record<string, unknown>> {
+    return this.#post(`/v1/admin/data-requests/${encodeURIComponent(id)}/resolve`, {
+      status,
+      outcome,
+      transaction_pin: pin,
+    });
+  }
+
+  /* ---------------------------- provider health ------------------------- */
+
+  /**
+   * Whether the providers are answering.
+   *
+   * `degraded` is what needs acting on; `recent` includes the ones that are
+   * fine, which is what makes "quiet because nothing is wrong"
+   * distinguishable from "quiet because nothing is being called".
+   */
+  async providerHealth(): Promise<AdminProviderHealth> {
+    return this.#get<AdminProviderHealth>('/v1/admin/providers');
+  }
+
+  /* ------------------------------- readiness ---------------------------- */
+
+  /**
+   * What THIS instance has not been told yet.
+   *
+   * It answers for the process that served the request, which is why the
+   * response names it: on a deployment where the workers run in their own
+   * container, every worker interval is `unset-here` on the API and set on
+   * the worker.
+   */
+  async readiness(): Promise<AdminReadiness> {
+    return this.#get<AdminReadiness>('/v1/admin/readiness');
+  }
+
+  /* -------------------------------- pricing ----------------------------- */
+
+  /**
+   * What a customer will be quoted today, and everything that has ever been
+   * published.
+   *
+   * The retired rows are the point rather than clutter: a published price is
+   * append-only precisely so a quote given last month can be explained.
+   */
+  async prices(): Promise<AdminPrices> {
+    return this.#get<AdminPrices>('/v1/admin/prices');
+  }
+
+  /**
+   * Publishes an FX spread for ONE PAIR AND ONE DIRECTION.
+   *
+   * Publishing NGN/USD does not publish USD/NGN: a rate is a ratio, and
+   * "minor units per major unit" collapses in one of the two directions, so
+   * each is priced on its own.
+   */
+  async publishFxSpread(
+    input: {
+      readonly base_currency: string;
+      readonly quote_currency: string;
+      readonly spread_basis_points: number;
+      /** MINOR UNITS as a string. It is a bigint in Postgres. */
+      readonly min_base_minor: string;
+    },
+    pin: string,
+  ): Promise<Record<string, unknown>> {
+    return this.#post('/v1/admin/prices/fx', { ...input, transaction_pin: pin });
+  }
+
+  /** Publishes a gift card rate for one brand, country, type and face band.
+   *  A band overlapping a live one is REFUSED, not merged. */
+  async publishRateCard(
+    input: {
+      readonly brand: string;
+      readonly country: string;
+      readonly card_type: 'ecode' | 'physical';
+      readonly face_currency: string;
+      readonly payout_currency: string;
+      readonly payout_rate_minor: string;
+      readonly min_face_minor: string;
+      readonly max_face_minor: string;
+    },
+    pin: string,
+  ): Promise<Record<string, unknown>> {
+    return this.#post('/v1/admin/prices/giftcard', { ...input, transaction_pin: pin });
+  }
+
+  /**
+   * Retires a price. It stops being quoted and stays on record.
+   *
+   * The reason is required, because until a replacement is published the flow
+   * this priced REFUSES every customer — an unpublished FX pair is not quoted
+   * from a default.
+   */
+  async retirePrice(
+    uuid: string,
+    kind: 'fx' | 'giftcard',
+    reason: string,
+    pin: string,
+  ): Promise<Record<string, unknown>> {
+    return this.#post(`/v1/admin/prices/${encodeURIComponent(uuid)}/retire`, {
+      kind,
+      reason,
+      transaction_pin: pin,
+    });
+  }
+
+  /* ------------------------------- consent ------------------------------ */
+
+  /**
+   * Who has not agreed to the words currently in force.
+   *
+   * Empty is the resting state, and it fills the moment a notice is
+   * republished — which is exactly when somebody needs to look at it.
+   */
+  async consents(): Promise<AdminConsentReport> {
+    return this.#get<AdminConsentReport>('/v1/admin/consents');
+  }
+
+  /* --------------------------------- tax -------------------------------- */
+
+  /**
+   * What was collected for a revenue authority, and what is still held.
+   *
+   * Every amount stays a STRING, the way every amount does on this client.
+   * These are the figures a return is filed from, so the one place a float
+   * must never appear is here.
+   */
+  async tax(months = 12): Promise<AdminTaxReport> {
+    return this.#get<AdminTaxReport>(`/v1/admin/tax?months=${String(months)}`);
+  }
+
   /* ------------------------------ suspense ----------------------------- */
 
   async suspense(): Promise<readonly AdminSuspenseDeposit[]> {
@@ -307,6 +708,111 @@ export class AdminClient {
       value,
       transaction_pin: pin,
     });
+  }
+
+  /* --------------------------- risk monitoring ------------------------- */
+
+  async riskSignals(): Promise<readonly AdminRiskSignal[]> {
+    const body = await this.#get<{ signals: AdminRiskSignal[] }>('/v1/admin/risk/signals');
+    return body.signals;
+  }
+
+  async resolveRiskSignal(
+    id: string,
+    resolution: string,
+    pin: string,
+  ): Promise<Record<string, unknown>> {
+    return this.#post(`/v1/admin/risk/signals/${encodeURIComponent(id)}/resolve`, {
+      resolution,
+      transaction_pin: pin,
+    });
+  }
+
+  /* -------------------------------- cards ------------------------------ */
+
+  /** One card's whole life. Carries four digits of the number and no more —
+   *  there is no endpoint that returns a PAN to anybody but the customer who
+   *  proved a PIN. */
+  async card(id: string): Promise<Record<string, unknown>> {
+    return this.#get(`/v1/admin/cards/${encodeURIComponent(id)}`);
+  }
+
+  /** Freezes a card on a customer's behalf. There is deliberately no staff
+   *  terminate: it moves their money and cannot be undone. */
+  async freezeCard(id: string, reason: string, pin: string): Promise<void> {
+    await this.#post(`/v1/admin/cards/${encodeURIComponent(id)}/freeze`, {
+      reason,
+      transaction_pin: pin,
+    });
+  }
+
+  /* ---------------------------- case files ----------------------------- */
+
+  async riskCases(): Promise<readonly AdminRiskCase[]> {
+    const body = await this.#get<{ cases: AdminRiskCase[] }>('/v1/admin/risk/cases');
+    return body.cases;
+  }
+
+  async riskCase(id: string): Promise<Record<string, unknown>> {
+    return this.#get(`/v1/admin/risk/cases/${encodeURIComponent(id)}`);
+  }
+
+  async openRiskCase(userId: string, reason: string): Promise<{ id: string }> {
+    return this.#post('/v1/admin/risk/cases', { user_id: userId, reason });
+  }
+
+  /** No PIN. A reviewer writes several notes while working one case, and
+   *  demanding the factor on each is how a shared authenticator ends up on
+   *  somebody's desk. */
+  async noteRiskCase(id: string, note: string): Promise<void> {
+    await this.#post(`/v1/admin/risk/cases/${encodeURIComponent(id)}/notes`, { note });
+  }
+
+  async closeRiskCase(
+    id: string,
+    decision: {
+      readonly outcome: AdminCaseOutcome;
+      readonly summary: string;
+      readonly report_reference?: string;
+    },
+    pin: string,
+  ): Promise<Record<string, unknown>> {
+    return this.#post(`/v1/admin/risk/cases/${encodeURIComponent(id)}/close`, {
+      ...decision,
+      transaction_pin: pin,
+    });
+  }
+
+  /* ------------------------ provider credentials ----------------------- */
+
+  async credentials(): Promise<readonly AdminCredential[]> {
+    const body = await this.#get<{ credentials: AdminCredential[] }>('/v1/admin/credentials');
+    return body.credentials;
+  }
+
+  /** That a credential was replaced, by whom and when — never what it was. */
+  async credentialRotations(
+    provider: string,
+    name: string,
+  ): Promise<readonly Record<string, unknown>[]> {
+    const body = await this.#get<{ rotations: Record<string, unknown>[] }>(
+      `/v1/admin/credentials/${encodeURIComponent(provider)}/${encodeURIComponent(name)}/rotations`,
+    );
+    return body.rotations;
+  }
+
+  /** Returns the slot's new STATUS, which carries a hint and no secret. There
+   *  is no response shape here that could echo the pasted value back. */
+  async setCredential(
+    provider: string,
+    name: string,
+    secret: string,
+    pin: string,
+  ): Promise<AdminCredential> {
+    return this.#post(
+      `/v1/admin/credentials/${encodeURIComponent(provider)}/${encodeURIComponent(name)}`,
+      { secret, transaction_pin: pin },
+    );
   }
 
   /* -------------------------------- staff ------------------------------ */

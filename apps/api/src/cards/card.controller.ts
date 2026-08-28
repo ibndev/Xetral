@@ -12,10 +12,10 @@ import {
 import type { Request } from 'express';
 import type { AuthenticatedRequest } from '../auth/auth.guard.js';
 import { CardService } from './card.service.js';
-import type { CardView } from './card.service.js';
+import type { CardSecretsView, CardView } from './card.service.js';
 import { CardWebhookService } from './webhook.service.js';
 import type { WebhookOutcome } from './webhook.service.js';
-import { fundCardSchema, issueCardSchema } from './dto.js';
+import { fundCardSchema, issueCardSchema, reissueCardSchema } from './dto.js';
 
 @Controller('v1/cards')
 export class CardController {
@@ -63,6 +63,29 @@ export class CardController {
     });
   }
 
+  /**
+   * The card number, the CVV and the expiry.
+   *
+   * POST rather than GET, and not for REST tidiness. A GET puts the card id in
+   * access logs, browser history and `Referer` headers, is prefetched by
+   * browsers and cached by intermediaries — none of which is acceptable for
+   * the request that returns a PAN. It also could not carry the PIN, which
+   * travels in the body so `redactPayload` scrubs it from anything that logs
+   * one.
+   *
+   * The response is the only place in this API where a full card number
+   * appears. It is not stored, not logged, and not repeated in the audit
+   * detail: `card_reveals` records THAT it happened, never what it showed.
+   */
+  @Post(':id/reveal')
+  @HttpCode(200)
+  async reveal(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+  ): Promise<CardSecretsView> {
+    return this.cards.reveal(subjectOf(request), id, request.ip);
+  }
+
   /** No PIN. Freezing is the protective action, and a customer watching
    *  fraudulent charges land should not have to remember one first. */
   @Post(':id/freeze')
@@ -82,6 +105,29 @@ export class CardController {
     @Param('id') id: string,
   ): Promise<CardView> {
     return this.cards.unfreeze(subjectOf(request), id);
+  }
+
+  /**
+   * Replaces a card. Takes a PIN, because it terminates the old one.
+   */
+  @Post(':id/reissue')
+  @HttpCode(200)
+  async reissue(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ): Promise<CardView> {
+    const parsed = reissueCardSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException({
+        error: 'invalid_request',
+        fields: parsed.error.issues.map((i) => i.path.join('.')),
+      });
+    }
+    return this.cards.reissue(subjectOf(request), id, {
+      nameOnCard: parsed.data.name_on_card,
+      idempotencyKey: parsed.data.idempotency_key,
+    });
   }
 
   @Post(':id/terminate')

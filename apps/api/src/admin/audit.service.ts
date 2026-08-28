@@ -18,6 +18,13 @@ export type AdminAction =
   | 'user.freeze'
   | 'user.unfreeze'
   | 'user.close'
+  /* A verification tier raised or lowered. A reason is required in both
+     directions: raising decides how much money may leave in a day, and
+     lowering takes something away from a customer. */
+  | 'user.tier'
+  /* A card frozen by staff. A reason is required: the customer will ring back
+     to ask why their card stopped working. */
+  | 'card.freeze'
   | 'kyc.approve'
   | 'kyc.reject'
   | 'deposit.attribute'
@@ -27,14 +34,54 @@ export type AdminAction =
   | 'staff.revoke'
   | 'giftcard.approve'
   | 'giftcard.reject'
-  | 'giftcard.clawback';
+  | 'giftcard.clawback'
+  /* A dispute resolved. Recorded whichever way it went: an upheld one moved
+     money, and a rejected one is a decision a customer may come back about. */
+  | 'dispute.accept'
+  | 'dispute.reject'
+  /* A provider credential replaced. Recorded with the four-character HINT and
+     never the value: this table is append-only, so a secret written into it
+     could never be removed — which is exactly why credentials do not go
+     through `setting.change`, whose detail IS the new value. */
+  | 'credential.change'
+  /* A monitoring signal reviewed and closed. Its `reason` is the reviewer's
+     own words, and it is the part of an AML programme a regulator inspects. */
+  | 'risk.resolve'
+  /* A compliance case opened and closed. Closing carries the summary as its
+     reason, which is the same text every signal the case covered gets. */
+  | 'risk.case_open'
+  | 'risk.case_close'
+  /* A customer's data erased on request. THE ONE ACTION HERE THAT CANNOT BE
+     UNDONE BY APPENDING, so it is in the schema's destructive list and its
+     reason is the outcome itself — what went, and what had to stay. */
+  | 'data.erase'
+  | 'data.resolve'
+  /* A price published or retired. Both are recorded: publishing decides what
+     every customer is charged from that moment, and retiring means the flow
+     it priced refuses them until a replacement exists — so retiring is in
+     009's list of actions that must say why. */
+  | 'price.publish'
+  | 'price.retire';
 
 export interface AuditEntry {
   /** The actor's UUID, as it appears in an access token. Resolved to the
    *  numeric id inside the INSERT, so no caller has to carry both. */
   readonly actorId: string;
   readonly action: AdminAction;
-  readonly subjectType: 'user' | 'deposit' | 'setting' | 'giftcard' | 'kyc' | 'staff';
+  readonly subjectType:
+    | 'user'
+    | 'deposit'
+    | 'setting'
+    | 'giftcard'
+    | 'kyc'
+    | 'staff'
+    | 'provider_credential'
+    | 'risk_signal'
+    | 'risk_case'
+    | 'card'
+    | 'dispute'
+    | 'data_request'
+    | 'price';
   readonly subjectId: string;
   readonly detail?: Record<string, unknown>;
   readonly reason?: string;
@@ -92,7 +139,13 @@ export class AuditService {
     }
     params.push(options.limit);
 
+    /*
+     * nosemgrep: no-interpolated-sql — the same shape as `users()`: values go
+     * through `params` and only `$N` placeholders and fixed fragments are
+     * interpolated.
+     */
     const rows = await this.pool.query(
+      // nosemgrep: semgrep.no-interpolated-sql
       `SELECT l.id::text, l.uuid, l.action, l.subject_type, l.subject_id,
               l.detail, l.reason, l.created_at, u.email AS actor
          FROM admin_audit_log l

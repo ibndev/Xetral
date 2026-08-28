@@ -1,6 +1,7 @@
 import { Controller, Get, HttpCode, Inject, ServiceUnavailableException } from '@nestjs/common';
 import type { Pool } from 'pg';
-import { DATABASE } from '../tokens.js';
+import { API_CONFIG, DATABASE } from '../tokens.js';
+import type { ApiConfig } from '../config.js';
 
 /**
  * Liveness and readiness, which are different questions.
@@ -20,13 +21,31 @@ import { DATABASE } from '../tokens.js';
  */
 @Controller()
 export class HealthController {
-  constructor(@Inject(DATABASE) private readonly pool: Pool) {}
+  constructor(
+    @Inject(DATABASE) private readonly pool: Pool,
+    @Inject(API_CONFIG) private readonly config: ApiConfig,
+  ) {}
 
-  /** Liveness. Answers as long as the event loop is turning. */
+  /**
+   * Liveness. Answers as long as the event loop is turning.
+   *
+   * It also names the ENVIRONMENT, and that is not decoration. Staging and
+   * production are deliberately identical in every visible respect — same
+   * bundle, same routes, same screens — which is what makes staging worth
+   * having and also what makes "which one am I looking at?" a question people
+   * get wrong under pressure. One curl now answers it.
+   *
+   * Nothing sensitive: the name of the deployment is not a secret, and an
+   * operator who cannot tell them apart is the more dangerous condition.
+   */
   @Get('health')
   @HttpCode(200)
-  health(): { status: 'ok'; uptime_seconds: number } {
-    return { status: 'ok', uptime_seconds: Math.floor(process.uptime()) };
+  health(): { status: 'ok'; environment: string; uptime_seconds: number } {
+    return {
+      status: 'ok',
+      environment: this.config.environment,
+      uptime_seconds: Math.floor(process.uptime()),
+    };
   }
 
   /**

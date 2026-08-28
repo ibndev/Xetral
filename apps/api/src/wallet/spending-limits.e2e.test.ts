@@ -66,6 +66,14 @@ async function onboard(): Promise<Customer> {
     await hashPassword(PASSWORD),
   ]);
 
+  // VERIFIED, because this suite is about the FLOW limits and an unverified
+  // customer's tier ceiling would be what refused instead — quietly turning
+  // every assertion here into a test of something else. The dollar case below
+  // is the one that showed it: tier 0 may move no dollars at all, so the
+  // transfer was refused by a real USD limit rather than by the kobo one the
+  // test exists to prove is not applied.
+  await pool.query(`UPDATE users SET kyc_tier = 1 WHERE id = $1::bigint`, [userId]);
+
   const login = await request(app.getHttpServer())
     .post('/v1/auth/login')
     .send({
@@ -336,6 +344,10 @@ describe('the daily transfer ceiling', () => {
     // sail past a ₦1,000 ceiling read as a bare integer — the same class of
     // mistake as adding kobo to cents, and the reason the guard names its
     // currency.
+    //
+    // The customer is verified, so their TIER allows dollars. Without that
+    // this passes or fails on the tier ceiling and proves nothing about the
+    // kobo one.
     const res = await transfer(alice, {
       recipient: bob.identifier,
       amount: '50.00',

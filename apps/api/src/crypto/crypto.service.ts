@@ -20,6 +20,9 @@ import { API_CONFIG, CRYPTO_PORT, DATABASE, LEDGER } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
 import type { CryptoQuoteBody, WithdrawBody } from './dto.js';
 import { AffordabilityService } from '../wallet/affordability.service.js';
+import { SettingsService } from '../settings/settings.service.js';
+import { SpendingLimitService } from '../wallet/spending-limits.service.js';
+import { NotificationService } from '../notifications/notification.service.js';
 
 /**
  * On-chain deposits and withdrawals.
@@ -91,6 +94,9 @@ export class CryptoService {
     @Inject(CRYPTO_PORT) private readonly port: CryptoPort,
     @Inject(API_CONFIG) private readonly config: ApiConfig,
     @Inject(AffordabilityService) private readonly affordability: AffordabilityService,
+    @Inject(SettingsService) private readonly settings: SettingsService,
+    @Inject(SpendingLimitService) private readonly limits: SpendingLimitService,
+    @Inject(NotificationService) private readonly notifications: NotificationService,
   ) {}
 
   /** The customer's deposit address, issued once and returned for ever after. */
@@ -99,6 +105,7 @@ export class CryptoService {
     asset: Currency,
     network: CryptoNetwork,
   ): Promise<CryptoAddressView> {
+    await this.settings.assertServiceEnabled('crypto');
     const userId = await this.#activeUserId(userUuid);
 
     const existing = await this.pool.query<{
@@ -169,6 +176,7 @@ export class CryptoService {
   /** What sending would cost. Called before the customer commits, so the
    *  number they approve is the number they pay. */
   async quote(body: CryptoQuoteBody): Promise<CryptoQuoteView> {
+    await this.settings.assertServiceEnabled('crypto');
     const asset = body.asset as Currency;
     const amount = this.#parseAmount(body.amount, asset);
     const quote = await this.port.quoteWithdrawal(asset, body.network, amount);
@@ -205,6 +213,7 @@ export class CryptoService {
    *   4. Only then send.
    */
   async withdraw(userUuid: string, body: WithdrawBody): Promise<WithdrawalView> {
+    await this.settings.assertServiceEnabled('crypto');
     const userId = await this.#activeUserId(userUuid);
     const asset = body.asset as Currency;
 
@@ -296,13 +305,7 @@ export class CryptoService {
 
     if (receipt.state === 'broadcast') {
       // On a chain and unrecallable. The money stays held until it confirms.
-      await this.pool.query(
-        `UPDATE crypto_withdrawals
-            SET status = 'broadcast', tx_hash = COALESCE(tx_hash, $2),
-                provider_reference = COALESCE(provider_reference, $3)
-          WHERE id = $1::bigint AND status = 'reserved'`,
-        [row.id, receipt.txHash ?? null, receipt.providerReference],
-      );
+      await this.#markBroadcast(row, receipt);
       return;
     }
 
@@ -322,19 +325,59 @@ export class CryptoService {
       ],
     });
 
-    await this.pool.query(
-      `UPDATE crypto_withdrawals
-          SET status = 'broadcast', tx_hash = COALESCE(tx_hash, $2),
-              provider_reference = COALESCE(provider_reference, $3)
-        WHERE id = $1::bigint AND status = 'reserved'`,
-      [row.id, receipt.txHash ?? null, receipt.providerReference],
-    );
+    await this.#markBroadcast(row, receipt);
     await this.pool.query(
       `UPDATE crypto_withdrawals
           SET status = 'confirmed', settle_entry_id = $2::bigint
         WHERE id = $1::bigint AND status = 'broadcast'`,
       [row.id, posted.entryId],
     );
+  }
+
+  /**
+   * Moves a withdrawal to `broadcast`, and tells the customer once.
+   *
+   * Both paths into this state go through here — the provider answering
+   * "broadcast" and the provider answering "confirmed" without ever having
+   * reported the intermediate step — so there is one place that decides what
+   * broadcasting means and one place that alerts on it.
+   *
+   * The alert fires on the TRANSITION, which is what `rowCount` reports: the
+   * UPDATE is guarded on `status = 'reserved'`, so a redelivered receipt for a
+   * withdrawal already broadcast changes no rows and mails nothing. This is
+   * the one outbound money movement that cannot be recalled by anybody, so it
+   * is the one a customer most needs to hear about while it is happening.
+   */
+  async #markBroadcast(row: WithdrawalRow, receipt: WithdrawalReceipt): Promise<void> {
+    const updated = await this.pool.query(
+      `UPDATE crypto_withdrawals
+          SET status = 'broadcast', tx_hash = COALESCE(tx_hash, $2),
+              provider_reference = COALESCE(provider_reference, $3)
+        WHERE id = $1::bigint AND status = 'reserved'`,
+      [row.id, receipt.txHash ?? null, receipt.providerReference],
+    );
+    if ((updated.rowCount ?? 0) === 0) return;
+
+    const target = await this.pool.query<{ email: string | null }>(
+      `SELECT email FROM users WHERE id = $1::bigint`,
+      [row.user_id],
+    );
+    const email = target.rows[0]?.email;
+    if (email === null || email === undefined) return;
+
+    const asset = row.asset as Currency;
+    await this.notifications.enqueueDetached({
+      userId: row.user_id,
+      recipient: email,
+      idempotencyKey: `receipt:crypto_withdrawal:${row.reference}`,
+      request: {
+        kind: 'crypto_withdrawal_sent',
+        amount: toMajor(money(BigInt(row.amount_minor), asset)),
+        asset: row.asset,
+        address: row.destination,
+        network: row.network,
+      },
+    });
   }
 
   /* ------------------------------------------------------------------ */
@@ -351,17 +394,38 @@ export class CryptoService {
 
     let entryId: string;
     try {
-      const posted = await this.ledger.post({
+      /*
+       * THE ONLY MOVEMENT HERE NOBODY CAN RECALL, and until now the only one
+       * with no ceiling. The guard runs as a precondition on the ledger's own
+       * transaction under a per-customer advisory lock — never as a check
+       * around it — because two withdrawals arriving together would otherwise
+       * each read the day's total, each find room, and both go on a chain.
+       *
+       * On the RESERVE, not the settle. By the time a withdrawal settles it has
+       * been broadcast and refusing it would be a statement about money that
+       * has already gone.
+       */
+      const precondition = await this.limits.precondition({
+        userId,
+        scope: 'crypto_withdrawal',
+        amount: total,
         idempotencyKey: `crypto-withdraw-reserve:${reference}`,
-        kind: 'crypto_withdrawal',
-        occurredAt: new Date(),
-        description: `${body.asset} withdrawal reserved`,
-        metadata: { reference, chain: body.network },
-        postings: [
-          posting(walletAccount(userId, asset), money(-total.amount, asset)),
-          posting(pendingAccount(userId, asset), total),
-        ],
       });
+
+      const posted = await this.ledger.post(
+        {
+          idempotencyKey: `crypto-withdraw-reserve:${reference}`,
+          kind: 'crypto_withdrawal',
+          occurredAt: new Date(),
+          description: `${body.asset} withdrawal reserved`,
+          metadata: { reference, chain: body.network },
+          postings: [
+            posting(walletAccount(userId, asset), money(-total.amount, asset)),
+            posting(pendingAccount(userId, asset), total),
+          ],
+        },
+        precondition === undefined ? {} : { precondition },
+      );
       entryId = posted.entryId;
     } catch (error) {
       if (error instanceof InsufficientFundsError) {

@@ -12,7 +12,7 @@ import {
 import type { Pool } from 'pg';
 import { InsufficientFundsError, LedgerService, posting } from '@xetral/ledger';
 import type { PostingIntent } from '@xetral/ledger';
-import { convertWithSpread, ProviderTimeoutError } from '@xetral/providers';
+import { convertWithSpread, displayRate, ProviderTimeoutError } from '@xetral/providers';
 import type { FxPort, FxRate } from '@xetral/providers';
 import { exponentOf, fromMajor, money, toMajor } from '@xetral/shared';
 import type { Currency, Money } from '@xetral/shared';
@@ -20,6 +20,8 @@ import { API_CONFIG, DATABASE, FX_PORT, LEDGER } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
 import type { ConvertBody, FxQuoteBody } from './dto.js';
 import { AffordabilityService } from '../wallet/affordability.service.js';
+import { SettingsService } from '../settings/settings.service.js';
+import { SpendingLimitService } from '../wallet/spending-limits.service.js';
 
 /**
  * Converting between currencies, and sending across them.
@@ -87,9 +89,12 @@ export class FxService {
     @Inject(FX_PORT) private readonly port: FxPort,
     @Inject(API_CONFIG) private readonly config: ApiConfig,
     @Inject(AffordabilityService) private readonly affordability: AffordabilityService,
+    @Inject(SettingsService) private readonly settings: SettingsService,
+    @Inject(SpendingLimitService) private readonly limits: SpendingLimitService,
   ) {}
 
   async quote(body: FxQuoteBody): Promise<FxQuoteView> {
+    await this.settings.assertServiceEnabled('fx');
     const from = body.from as Currency;
     const to = body.to as Currency;
     if (from === to) throw new BadRequestException({ error: 'same_currency' });
@@ -144,6 +149,7 @@ export class FxService {
    * there.
    */
   async convert(userUuid: string, body: ConvertBody): Promise<FxTradeView> {
+    await this.settings.assertServiceEnabled('fx');
     const userId = await this.#activeUserId(userUuid);
     const from = body.from as Currency;
     const to = body.to as Currency;
@@ -273,14 +279,34 @@ export class FxService {
 
     let entryId: string;
     try {
-      const posted = await this.ledger.post({
+      /*
+       * Capped on `sold` — the BASE amount, what actually leaves the wallet —
+       * rather than on what arrives. The kobo ceiling therefore applies to a
+       * conversion out of naira and is skipped in the other direction, which is
+       * the same rule every other kobo limit here follows. The hourly COUNT
+       * applies either way, because a count carries no units.
+       *
+       * A precondition on the entry's own transaction, not a check around it:
+       * two conversions arriving together would each find room and both post.
+       */
+      const precondition = await this.limits.precondition({
+        userId,
+        scope: 'fx',
+        amount: sold,
         idempotencyKey: `fx-trade:${reference}`,
-        kind: 'fx_trade',
-        occurredAt: new Date(),
-        description: `${from} -> ${to}${recipientId === undefined ? '' : ' (remittance)'}`,
-        metadata: { reference, from, to },
-        postings,
       });
+
+      const posted = await this.ledger.post(
+        {
+          idempotencyKey: `fx-trade:${reference}`,
+          kind: 'fx_trade',
+          occurredAt: new Date(),
+          description: `${from} -> ${to}${recipientId === undefined ? '' : ' (remittance)'}`,
+          metadata: { reference, from, to },
+          postings,
+        },
+        precondition === undefined ? {} : { precondition },
+      );
       entryId = posted.entryId;
     } catch (error) {
       if (error instanceof InsufficientFundsError) {
@@ -445,9 +471,14 @@ function toView(row: TradeRow): FxTradeView {
 /**
  * How many major units of `to` per one major unit of `from`, for display.
  *
- * Built from the exact integers and rendered once, rather than carried around
- * as a float. Same rule as Bitnob's `display_amount`: a number for a human to
- * read, never a number to compute with.
+ * DELEGATES TO `displayRate`, and used to be a second copy of it. Both did
+ * `Number(a) / Number(b)` then `toFixed(2)`, and both were wrong the same way:
+ * USD per naira is 0.000606, which two decimal places renders as **"0.00"** —
+ * so a customer converting naira to dollars was shown a rate of zero.
+ *
+ * Two copies of one calculation is the thing this codebase says not to do, and
+ * this is why: they drifted into being wrong together, and fixing one would
+ * have left the other. All rate arithmetic lives in `fx/rate-math.ts`.
  */
 function effectiveRate(
   quoteMinor: bigint,
@@ -455,9 +486,19 @@ function effectiveRate(
   from: Currency,
   to: Currency,
 ): string {
-  const scale = 10 ** (exponentOf(from) - exponentOf(to));
-  const value = (Number(quoteMinor) / Number(baseMinor)) * scale;
-  return value.toFixed(Math.max(2, exponentOf(to)));
+  return displayRate(
+    {
+      base: from,
+      quote: to,
+      numerator: quoteMinor,
+      denominator: baseMinor,
+      // Not read by `displayRate`; the shape is the port's and this is a
+      // rendering of an executed conversion rather than a live quote.
+      expiresAt: new Date(0),
+    },
+    exponentOf(from),
+    exponentOf(to),
+  );
 }
 
 /** Derived, never generated — the same rule as everywhere else money moves. */

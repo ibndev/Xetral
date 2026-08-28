@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { apiBaseUrl } from '@/lib/config';
+import { forwardedFor } from '@/lib/forwarded';
 
 /**
  * A same-origin proxy to the API.
@@ -30,6 +31,9 @@ async function forward(request: Request, path: string[]): Promise<NextResponse> 
       headers: {
         'content-type': 'application/json',
         ...(authorization === null ? {} : { authorization }),
+        // Without this every web customer looks like one client to the API's
+        // rate limiter. See `forwardedFor`.
+        ...forwardedFor(request),
       },
       ...(body === undefined || body === '' ? {} : { body }),
     });

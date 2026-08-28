@@ -28,6 +28,32 @@ export function messageFor(error: unknown): string {
       return error.detail ?? 'That PIN is not allowed. Use six digits that are not a simple pattern.';
     case 'transaction_pin_required':
       return 'Enter your transaction PIN.';
+    case 'consent_not_withdrawable':
+      // The honest answer rather than a silent failure. Withdrawing the terms
+      // is closing the account, which moves money and has its own path.
+      return 'You cannot withdraw this while your account is open. Close the account instead.';
+    case 'price_already_published':
+      return 'A live price already exists for that. Retire it first — that is a separate step because it changes what customers are quoted.';
+    case 'price_band_overlaps':
+      return 'That band overlaps one that is already live. Retire the one it overlaps, or narrow this band.';
+    case 'price_not_found':
+      return 'That price is not live. It may already have been retired.';
+    case 'invalid_price':
+      return 'That price is outside what the platform allows. Check the units — spreads are basis points, amounts are minor units.';
+    case 'erasure_blocked':
+      // ONE MESSAGE for two reasons, matching the API. The other reason is an
+      // open investigation, and telling a customer that is an offence — so
+      // the wording has to be true of a balance and say nothing about the
+      // other case.
+      return 'We cannot action this while your account still holds money or is under review. Empty the account and try again, or contact support.';
+    case 'request_already_open':
+      return 'You already have a request open. We will answer it by the date shown.';
+    case 'request_not_found':
+      return 'That request is no longer open.';
+    case 'consent_document_missing':
+      // An operator's problem, not the customer's — and saying so is better
+      // than blaming them for a document nobody published.
+      return 'We cannot record that right now. Please try again shortly.';
     case 'insufficient_funds':
       return 'Your balance will not cover this.';
     case 'invalid_amount':
@@ -50,6 +76,17 @@ export function messageFor(error: unknown): string {
       return 'This account cannot make transactions right now.';
     case 'gift_cards_disabled':
       return 'Gift cards are not available yet.';
+    // Paused by an operator, usually because a provider is having an incident.
+    // Worth saying "right now" — this is temporary and retrying later works,
+    // which is not true of the refusals around it.
+    case 'crypto_disabled':
+      return 'Crypto is paused right now. Your balance is safe — try again shortly.';
+    case 'fx_disabled':
+      return 'Currency conversion is paused right now. Try again shortly.';
+    case 'cards_disabled':
+      return 'New cards and card funding are paused right now. Your existing cards still work.';
+    case 'bills_disabled':
+      return 'Airtime and bill payments are paused right now. Try again shortly.';
     case 'service_not_configured':
       return 'That service is unavailable right now.';
     case 'forbidden':

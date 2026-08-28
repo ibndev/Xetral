@@ -71,6 +71,27 @@ async function bootstrap(): Promise<void> {
     // Every response here is about one customer's money. A shared cache
     // holding one is a shared cache serving it to somebody else.
     response.setHeader('Cache-Control', 'no-store');
+    /*
+     * HSTS, and it is set HERE rather than left to Cloudflare.
+     *
+     * The web app has sent this since it was written and the API did not,
+     * which looked harmless because both sit behind the same edge. They do not
+     * have the same clients: `apps/mobile` talks to this origin DIRECTLY, so
+     * the browser-side protection the web app enjoys was never reaching the
+     * clients that hold a customer's transaction PIN in a Keychain.
+     *
+     * And relying on the edge means a direct hit to the origin, or an edge
+     * rule somebody changes, silently removes it. A security header that only
+     * exists because of a setting in another system is a header nobody owns.
+     *
+     * Two years with `includeSubDomains`, matching what apps/web sends.
+     * Browsers ignore it entirely over plain HTTP, so it costs nothing in
+     * development.
+     */
+    response.setHeader(
+      'Strict-Transport-Security',
+      'max-age=63072000; includeSubDomains; preload',
+    );
     next();
   });
 

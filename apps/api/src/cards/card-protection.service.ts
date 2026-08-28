@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { Pool, PoolClient } from 'pg';
 import { DATABASE } from '../tokens.js';
 import { SettingsService } from '../settings/settings.service.js';
+import { NotificationService } from '../notifications/notification.service.js';
 
 /**
  * The guards that run around a card spend.
@@ -34,6 +35,7 @@ export class CardProtectionService {
   constructor(
     @Inject(DATABASE) private readonly pool: Pool,
     @Inject(SettingsService) private readonly settings: SettingsService,
+    @Inject(NotificationService) private readonly notifications: NotificationService,
   ) {}
 
   /**
@@ -243,8 +245,15 @@ export class CardProtectionService {
 
       // FOR UPDATE, so two webhooks arriving together cannot both read
       // 'active' and both write a freeze row.
-      const card = await client.query<{ status: string }>(
-        `SELECT status FROM cards WHERE id = $1 FOR UPDATE`,
+      const card = await client.query<{
+        status: string;
+        last4: string;
+        user_id: string;
+        email: string | null;
+      }>(
+        `SELECT c.status, c.last4, c.user_id, u.email
+           FROM cards c JOIN users u ON u.id = c.user_id
+          WHERE c.id = $1 FOR UPDATE OF c`,
         [cardId],
       );
       const status = card.rows[0]?.status;
@@ -261,6 +270,25 @@ export class CardProtectionService {
         `INSERT INTO card_freezes (card_id, actor, reason, detail) VALUES ($1, $2, $3, $4)`,
         [cardId, actor, reason, detail],
       );
+
+      // Told to the customer, in the same transaction as the freeze itself.
+      // An automatic freeze is the platform taking their card away on their
+      // behalf — usually while somebody else is trying to spend on it — and a
+      // card that stops working with no explanation is indistinguishable from
+      // a broken one. Enqueued only for AUTOMATIC freezes: a customer who
+      // froze their own card in the app already knows.
+      const owner = card.rows[0];
+      if (actor === 'automatic' && owner !== undefined && owner.email !== null) {
+        await this.notifications.enqueueBestEffort(client, {
+          userId: owner.user_id,
+          recipient: owner.email,
+          // Keyed on the card and the reason. A card frozen for one reason
+          // today and another next month is two alerts; a redelivered webhook
+          // that races into a second freeze attempt is not.
+          idempotencyKey: `card_frozen:${cardId}:${reason}`,
+          request: { kind: 'card_frozen', last4: owner.last4, reason: detail },
+        });
+      }
 
       await client.query('COMMIT');
       this.#logger.warn(`froze card ${cardId}: ${reason} (${detail})`);

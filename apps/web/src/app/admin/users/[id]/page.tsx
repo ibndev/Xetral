@@ -24,6 +24,8 @@ export default function UserDetail({ params }: { params: Promise<{ id: string }>
   const balances = detail.data?.balances ?? [];
   const devices = detail.data?.devices ?? [];
   const history = detail.data?.status_history ?? [];
+  const cards = detail.data?.cards ?? [];
+  const tier = profile['kyc_tier'] ?? '0';
 
   return (
     <>
@@ -89,6 +91,29 @@ export default function UserDetail({ params }: { params: Promise<{ id: string }>
             );
           })}
         </div>
+      </div>
+
+      {/*
+        THE CARDS, which this screen could not show at all. A customer ringing
+        about a declined card was a conversation nobody on this side could
+        follow: no status, no history, and no way to tell whether the card had
+        been frozen or by whom.
+
+        Four digits of the number and no more — the same amount the database
+        stores, and this panel is read over shoulders and screenshotted into
+        tickets.
+      */}
+      <div className="panel">
+        <h2>
+          Cards <span className="badge">tier {tier}</span>
+        </h2>
+        {cards.length === 0 && <p className="empty">None issued.</p>}
+        {cards.map((card, index) => {
+          const row = card as Record<string, string | number | null>;
+          return (
+            <CardRow key={index} card={row} onChanged={detail.reload} />
+          );
+        })}
       </div>
 
       <ChangeStatus id={id} current={profile['status'] ?? 'active'} onChanged={detail.reload} />
@@ -220,5 +245,146 @@ function ChangeStatus({
       {error !== undefined && <p className="error">{error}</p>}
       {done !== undefined && <p className="ok">{done}</p>}
     </form>
+  );
+}
+
+/**
+ * One card, with its history on demand and a freeze an agent can actually
+ * reach.
+ *
+ * FREEZE AND NOT TERMINATE. Freezing stops spending and the customer can undo
+ * it; terminating moves their money and cannot be undone, and there is no
+ * support conversation in which doing that without them is right. The API
+ * agrees — there is no staff terminate endpoint to call.
+ */
+function CardRow({
+  card,
+  onChanged,
+}: {
+  card: Record<string, string | number | null>;
+  onChanged: () => void;
+}) {
+  const admin = useAdmin();
+  const id = String(card['id']);
+  const status = String(card['status']);
+
+  const [events, setEvents] = useState<readonly Record<string, string>[] | undefined>();
+  const [reason, setReason] = useState('');
+  const [pin, setPin] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | undefined>();
+
+  return (
+    <div style={{ borderBottom: '1px solid var(--line)', paddingBottom: 12, marginBottom: 12 }}>
+      <div className="row">
+        <span>
+          <span className="mono">•••• {String(card['last4'] ?? '????')}</span>{' '}
+          <span className="hint">{String(card['currency'])}</span>
+          {card['replaces_card_id'] !== null && (
+            <div className="hint">Replaced an earlier card.</div>
+          )}
+          {card['replaced_by_card_id'] !== null && (
+            <div className="hint">Replaced by a newer card.</div>
+          )}
+        </span>
+        <span className={`badge ${status === 'active' ? 'ok' : status === 'terminated' ? 'danger' : 'warn'}`}>
+          {status}
+        </span>
+      </div>
+
+      <div className="actions">
+        <button
+          type="button"
+          className="ghost small"
+          onClick={() => {
+            void (async () => {
+              try {
+                const detail = await admin.card(id);
+                setEvents((detail['events'] ?? []) as Record<string, string>[]);
+              } catch (cause) {
+                setError(messageFor(cause));
+              }
+            })();
+          }}
+        >
+          History
+        </button>
+      </div>
+
+      {events !== undefined && (
+        <div className="scroll" style={{ marginTop: 8 }}>
+          <table>
+            <tbody>
+              {events.map((event, index) => (
+                <tr key={index}>
+                  <td className="mono">{event['kind']}</td>
+                  <td>{new Date(event['created_at'] ?? '').toLocaleString()}</td>
+                  <td className="hint">
+                    {event['actor'] === 'system'
+                      ? 'automatic'
+                      : (event['actor_email'] ?? event['actor'])}
+                  </td>
+                  <td className="hint">{event['reason'] ?? ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {status !== 'terminated' && status !== 'frozen' && (
+        <div style={{ marginTop: 8 }}>
+          <label>
+            Freeze this card — why?
+            <input
+              value={reason}
+              placeholder="e.g. customer reports charges they did not make"
+              onChange={(e) => setReason(e.target.value)}
+            />
+          </label>
+          {reason.trim() !== '' && (
+            <label>
+              Your transaction PIN
+              <input
+                type="password"
+                inputMode="numeric"
+                autoComplete="off"
+                value={pin}
+                onChange={(e) => setPin(e.target.value)}
+              />
+            </label>
+          )}
+          <div className="actions">
+            <button
+              type="button"
+              className="small"
+              disabled={reason.trim().length < 5 || pin === '' || busy}
+              onClick={() => {
+                setBusy(true);
+                setError(undefined);
+                void (async () => {
+                  try {
+                    await admin.freezeCard(id, reason, pin);
+                    setReason('');
+                    setPin('');
+                    onChanged();
+                  } catch (cause) {
+                    setError(messageFor(cause));
+                  } finally {
+                    setBusy(false);
+                  }
+                })();
+              }}
+            >
+              {busy ? 'Freezing…' : 'Freeze'}
+            </button>
+            <span className="hint">
+              Stops spending. The customer can unfreeze it themselves.
+            </span>
+          </div>
+          {error !== undefined && <p className="error">{error}</p>}
+        </div>
+      )}
+    </div>
   );
 }

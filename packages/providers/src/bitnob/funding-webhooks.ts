@@ -122,7 +122,25 @@ export async function handleDepositWebhook(
         );
 
   const intent: LedgerIntent = {
-    idempotencyKey: `${PROVIDER}:${event.event_id}`,
+    // KEYED ON THE DEPOSIT, NOT ON THE WEBHOOK EVENT.
+    //
+    // `event_id` identifies a DELIVERY; `data.id` identifies the money. They
+    // are different fields, and keying on the delivery meant the
+    // reconciliation sweep — which only ever sees `data.id`, because a lost
+    // webhook has no event id to know — posted under a different key from the
+    // webhook. A sweep followed by a late redelivery therefore credited the
+    // customer TWICE, on the one flow in the system that creates money.
+    //
+    // The suite claimed to cover this and did not: its late webhook carried no
+    // account number, so it resolved to no owner and landed in suspense, and
+    // the customer's balance was unchanged for a reason that had nothing to do
+    // with idempotency. A test passing for the wrong reason.
+    //
+    // One deposit is one credit however many times we are told about it, and
+    // there is exactly one crediting event type on this rail — so there is no
+    // phase to distinguish and no suffix needed, unlike the two-phase crypto
+    // and card flows.
+    idempotencyKey: `${PROVIDER}:${event.data.id}`,
     kind: 'wallet_funding',
     occurredAt: new Date(event.created_at),
     description:

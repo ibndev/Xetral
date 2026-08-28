@@ -34,6 +34,36 @@ const API_ERROR_CODES = [
   'email_taken',
   'registration_closed',
   'too_many_attempts',
+  /* The general ceiling on request rate, distinct from `too_many_attempts` and
+     deliberately so: one means "we have stopped accepting guesses at this
+     account", the other means "you are going too fast". A client that showed
+     the same words for both would tell a customer whose app retried eagerly
+     that their sign-in had been blocked. */
+  'too_many_requests',
+  /* Password reset is refused as a whole when the deployment has no email
+     provider. NOT user-fixable: nothing the customer types changes it, and
+     telling them to try again would send them round a loop that cannot end. */
+  'password_reset_unavailable',
+
+  /* The staff second factor. `totp_required` and `invalid_totp` ARE
+     user-fixable — the operator opens their authenticator and reads the
+     current code — while the other three describe the state of the enrolment
+     and are fixed by an administrator, not by retrying. */
+  'totp_required',
+  'invalid_totp',
+  'totp_locked',
+  'totp_not_enrolled',
+  'totp_already_enrolled',
+
+  /* What the global filter answers when something threw that nothing in the
+     codebase expected. Not user-fixable: nothing the customer types changes
+     it, and the honest thing to show is that it was our fault. */
+  'internal_error',
+
+  /* Reading a card number too often. User-fixable in the sense that waiting
+     clears it — and the customer is told to wait rather than told nothing,
+     because the alternative is somebody concluding their card is broken. */
+  'too_many_reveals',
 
   /* the transaction PIN */
   'invalid_pin',
@@ -47,6 +77,59 @@ const API_ERROR_CODES = [
   'account_not_active',
   'account_closed',
   'kyc_required',
+  /* identity review. The first two were reaching customers with no name here
+     at all: they are chosen by a ternary, which the API-side scanner could not
+     see until it was taught to read one. */
+  'already_verified',
+  'review_in_progress',
+  /* Consent. `consent_not_withdrawable` is the honest refusal for the terms
+     and the privacy notice: withdrawing them is closing the account, which
+     moves money and has its own path — a screen that just failed silently
+     would read as a bug. `consent_document_missing` means nothing is
+     published to agree TO, which is an operator's problem and not the
+     customer's, so it needs its own words rather than "something went
+     wrong". */
+  'consent_not_withdrawable',
+  'consent_document_missing',
+  /* Data rights. `erasure_blocked` is deliberately one code for two very
+     different reasons — a balance, or an open investigation — because the API
+     answers them identically: tipping off is an offence, and a
+     distinguishable refusal is a way to learn you are under review. */
+  /* Publishing a price. `price_band_overlaps` is named separately from
+     `price_already_published` because the fix differs: retire the band it
+     overlaps or narrow this one, versus retire the live policy first. */
+  'price_already_published',
+  'price_band_overlaps',
+  'price_not_found',
+  'invalid_price',
+  'erasure_blocked',
+  'request_already_open',
+  'request_not_found',
+  'not_an_erasure_request',
+  /* One person, one account. Answered to a REVIEWER at approval, never to the
+     customer at submission — a form that said "that BVN is already
+     registered" would confirm to anybody holding a stolen BVN that its owner
+     banks here. */
+  'bvn_already_verified',
+  /* An operator pasting a key into a slot this platform does not know about.
+     Refused rather than stored, because a credential nothing reads is one
+     somebody believes is live. */
+  'credential_not_found',
+  /* A monitoring signal that does not exist, or that a colleague resolved
+     first. One answer for both, so nobody learns which signal ids are real. */
+  'signal_not_found',
+  /* Compliance cases. `case_not_found` answers both "no such case" and
+     "already closed", so a reviewer racing a colleague learns it is handled
+     and nobody learns which case ids exist. */
+  'case_not_found',
+  'case_already_open',
+  'case_closed',
+  'report_reference_required',
+  'signal_not_this_customer',
+  /* A tier granted without the evidence of the one below it. Each tier rests
+     on the one under it, so enhanced due diligence cannot be given to somebody
+     whose identity was never checked. */
+  'tier_skips_evidence',
   'device_not_found',
   'below_minimum_age',
   'forbidden',
@@ -98,6 +181,12 @@ const API_ERROR_CODES = [
 
   /* gift cards */
   'gift_cards_disabled',
+  // The kill switches. Each names its service so a screen can say which part
+  // of the product is paused rather than showing one generic message.
+  'crypto_disabled',
+  'fx_disabled',
+  'cards_disabled',
+  'bills_disabled',
   'no_rate_for_card',
   'not_clawable',
   'not_convertible',
@@ -118,6 +207,24 @@ const API_ERROR_CODES = [
   'user_not_found',
   'not_in_suspense',
   'daily_limit_exceeded',
+  /* The velocity rules, which are about COUNT rather than amount: how many
+     people a customer is paying for the first time today, and how many
+     transfers they have sent in the last hour. Distinct codes because they
+     want different words — "you have paid a lot of new people today" is
+     actionable, "you hit a limit" is not — and because a customer who caused
+     neither needs to be told that somebody else may be signed in as them. */
+  'too_many_new_recipients',
+  'too_many_transfers',
+
+  /* Disputes. `entry_not_found` is deliberately the answer BOTH when an entry
+     does not exist and when it belongs to somebody else — distinguishing them
+     would turn the complaints form into a way to discover which transactions
+     are real. */
+  'entry_not_found',
+  'dispute_not_found',
+  'dispute_already_open',
+  'dispute_not_open',
+  'dispute_window_closed',
 ] as const;
 
 export type ApiErrorCode =
@@ -166,8 +273,19 @@ const USER_FIXABLE: ReadonlySet<ApiErrorCode> = new Set<ApiErrorCode>([
   'recipient_not_found',
   'below_minimum',
   'daily_limit_exceeded',
+  'too_many_new_recipients',
+  'too_many_transfers',
+  /* A customer can act on both: raise it against the right entry, or open a
+     new dispute rather than a second one against the same entry. */
+  'dispute_already_open',
+  'dispute_window_closed',
   'fee_moved',
   'rate_moved',
+  'totp_required',
+  'invalid_totp',
+  'too_many_reveals',
+  /* Waiting clears it, and the screen says so. */
+  'too_many_requests',
 ]);
 
 /** The session is gone and the customer must sign in again. */

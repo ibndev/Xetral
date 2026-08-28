@@ -1,21 +1,29 @@
 import { Inject, Injectable, Logger, Module, ServiceUnavailableException } from '@nestjs/common';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import type { DynamicModule, OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common';
 import Redis from 'ioredis';
 import type { Pool } from 'pg';
 import { LedgerService } from '@xetral/ledger';
 import {
   AiraloAdapter,
+  BitnobBalanceAdapter,
   BitnobCardAdapter,
   BitnobClient,
   TwilioAdapter,
   VtpassAdapter,
 } from '@xetral/providers';
-import type { CardPort, FulfilmentPort, ServiceKind } from '@xetral/providers';
+import type {
+  CardPort,
+  FulfilmentPort,
+  ProviderBalancePort,
+  ServiceKind,
+} from '@xetral/providers';
 import { AuthController } from './auth/auth.controller.js';
 import { AuthGuard } from './auth/auth.guard.js';
 import { AuthService } from './auth/auth.service.js';
+import { SignInEventService } from './auth/sign-in-events.service.js';
 import { PinService } from './auth/pin.service.js';
+import { PasswordResetService } from './auth/password-reset.service.js';
 import { WalletController } from './wallet/wallet.controller.js';
 import { WalletService } from './wallet/wallet.service.js';
 import { SpendingLimitService } from './wallet/spending-limits.service.js';
@@ -37,8 +45,16 @@ import {
 import { GiftCardService } from './giftcards/giftcard.service.js';
 import { GiftCardHoldService } from './giftcards/hold-release.service.js';
 import { StaffService } from './auth/staff.service.js';
+import { StaffTotpService } from './auth/staff-totp.service.js';
 import { HealthController } from './health/health.controller.js';
 import { SettingsService } from './settings/settings.service.js';
+import { TaxService } from './tax/tax.service.js';
+import { ConsentService } from './consent/consent.service.js';
+import { ConsentController } from './consent/consent.controller.js';
+import { DataRightsService } from './datarights/data-rights.service.js';
+import { DataRightsController } from './datarights/data-rights.controller.js';
+import { PricingService } from './pricing/pricing.service.js';
+import { ProviderCredentialService } from './settings/provider-credentials.service.js';
 import { AuditService } from './admin/audit.service.js';
 import { AdminService } from './admin/admin.service.js';
 import { AdminController } from './admin/admin.controller.js';
@@ -60,9 +76,28 @@ import {
 import { CryptoService } from './crypto/crypto.service.js';
 import { CryptoWebhookService } from './crypto/crypto-webhook.service.js';
 import { CryptoReconciliationService } from './crypto/crypto-reconciliation.service.js';
+import { CryptoDepositReconciliationService } from './crypto/crypto-deposit-reconciliation.service.js';
 import { FxController } from './fx/fx.controller.js';
 import { FxService } from './fx/fx.service.js';
-import { LoginRateLimitGuard } from './auth/login-rate-limit.guard.js';
+import { NotificationService } from './notifications/notification.service.js';
+import { ErrorRecorder } from './observability/error-recorder.service.js';
+import { ProviderHealthService, watched } from './observability/provider-health.service.js';
+import { ReadinessService } from './golive/readiness.service.js';
+import { MetricsService } from './observability/metrics.service.js';
+import { MetricsController } from './observability/metrics.controller.js';
+import { ErrorRecordingFilter } from './observability/error.filter.js';
+import { ErrorAlertService } from './observability/error-alert.service.js';
+import { NotificationWorker } from './notifications/notification.worker.js';
+import { ResendNotificationAdapter } from '@xetral/providers';
+import type { NotificationPort } from '@xetral/providers';
+import { LoginRateLimitGuard, PasswordResetRateLimitGuard } from './auth/login-rate-limit.guard.js';
+import { RequestRateLimiter } from './auth/request-rate-limit.service.js';
+import { AdminDisputeController, DisputeController } from './disputes/dispute.controller.js';
+import { DisputeService } from './disputes/dispute.service.js';
+import { RetentionService } from './retention/retention.service.js';
+import { BalanceReconciliationService } from './reconciliation/balance-reconciliation.service.js';
+import { MonitoringService } from './risk/monitoring.service.js';
+import { CaseService } from './risk/case.service.js';
 import {
   InMemoryRateLimitStore,
   RedisRateLimitStore,
@@ -76,12 +111,14 @@ import {
   API_CONFIG,
   CARD_PORT,
   CLOCK,
+  CRYPTO_PORT,
   DATABASE,
   FULFILMENT_PORTS,
-  CRYPTO_PORT,
   FUNDING_PORT,
   FX_PORT,
   LEDGER,
+  NOTIFICATION_PORT,
+  PROVIDER_BALANCE_PORT,
   RATE_LIMIT_STORE,
   ROUTE_POLICY,
   systemClock,
@@ -98,6 +135,8 @@ export interface AppModuleOptions {
   readonly rateLimitStore?: RateLimitStore;
   /** Overridden in tests so card flows run without a live Bitnob. */
   readonly cardPort?: CardPort;
+  /** Read-only, and injectable so a suite can drive a known provider figure. */
+  readonly providerBalancePort?: ProviderBalancePort;
   /** Overridden in tests so purchases run without live VTpass/Airalo/Twilio. */
   readonly fulfilmentPorts?: ReadonlyMap<ServiceKind, FulfilmentPort>;
   /** Overridden in tests so funding runs without a live Bitnob. */
@@ -106,6 +145,8 @@ export interface AppModuleOptions {
   readonly cryptoPort?: CryptoPort;
   /** Overridden in tests so FX runs without a live Bitnob. */
   readonly fxPort?: FxPort;
+  /** Overridden in tests so the outbox can be drained without a live Resend. */
+  readonly notificationPort?: NotificationPort;
 }
 
 /**
@@ -116,6 +157,23 @@ export interface AppModuleOptions {
  * request, where it looks like a provider outage rather than a missing
  * environment variable.
  */
+/**
+ * The read-only balance port, or nothing.
+ *
+ * Returns `undefined` rather than an unconfigured stand-in, and the sweep skips
+ * itself when it is absent. A stub that answered "zero" would be worse than no
+ * check at all: every float would look like a discrepancy the size of the whole
+ * balance, and the queue this exists to fill would be unreadable on day one.
+ */
+export function createProviderBalancePort(config: ApiConfig): ProviderBalancePort | undefined {
+  const { bitnobBaseUrl, bitnobApiKey } = config;
+  if (bitnobBaseUrl === undefined || bitnobApiKey === undefined) return undefined;
+
+  return new BitnobBalanceAdapter(
+    new BitnobClient({ baseUrl: bitnobBaseUrl, apiKey: bitnobApiKey }),
+  );
+}
+
 export function createCardPort(config: ApiConfig): CardPort {
   const { bitnobBaseUrl, bitnobApiKey } = config;
 
@@ -140,6 +198,7 @@ function unconfiguredCardPort(): CardPort {
     unfreeze: refuse,
     terminate: refuse,
     get: refuse,
+    reveal: refuse,
   };
 }
 
@@ -281,6 +340,7 @@ export function createCryptoPort(config: ApiConfig): CryptoPort {
       quoteWithdrawal: refuse,
       send: refuse,
       withdrawalStatus: refuse,
+      listDeposits: refuse,
     };
   }
 
@@ -303,6 +363,42 @@ export function createFxPort(config: ApiConfig): FxPort {
 
   return new BitnobFxAdapter({
     client: new BitnobClient({ baseUrl: bitnobBaseUrl, apiKey: bitnobApiKey }),
+  });
+}
+
+/**
+ * The email provider, or nothing at all.
+ *
+ * `undefined` rather than a refusing stand-in, and the difference matters
+ * here. Every other port in this file gets a stand-in that throws
+ * `..._not_configured`, because a customer asking for a card deserves a clear
+ * refusal. Notifications are not requested by a customer — they are owed to
+ * one — so there is no request to refuse. A stand-in that threw would turn
+ * every queued receipt into an error in the worker's log and every password
+ * reset into a 500 on a route that should have refused at the door instead.
+ *
+ * Absent means: the outbox still accepts rows, nothing drains them, and the
+ * routes that depend on email refuse up front.
+ */
+export function createNotificationPort(config: ApiConfig): NotificationPort | undefined {
+  const { resendApiKey, notificationFrom } = config;
+  const logger = new Logger('Notifications');
+
+  if (resendApiKey === undefined || notificationFrom === undefined) {
+    logger.warn(
+      'RESEND_API_KEY or NOTIFICATION_FROM is not set: NO EMAIL WILL BE SENT. Password ' +
+        'reset is unavailable, and customers will not be told when a new device signs ' +
+        'into their account.',
+    );
+    return undefined;
+  }
+
+  return new ResendNotificationAdapter({
+    apiKey: resendApiKey,
+    from: notificationFrom,
+    ...(config.notificationReplyTo === undefined
+      ? {}
+      : { replyTo: config.notificationReplyTo }),
   });
 }
 
@@ -406,10 +502,97 @@ export class CryptoLifecycle implements OnApplicationBootstrap {
   constructor(
     @Inject(CryptoReconciliationService)
     private readonly crypto: CryptoReconciliationService,
+    @Inject(CryptoDepositReconciliationService)
+    private readonly cryptoDeposits: CryptoDepositReconciliationService,
   ) {}
 
   onApplicationBootstrap(): void {
     this.crypto.start();
+    // Deposits as well as withdrawals. Withdrawals had a sweep from the day
+    // they shipped and deposits did not, which meant a lost deposit webhook
+    // was money on a chain that never reached a balance and nothing would
+    // ever notice.
+    this.cryptoDeposits.start();
+  }
+}
+
+/**
+ * Starts the outbox worker.
+ *
+ * Separate from the other lifecycles because it is enabled independently, and
+ * because it is the one whose absence is silent in the worst way: rows
+ * accumulate, the API keeps answering "check your email", and nothing is ever
+ * delivered. The worker says so at boot when nobody has turned it on.
+ */
+@Injectable()
+export class NotificationLifecycle implements OnApplicationBootstrap {
+  constructor(@Inject(NotificationWorker) private readonly worker: NotificationWorker) {}
+
+  onApplicationBootstrap(): void {
+    this.worker.start();
+  }
+}
+
+/**
+ * Starts the alerter.
+ *
+ * Separate lifecycle because it is enabled independently — and because an
+ * instance that RECORDS failures without telling anybody is a legitimate
+ * configuration for all but one box, exactly like the other sweeps.
+ */
+@Injectable()
+export class ErrorAlertLifecycle implements OnApplicationBootstrap {
+  constructor(@Inject(ErrorAlertService) private readonly alerts: ErrorAlertService) {}
+
+  onApplicationBootstrap(): void {
+    this.alerts.start();
+  }
+}
+
+/**
+ * Starts the balance comparison sweep. Its own lifecycle, like every other:
+ * they are enabled independently.
+ */
+@Injectable()
+export class BalanceReconciliationLifecycle implements OnApplicationBootstrap {
+  constructor(
+    @Inject(BalanceReconciliationService) private readonly balances: BalanceReconciliationService,
+  ) {}
+
+  onApplicationBootstrap(): void {
+    this.balances.start();
+  }
+}
+
+/**
+ * Starts the transaction monitoring sweep.
+ *
+ * Its own lifecycle, like every other. This is the one whose absence is
+ * hardest to notice — nothing fails, the queue is simply empty — so it must be
+ * possible to see that it is off without reading a compose file.
+ */
+@Injectable()
+export class MonitoringLifecycle implements OnApplicationBootstrap {
+  constructor(@Inject(MonitoringService) private readonly monitoring: MonitoringService) {}
+
+  onApplicationBootstrap(): void {
+    this.monitoring.start();
+  }
+}
+
+/**
+ * Starts the retention sweep.
+ *
+ * Its own lifecycle rather than sharing one, for the same reason every other
+ * sweep has its own: they are enabled independently, and the one whose job is
+ * to delete data should be the easiest of all to switch off on its own.
+ */
+@Injectable()
+export class RetentionLifecycle implements OnApplicationBootstrap {
+  constructor(@Inject(RetentionService) private readonly retention: RetentionService) {}
+
+  onApplicationBootstrap(): void {
+    this.retention.start();
   }
 }
 
@@ -449,8 +632,13 @@ export class AppModule {
         CryptoWebhookController,
         FxController,
         HealthController,
+        MetricsController,
         KycController,
+        ConsentController,
+        DataRightsController,
         AdminController,
+        DisputeController,
+        AdminDisputeController,
       ],
       providers: [
         { provide: API_CONFIG, useValue: options.config },
@@ -467,27 +655,80 @@ export class AppModule {
           useFactory: (pool: Pool) => new LedgerService(pool),
           inject: [DATABASE],
         },
+        /*
+         * EVERY PORT IS WRAPPED HERE, and this is the only place it happens.
+         *
+         * `watched()` records whether each provider call succeeded, so the
+         * question "is Bitnob down?" has an answer that is not a log grep.
+         * Doing it at the injection boundary rather than at call sites means a
+         * new flow is watched by construction, and a method added to a port
+         * later cannot be silently missed — which is the failure the whole
+         * thing exists to prevent.
+         *
+         * These moved from `useValue` to `useFactory` for one reason: a
+         * factory can inject the pool, and health that lives in process memory
+         * would be lost on exactly the restart an incident causes.
+         */
         {
           provide: CARD_PORT,
-          useValue: options.cardPort ?? createCardPort(options.config),
+          useFactory: (health: ProviderHealthService) => {
+            const port = options.cardPort ?? createCardPort(options.config);
+            return watched(port, 'bitnob', health);
+          },
+          inject: [ProviderHealthService],
+        },
+        {
+          provide: PROVIDER_BALANCE_PORT,
+          useFactory: (health: ProviderHealthService) => {
+            const port = options.providerBalancePort ?? createProviderBalancePort(options.config);
+            // Optional: an instance with no Bitnob credentials has none, and
+            // wrapping `undefined` would turn a deliberate absence into a
+            // proxy that answers every call.
+            return port === undefined ? undefined : watched(port, 'bitnob', health);
+          },
+          inject: [ProviderHealthService],
         },
         {
           provide: FULFILMENT_PORTS,
-          useValue: options.fulfilmentPorts ?? createFulfilmentPorts(options.config),
+          useFactory: (health: ProviderHealthService) => {
+            const ports = options.fulfilmentPorts ?? createFulfilmentPorts(options.config);
+            // A MAP of three different providers behind one port, so each is
+            // watched under its own name: VTpass being down is not Airalo
+            // being down, and one health row for all three would say neither.
+            return new Map(
+              [...ports].map(([kind, port]) => [kind, watched(port, port.provider, health)]),
+            );
+          },
+          inject: [ProviderHealthService],
         },
         {
           provide: FUNDING_PORT,
-          useValue: options.fundingPort ?? createFundingPort(options.config),
+          useFactory: (health: ProviderHealthService) =>
+            watched(options.fundingPort ?? createFundingPort(options.config), 'bitnob', health),
+          inject: [ProviderHealthService],
         },
         {
           provide: CRYPTO_PORT,
-          useValue: options.cryptoPort ?? createCryptoPort(options.config),
+          useFactory: (health: ProviderHealthService) =>
+            watched(options.cryptoPort ?? createCryptoPort(options.config), 'bitnob', health),
+          inject: [ProviderHealthService],
         },
         {
           provide: FX_PORT,
-          useValue: options.fxPort ?? createFxPort(options.config),
+          useFactory: (health: ProviderHealthService) =>
+            watched(options.fxPort ?? createFxPort(options.config), 'bitnob', health),
+          inject: [ProviderHealthService],
+        },
+        {
+          provide: NOTIFICATION_PORT,
+          useFactory: (health: ProviderHealthService) => {
+            const port = options.notificationPort ?? createNotificationPort(options.config);
+            return port === undefined ? undefined : watched(port, 'resend', health);
+          },
+          inject: [ProviderHealthService],
         },
         AuthService,
+        SignInEventService,
         PinService,
         WalletService,
         SpendingLimitService,
@@ -500,7 +741,13 @@ export class AppModule {
         PurchaseService,
         PurchaseOutcome,
         StaffService,
+        StaffTotpService,
         SettingsService,
+        TaxService,
+        ConsentService,
+        DataRightsService,
+        PricingService,
+        ProviderCredentialService,
         AuditService,
         AdminService,
         KycService,
@@ -510,20 +757,51 @@ export class AppModule {
         CryptoWebhookService,
         FxService,
         CryptoReconciliationService,
+        CryptoDepositReconciliationService,
         CryptoLifecycle,
         DepositReconciliationService,
         DepositLifecycle,
+        ErrorRecorder,
+        ProviderHealthService,
+        ReadinessService,
+        MetricsService,
+        ErrorAlertService,
+        ErrorAlertLifecycle,
+        NotificationService,
+        NotificationWorker,
+        NotificationLifecycle,
         GiftCardService,
         GiftCardHoldService,
         ReconciliationService,
         ReconciliationLifecycle,
         GiftCardLifecycle,
         LoginRateLimitGuard,
+        PasswordResetRateLimitGuard,
+        // Injected into AuthGuard rather than registered as a second global
+        // guard: it has to run after the bearer check (so it has an account to
+        // count against) and before the PIN (so a flood cannot spend scrypt).
+        // Guard ordering cannot express "in the middle of that one".
+        RequestRateLimiter,
+        DisputeService,
+        RetentionService,
+        RetentionLifecycle,
+        BalanceReconciliationService,
+        MonitoringService,
+        CaseService,
+        BalanceReconciliationLifecycle,
+        MonitoringLifecycle,
+        PasswordResetService,
 
         // Registered globally, so it runs for every route including one whose
         // author never thought about authorisation. That is the whole point of
         // deny by default: the guard cannot be forgotten, only satisfied.
         { provide: APP_GUARD, useClass: AuthGuard },
+
+        // Registered globally, so no unhandled failure anywhere in the app can
+        // avoid being recorded. Same reasoning as the guard: a filter that has
+        // to be remembered per controller is one that will be forgotten on the
+        // controller that needed it.
+        { provide: APP_FILTER, useClass: ErrorRecordingFilter },
       ],
     };
   }

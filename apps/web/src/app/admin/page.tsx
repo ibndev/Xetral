@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { formatAmount } from '@xetral/client';
+import { formatAmount, formatMinor } from '@xetral/client';
 import { useAdmin, useLoad } from '@/lib/hooks';
 
 /**
@@ -20,6 +20,7 @@ export default function Overview() {
 
   const drifted = drift.data ?? [];
   const queues = overview.data?.queues ?? [];
+  const waiting = queues.filter((q) => Number(q.waiting) > 0);
   const liability = overview.data?.liability ?? [];
 
   return (
@@ -72,9 +73,22 @@ export default function Overview() {
 
       <div className="panel">
         <h2>Work queues</h2>
+        {/*
+          WAITING FIRST, and zeros kept rather than hidden.
+
+          This view named five sources until 036 and now names twenty-two, so
+          the risk changed: a wall of zeros is a list people learn to skim, and
+          skimming is how the one row that mattered gets missed. Sorting by
+          what is waiting puts the work at the top; keeping the empty rows
+          visible below is what says the other queues were checked, which an
+          absent row does not.
+        */}
         {overview.loading && <p className="spinner">Loading…</p>}
-        {!overview.loading && queues.length === 0 && (
-          <p className="empty">Nothing waiting.</p>
+
+        {waiting.length === 0 && queues.length > 0 && (
+          <p className="empty">
+            All {queues.length} queues are empty.
+          </p>
         )}
 
         {queues.length > 0 && (
@@ -89,20 +103,26 @@ export default function Overview() {
                 </tr>
               </thead>
               <tbody>
-                {queues.map((queue) => (
-                  <tr key={queue.queue}>
-                    <td>{queue.queue.replace(/_/g, ' ')}</td>
-                    <td className="right amount">{queue.waiting}</td>
-                    <td className="right muted">
-                      {queue.oldest === null
-                        ? '—'
-                        : new Date(queue.oldest).toLocaleString()}
-                    </td>
-                    <td className="right">
-                      <Link href={queueLink(queue.queue)}>Open</Link>
-                    </td>
-                  </tr>
-                ))}
+                {[...queues]
+                  .sort((a, b) => Number(b.waiting) - Number(a.waiting))
+                  .map((queue) => {
+                    const href = queueLink(queue.queue);
+                    const idle = Number(queue.waiting) === 0;
+                    return (
+                      <tr key={queue.queue} className={idle ? 'muted' : undefined}>
+                        <td>{queue.queue.replace(/_/g, ' ')}</td>
+                        <td className="right amount">{queue.waiting}</td>
+                        <td className="right muted">
+                          {queue.oldest === null
+                            ? '—'
+                            : new Date(queue.oldest).toLocaleString()}
+                        </td>
+                        <td className="right">
+                          {href !== undefined && !idle && <Link href={href}>Open</Link>}
+                        </td>
+                      </tr>
+                    );
+                  })}
               </tbody>
             </table>
           </div>
@@ -138,16 +158,16 @@ export default function Overview() {
                   <tr key={row.currency}>
                     <td>{row.currency}</td>
                     <td className="right amount">
-                      {formatAmount(minorToMajor(row.wallets_minor, row.currency), row.currency)}
+                      {formatMinor(row.wallets_minor, row.currency)}
                     </td>
                     <td className="right amount">
-                      {formatAmount(minorToMajor(row.pending_minor, row.currency), row.currency)}
+                      {formatMinor(row.pending_minor, row.currency)}
                     </td>
                     <td className="right amount">
-                      {formatAmount(minorToMajor(row.cards_minor, row.currency), row.currency)}
+                      {formatMinor(row.cards_minor, row.currency)}
                     </td>
                     <td className="right amount">
-                      {formatAmount(minorToMajor(row.suspense_minor, row.currency), row.currency)}
+                      {formatMinor(row.suspense_minor, row.currency)}
                     </td>
                     <td className="right amount">
                       <strong>{formatAmount(row.total_owed, row.currency)}</strong>
@@ -163,31 +183,46 @@ export default function Overview() {
   );
 }
 
-function queueLink(queue: string): string {
-  if (queue.includes('kyc')) return '/admin/kyc';
-  if (queue.includes('suspense')) return '/admin/suspense';
-  if (queue.includes('giftcard')) return '/admin/giftcards';
-  return '/admin';
+/**
+ * Where a queue is worked.
+ *
+ * Written out rather than matched on substrings. The old version tested for
+ * 'kyc', 'suspense' and 'giftcard' and sent everything else to /admin — which
+ * was invisible while the overview showed five queues and would now send
+ * eighteen of twenty-two rows to a page that cannot help.
+ *
+ * A queue with no screen returns undefined and renders no link, which is the
+ * honest answer: some of these are read in the database, and pretending
+ * otherwise wastes somebody's click during an incident.
+ */
+const QUEUE_SCREENS: Readonly<Record<string, string>> = {
+  kyc: '/admin/kyc',
+  bvn_collisions: '/admin/kyc',
+  suspense: '/admin/suspense',
+  giftcard_review: '/admin/giftcards',
+  giftcard_holds_due: '/admin/giftcards',
+  risk_signals: '/admin/risk',
+  risk_cases: '/admin/risk/cases',
+  consent: '/admin/consents',
+  data_requests: '/admin/data-requests',
+  errors: '/admin/errors',
+  prices_unattributed: '/admin/prices',
+  staff_without_totp: '/admin/staff',
+  provider_degraded: '/admin/providers',
+};
+
+function queueLink(queue: string): string | undefined {
+  return QUEUE_SCREENS[queue];
 }
 
-/**
- * Minor units to a major-unit string, WITHOUT going through a number.
+
+/*
+ * Minor units to a major-unit string, WITHOUT going through a number, lives in
+ * `formatMinor` in the client package.
  *
  * The API sends `total_owed` already formatted for exactly this reason, and
  * these four component columns arrive as minor units because no endpoint had a
- * reason to format them. So the conversion happens here, on strings — a
- * `Number(minor) / 100` would be a float in a column labelled "what we owe
- * customers", and would be wrong for JPY and very wrong for BTC.
+ * reason to format them. This file used to carry its own copy of the
+ * conversion, with its own exponent table — which is how two copies drift, and
+ * the one that drifts is the one nobody reads closely.
  */
-const EXPONENTS: Readonly<Record<string, number>> = {
-  NGN: 2, USD: 2, GBP: 2, EUR: 2, GHS: 2, KES: 2, JPY: 0, USDT: 6, BTC: 8,
-};
-
-function minorToMajor(minor: string, currency: string): string {
-  const exponent = EXPONENTS[currency] ?? 2;
-  const negative = minor.startsWith('-');
-  const digits = (negative ? minor.slice(1) : minor).padStart(exponent + 1, '0');
-  const whole = digits.slice(0, digits.length - exponent);
-  const fraction = exponent === 0 ? '' : `.${digits.slice(digits.length - exponent)}`;
-  return `${negative ? '-' : ''}${whole}${fraction}`;
-}

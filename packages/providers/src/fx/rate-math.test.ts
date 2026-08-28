@@ -126,4 +126,63 @@ describe('displayRate', () => {
     // USD (2dp) to NGN (2dp): 165025/100 with equal exponents is 1650.25.
     expect(displayRate(USD_NGN, 2, 2)).toBe('1650.25');
   });
+
+  it('DOES NOT COLLAPSE in the other direction', () => {
+    /*
+     * The bug this function had. `(Number(n) / Number(d)).toFixed(2)` rendered
+     * USD per naira — genuinely 0.000606 — as "0.00", so a customer converting
+     * naira to dollars was shown a rate of zero and nothing failed.
+     *
+     * Phase 10 finding 1 in the display layer: "minor units per major unit
+     * works for USD→NGN and collapses in the other direction, where one kobo
+     * is 0.0006 cents." The conversion arithmetic was fixed then; the
+     * rendering of it was not.
+     */
+    const rendered = displayRate(invert(USD_NGN), 2, 2);
+    expect(rendered).not.toBe('0.00');
+    // 1 / 1650.25 exactly, not 1 / 1650 rounded — which is the point: the
+    // digits are the ratio's own rather than a float's idea of them.
+    expect(rendered).toBe('0.00060596');
+  });
+
+  it('widens for a tiny rate and does not for a large one', () => {
+    // Two decimals is right for 1650 and useless for 0.000606, so the number
+    // of places is chosen rather than fixed — and it stops, so a rate is never
+    // a wall of noise.
+    expect(displayRate(USD_NGN, 2, 2)).toBe('1650.25');
+    expect(displayRate(invert(USD_NGN), 2, 2).length).toBeLessThan(16);
+  });
+
+  it('handles a negative exponent difference without a float', () => {
+    // NGN (2dp) to BTC (8dp): the power of ten goes on the other side of the
+    // division, because `10 ** -6` would be the float this avoids.
+    // 1 sat per 150 kobo is 6.667e-9 BTC per naira.
+    const ngnBtc = {
+      base: 'NGN' as const,
+      quote: 'BTC' as const,
+      numerator: 1n,
+      denominator: 150n,
+      expiresAt: new Date('2030-01-01T00:00:00Z'),
+    };
+    expect(displayRate(ngnBtc, 2, 8)).toBe('0.000000006666');
+  });
+
+  it('says nothing rather than something wrong for a zero rate', () => {
+    const zero = { ...USD_NGN, numerator: 0n };
+    expect(displayRate(zero, 2, 2)).toBe('0');
+  });
+
+  it('goes through no float at all', () => {
+    /*
+     * Past 2^53 the old implementation lost the low digits before it ever
+     * reached `toFixed`. This rate is deliberately larger than a float can
+     * hold exactly, and the rendering is exact.
+     */
+    const huge = {
+      ...USD_NGN,
+      numerator: 9_007_199_254_740_993n,
+      denominator: 1n,
+    };
+    expect(displayRate(huge, 2, 2)).toBe('9007199254740993.00');
+  });
 });

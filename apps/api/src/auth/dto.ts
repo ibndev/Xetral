@@ -64,3 +64,36 @@ export const changePasswordSchema = z.object({
 });
 
 export type ChangePasswordRequest = z.infer<typeof changePasswordSchema>;
+
+/**
+ * Asking for a reset link.
+ *
+ * `identifier` rather than `email` so the field matches login's, which is what
+ * lets one rate-limit helper read both — and so a customer who signs in with a
+ * phone number is not presented with a form asking for something else.
+ */
+export const forgotPasswordSchema = z.object({
+  identifier: z.string().trim().min(3).max(255),
+});
+
+/**
+ * Finishing one.
+ *
+ * `max(512)` on the password rather than the policy's real maximum, for the
+ * same reason `changePasswordSchema` does it: the policy lives in one place,
+ * @xetral/identity, and a second looser copy here is how the two drift.
+ */
+export const resetPasswordSchema = z.object({
+  token: z.string().min(1).max(512),
+  new_password: z.string().min(1).max(512),
+});
+
+export type ForgotPasswordRequest = z.infer<typeof forgotPasswordSchema>;
+export type ResetPasswordRequest = z.infer<typeof resetPasswordSchema>;
+
+/** Confirming an enrolment, and every acting staff request. */
+export const totpCodeSchema = z.object({
+  totp_code: z.string().trim().regex(/^[0-9]{6}$/),
+});
+
+export type TotpCodeRequest = z.infer<typeof totpCodeSchema>;

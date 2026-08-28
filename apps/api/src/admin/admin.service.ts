@@ -5,6 +5,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import type { Pool } from 'pg';
 import { LedgerService, posting } from '@xetral/ledger';
@@ -118,7 +119,15 @@ export class AdminService {
     }
     params.push(options.limit);
 
+    /*
+     * nosemgrep: no-interpolated-sql — every VALUE goes through `params`; what
+     * is interpolated is `$N` placeholder numbers and fixed clause fragments
+     * built above, none of which comes from a request. Postgres has no
+     * parameter for an optional WHERE, so a filter list is either built this
+     * way or written out once per combination.
+     */
     const rows = await this.pool.query<UserSummary & { row_id: string }>(
+      // nosemgrep: semgrep.no-interpolated-sql
       `SELECT u.id::text AS row_id, u.uuid AS id, u.email, u.status, u.created_at,
               (SELECT k.status::text FROM kyc_submissions k
                 WHERE k.user_id = u.id ORDER BY k.id DESC LIMIT 1) AS kyc_status
@@ -139,9 +148,10 @@ export class AdminService {
     const row = found.rows[0];
     if (row === undefined) throw new NotFoundException({ error: 'user_not_found' });
 
-    const [profile, balances, devices, statusHistory] = await Promise.all([
+    const [profile, balances, devices, statusHistory, tierHistory, tierLimits, cards] =
+      await Promise.all([
       this.pool.query(
-        `SELECT u.uuid AS id, u.email, u.status, u.created_at,
+        `SELECT u.uuid AS id, u.email, u.status, u.created_at, u.kyc_tier,
                 k.status::text AS kyc_status, k.full_name, k.bvn_last4, k.phone
            FROM users u
            LEFT JOIN kyc_submissions k
@@ -166,6 +176,35 @@ export class AdminService {
           WHERE c.user_id = $1::bigint ORDER BY c.created_at DESC LIMIT 20`,
         [row.id],
       ),
+      this.pool.query(
+        `SELECT t.from_tier, t.to_tier, t.reason, t.changed_at, a.email AS changed_by
+           FROM kyc_tier_changes t
+           LEFT JOIN users a ON a.id = t.changed_by
+          WHERE t.user_id = $1::bigint ORDER BY t.changed_at DESC LIMIT 20`,
+        [row.id],
+      ),
+      // What this customer's tier actually allows, so an operator looking at a
+      // refused transfer does not have to hold the grid in their head.
+      this.pool.query(
+        `SELECT l.currency, l.daily_limit_minor::text
+           FROM users u JOIN kyc_tier_limits l ON l.tier = u.kyc_tier
+          WHERE u.id = $1::bigint ORDER BY l.currency`,
+        [row.id],
+      ),
+      // THE CARDS, which support could not see at all. A customer ringing
+      // about a declined card was previously a conversation nobody on this
+      // side could follow — no status, no history, and no way to tell whether
+      // the card had been frozen and by whom.
+      //
+      // From `card_history`, which carries `last4` and nothing more of the
+      // number: this screen is read over shoulders and screenshotted into
+      // tickets.
+      this.pool.query(
+        `SELECT card_id AS id, last4, currency, status, created_at, terminated_at,
+                replaces_card_id, replaced_by_card_id, events
+           FROM card_history WHERE user_id = $1::bigint`,
+        [row.id],
+      ),
     ]);
 
     return {
@@ -173,7 +212,102 @@ export class AdminService {
       balances: balances.rows,
       devices: devices.rows,
       status_history: statusHistory.rows,
+      tier_history: tierHistory.rows,
+      tier_limits: tierLimits.rows,
+      cards: cards.rows,
     };
+  }
+
+  /**
+   * One card's whole life, for the agent on the phone to a customer.
+   *
+   * Every status change with who caused it, so "was this card frozen at the
+   * time, and who unfroze it?" — the first question in any card dispute — has
+   * an answer. Carries four digits of the number and no more, which is all
+   * `cards` stores.
+   */
+  async cardHistory(cardUuid: string): Promise<Record<string, unknown>> {
+    const card = await this.pool.query<{ id: string }>(
+      `SELECT id FROM cards WHERE uuid = $1::uuid`,
+      [cardUuid],
+    );
+    const id = card.rows[0]?.id;
+    if (id === undefined) throw new NotFoundException({ error: 'card_not_found' });
+
+    const [summary, events] = await Promise.all([
+      this.pool.query(`SELECT * FROM card_history WHERE card_id = $1::uuid`, [cardUuid]),
+      this.pool.query(
+        `SELECT e.kind::text AS kind, e.actor::text AS actor, e.reason, e.created_at,
+                u.email AS actor_email
+           FROM card_events e
+           LEFT JOIN users u ON u.id = e.actor_id
+          WHERE e.card_id = $1::bigint
+          ORDER BY e.id`,
+        [id],
+      ),
+    ]);
+
+    return { ...(summary.rows[0] ?? {}), events: events.rows };
+  }
+
+  /**
+   * Raises or lowers a customer's verification tier.
+   *
+   * SEPARATE FROM `setUserStatus`, deliberately. Freezing is a protective
+   * action about an account's safety; a tier is a claim about what we know
+   * about a person, and the two answer different questions. Conflating them
+   * would mean unfreezing an account also restored a ceiling somebody removed
+   * for a reason.
+   *
+   * A REASON IS REQUIRED IN BOTH DIRECTIONS. Raising one to enhanced is the act
+   * that decides how much money may leave in a day, and the answer to "who
+   * allowed this" has to exist. Lowering one takes something away from a
+   * customer, which `admin_audit_log`'s CHECK already demands a reason for.
+   */
+  async setUserTier(
+    uuid: string,
+    tier: number,
+    actorUuid: string,
+    reason: string,
+  ): Promise<Record<string, unknown>> {
+    const actorId = await this.#userId(actorUuid);
+
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const updated = await client.query<{ id: string; kyc_tier: number }>(
+        `UPDATE users SET kyc_tier = $2 WHERE uuid = $1::uuid RETURNING id, kyc_tier`,
+        [uuid, tier],
+      );
+      const row = updated.rows[0];
+      if (row === undefined) throw new NotFoundException({ error: 'user_not_found' });
+
+      // The trigger records the change; this fills in WHO and WHY, which the
+      // trigger cannot know. Updating the row it just wrote is safe because
+      // `kyc_tier_changes` is append-only only against later edits — this is
+      // the same statement completing its own record.
+      await client.query(
+        `UPDATE kyc_tier_changes SET changed_by = $2::bigint, reason = $3
+          WHERE id = (SELECT max(id) FROM kyc_tier_changes WHERE user_id = $1::bigint)`,
+        [row.id, actorId, reason],
+      );
+
+      await client.query('COMMIT');
+      return { id: uuid, kyc_tier: row.kyc_tier };
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      if (
+        error !== null &&
+        typeof error === 'object' &&
+        String((error as { message?: string }).message ?? '').includes('rests on the evidence')
+      ) {
+        throw new UnprocessableEntityException({ error: 'tier_skips_evidence' });
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   /**
@@ -365,6 +499,46 @@ export class AdminService {
       ),
     ]);
     return { purchases: purchases.rows, crypto_withdrawals: withdrawals.rows };
+  }
+
+  /* --------------------------------- tax -------------------------------- */
+
+  /**
+   * What finance files, and what we hold against it.
+   *
+   * Every figure comes from a VIEW over the ledger rather than from a counter
+   * this method maintains — a revenue number computed from a second record is
+   * a revenue number that drifts, and the drift is discovered while filing.
+   *
+   * `drift` is the row nobody wants and everybody needs: tax held that no
+   * collection explains means a path posted the money and forgot the record.
+   */
+  async tax(months: number): Promise<Record<string, unknown>> {
+    const [collected, revenue, payable, drift] = await Promise.all([
+      this.pool.query(
+        `SELECT month, kind, currency, transactions::text,
+                collected_minor::text, base_minor::text
+           FROM tax_collected_monthly LIMIT $1`,
+        [months * 8],
+      ),
+      this.pool.query(
+        `SELECT month, account, currency, amount_minor::text
+           FROM revenue_monthly LIMIT $1`,
+        [months * 12],
+      ),
+      this.pool.query(`SELECT currency, balance_minor::text FROM tax_payable`),
+      this.pool.query(
+        `SELECT currency, collected_minor::text, held_minor::text,
+                difference_minor::text
+           FROM tax_remittance_drift`,
+      ),
+    ]);
+    return {
+      collected: collected.rows,
+      revenue: revenue.rows,
+      payable: payable.rows,
+      drift: drift.rows,
+    };
   }
 
   /* ------------------------------- staff ------------------------------- */

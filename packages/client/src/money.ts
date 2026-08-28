@@ -98,3 +98,37 @@ export const EXPONENTS: Record<string, number> = {
 export function exponentFor(currency: string): number {
   return EXPONENTS[currency] ?? 2;
 }
+
+/**
+ * Formats MINOR units — an integer string, the way the ledger stores money.
+ *
+ * SEPARATE FROM `formatAmount`, which takes major units, and the separation is
+ * the point: the two look identical at a call site and differ by a factor of
+ * a hundred. The admin surface reads `*_minor` columns straight out of views,
+ * and `formatAmount('500000000', 'NGN')` renders ₦500,000,000 for what is
+ * really ₦5,000,000 — an error a reviewer deciding whether a transaction is
+ * reportable has no way to see. Found on the compliance queue, which had been
+ * doing exactly that.
+ *
+ * The exponent is PER CURRENCY. Six for USDT, eight for BTC, zero for JPY, and
+ * never a hardcoded two.
+ *
+ * No division, and no number anywhere: the decimal point is inserted into the
+ * digits.
+ */
+export function formatMinor(minor: string, currency: string): string {
+  const trimmed = minor.trim();
+  if (!/^-?[0-9]+$/.test(trimmed)) {
+    throw new RangeError(`'${minor}' is not an integer amount of minor units`);
+  }
+
+  const negative = trimmed.startsWith('-');
+  const digits = negative ? trimmed.slice(1) : trimmed;
+  const exponent = exponentFor(currency);
+
+  const padded = digits.padStart(exponent + 1, '0');
+  const whole = exponent === 0 ? padded : padded.slice(0, padded.length - exponent);
+  const fraction = exponent === 0 ? '' : padded.slice(padded.length - exponent);
+
+  return formatAmount(`${negative ? '-' : ''}${whole}${fraction === '' ? '' : `.${fraction}`}`, currency);
+}

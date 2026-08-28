@@ -25,6 +25,12 @@ import type { Clock } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
 import type { LoginRequest, RegisterRequest } from './dto.js';
 import { SettingsService } from '../settings/settings.service.js';
+import { NotificationService } from '../notifications/notification.service.js';
+import { lagosTime } from './password-reset.service.js';
+import { SignInEventService } from './sign-in-events.service.js';
+import { ConsentService } from '../consent/consent.service.js';
+import type { ConsentContext } from '../consent/consent.service.js';
+import type { SignInOrigin } from './sign-in-events.service.js';
 
 export interface TokenPair {
   readonly access_token: string;
@@ -59,6 +65,9 @@ interface UserRow {
   id: string;
   uuid: string;
   status: string;
+  /** Nullable: an account can be opened on a phone number. Nothing can be
+   *  mailed to such a customer, and the alert is skipped rather than faked. */
+  email: string | null;
   password_hash: string | null;
 }
 
@@ -96,6 +105,9 @@ export class AuthService {
     @Inject(API_CONFIG) private readonly config: ApiConfig,
     @Inject(CLOCK) private readonly clock: Clock,
     @Inject(SettingsService) private readonly settings: SettingsService,
+    @Inject(NotificationService) private readonly notifications: NotificationService,
+    @Inject(SignInEventService) private readonly signIns: SignInEventService,
+    @Inject(ConsentService) private readonly consents: ConsentService,
   ) {}
 
   /**
@@ -111,7 +123,7 @@ export class AuthService {
    * and a provider identity is a KYC decision. Creating either here would mean
    * a signup form quietly performing a regulated step.
    */
-  async register(input: RegisterRequest): Promise<TokenPair> {
+  async register(input: RegisterRequest, context: ConsentContext = {}): Promise<TokenPair> {
     if (!(await this.settings.registrationEnabled())) {
       // A flag rather than a deploy, so an abuse wave can be stopped in
       // seconds without taking the platform down for existing customers.
@@ -163,6 +175,19 @@ export class AuthService {
         [user.id, passwordHash],
       );
 
+      /*
+       * ON THIS TRANSACTION, so an account cannot exist without a record of
+       * what its owner agreed to and the record cannot exist without the
+       * account. Written afterwards on its own connection, a crash in the gap
+       * leaves a customer whose consent we cannot demonstrate — and that is
+       * precisely the customer somebody will later ask about.
+       *
+       * The terms and the privacy notice only. Marketing is refused here by
+       * CHECK, because bundling a mailing list into "create account" is not
+       * consent to the mailing list whatever the button said.
+       */
+      await this.consents.recordRegistration(client, user.id, context);
+
       const device = await this.#resolveDevice(client, user.id, input.device);
       const pair = await this.#openSession(client, user, device);
 
@@ -177,8 +202,21 @@ export class AuthService {
     }
   }
 
-  async login(input: LoginRequest): Promise<TokenPair> {
+  /**
+   * `origin` describes the sign-in — where it came from and on what — and is
+   * NEVER an authorisation input. Both its fields arrive through the edge, so
+   * they are worth what the edge is worth: enough to show a customer and to
+   * correlate against, not enough to decide anything on.
+   */
+  async login(input: LoginRequest, origin: SignInOrigin = {}): Promise<TokenPair> {
+    const ipAddress = origin.ip;
     const client = await this.pool.connect();
+    // Set as soon as we know which refusal it was, and recorded AFTER the
+    // rollback below — see `recordFailure`. A failure written on this client
+    // is a failure that is never written, which would leave the
+    // credential-stuffing view looking at a clean database during an attack.
+    let failure: 'bad_credentials' | 'unknown_identifier' | 'refused' | undefined;
+    let failedUserId: string | undefined;
     try {
       await client.query('BEGIN');
 
@@ -193,6 +231,13 @@ export class AuthService {
 
       if (user === undefined || !passwordMatches) {
         this.#logger.warn(`login failed for '${input.identifier}': bad credentials`);
+        // The two are recorded apart even though the caller cannot tell them
+        // apart. "Somebody is guessing passwords on real accounts" and
+        // "somebody is guessing which accounts exist" are different attacks
+        // with different responses, and the endpoint answering identically is
+        // what makes the distinction safe to keep here.
+        failure = user === undefined ? 'unknown_identifier' : 'bad_credentials';
+        failedUserId = user?.id;
         throw new UnauthorizedException(INVALID_CREDENTIALS);
       }
 
@@ -200,11 +245,85 @@ export class AuthService {
       // must not be able to obtain a session at all.
       if (user.status === 'closed') {
         this.#logger.warn(`login refused for user ${user.id}: account closed`);
+        failure = 'refused';
+        failedUserId = user.id;
         throw new UnauthorizedException(INVALID_CREDENTIALS);
       }
 
+      // ASKED BEFORE THE EVENT IS WRITTEN. Recording first would make every
+      // place familiar the moment it is used, and the alert below would never
+      // fire again.
+      const familiar = await this.signIns.familiarity(client, user.id, origin);
+
       const device = await this.#resolveDevice(client, user.id, input.device);
       const pair = await this.#openSession(client, user, device);
+
+      // On the login's OWN transaction, so a 'succeeded' row cannot commit
+      // while the session it describes rolls back.
+      await this.signIns.recordSuccess(client, {
+        userId: user.id,
+        identifier: input.identifier,
+        deviceId: device.id,
+        origin,
+      });
+
+      // A sign-in from a device this customer has never used is the single
+      // most useful thing to tell them about: it is what account takeover
+      // looks like from the outside, and it is the moment they can still do
+      // something about it.
+      //
+      // Enqueued INSIDE the login transaction, so the alert and the device row
+      // that justifies it commit together — a device recorded with no alert
+      // owed is the failure that matters, and it is silent. `enqueueBestEffort`
+      // takes a SAVEPOINT so a queueing failure cannot take the login down
+      // with it; being unable to send an email is not a reason to refuse
+      // somebody entry to their own account.
+      //
+      // Deliberately NOT sent from `register`: the first device on a new
+      // account is the one the customer is holding.
+      if (device.firstSeen && user.email !== null) {
+        await this.notifications.enqueueBestEffort(client, {
+          userId: user.id,
+          recipient: user.email,
+          // Keyed on the DEVICE, so a retried login cannot mail twice and a
+          // genuinely new device always gets its own alert.
+          idempotencyKey: `new_device:${device.id}`,
+          request: {
+            kind: 'new_device',
+            platform: input.device.displayName ?? input.device.platform,
+            at: lagosTime(),
+            ...(ipAddress === undefined ? {} : { ipAddress }),
+          },
+        });
+      }
+
+      // A KNOWN DEVICE IN AN UNKNOWN COUNTRY is the case the new-device alert
+      // cannot see, and it is the whole reason this is a second message rather
+      // than a field on that one. A takeover normally arrives on new hardware
+      // and `new_device` covers it; a replayed fingerprint arrives on hardware
+      // we already trust, and only the country moves. Sending both when both
+      // are new would mail the customer twice about one event and train them
+      // to ignore the pair.
+      if (
+        !device.firstSeen &&
+        !familiar.countrySeenBefore &&
+        origin.country !== undefined &&
+        user.email !== null
+      ) {
+        await this.notifications.enqueueBestEffort(client, {
+          userId: user.id,
+          recipient: user.email,
+          // Keyed on the country, so a customer who has genuinely moved is
+          // told once rather than on every sign-in until they come home.
+          idempotencyKey: `new_location:${user.id}:${origin.country}`,
+          request: {
+            kind: 'new_location',
+            country: origin.country,
+            at: lagosTime(),
+            ...(ipAddress === undefined ? {} : { ipAddress }),
+          },
+        });
+      }
 
       await client.query('COMMIT');
       return pair;
@@ -213,12 +332,23 @@ export class AuthService {
       throw error;
     } finally {
       client.release();
+      if (failure !== undefined) {
+        // After the rollback and after the connection is back, on a client of
+        // its own. Swallows its own errors: being unable to record an attempt
+        // must not change the answer the caller already has.
+        await this.signIns.recordFailure({
+          identifier: input.identifier,
+          outcome: failure,
+          origin,
+          ...(failedUserId === undefined ? {} : { userId: failedUserId }),
+        });
+      }
     }
   }
 
   async #findUser(client: PoolClient, identifier: string): Promise<UserRow | undefined> {
     const result = await client.query<UserRow>(
-      `SELECT u.id, u.uuid, u.status, c.password_hash
+      `SELECT u.id, u.uuid, u.status, u.email, c.password_hash
          FROM users u
          LEFT JOIN user_credentials c ON c.user_id = u.id
         WHERE lower(u.email) = lower($1) OR u.phone = $1
@@ -232,7 +362,7 @@ export class AuthService {
     client: PoolClient,
     userId: string,
     device: LoginRequest['device'],
-  ): Promise<DeviceRow> {
+  ): Promise<DeviceRow & { firstSeen: boolean }> {
     const hashedFingerprint = fingerprintHash(device.fingerprint);
 
     const existing = await client.query<DeviceRow>(
@@ -250,7 +380,12 @@ export class AuthService {
       );
       const row = created.rows[0];
       if (row === undefined) throw new Error('device insert returned no row');
-      return row;
+      // `firstSeen` is what the new-device alert keys on. It has to be
+      // reported from HERE rather than inferred by the caller comparing
+      // timestamps: a device created microseconds ago and one seen last week
+      // differ only by a row that already exists, and a caller re-querying
+      // for it would race its own insert.
+      return { ...row, firstSeen: true };
     }
 
     // A revoked device stays revoked. This is the "lost phone" action, and it
@@ -264,7 +399,7 @@ export class AuthService {
     }
 
     await client.query(`UPDATE devices SET last_seen_at = now() WHERE id = $1`, [found.id]);
-    return found;
+    return { ...found, firstSeen: false };
   }
 
   async #openSession(client: PoolClient, user: UserRow, device: DeviceRow): Promise<TokenPair> {

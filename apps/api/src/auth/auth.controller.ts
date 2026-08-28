@@ -16,8 +16,20 @@ import { AuthService } from './auth.service.js';
 import { PinService } from './pin.service.js';
 import { setPinSchema } from '../wallet/dto.js';
 import type { SessionSummary, TokenPair } from './auth.service.js';
-import { LoginRateLimitGuard } from './login-rate-limit.guard.js';
-import { changePasswordSchema, loginSchema, registerSchema, refreshSchema } from './dto.js';
+import { LoginRateLimitGuard, PasswordResetRateLimitGuard } from './login-rate-limit.guard.js';
+import { countryFrom } from './sign-in-events.service.js';
+import {
+  changePasswordSchema,
+  forgotPasswordSchema,
+  loginSchema,
+  registerSchema,
+  refreshSchema,
+  resetPasswordSchema,
+  totpCodeSchema,
+} from './dto.js';
+import { PasswordResetService } from './password-reset.service.js';
+import { StaffTotpService } from './staff-totp.service.js';
+import type { TotpEnrolment } from './staff-totp.service.js';
 import { AccountSecurityService } from './account-security.service.js';
 import type { DeviceView } from './account-security.service.js';
 
@@ -34,6 +46,8 @@ export class AuthController {
     @Inject(AuthService) private readonly auth: AuthService,
     @Inject(PinService) private readonly pins: PinService,
     @Inject(AccountSecurityService) private readonly security: AccountSecurityService,
+    @Inject(PasswordResetService) private readonly resets: PasswordResetService,
+    @Inject(StaffTotpService) private readonly totp: StaffTotpService,
   ) {}
 
   /**
@@ -51,7 +65,10 @@ export class AuthController {
   @Post('register')
   @HttpCode(201)
   @UseGuards(LoginRateLimitGuard)
-  async register(@Body() body: unknown): Promise<TokenPair> {
+  async register(
+    @Body() body: unknown,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<TokenPair> {
     const parsed = registerSchema.safeParse(body);
     if (!parsed.success) {
       throw new BadRequestException({
@@ -59,13 +76,19 @@ export class AuthController {
         fields: parsed.error.issues.map((issue) => issue.path.join('.')),
       });
     }
-    return this.auth.register(parsed.data);
+    // Describes the consent this creates, and decides nothing. The signup form
+    // shows the terms and the privacy notice above the button; without these
+    // two fields, "they agreed" would be a claim with nothing behind it.
+    return this.auth.register(parsed.data, {
+      ip: request.ip,
+      userAgent: request.headers['user-agent'],
+    });
   }
 
   @Post('login')
   @HttpCode(200)
   @UseGuards(LoginRateLimitGuard)
-  async login(@Body() body: unknown): Promise<TokenPair> {
+  async login(@Body() body: unknown, @Req() request: AuthenticatedRequest): Promise<TokenPair> {
     const parsed = loginSchema.safeParse(body);
     if (!parsed.success) {
       // The validation detail is safe to return — it describes the request
@@ -76,7 +99,14 @@ export class AuthController {
         fields: parsed.error.issues.map((issue) => issue.path.join('.')),
       });
     }
-    return this.auth.login(parsed.data);
+    // Both fields describe the sign-in and neither decides it. `request.ip`
+    // resolves the forwarded chain against TRUST_PROXY_HOPS; the country comes
+    // from the edge's own header and is discarded unless it looks like one.
+    return this.auth.login(parsed.data, {
+      ip: request.ip,
+      country: countryFrom(request.headers),
+      platform: parsed.data.device.platform,
+    });
   }
 
   @Post('refresh')
@@ -226,5 +256,101 @@ export class AuthController {
       parsed.data.current_password,
       parsed.data.new_password,
     );
+  }
+
+  /**
+   * Ask for a reset link.
+   *
+   * ALWAYS 204, for any syntactically valid identifier. That is the whole
+   * security property of this endpoint: answering 404 for an unknown address
+   * and 204 for a known one turns any address list into a customer list.
+   *
+   * A 204 therefore means "if that address has an account, mail is on its way"
+   * and nothing more. It is not a confirmation that anything was sent, and it
+   * deliberately cannot be used as one.
+   */
+  @Post('password/forgot')
+  @HttpCode(204)
+  @UseGuards(PasswordResetRateLimitGuard)
+  async forgotPassword(@Body() body: unknown, @Req() request: AuthenticatedRequest): Promise<void> {
+    const parsed = forgotPasswordSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException({
+        error: 'invalid_request',
+        fields: parsed.error.issues.map((issue) => issue.path.join('.')),
+      });
+    }
+    await this.resets.request(parsed.data.identifier, request.ip);
+  }
+
+  /**
+   * Finish a reset.
+   *
+   * 204 with no body: there is no session here. The customer signs in with the
+   * password they just set, which is also what proves the reset worked. Issuing
+   * a token pair from this endpoint would mean a leaked reset link grants an
+   * immediate live session rather than merely a password that can be used —
+   * and every session on the account was just revoked for that same reason.
+   */
+  @Post('password/reset')
+  @HttpCode(204)
+  @UseGuards(PasswordResetRateLimitGuard)
+  async resetPassword(@Body() body: unknown): Promise<void> {
+    const parsed = resetPasswordSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException({
+        error: 'invalid_request',
+        fields: parsed.error.issues.map((issue) => issue.path.join('.')),
+      });
+    }
+    await this.resets.reset(parsed.data.token, parsed.data.new_password);
+  }
+
+  /**
+   * Begin enrolling a second factor.
+   *
+   * Authenticated but NOT staff-only, and that is deliberate. A person who has
+   * just been granted a role has to be able to enrol before they can use the
+   * admin surface — and every staff route now requires an enrolled factor, so
+   * gating this one behind `staff()` would be a circular lock nobody could
+   * open. Enrolling is harmless for a customer who never becomes staff: it
+   * writes a row that nothing consults.
+   *
+   * The secret is returned ONCE, here, and never again. Re-reading it would
+   * turn any stolen session into a way to clone the factor.
+   */
+  @Post('totp/enrol')
+  @HttpCode(200)
+  async enrolTotp(@Req() request: AuthenticatedRequest): Promise<TotpEnrolment> {
+    const auth = request.auth;
+    if (auth === undefined) throw new UnauthorizedException({ error: 'invalid_token' });
+    return await this.totp.beginEnrolment(auth.sub, auth.sub);
+  }
+
+  /**
+   * Prove the authenticator works, and turn the factor on.
+   *
+   * Until this succeeds the enrolment is inert. Trusting the row at issue time
+   * instead would lock out an operator who scanned nothing — and they would
+   * find out while trying to open the admin surface during whatever made them
+   * need it.
+   */
+  @Post('totp/confirm')
+  @HttpCode(204)
+  async confirmTotp(
+    @Body() body: unknown,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<void> {
+    const auth = request.auth;
+    if (auth === undefined) throw new UnauthorizedException({ error: 'invalid_token' });
+
+    const parsed = totpCodeSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException({
+        error: 'invalid_request',
+        fields: parsed.error.issues.map((issue) => issue.path.join('.')),
+      });
+    }
+    await this.totp.confirmEnrolment(auth.sub, auth.sid, parsed.data.totp_code);
   }
 }

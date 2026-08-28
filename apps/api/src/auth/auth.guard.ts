@@ -16,6 +16,8 @@ import type { ApiConfig } from '../config.js';
 import { routeKeyOf } from './route-key.js';
 import { PinService } from './pin.service.js';
 import { StaffService } from './staff.service.js';
+import { StaffTotpService, optionalTotpFrom } from './staff-totp.service.js';
+import { RequestRateLimiter, rateClassOf } from './request-rate-limit.service.js';
 
 /** The claims a handler can rely on once the guard has allowed the request. */
 export interface AuthenticatedRequest extends Request {
@@ -44,6 +46,8 @@ export class AuthGuard implements CanActivate {
     @Inject(CLOCK) private readonly clock: Clock,
     @Inject(PinService) private readonly pins: PinService,
     @Inject(StaffService) private readonly staff: StaffService,
+    @Inject(StaffTotpService) private readonly totp: StaffTotpService,
+    @Inject(RequestRateLimiter) private readonly limits: RequestRateLimiter,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -73,11 +77,35 @@ export class AuthGuard implements CanActivate {
       throw new ForbiddenException({ error: 'route_not_declared' });
     }
 
-    if (decision.mode === 'public') return true;
-
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
+    const rateClass = rateClassOf(decision, route.method, route.path);
+
+    if (decision.mode === 'public') {
+      // Nothing to key on but the address, which under carrier-grade NAT is
+      // most of a Nigerian network at once — so this ceiling is loose and the
+      // real one on these routes is the per-identifier bucket in
+      // LoginRateLimitGuard.
+      await this.limits.enforce(request, undefined, rateClass);
+      return true;
+    }
+
     const claims = this.#verifyBearer(request);
     request.auth = claims;
+
+    /*
+     * THE RATE LIMIT SITS HERE, AND THE POSITION IS THE POINT.
+     *
+     * After the bearer check, so there is a real account to count against and
+     * a forged token cannot invent a fresh bucket per request.
+     *
+     * BEFORE the role lookup and before the PIN. The PIN is verified with
+     * scrypt, which is deliberately, expensively slow — that slowness is what
+     * makes five attempts meaningful. A flood that reached it would spend that
+     * cost on every request before being refused, and the limiter would be the
+     * thing bringing the box down. Same reasoning that already puts the bearer
+     * check ahead of the PIN, one concern further out.
+     */
+    await this.limits.enforce(request, claims.sub, rateClass);
 
     // The ROLE is checked before the PIN, and that order is also deliberate.
     // A customer poking at an admin path should be refused for not being
@@ -85,6 +113,27 @@ export class AuthGuard implements CanActivate {
     // same reasoning that puts the bearer check before the PIN, one level up.
     if (decision.requiresRole !== undefined) {
       await this.staff.assertRole(claims.sub, decision.requiresRole);
+
+      // A SECOND FACTOR, on every staff route including the read-only ones.
+      //
+      // Gating only the acting routes would leave the whole customer database
+      // — names, balances, KYC status, transaction history — behind one
+      // password. That data is what a targeted phishing campaign is built
+      // from, so reading it is not the harmless half.
+      //
+      // Enrolment is checked here rather than at a login step because a signed
+      // access token cannot be revoked mid-life: an operator whose factor is
+      // removed during an incident would otherwise keep working for fifteen
+      // minutes. Same reasoning that reads roles fresh per request.
+      await this.totp.assertEnrolled(claims.sub);
+
+      // And a FRESH CODE on anything that acts. `requiresPin` already marks
+      // exactly those routes — approving a payout, changing a fee, granting a
+      // role — so the two travel together rather than needing a second flag
+      // somebody could forget to set.
+      if (decision.requiresPin) {
+        await this.totp.assertElevated(claims.sub, claims.sid, optionalTotpFrom(request.body));
+      }
     }
 
     // The PIN is checked AFTER the bearer token, and the order is not

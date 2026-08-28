@@ -1,12 +1,47 @@
 # The APPLICATION node. The only machine with a public address, and Cloudflare
 # sits in front of it.
 services:
+  # The request-serving instance. Scale this one.
+  #
+  # Every sweep interval is BLANKED here, which is what makes "exactly one
+  # instance runs the workers" a fact about the topology rather than a comment
+  # in a .env file. `env_file` gives every replica the same variables, so
+  # scaling the API to three used to mean three processes asking Bitnob about
+  # the same purchase. A blank value disables a sweep (`optionalInteger`
+  # treats it as unset), so this can be scaled freely.
   api:
     build:
       context: ..
       dockerfile: deploy/Dockerfile.api
     restart: always
     env_file: .env
+    environment:
+      # Stated here as well as in .env, because this is the file that says
+      # which deployment this is. A staging .env accidentally used with this
+      # compose file would otherwise start a production topology in staging
+      # mode, with the provider guards relaxed.
+      XETRAL_ENVIRONMENT: production
+      # SET IT, or /metrics answers 404 and nothing is watching. Unset is the
+      # deliberate default rather than an oversight: an open metrics endpoint
+      # publishes queue depths, provider health and what is owed to customers
+      # to anything that can route here, so it exists only when somebody has
+      # decided it should.
+      #
+      # Both processes carry it. The worker is the one whose failure is
+      # silent — rows accumulate, the API keeps saying "check your email", and
+      # nothing is ever sent — so scraping the API alone would watch the half
+      # that complains loudly on its own.
+      METRICS_TOKEN: '${METRICS_TOKEN:-}'
+      RECONCILE_INTERVAL_SECONDS: ''
+      DEPOSIT_RECONCILE_INTERVAL_SECONDS: ''
+      CRYPTO_RECONCILE_INTERVAL_SECONDS: ''
+      CRYPTO_DEPOSIT_RECONCILE_INTERVAL_SECONDS: ''
+      GIFTCARD_RELEASE_INTERVAL_SECONDS: ''
+      NOTIFICATION_INTERVAL_SECONDS: ''
+      ERROR_ALERT_INTERVAL_SECONDS: ''
+      RETENTION_INTERVAL_SECONDS: ''
+      BALANCE_RECONCILE_INTERVAL_SECONDS: ''
+      RISK_MONITOR_INTERVAL_SECONDS: ''
     ports:
       - '127.0.0.1:3000:3000'
     depends_on:
@@ -16,6 +51,51 @@ services:
       # A guarded route answering 401 proves the global guard is mounted, not
       # merely compiled. Three failures in this app were invisible to both the
       # compiler and the tests and appeared only at startup.
+      test:
+        - CMD-SHELL
+        - >-
+          wget -qS -O /dev/null http://127.0.0.1:3000/v1/auth/session 2>&1
+          | grep -q "401"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # THE WORKER. One replica, never more.
+  #
+  # The same image as the API — the sweeps start from the application's own
+  # bootstrap — but it takes the intervals from .env and is not published to
+  # Cloudflare, so nothing routes traffic to it. It still answers on 3000 for
+  # its own healthcheck.
+  #
+  # If this container is not running, no reconciliation happens: a lost
+  # webhook is never found, a held purchase is never resolved, and an approved
+  # gift card is never released. Its healthcheck is the same guarded-route
+  # probe the API uses, so a wedged worker restarts rather than going quiet.
+  worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.api
+    restart: always
+    env_file: .env
+    environment:
+      XETRAL_ENVIRONMENT: production
+      # Read from .env for every other worker; named here too because this is
+      # the one that DELETES, and the blank on `api` above is what stops a
+      # scaled API running it from four processes at once.
+      RETENTION_INTERVAL_SECONDS: '${RETENTION_INTERVAL_SECONDS:-86400}'
+      # Named here for the opposite reason to the one above: this is the worker
+      # whose absence is INVISIBLE. Nothing fails, no request errors, and the
+      # compliance queue is simply empty — which looks exactly like a quiet
+      # week. A default means it runs unless somebody deliberately blanks it.
+      RISK_MONITOR_INTERVAL_SECONDS: '${RISK_MONITOR_INTERVAL_SECONDS:-900}'
+      METRICS_TOKEN: '${METRICS_TOKEN:-}'
+    deploy:
+      replicas: 1
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
       test:
         - CMD-SHELL
         - >-

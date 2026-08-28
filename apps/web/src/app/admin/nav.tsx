@@ -9,11 +9,19 @@ const TABS = [
   { href: '/admin', label: 'Overview' },
   { href: '/admin/users', label: 'Customers' },
   { href: '/admin/kyc', label: 'Identity' },
+  { href: '/admin/risk', label: 'Compliance' },
   { href: '/admin/suspense', label: 'Suspense' },
+  { href: '/admin/tax', label: 'Tax' },
+  { href: '/admin/consents', label: 'Consent' },
+  { href: '/admin/data-requests', label: 'Data requests' },
   { href: '/admin/giftcards', label: 'Gift cards' },
+  { href: '/admin/prices', label: 'Prices' },
+  { href: '/admin/providers', label: 'Providers' },
   { href: '/admin/settings', label: 'Settings' },
+  { href: '/admin/credentials', label: 'Provider keys' },
   { href: '/admin/staff', label: 'Staff' },
   { href: '/admin/audit', label: 'Audit' },
+  { href: '/admin/readiness', label: 'Readiness' },
 ] as const;
 
 export function AdminNav() {

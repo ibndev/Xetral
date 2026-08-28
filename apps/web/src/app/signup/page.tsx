@@ -127,6 +127,23 @@ export default function SignUp() {
           />
         </div>
 
+        {/* Above the button, not below it. Consent has to be readable BEFORE
+            the account exists — a link under the control that creates one is a
+            link nobody reads, and this is the only moment the notice is for.
+
+            There is deliberately NO mailing-list checkbox here. Consent must
+            be specific and freely given, and one act covering the terms and a
+            mailing list is not consent to the mailing list — which the
+            database enforces rather than trusting this page: a consent whose
+            source is `registration` cannot be a marketing one. Opting in
+            lives in settings, as its own decision. */}
+        <p className="hint" style={{ margin: '0 0 14px' }}>
+          By creating an account you agree to our{' '}
+          <Link href="/legal/terms">terms</Link> and{' '}
+          <Link href="/legal/privacy">privacy notice</Link>. We record which
+          version you agreed to, and when.
+        </p>
+
         <button type="submit" className="block" disabled={busy}>
           {busy ? 'Creating your account…' : 'Create account'}
         </button>
