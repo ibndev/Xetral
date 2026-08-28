@@ -202,6 +202,17 @@ describe('formatting', () => {
   it('formats negatives', () => {
     expect(format(ngn(-50_00))).toContain('50.00');
   });
+
+  it('formats past MAX_SAFE_INTEGER without lying', () => {
+    // This is where the float was. `format` read `Number(toMajor(m))` and
+    // rendered N90,071,992,547,409,940.00 for a balance of
+    // N90,071,992,547,409,931.23 — wrong in the digits somebody reads to
+    // decide whether they have been paid, and wrong in the one module whose
+    // entire purpose is that money is never a float.
+    expect(format(money(9_007_199_254_740_993_123n, 'NGN'))).toContain(
+      '90,071,992,547,409,931.23',
+    );
+  });
 });
 
 describe('compile-time currency safety', () => {

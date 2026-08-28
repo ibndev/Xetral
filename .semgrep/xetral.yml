@@ -1,0 +1,137 @@
+# ============================================================================
+#  Rules about THIS codebase.
+#
+#  The generic rulesets find generic things — a missing CSRF token, a weak
+#  cipher — and they are worth running. They cannot find the rules that
+#  actually hold this system together, because those rules are specific to it:
+#  only the ledger writes postings, money is never a float, a card number is
+#  never stored. Every one of them is written down in CLAUDE.md, and until now
+#  every one of them was enforced by a person reading a diff.
+#
+#  EACH RULE HERE HAS A HISTORY. Three of the five caught something real in the
+#  tree the day they were written, which is the argument for writing them:
+#  `format()` in the money package was rendering a naira balance past 2^53 as
+#  N90,071,992,547,409,940.00 instead of N90,071,992,547,409,931.23, and the
+#  compliance queue and the KYC limits screen were both rendering minor units
+#  through a major-unit formatter.
+#
+#  A RULE THAT FIRES ON CORRECT CODE IS WORSE THAN NO RULE, because the fix is
+#  an ignore comment and the next real finding gets the same treatment. Every
+#  pattern below was run against the whole tree and tightened until it reported
+#  only what it should.
+# ============================================================================
+rules:
+  # --------------------------------------------------------------------------
+  - id: only-the-ledger-writes-postings
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >-
+      Rule 1: only LedgerService writes postings and journal entries. Build a
+      LedgerIntent and hand it over — a direct write is what makes the ledger
+      stop being the single record everything else reconciles against, and it
+      bypasses the per-currency balance check, the overdraft guard and the
+      idempotency key all at once.
+    paths:
+      exclude:
+        - "packages/ledger/src/ledger-service.ts"
+        - "*.test.ts"
+        - "*.test.sql"
+        - "sql/"
+    patterns:
+      - pattern-regex: (?i)(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(postings|journal_entries)\b
+
+  # --------------------------------------------------------------------------
+  - id: no-interpolated-sql
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >-
+      SQL built by interpolation. Use a parameter ($1). Postgres has no
+      parameter for an identifier, so a table or column name genuinely cannot
+      be one — in that case the value must be a local constant and never reach
+      here from a request, and the statement is better written out twice than
+      built once.
+    paths:
+      exclude:
+        - "*.test.ts"
+    patterns:
+      # Only statements. A `SAVEPOINT ${name}` cannot be parameterised and is
+      # a local constant, so matching on the four verbs keeps that out.
+      - pattern-regex: \`[^`]*\b(?i:SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM)\b[^`]*\$\{
+
+  # --------------------------------------------------------------------------
+  - id: no-float-holding-money
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >-
+      A float holding money. Amounts are integer minor units as bigint, and
+      major units cross a boundary as decimal STRINGS — the moment one becomes
+      a JS number the guarantee the whole system rests on is gone, and it is
+      gone in the digits a customer reads. This caught two: `format()` rendered
+      a naira balance past 2^53 as N90,071,992,547,409,940.00, and `displayRate`
+      rendered USD per naira as "0.00".
+    paths:
+      exclude:
+        - "*.test.ts"
+    patterns:
+      # AST patterns rather than a regex, so a COMMENT describing the mistake
+      # is not reported as making it — the first version of this rule flagged
+      # its own explanation.
+      - pattern-either:
+          - patterns:
+              - pattern-either:
+                  - pattern: Number($X)
+                  - pattern: parseFloat($X)
+              # Deliberately NOT `spread`, `fee` or `price`: those are usually
+              # basis points or a catalogue label rather than an amount, and a
+              # rule that fires on `Number(spreadBasisPoints)` is a rule people
+              # learn to ignore.
+              - metavariable-regex:
+                  metavariable: $X
+                  regex: (?i).*(minor|amount|balance|payout|owed|liability).*
+          # Formatting through a float, whatever the value is called. This is
+          # the shape both real findings had.
+          - pattern: $F.format(Number(...))
+          - pattern: $F.format(parseFloat(...))
+
+  # --------------------------------------------------------------------------
+  - id: minor-units-through-a-major-unit-formatter
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >-
+      `formatAmount` takes MAJOR units and this value is minor units — the two
+      look identical at a call site and differ by a factor of a hundred. Use
+      `formatMinor`. The compliance queue rendered a N5,000,000 transfer as
+      N500,000,000 this way, to the reviewer deciding whether it was
+      reportable.
+    paths:
+      exclude:
+        - "*.test.ts"
+    patterns:
+      - pattern-regex: \bformatAmount\s*\(\s*[A-Za-z0-9_.\[\]'"]*_minor\b
+
+  # --------------------------------------------------------------------------
+  - id: no-secret-in-a-log-line
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >-
+      A secret interpolated into a log line. Never log full PANs, BVNs, PINs,
+      passwords, tokens or provider keys — logs are read by more people than
+      the database is, kept longer, and shipped somewhere else entirely. Use
+      `redactSecret()`, which deliberately takes no "visible characters"
+      argument because a prefix is not a redaction.
+    paths:
+      exclude:
+        - "*.test.ts"
+    patterns:
+      # `this.#logger.warn(...)` as well as `logger.warn` and `console.log`,
+      # because the private-field form is what this codebase actually uses and
+      # a rule that missed it would be a rule that never fires.
+      #
+      # The names are matched as CAMEL-CASE SEGMENTS (`userPin`, `newBvn`,
+      # `rawAccessToken`) rather than as bare words, and the short ones are
+      # anchored so `spinner` and `mapping` do not read as `pin` and `pan`.
+      # ONE LINE, deliberately. A folded YAML scalar (`>-`) turns each newline
+      # into a SPACE, which silently inserts literal spaces into the pattern —
+      # the first version of this rule matched nothing at all and looked
+      # perfectly correct.
+      - pattern-regex: '(?:this\s*\.\s*)?#?(?:logger|console)\s*\.\s*(?:log|info|warn|error|debug)\s*\([^)]*\$\{[^}]*(?:[Pp]in|PIN|[Pp]an\b|PAN|[Bb]vn|BVN|[Pp]assword|[Pp]assphrase|[Ss]ecret|[Cc]ardNumber|card_number|[Aa]piKey|api_key|[Aa]ccessToken|[Rr]efreshToken|[Rr]awToken|[Pp]laintext)'

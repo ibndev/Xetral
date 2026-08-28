@@ -139,7 +139,13 @@ export class AuditService {
     }
     params.push(options.limit);
 
+    /*
+     * nosemgrep: no-interpolated-sql — the same shape as `users()`: values go
+     * through `params` and only `$N` placeholders and fixed fragments are
+     * interpolated.
+     */
     const rows = await this.pool.query(
+      // nosemgrep: semgrep.no-interpolated-sql
       `SELECT l.id::text, l.uuid, l.action, l.subject_type, l.subject_id,
               l.detail, l.reason, l.created_at, u.email AS actor
          FROM admin_audit_log l

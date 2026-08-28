@@ -539,6 +539,41 @@ wrapper in `apps/api/src/observability/provider-health.service.ts`, screen at
   Tuesday is a queue nobody is working; a queue of forty turning over hourly is
   a busy morning. Alerting on depth alone gets both wrong.
 
+### Static analysis — non-obvious rules
+
+Rules in `.semgrep/xetral.yml`, probe in `.semgrep/probe/`, workflow in
+`.github/workflows/scan.yml`.
+
+- **The generic rulesets cannot know this system's rules.** CodeQL and
+  Semgrep's own packs find well-known bug classes and are worth running. They
+  cannot find "only the ledger writes postings" or "money is never a float",
+  and until now every one of those was enforced by a person reading a diff.
+- **The five local rules BLOCK; the generic ones REPORT.** A generic ruleset
+  over a repo this size finds things in fixtures and build tooling, and failing
+  on those trains everybody to skip the step — the same argument the dependency
+  audit makes. When a generic finding matters it gets written into
+  `xetral.yml`, where it does block.
+- **A rule that matches nothing looks exactly like a rule that finds nothing.**
+  `.semgrep/probe/violations.ts.probe` is deliberately broken code, one
+  violation per rule, and CI fails if fewer than all of them fire. That is not
+  hypothetical: `no-secret-in-a-log-line` was written as a folded YAML scalar,
+  which turns every newline into a SPACE — the regex matched nothing at all and
+  read perfectly correctly in review.
+- **A rule that fires on correct code is worse than no rule**, because the fix
+  is an ignore comment and the next real finding gets the same treatment. Every
+  pattern was run against the whole tree and tightened until it reported only
+  what it should: `spread`, `fee` and `price` are NOT in the float rule's name
+  list, because those are usually basis points or a catalogue label.
+- **The four `nosemgrep` comments each say why at the site.** Two are dynamic
+  WHERE clauses where every value goes through `params`; two are the demo
+  seeder, which skips the service but not the database's own guards.
+- **Prefer AST patterns to regexes** — the first float rule reported its own
+  explanatory comment as a violation.
+- **Three of the five caught something real the day they were written**:
+  `format()` rendered a naira balance past 2^53 as ₦90,071,992,547,409,940.00,
+  and `displayRate` rendered USD-per-naira as **"0.00"** — Phase 10 finding 1's
+  collapse, in the display layer, in two copies of one calculation.
+
 ### Purchases (bills, eSIM, numbers) — non-obvious rules
 
 Schema: `packages/ledger/sql/004_purchases.sql`. One table for every "buy a thing

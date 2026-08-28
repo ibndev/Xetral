@@ -44,13 +44,25 @@ async function entry(key, kind, description, legs) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    /*
+     * nosemgrep: only-the-ledger-writes-postings — a LOCAL DEMO SEEDER, and
+     * the exception is narrow enough to state. It writes real entries with
+     * real idempotency keys inside one transaction, so the deferred
+     * per-currency balance check, the overdraft guard and the unique key all
+     * still apply: what it skips is the SERVICE, not the database's rules.
+     * Nothing on a customer path may do this — that is the rule, and this
+     * file never runs against one.
+     */
     const e = await client.query(
+      // nosemgrep: semgrep.only-the-ledger-writes-postings
       `INSERT INTO journal_entries (idempotency_key, kind, description, occurred_at)
        VALUES ($1,$2::entry_kind,$3,now()) RETURNING id`,
       [key, kind, description],
     );
     for (const [accId, amount, currency] of legs) {
+      // nosemgrep: only-the-ledger-writes-postings — see above.
       await client.query(
+        // nosemgrep: semgrep.only-the-ledger-writes-postings
         `INSERT INTO postings (journal_entry_id, account_id, amount_minor, currency)
          VALUES ($1,$2,$3,$4)`,
         [e.rows[0].id, accId, amount, currency],

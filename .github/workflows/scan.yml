@@ -1,0 +1,129 @@
+# ============================================================================
+#  Reading the source for what the tests cannot see.
+#
+#  THREE THINGS, and they answer different questions.
+#
+#  CodeQL asks what a well-known bug class looks like in this language, and it
+#  is worth running precisely because nobody here wrote its rules.
+#
+#  The XETRAL RULES ask about the invariants this system actually rests on —
+#  only the ledger writes postings, money is never a float, a secret never
+#  reaches a log line. No generic ruleset can know those, and until now every
+#  one of them was enforced by a person reading a diff. Three of the five
+#  caught something real on the day they were written.
+#
+#  The PROBE asks whether those rules still match anything at all. A rule that
+#  matches nothing looks exactly like a rule that finds nothing, and one of
+#  these had that fault before it ever ran: its pattern was a folded YAML
+#  scalar, so every newline became a space, and the regex matched nothing while
+#  reading perfectly correctly.
+#
+#  SEPARATE FROM ci.yml on purpose. CodeQL takes minutes and this must not sit
+#  between a developer and a test result — but the xetral rules are seconds and
+#  block, because they are about money.
+# ============================================================================
+name: Scan
+
+on:
+  push:
+    branches: [main, 'claude/**']
+  pull_request:
+  schedule:
+    # Weekly, because CodeQL's rules change even when this repository does not.
+    - cron: '17 4 * * 1'
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  xetral-rules:
+    name: The rules about this codebase
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install semgrep
+
+      # BEFORE the scan. If a rule matches nothing, a clean scan means nothing
+      # either, and running them in the other order would report success twice.
+      - name: Every rule still matches what it is about
+        run: sh .semgrep/probe/run.sh
+
+      - name: Scan
+        run: |
+          semgrep --config .semgrep/xetral.yml \
+            --metrics=off --error \
+            --exclude=node_modules --exclude=dist --exclude=.next \
+            --exclude='*.probe' \
+            .
+
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          # `security-and-quality` over `security-extended`: the quality rules
+          # are what catch an unawaited promise, and in this codebase a
+          # forgotten `await` on a ledger write is a money bug rather than a
+          # style one.
+          queries: security-and-quality
+
+      # No build step. The repository is TypeScript that is bundled rather than
+      # compiled to an artifact CodeQL needs, and its extractor reads the
+      # sources directly.
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:javascript-typescript
+
+  generic-rules:
+    name: Semgrep's own rules
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install semgrep
+
+      # REPORTS, does not block, and that is the same argument the dependency
+      # audit makes: a generic ruleset over a repository this size produces
+      # findings in test fixtures and build tooling, and failing the build on
+      # those trains everybody to skip the step — after which the one finding
+      # that IS in the request path scrolls past with the rest.
+      #
+      # It is read, not ignored: the findings land in the job summary, and the
+      # day one of them belongs in `.semgrep/xetral.yml` it gets written there
+      # as a rule that DOES block.
+      # NOT VERIFIED LOCALLY, and worth saying. The development container here
+      # cannot reach `semgrep.dev` — the egress policy answers 403 at CONNECT,
+      # the same reason the Bitnob sandbox probe runs on a runner — so the
+      # registry rulesets are fetched for the first time on the runner. That is
+      # also why this job cannot fail the build: an unreachable registry would
+      # otherwise be a red build about nothing.
+      - name: Scan and report
+        run: |
+          semgrep --config p/typescript --config p/nodejs --config p/owasp-top-ten \
+            --metrics=off \
+            --exclude=node_modules --exclude=dist --exclude=.next \
+            --exclude='*.probe' --exclude='*.test.ts' \
+            . > /tmp/semgrep.txt 2>&1 || true
+          tail -40 /tmp/semgrep.txt
+          {
+            echo '### Semgrep, generic rulesets'
+            echo
+            echo 'Advisory. Blocking rules live in `.semgrep/xetral.yml`.'
+            echo
+            echo '```'
+            tail -40 /tmp/semgrep.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

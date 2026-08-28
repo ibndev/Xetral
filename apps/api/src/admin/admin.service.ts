@@ -119,7 +119,15 @@ export class AdminService {
     }
     params.push(options.limit);
 
+    /*
+     * nosemgrep: no-interpolated-sql — every VALUE goes through `params`; what
+     * is interpolated is `$N` placeholder numbers and fixed clause fragments
+     * built above, none of which comes from a request. Postgres has no
+     * parameter for an optional WHERE, so a filter list is either built this
+     * way or written out once per combination.
+     */
     const rows = await this.pool.query<UserSummary & { row_id: string }>(
+      // nosemgrep: semgrep.no-interpolated-sql
       `SELECT u.id::text AS row_id, u.uuid AS id, u.email, u.status, u.created_at,
               (SELECT k.status::text FROM kyc_submissions k
                 WHERE k.user_id = u.id ORDER BY k.id DESC LIMIT 1) AS kyc_status

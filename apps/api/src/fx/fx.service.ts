@@ -12,7 +12,7 @@ import {
 import type { Pool } from 'pg';
 import { InsufficientFundsError, LedgerService, posting } from '@xetral/ledger';
 import type { PostingIntent } from '@xetral/ledger';
-import { convertWithSpread, ProviderTimeoutError } from '@xetral/providers';
+import { convertWithSpread, displayRate, ProviderTimeoutError } from '@xetral/providers';
 import type { FxPort, FxRate } from '@xetral/providers';
 import { exponentOf, fromMajor, money, toMajor } from '@xetral/shared';
 import type { Currency, Money } from '@xetral/shared';
@@ -471,9 +471,14 @@ function toView(row: TradeRow): FxTradeView {
 /**
  * How many major units of `to` per one major unit of `from`, for display.
  *
- * Built from the exact integers and rendered once, rather than carried around
- * as a float. Same rule as Bitnob's `display_amount`: a number for a human to
- * read, never a number to compute with.
+ * DELEGATES TO `displayRate`, and used to be a second copy of it. Both did
+ * `Number(a) / Number(b)` then `toFixed(2)`, and both were wrong the same way:
+ * USD per naira is 0.000606, which two decimal places renders as **"0.00"** —
+ * so a customer converting naira to dollars was shown a rate of zero.
+ *
+ * Two copies of one calculation is the thing this codebase says not to do, and
+ * this is why: they drifted into being wrong together, and fixing one would
+ * have left the other. All rate arithmetic lives in `fx/rate-math.ts`.
  */
 function effectiveRate(
   quoteMinor: bigint,
@@ -481,9 +486,19 @@ function effectiveRate(
   from: Currency,
   to: Currency,
 ): string {
-  const scale = 10 ** (exponentOf(from) - exponentOf(to));
-  const value = (Number(quoteMinor) / Number(baseMinor)) * scale;
-  return value.toFixed(Math.max(2, exponentOf(to)));
+  return displayRate(
+    {
+      base: from,
+      quote: to,
+      numerator: quoteMinor,
+      denominator: baseMinor,
+      // Not read by `displayRate`; the shape is the port's and this is a
+      // rendering of an executed conversion rather than a live quote.
+      expiresAt: new Date(0),
+    },
+    exponentOf(from),
+    exponentOf(to),
+  );
 }
 
 /** Derived, never generated — the same rule as everywhere else money moves. */

@@ -342,6 +342,18 @@ export function toMajor<C extends Currency>(m: Money<C>): string {
  * Uses Intl for fiat so grouping and placement follow the locale rather than
  * our assumptions. Crypto goes through a manual path because Intl's currency
  * data does not cover BTC or USDT and silently falls back to a bare code.
+ *
+ * THE DECIMAL STRING GOES TO INTL DIRECTLY. This used to read
+ * `.format(Number(toMajor(m)))`, and that `Number` was a float holding money
+ * in the one file whose whole purpose is that money is never a float. It is
+ * not theoretical: a naira balance past 2^53 minor units formatted as
+ * ₦90,071,992,547,409,940.00 for ₦90,071,992,547,409,931.23 — wrong in the
+ * digits somebody reads to decide whether they have been paid.
+ *
+ * `Intl.NumberFormat.format` has accepted a string since ES2023 and formats it
+ * exactly, so the locale-aware placement this function exists for costs
+ * nothing. Found by writing the Semgrep rule that now forbids the pattern,
+ * which is the argument for having written it.
  */
 export function format<C extends Currency>(
   m: Money<C>,
@@ -360,7 +372,16 @@ export function format<C extends Currency>(
     currency: m.currency,
     minimumFractionDigits: meta.exponent,
     maximumFractionDigits: meta.exponent,
-  }).format(Number(toMajor(m)));
+    /*
+     * The cast, and why it is not the thing this file forbids. TypeScript
+     * types Intl's string overload as `StringNumericLiteral` — a template
+     * literal type no ordinary `string` satisfies — so the alternative to a
+     * cast here is `Number()`, which is the float this whole module exists to
+     * avoid. `toMajor` produces a plain decimal numeric string by
+     * construction, so the cast asserts something already true rather than
+     * widening anything.
+     */
+  }).format(toMajor(m) as `${number}`);
 
   return showCode ? `${formatted} ${m.currency}` : formatted;
 }

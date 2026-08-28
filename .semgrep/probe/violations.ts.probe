@@ -1,0 +1,39 @@
+/*
+ * DELIBERATELY BROKEN CODE, and not compiled.
+ *
+ * Every rule in ../xetral.yml is meant to fire on exactly one thing in this
+ * file. CI runs the rules against it and fails if fewer than all of them do —
+ * because a rule that matches nothing looks identical to a rule that finds
+ * nothing, and this repository has already had one of each.
+ *
+ * `no-secret-in-a-log-line` was the reason. Its pattern was written as a
+ * folded YAML scalar, which turns every newline into a SPACE, so the regex
+ * carried literal spaces and matched nothing at all — while reading perfectly
+ * correctly in review and reporting a clean scan.
+ *
+ * The extension is `.probe` so nothing typechecks, bundles or lints it. It is
+ * input to a scanner and not part of the program.
+ */
+declare const pool: { query: (s: string, p?: unknown[]) => Promise<unknown> };
+declare const logger: { warn: (s: string) => void };
+declare function formatAmount(v: string, c: string): string;
+declare const row: { amount_minor: string; currency: string };
+declare const balanceMinor: string;
+declare const userPin: string;
+declare const table: string;
+
+export async function a(): Promise<void> {
+  await pool.query(`INSERT INTO postings (journal_entry_id) VALUES ($1)`, [1]);
+}
+export async function b(): Promise<void> {
+  await pool.query(`SELECT * FROM users WHERE email = '${table}'`);
+}
+export function c(): number {
+  return Number(balanceMinor);
+}
+export function d(): string {
+  return formatAmount(row.amount_minor, row.currency);
+}
+export function e(): void {
+  logger.warn(`verifying ${userPin} now`);
+}
