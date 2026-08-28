@@ -13,6 +13,7 @@ import {
   toMajor,
   usd,
   greaterThan,
+  splitInclusiveTax,
 } from './money.js';
 import { exponentOf, scaleOf } from './currency.js';
 
@@ -236,5 +237,57 @@ describe('compile-time currency safety', () => {
     };
 
     expect(compileTimeOnly).toBeTypeOf('function'); // referenced, not run
+  });
+});
+
+describe('splitting tax out of an inclusive amount', () => {
+  it('takes the tax from INSIDE the amount, not on top of it', () => {
+    // The mistake worth a test of its own. At 7.5%, the VAT inside a ₦107.50
+    // fee is ₦7.50 — `gross × 750 / 10750`. Computing `gross × 750 / 10000`
+    // gives ₦8.06, which is the tax on a fee of that size EXCLUDING tax: a
+    // different and larger number, wrong on every single transaction, and
+    // invisible until somebody reconciles a return.
+    const { net, tax } = splitInclusiveTax(ngn(10_750), 750);
+    expect(tax.amount).toBe(750n);
+    expect(net.amount).toBe(10_000n);
+  });
+
+  it('always sums back to what the customer paid', () => {
+    // The property that matters more than any single figure: the two halves
+    // are the whole. A split that lost a kobo would unbalance the entry, and
+    // the ledger would refuse it — which is the right failure but a late one.
+    for (const gross of [1n, 7n, 99n, 100n, 12_345n, 999_999n, 10n ** 15n]) {
+      const { net, tax } = splitInclusiveTax({ amount: gross, currency: 'NGN' }, 750);
+      expect(net.amount + tax.amount).toBe(gross);
+    }
+  });
+
+  it('rounds the tax UP, so we can never under-remit', () => {
+    // The remainder has to go somewhere. Toward the revenue authority means at
+    // worst we are a fraction of a kobo out of pocket; toward us means
+    // systematically collecting less tax than was due on a rate somebody else
+    // sets.
+    // 100 × 750 / 10750 = 6.976…, so 7 rather than 6.
+    expect(splitInclusiveTax(ngn(100), 750).tax.amount).toBe(7n);
+    expect(splitInclusiveTax(ngn(100), 750).net.amount).toBe(93n);
+  });
+
+  it('takes nothing at a zero rate', () => {
+    const { net, tax } = splitInclusiveTax(ngn(10_000), 0);
+    expect(tax.amount).toBe(0n);
+    expect(net.amount).toBe(10_000n);
+  });
+
+  it('keeps the currency, so a split cannot change it', () => {
+    // `Money` is invariant over its currency parameter, which is what makes
+    // this a compile-time guarantee rather than a runtime check — but the
+    // exponent differs per currency and the arithmetic must not assume two.
+    const { tax } = splitInclusiveTax(usd(10_750), 750);
+    expect(tax.currency).toBe('USD');
+    expect(tax.amount).toBe(750n);
+  });
+
+  it('refuses a negative amount rather than guessing a direction', () => {
+    expect(() => splitInclusiveTax(ngn(-100), 750)).toThrow(RangeError);
   });
 });

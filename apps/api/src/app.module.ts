@@ -48,6 +48,7 @@ import { StaffService } from './auth/staff.service.js';
 import { StaffTotpService } from './auth/staff-totp.service.js';
 import { HealthController } from './health/health.controller.js';
 import { SettingsService } from './settings/settings.service.js';
+import { TaxService } from './tax/tax.service.js';
 import { ProviderCredentialService } from './settings/provider-credentials.service.js';
 import { AuditService } from './admin/audit.service.js';
 import { AdminService } from './admin/admin.service.js';
@@ -686,6 +687,7 @@ export class AppModule {
         StaffService,
         StaffTotpService,
         SettingsService,
+        TaxService,
         ProviderCredentialService,
         AuditService,
         AdminService,

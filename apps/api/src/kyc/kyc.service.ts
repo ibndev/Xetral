@@ -10,6 +10,8 @@ import {
 } from '@nestjs/common';
 import type { Pool } from 'pg';
 import { blindIndex, seal } from '@xetral/identity';
+import { toMajor } from '@xetral/shared';
+import type { Currency } from '@xetral/shared';
 import type { BlindIndexKey, Keyring } from '@xetral/identity';
 import { API_CONFIG, DATABASE } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
@@ -83,8 +85,16 @@ export class KycService {
    * to finish verifying — which turns a control into a support ticket, and a
    * customer who cannot move their own money into one who does not know why.
    *
-   * Amounts are MINOR-UNIT STRINGS, like every other amount that crosses this
-   * boundary. The client formats them without ever producing a number.
+   * Amounts are MAJOR-UNIT DECIMAL STRINGS, like every other amount that
+   * crosses this boundary. They were minor units, and the web page formatted
+   * them as major — so a customer whose naira ceiling is N50,000 was told it
+   * was N5,000,000, and the number they were being refused against was the one
+   * they could not see. Mapping here rather than on the page keeps this
+   * endpoint the same shape as every other, which is what stops the next
+   * screen making the same mistake.
+   *
+   * `toMajor` is per currency: two places for naira, six for USDT, eight for
+   * BTC, and never a hardcoded two.
    */
   async limits(userUuid: string): Promise<{
     readonly tier: number;
@@ -110,7 +120,10 @@ export class KycService {
       tier,
       limits: result.rows.map((row) => ({
         currency: row.currency,
-        daily_limit: row.daily_limit_minor,
+        daily_limit: toMajor({
+          amount: BigInt(row.daily_limit_minor),
+          currency: row.currency as Currency,
+        }),
       })),
       // Tier 2 is an administrator's judgement about source of funds, not
       // something a customer can apply for — so the next tier they can reach

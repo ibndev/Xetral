@@ -198,6 +198,38 @@ export type StaffRole =
   | 'finance'
   | 'admin';
 
+/**
+ * The tax report. Minor units as strings throughout — a return is the last
+ * place a JSON number should be allowed near an amount.
+ */
+export interface AdminTaxReport {
+  readonly collected: readonly {
+    readonly month: string;
+    readonly kind: string;
+    readonly currency: string;
+    readonly transactions: string;
+    readonly collected_minor: string;
+    readonly base_minor: string;
+  }[];
+  readonly revenue: readonly {
+    readonly month: string;
+    readonly account: string;
+    readonly currency: string;
+    readonly amount_minor: string;
+  }[];
+  readonly payable: readonly {
+    readonly currency: string;
+    readonly balance_minor: string;
+  }[];
+  /** Tax held that no collection explains. Empty is the only good answer. */
+  readonly drift: readonly {
+    readonly currency: string;
+    readonly collected_minor: string;
+    readonly held_minor: string;
+    readonly difference_minor: string;
+  }[];
+}
+
 export class AdminClient {
   readonly #baseUrl: string;
   readonly #session: Session;
@@ -348,6 +380,19 @@ export class AdminClient {
       reason,
       transaction_pin: pin,
     });
+  }
+
+  /* --------------------------------- tax -------------------------------- */
+
+  /**
+   * What was collected for a revenue authority, and what is still held.
+   *
+   * Every amount stays a STRING, the way every amount does on this client.
+   * These are the figures a return is filed from, so the one place a float
+   * must never appear is here.
+   */
+  async tax(months = 12): Promise<AdminTaxReport> {
+    return this.#get<AdminTaxReport>(`/v1/admin/tax?months=${String(months)}`);
   }
 
   /* ------------------------------ suspense ----------------------------- */

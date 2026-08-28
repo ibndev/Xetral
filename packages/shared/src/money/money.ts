@@ -179,6 +179,47 @@ export function applyBasisPoints<C extends Currency>(
 }
 
 /**
+ * Splits a VAT-INCLUSIVE amount into what we keep and what we owe.
+ *
+ * The customer paid `gross`. Part of it was never ours: at 7.5% the tax inside
+ * a gross fee is `gross × 750 / 10750`, NOT `gross × 750 / 10000` — the second
+ * is the tax on a fee of that size EXCLUDING tax, which is a different and
+ * larger number. Getting this backwards under-collects on every single
+ * transaction, and the error is invisible until a return is reconciled.
+ *
+ * THE TAX ROUNDS UP, and the direction is the decision. The remainder has to
+ * go somewhere, and giving it to the revenue authority means we can never
+ * under-remit — at worst we are a fraction of a kobo out of pocket per
+ * transaction. Rounding it toward ourselves would mean systematically
+ * collecting less tax than was due on a rate somebody else sets, which is not
+ * a position to be in.
+ *
+ * Returns both halves so a caller cannot compute one and infer the other
+ * wrongly; they sum to `gross` exactly, by construction.
+ */
+export function splitInclusiveTax<C extends Currency>(
+  gross: Money<C>,
+  basisPoints: number,
+): { readonly net: Money<C>; readonly tax: Money<C> } {
+  if (!Number.isInteger(basisPoints) || basisPoints < 0) {
+    throw new RangeError(`basisPoints must be a non-negative integer, got ${basisPoints}`);
+  }
+  if (gross.amount < 0n) {
+    // A negative gross would make "round up" move the tax the other way, and
+    // there is no flow here that charges a negative fee. Refusing beats
+    // guessing which direction was meant.
+    throw new RangeError('cannot split tax out of a negative amount');
+  }
+
+  const rate = BigInt(basisPoints);
+  const tax = divideRounded(gross.amount * rate, 10_000n + rate, 'up');
+  return {
+    net: { amount: gross.amount - tax, currency: gross.currency },
+    tax: { amount: tax, currency: gross.currency },
+  };
+}
+
+/**
  * Integer division with an explicit rounding mode.
  *
  * bigint division truncates toward zero, which for a NEGATIVE numerator

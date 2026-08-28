@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { formatAmount } from '@xetral/client';
+import { formatAmount, formatMinor } from '@xetral/client';
 import { useAdmin, useLoad } from '@/lib/hooks';
 
 /**
@@ -138,16 +138,16 @@ export default function Overview() {
                   <tr key={row.currency}>
                     <td>{row.currency}</td>
                     <td className="right amount">
-                      {formatAmount(minorToMajor(row.wallets_minor, row.currency), row.currency)}
+                      {formatMinor(row.wallets_minor, row.currency)}
                     </td>
                     <td className="right amount">
-                      {formatAmount(minorToMajor(row.pending_minor, row.currency), row.currency)}
+                      {formatMinor(row.pending_minor, row.currency)}
                     </td>
                     <td className="right amount">
-                      {formatAmount(minorToMajor(row.cards_minor, row.currency), row.currency)}
+                      {formatMinor(row.cards_minor, row.currency)}
                     </td>
                     <td className="right amount">
-                      {formatAmount(minorToMajor(row.suspense_minor, row.currency), row.currency)}
+                      {formatMinor(row.suspense_minor, row.currency)}
                     </td>
                     <td className="right amount">
                       <strong>{formatAmount(row.total_owed, row.currency)}</strong>
@@ -170,24 +170,13 @@ function queueLink(queue: string): string {
   return '/admin';
 }
 
-/**
- * Minor units to a major-unit string, WITHOUT going through a number.
+/*
+ * Minor units to a major-unit string, WITHOUT going through a number, lives in
+ * `formatMinor` in the client package.
  *
  * The API sends `total_owed` already formatted for exactly this reason, and
  * these four component columns arrive as minor units because no endpoint had a
- * reason to format them. So the conversion happens here, on strings — a
- * `Number(minor) / 100` would be a float in a column labelled "what we owe
- * customers", and would be wrong for JPY and very wrong for BTC.
+ * reason to format them. This file used to carry its own copy of the
+ * conversion, with its own exponent table — which is how two copies drift, and
+ * the one that drifts is the one nobody reads closely.
  */
-const EXPONENTS: Readonly<Record<string, number>> = {
-  NGN: 2, USD: 2, GBP: 2, EUR: 2, GHS: 2, KES: 2, JPY: 0, USDT: 6, BTC: 8,
-};
-
-function minorToMajor(minor: string, currency: string): string {
-  const exponent = EXPONENTS[currency] ?? 2;
-  const negative = minor.startsWith('-');
-  const digits = (negative ? minor.slice(1) : minor).padStart(exponent + 1, '0');
-  const whole = digits.slice(0, digits.length - exponent);
-  const fraction = exponent === 0 ? '' : `.${digits.slice(digits.length - exponent)}`;
-  return `${negative ? '-' : ''}${whole}${fraction}`;
-}

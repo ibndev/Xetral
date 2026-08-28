@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import type { Pool, PoolClient } from 'pg';
 import { InsufficientFundsError, LedgerService, posting } from '@xetral/ledger';
-import type { AccountRef, LedgerIntent } from '@xetral/ledger';
+import type { AccountRef, LedgerIntent, WrittenEntry } from '@xetral/ledger';
 import { applyBasisPoints, fromMajor, subtract, toMajor } from '@xetral/shared';
 import type { Currency, Money } from '@xetral/shared';
 import { API_CONFIG, DATABASE, LEDGER } from '../tokens.js';
@@ -16,6 +16,7 @@ import type { ApiConfig } from '../config.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { SpendingLimitService } from './spending-limits.service.js';
 import { NotificationService } from '../notifications/notification.service.js';
+import { TaxService } from '../tax/tax.service.js';
 import type { TransferRequest } from './dto.js';
 
 export interface TransferResult {
@@ -42,6 +43,7 @@ export class WalletService {
     @Inject(SettingsService) private readonly settings: SettingsService,
     @Inject(SpendingLimitService) private readonly limits: SpendingLimitService,
     @Inject(NotificationService) private readonly notifications: NotificationService,
+    @Inject(TaxService) private readonly tax: TaxService,
   ) {}
 
   async balances(userUuid: string): Promise<readonly BalanceView[]> {
@@ -120,7 +122,33 @@ export class WalletService {
       await this.settings.transferFeeBasisPoints(),
       'up',
     );
-    const debit = { amount: amount.amount + fee.amount, currency };
+
+    /*
+     * PART OF THE FEE IS NOT OURS.
+     *
+     * VAT on a service fee is collected for the FIRS and owed to the FIRS, so
+     * it goes to `liability_tax_payable` and never to `revenue_fees`. Booking
+     * it as revenue overstates what the business earned and understates what
+     * it owes — both errors pointing the flattering way.
+     *
+     * The split is INCLUSIVE by default, so the customer pays exactly what
+     * they paid before and only the books change. That is what makes this safe
+     * to ship without a pricing decision behind it.
+     */
+    const split = await this.tax.splitFee(fee);
+
+    /*
+     * The transfer levy, which is OFF by default and changes what the customer
+     * pays when it is not. Whether it applies to a wallet like this one is a
+     * question for a Nigerian tax adviser, so the machinery is here and the
+     * decision is not.
+     */
+    const levy = await this.tax.levyOn(amount);
+
+    const debit = {
+      amount: amount.amount + split.gross.amount + levy.amount,
+      currency,
+    };
 
     const senderWallet: AccountRef = {
       kind: 'customer_wallet',
@@ -143,10 +171,18 @@ export class WalletService {
       postings: [
         posting(senderWallet, negate(debit)),
         posting(recipientWallet, amount),
-        // A zero-amount posting is refused by the ledger, so the fee leg only
-        // exists when a fee was actually charged.
-        ...(fee.amount > 0n
-          ? [posting({ kind: 'revenue_fees', currency }, fee)]
+        // A zero-amount posting is refused by the ledger, so each leg below
+        // only exists when there is something in it. That is why the fee, the
+        // tax and the levy are three conditionals rather than one: a zero-rate
+        // VAT on a real fee must still post the fee.
+        ...(split.net.amount > 0n
+          ? [posting({ kind: 'revenue_fees', currency }, split.net)]
+          : []),
+        ...(split.tax.amount > 0n
+          ? [posting({ kind: 'liability_tax_payable', currency }, split.tax)]
+          : []),
+        ...(levy.amount > 0n
+          ? [posting({ kind: 'liability_tax_payable', currency }, levy)]
           : []),
       ],
     };
@@ -181,7 +217,43 @@ export class WalletService {
     // one being owed. `onEntry` is deliberately not called on a replay, which
     // is exactly right here: a customer retrying a timed-out transfer must not
     // be told twice that they sent money once.
-    const onEntry = async (client: PoolClient): Promise<void> => {
+    const onEntry = async (client: PoolClient, entry: WrittenEntry): Promise<void> => {
+      /*
+       * WHAT WAS COLLECTED, RECORDED AGAINST WHAT MOVED IT — and on the
+       * entry's own transaction, so neither half can exist without the other.
+       * Written apart, the posting and the record drift, and the drift is
+       * discovered while filing a return rather than by
+       * `tax_remittance_drift`.
+       *
+       * Only what actually posted is recorded. A zero leg is not posted, so a
+       * zero collection is not recorded: a row saying "we collected nothing"
+       * is indistinguishable from one somebody forgot to write.
+       */
+      if (split.tax.amount > 0n) {
+        await this.tax.record(client, {
+          kind: 'vat',
+          entryId: entry.entryId,
+          userId: sender.id,
+          amount: split.tax,
+          // The fee is the base VAT was charged on, not the transfer amount.
+          baseMinor: split.net.amount,
+          rateApplied: `${await this.settings.vatBasisPoints()}bp`,
+          occurredAt: intent.occurredAt,
+        });
+      }
+      if (levy.amount > 0n) {
+        await this.tax.record(client, {
+          kind: 'transfer_levy',
+          entryId: entry.entryId,
+          userId: sender.id,
+          amount: levy,
+          // A flat levy is charged ON the transfer, so that is its base.
+          baseMinor: amount.amount,
+          rateApplied: 'flat',
+          occurredAt: intent.occurredAt,
+        });
+      }
+
       if (sender.email === null) return;
       await this.notifications.enqueueBestEffort(client, {
         userId: sender.id,

@@ -11,6 +11,7 @@ const TABS = [
   { href: '/admin/kyc', label: 'Identity' },
   { href: '/admin/risk', label: 'Compliance' },
   { href: '/admin/suspense', label: 'Suspense' },
+  { href: '/admin/tax', label: 'Tax' },
   { href: '/admin/giftcards', label: 'Gift cards' },
   { href: '/admin/settings', label: 'Settings' },
   { href: '/admin/credentials', label: 'Provider keys' },

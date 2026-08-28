@@ -5,7 +5,7 @@ import { useState } from 'react';
 import type { AdminRiskSignal } from '@xetral/client';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
-import { formatAmount } from '@xetral/client';
+import { formatMinor } from '@xetral/client';
 
 /**
  * The compliance queue.
@@ -212,12 +212,18 @@ function Signal({
 /**
  * Renders one piece of a rule's evidence.
  *
- * A `*_minor` value is money, so it goes through `formatAmount`, which groups
+ * A `*_minor` value is money, so it goes through `formatMinor`, which groups
  * digits WITHOUT producing a number — the same rule the customer app follows,
  * and it matters here too: a reviewer deciding whether ₦5,000,000 is really
  * ₦5,000,000 is exactly who a float would mislead.
+ *
+ * `formatMinor`, NOT `formatAmount`. This called the major-unit formatter on a
+ * kobo figure, so every amount on the compliance queue read a hundred times
+ * larger than it was — ₦500,000,000 for a ₦5,000,000 transfer. The two
+ * functions look identical at a call site, which is why they are now named
+ * for the units they take.
  */
 function describe(key: string, value: string, currency: string | undefined): string {
   if (!key.endsWith('_minor') || currency === undefined) return value;
-  return `${formatAmount(value, currency)} ${currency}`;
+  return `${formatMinor(value, currency)} ${currency}`;
 }

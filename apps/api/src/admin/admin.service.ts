@@ -493,6 +493,46 @@ export class AdminService {
     return { purchases: purchases.rows, crypto_withdrawals: withdrawals.rows };
   }
 
+  /* --------------------------------- tax -------------------------------- */
+
+  /**
+   * What finance files, and what we hold against it.
+   *
+   * Every figure comes from a VIEW over the ledger rather than from a counter
+   * this method maintains — a revenue number computed from a second record is
+   * a revenue number that drifts, and the drift is discovered while filing.
+   *
+   * `drift` is the row nobody wants and everybody needs: tax held that no
+   * collection explains means a path posted the money and forgot the record.
+   */
+  async tax(months: number): Promise<Record<string, unknown>> {
+    const [collected, revenue, payable, drift] = await Promise.all([
+      this.pool.query(
+        `SELECT month, kind, currency, transactions::text,
+                collected_minor::text, base_minor::text
+           FROM tax_collected_monthly LIMIT $1`,
+        [months * 8],
+      ),
+      this.pool.query(
+        `SELECT month, account, currency, amount_minor::text
+           FROM revenue_monthly LIMIT $1`,
+        [months * 12],
+      ),
+      this.pool.query(`SELECT currency, balance_minor::text FROM tax_payable`),
+      this.pool.query(
+        `SELECT currency, collected_minor::text, held_minor::text,
+                difference_minor::text
+           FROM tax_remittance_drift`,
+      ),
+    ]);
+    return {
+      collected: collected.rows,
+      revenue: revenue.rows,
+      payable: payable.rows,
+      drift: drift.rows,
+    };
+  }
+
   /* ------------------------------- staff ------------------------------- */
 
   async staff(): Promise<readonly Record<string, unknown>[]> {

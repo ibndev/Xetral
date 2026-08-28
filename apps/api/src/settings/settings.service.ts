@@ -213,6 +213,41 @@ export class SettingsService implements OnApplicationBootstrap {
     return this.integer('transfer_fee_basis_points', this.config.transferFeeBasisPoints);
   }
 
+  /* ---------------------------------- tax ------------------------------ */
+
+  /**
+   * VAT on FEES, in basis points. Never applied to the amount being
+   * transferred: what is taxed is the service, not the money moving.
+   */
+  async vatBasisPoints(): Promise<number> {
+    return this.integer('vat_basis_points', 750);
+  }
+
+  /** TRUE means a fee is what the customer pays and part of it is VAT, so
+   *  turning VAT on changes the books and not the price. */
+  async vatInclusive(): Promise<boolean> {
+    return this.boolean('vat_inclusive', true);
+  }
+
+  /**
+   * Whether to charge the electronic money transfer levy.
+   *
+   * Defaults FALSE, and the default is the decision: turning it on changes
+   * what customers are charged, and whether it applies to a wallet like this
+   * one is a question for a Nigerian tax adviser rather than for a default.
+   */
+  async transferLevyEnabled(): Promise<boolean> {
+    return this.boolean('transfer_levy_enabled', false);
+  }
+
+  async transferLevyKobo(): Promise<bigint> {
+    return this.bigint('transfer_levy_kobo', 5000n);
+  }
+
+  async transferLevyThresholdKobo(): Promise<bigint> {
+    return this.bigint('transfer_levy_threshold_kobo', 1000000n);
+  }
+
   async depositCeilingKobo(): Promise<bigint> {
     return this.bigint('deposit_ceiling_kobo', this.config.depositCeilingKobo);
   }

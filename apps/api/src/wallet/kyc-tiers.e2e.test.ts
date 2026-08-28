@@ -205,7 +205,10 @@ describe('what an unverified account may move', () => {
     const ngnLimit = (res.body.limits as { currency: string; daily_limit: string }[]).find(
       (l) => l.currency === 'NGN',
     );
-    expect(ngnLimit?.daily_limit).toBe('5000000');
+    // MAJOR units, like every amount the API sends. This asserted '5000000'
+    // — the kobo figure — while the page formatted it as naira, so the screen
+    // telling a customer their ceiling said N5,000,000 for a N50,000 limit.
+    expect(ngnLimit?.daily_limit).toBe('50000.00');
   });
 });
 

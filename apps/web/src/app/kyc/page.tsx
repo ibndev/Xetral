@@ -212,7 +212,13 @@ function Limits() {
         <div className="row" key={limit.currency}>
           <span className="muted">{limit.currency}</span>
           <span className="mono">
-            {limit.daily_limit === '0' ? (
+            {/*
+              A regex, not `=== '0'`: the API sends major units, so a zero
+              ceiling arrives as "0.00" for naira and "0.00000000" for BTC.
+              Comparing against a bare '0' would render the "no crypto without
+              an identity" limit as an ordinary allowance of nothing.
+            */}
+            {/^0(\.0+)?$/.test(limit.daily_limit) ? (
               'not available yet'
             ) : (
               <>{formatAmount(limit.daily_limit, limit.currency)} a day</>

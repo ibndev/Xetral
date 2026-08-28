@@ -449,6 +449,9 @@ function normalBalanceFor(kind: AccountRef['kind']): 'debit' | 'credit' {
     case 'customer_card':
     case 'customer_pending':
     case 'liability_customer_funds':
+    // Tax collected and not yet remitted. A liability, so a credit balance:
+    // charging VAT increases what we owe, and remitting it reduces it.
+    case 'liability_tax_payable':
     case 'revenue_fees':
     case 'revenue_fx_spread':
       return 'credit';

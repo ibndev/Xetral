@@ -441,3 +441,45 @@ describe('reconciliation', () => {
     expect(drift.rows[0]?.n).toBe(0);
   });
 });
+
+/*
+ * ONLY THE DATABASE CAN CHECK THIS.
+ *
+ * `AccountRef` is a literal union in TypeScript and `account_kind` is an enum
+ * in Postgres, and nothing but an insert proves the two still agree. Phase 3
+ * recorded exactly this for `EntryKind`, and `liability_tax_payable` — added
+ * when tax stopped being booked as revenue — is a second instance of the same
+ * shape: it typechecked, and would have failed on the first real transfer.
+ *
+ * The list is exhaustive BY THE COMPILER, and a `length: 12` assertion would
+ * not be: a twelve-element array of a thirteen-member union typechecks
+ * perfectly, so adding a kind and forgetting this file would leave the test
+ * green while covering less. A `Record` keyed on the union has to name every
+ * member, and the keys are read back off it.
+ */
+const EVERY_KIND = Object.keys({
+  customer_wallet: true,
+  customer_card: true,
+  customer_pending: true,
+  revenue_fees: true,
+  revenue_fx_spread: true,
+  expense_provider_cost: true,
+  expense_dispute_loss: true,
+  provider_float: true,
+  asset_giftcard_inventory: true,
+  liability_customer_funds: true,
+  liability_tax_payable: true,
+  suspense: true,
+} satisfies Record<AccountRef['kind'], true>) as readonly AccountRef['kind'][];
+
+describe('the account kinds TypeScript declares', () => {
+  it.each(EVERY_KIND)('%s exists in the database enum', async (kind) => {
+    const found = await pool.query(
+      `SELECT 1 FROM pg_enum e
+         JOIN pg_type t ON t.oid = e.enumtypid
+        WHERE t.typname = 'account_kind' AND e.enumlabel = $1`,
+      [kind],
+    );
+    expect(found.rowCount).toBe(1);
+  });
+});

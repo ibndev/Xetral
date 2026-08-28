@@ -116,6 +116,10 @@ const listQuery = z.object({
   before: z.string().regex(/^[0-9]+$/).optional(),
 });
 
+const taxQuery = z.object({
+  months: z.coerce.number().int().min(1).max(36).default(12),
+});
+
 @Controller('v1/admin')
 export class AdminController {
   constructor(
@@ -548,6 +552,20 @@ export class AdminController {
   }
 
   /* ------------------------------ settings ----------------------------- */
+
+  /* --------------------------------- tax -------------------------------- */
+
+  /**
+   * `finance`, not `support`. What was collected on a revenue authority's
+   * behalf is a finance figure, and the roles exist so a support agent looking
+   * up a card cannot also read the returns.
+   */
+  @Get('tax')
+  async tax(@Query() query: unknown): Promise<Record<string, unknown>> {
+    const parsed = taxQuery.safeParse(query);
+    if (!parsed.success) throw invalid(parsed.error.issues);
+    return this.admin.tax(parsed.data.months);
+  }
 
   @Get('settings')
   async listSettings(): Promise<{ settings: readonly unknown[] }> {

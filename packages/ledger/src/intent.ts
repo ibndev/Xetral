@@ -65,6 +65,11 @@ export type AccountRef =
   | { readonly kind: 'provider_float'; readonly currency: Currency }
   | { readonly kind: 'asset_giftcard_inventory'; readonly currency: Currency }
   | { readonly kind: 'liability_customer_funds'; readonly currency: Currency }
+  /* TAX COLLECTED FOR SOMEBODY ELSE. VAT on a fee is owed to the FIRS from the
+     moment it is charged, so it is a liability and never revenue — booking it
+     as revenue overstates what the business earned and understates what it
+     owes, and both errors point the flattering way. */
+  | { readonly kind: 'liability_tax_payable'; readonly currency: Currency }
   | { readonly kind: 'suspense'; readonly currency: Currency };
 
 /**

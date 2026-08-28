@@ -46,6 +46,23 @@ END $$;
  * `risk_signals` directly would be testing this file's own INSERT rather than
  * its arithmetic.
  */
+/**
+ * A moment inside the CURRENT Lagos day, `n` seconds after it began.
+ *
+ * The day-scoped rules below — structuring and pass-through — compare against
+ * `lagos_day_start()`, so a fixture written as "two hours ago" falls into
+ * YESTERDAY between midnight and 02:00 Lagos and the rule correctly sees
+ * nothing. That made these blocks pass twenty-two hours a day, which is the
+ * worst kind of green: this file was written in the afternoon and first failed
+ * at 00:43.
+ *
+ * Anchored to the start of the day instead, which is always in the past and
+ * always inside it.
+ */
+CREATE OR REPLACE FUNCTION p27_today(p_seconds INT) RETURNS TIMESTAMPTZ AS $$
+    SELECT lagos_day_start() + make_interval(secs => p_seconds);
+$$ LANGUAGE sql STABLE;
+
 CREATE OR REPLACE FUNCTION p27_move(
     p_email TEXT, p_kobo BIGINT, p_kind entry_kind, p_at TIMESTAMPTZ, p_tag TEXT
 ) RETURNS VOID AS $$
@@ -137,7 +154,7 @@ BEGIN
     -- ₦7,200,000.
     FOR i IN 1..4 LOOP
         PERFORM p27_move('p27-struct@example.ng', 180000000, 'wallet_funding',
-                         now() - make_interval(mins => i * 5), 'struct-' || i);
+                         p27_today(i * 10), 'struct-' || i);
     END LOOP;
 
     PERFORM detect_risk_signals();
@@ -174,7 +191,7 @@ BEGIN
     -- Six movements of ₦20,000. Together ₦120,000 — nowhere near ₦5,000,000.
     FOR i IN 1..6 LOOP
         PERFORM p27_move('p27-normal@example.ng', 2000000, 'wallet_funding',
-                         now() - make_interval(mins => i), 'normal-' || i);
+                         p27_today(i * 10), 'normal-' || i);
     END LOOP;
 
     PERFORM detect_risk_signals();
@@ -193,9 +210,9 @@ BEGIN
 
     -- ₦2,000,000 in, ₦1,900,000 straight out: 95%.
     PERFORM p27_move('p27-mule@example.ng',  200000000, 'wallet_funding',
-                     now() - interval '2 hours', 'mule-in');
+                     p27_today(10), 'mule-in');
     PERFORM p27_move('p27-mule@example.ng', -190000000, 'wallet_transfer',
-                     now() - interval '1 hour', 'mule-out');
+                     p27_today(20), 'mule-out');
 
     PERFORM detect_risk_signals();
 
@@ -222,9 +239,9 @@ BEGIN
 
     -- ₦2,000 in and ₦2,000 out: 100% out, and far below the ₦100,000 floor.
     PERFORM p27_move('p27-quiet@example.ng',  200000, 'wallet_funding',
-                     now() - interval '2 hours', 'tiny-in');
+                     p27_today(10), 'tiny-in');
     PERFORM p27_move('p27-quiet@example.ng', -200000, 'wallet_transfer',
-                     now() - interval '1 hour', 'tiny-out');
+                     p27_today(20), 'tiny-out');
 
     PERFORM detect_risk_signals();
 

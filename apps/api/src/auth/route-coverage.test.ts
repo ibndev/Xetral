@@ -185,6 +185,9 @@ describe('the privileged surface is declared as privileged', () => {
       'GET /v1/admin/staff (admin)',
       'GET /v1/admin/stuck (support)',
       'GET /v1/admin/suspense (finance)',
+      // What was collected on a revenue authority's behalf is a finance
+      // figure, not a support one.
+      'GET /v1/admin/tax (finance)',
       'GET /v1/admin/users (support)',
       'GET /v1/admin/users/:id (support)',
       // Acknowledging a failure. No PIN: it hides nothing, because a

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { exponentFor, formatAmount, isValidAmount, parseAmount } from './money.js';
+import { exponentFor, formatAmount, formatMinor, isValidAmount, parseAmount } from './money.js';
 
 describe('formatting without a float', () => {
   it('groups a large naira balance exactly', () => {
@@ -88,5 +88,42 @@ describe('validating input before it is sent', () => {
   it('knows JPY has no decimals', () => {
     expect(isValidAmount('100.5', exponentFor('JPY'))).toBe(false);
     expect(isValidAmount('100', exponentFor('JPY'))).toBe(true);
+  });
+});
+
+describe('formatMinor', () => {
+  it('shifts by the currency exponent, not by a hardcoded two', () => {
+    expect(formatMinor('500000000', 'NGN')).toBe('₦5,000,000.00');
+    expect(formatMinor('105', 'NGN')).toBe('₦1.05');
+    expect(formatMinor('1', 'NGN')).toBe('₦0.01');
+    expect(formatMinor('0', 'NGN')).toBe('₦0.00');
+  });
+
+  it('handles the currencies that would break a hardcoded two', () => {
+    // JPY has no minor unit at all, and is in the registry precisely so code
+    // assuming two decimals fails here rather than in production.
+    // No symbol on the client for a currency it does not offer, so it falls
+    // back to a suffixed code — the point here is the absent decimal places.
+    expect(formatMinor('1500', 'JPY')).toBe('1,500 JPY');
+    expect(formatMinor('1234567', 'USDT')).toBe('₮1.234567');
+    expect(formatMinor('100000000', 'BTC')).toBe('₿1.00000000');
+  });
+
+  it('keeps a negative sign', () => {
+    expect(formatMinor('-1500', 'NGN')).toBe('-₦15.00');
+  });
+
+  it('does not go through a float', () => {
+    // Past MAX_SAFE_INTEGER, which is where a division would start lying — in
+    // the digits somebody reads to file a return.
+    expect(formatMinor('9007199254740993123', 'NGN')).toBe('₦90,071,992,547,409,931.23');
+  });
+
+  it('refuses anything that is not an integer of minor units', () => {
+    // A major-unit string reaching this function would be off by a factor of
+    // a hundred and look entirely plausible. Refusing is the only way that
+    // mistake is visible.
+    expect(() => formatMinor('15.00', 'NGN')).toThrow(RangeError);
+    expect(() => formatMinor('', 'NGN')).toThrow(RangeError);
   });
 });

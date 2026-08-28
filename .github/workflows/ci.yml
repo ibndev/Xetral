@@ -115,6 +115,7 @@ jobs:
             -f packages/ledger/sql/029_kyc_tiers.seed.sql \
             -f packages/ledger/sql/030_card_lifecycle.sql \
             -f packages/ledger/sql/031_card_settlements.sql \
+            -f packages/ledger/sql/032_tax.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       - name: Ledger and identity invariants
@@ -154,6 +155,7 @@ jobs:
                    packages/ledger/sql/029_kyc_tiers.test.sql \
                    packages/ledger/sql/030_card_lifecycle.test.sql \
                    packages/ledger/sql/031_card_settlements.test.sql \
+                   packages/ledger/sql/032_tax.test.sql \
                    packages/ledger/sql/099_least_privilege.test.sql; do
             echo "== $f"
             psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
@@ -222,6 +224,7 @@ jobs:
             -f packages/ledger/sql/029_kyc_tiers.seed.sql \
             -f packages/ledger/sql/030_card_lifecycle.sql \
             -f packages/ledger/sql/031_card_settlements.sql \
+            -f packages/ledger/sql/032_tax.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       # ------------------------------------------------------------------
@@ -381,6 +384,12 @@ jobs:
           # routes added since the audit.
           check "totp enrolment is mounted" 401 http://127.0.0.1:3100/v1/auth/totp/enrol -X POST
           check "errors surface is mounted" 401 http://127.0.0.1:3100/v1/admin/errors
+
+          # The tax report. Mounted and gated on `finance`, so 401 rather than
+          # 404 — three controllers were once imported into the module and left
+          # out of its `controllers` list, and every one of their routes
+          # answered 404 in the built bundle while the coverage test was green.
+          check "tax report is mounted" 401 http://127.0.0.1:3100/v1/admin/tax
 
           # Reading a card number. Guarded, so 401 rather than 404 — and this
           # is the route whose ABSENCE was the bug: every card issued since

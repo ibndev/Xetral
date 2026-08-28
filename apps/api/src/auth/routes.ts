@@ -156,6 +156,10 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
 
       .staff('GET', '/v1/admin/overview', { pin: false, role: 'support' })
       .staff('GET', '/v1/admin/drift', { pin: false, role: 'finance' })
+      // What was collected on a revenue authority's behalf is a finance
+      // figure. `finance`, so a support agent looking up a card cannot also
+      // read the returns.
+      .staff('GET', '/v1/admin/tax', { pin: false, role: 'finance' })
       .staff('GET', '/v1/admin/stuck', { pin: false, role: 'support' })
 
       .staff('GET', '/v1/admin/users', { pin: false, role: 'support' })

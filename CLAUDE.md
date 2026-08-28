@@ -239,6 +239,57 @@ Schema: `packages/ledger/sql/030_card_lifecycle.sql` and
   stops spending and the customer can undo it; terminating moves their money
   and cannot be undone.
 
+### Tax — non-obvious rules
+
+Schema: `packages/ledger/sql/032_tax.sql`. Split in `apps/api/src/tax/tax.service.ts`,
+report at `/admin/tax`.
+
+- **Every naira of every fee used to go to `revenue_fees`.** Part of a fee
+  charged by a Nigerian company for a service is VAT, which is not our money at
+  all, and there was no account anywhere that could hold money collected and
+  owed onward. A finance team filing a return had nothing to file FROM.
+- **TAX IS A LIABILITY, NOT REVENUE.** `liability_tax_payable`, never
+  `revenue_fees`. Booking it as revenue overstates what the business earned and
+  understates what it owes — both errors pointing the flattering way.
+- **VAT ships ON and the transfer levy ships OFF, and the difference in
+  defaults is the point.** VAT-inclusive is a BOOKING correction: the customer
+  pays what they always paid and we stop calling all of it revenue, so leaving
+  it off means knowingly recording a wrong number. A levy CHANGES WHAT A
+  CUSTOMER IS CHARGED, so the machinery ships complete and the decision does
+  not ship at all.
+- **The inclusive split is `gross × rate / (10000 + rate)`, not
+  `gross × rate / 10000`.** The second is the exclusive formula and
+  over-collects on every fee. `splitInclusiveTax()` in `@xetral/shared` is the
+  one place it lives.
+- **Tax rounds UP, in both modes**, so we can never under-remit. The fraction
+  goes to the revenue authority rather than to us — the opposite direction from
+  the FX spread, and stated at both call sites for the same reason.
+- **VAT is charged on the FEE, never on the amount being transferred.** What is
+  taxed is the service, not the money moving.
+- **The levy is NAIRA ONLY**, threshold-gated, and flat. It is published in
+  kobo and is a statement about naira; applying a kobo figure to dollars
+  because both are integers is the same mistake as adding kobo to cents.
+- **`tax_collections` is written on the ENTRY'S OWN transaction**, through
+  `post()`'s `onEntry` hook, so a collection cannot exist without its posting
+  and a posting cannot exist without its record. `ON CONFLICT DO NOTHING`,
+  because a retried transfer is a replay at the ledger and must be one here.
+- **Nothing collected is NO ROW.** A row saying zero is indistinguishable from
+  one somebody forgot to write, and the ledger refuses a zero-amount posting
+  for the same reason — which is also why the fee, the tax and the levy are
+  three conditional legs rather than one.
+- **`tax_remittance_drift` reports ONE direction.** Remitting reduces the
+  balance without being a collection, so a balance below what was collected is
+  a payment, not a discrepancy. More held than collected means a path posted
+  the money and forgot the record.
+- **Neither figure is tax advice.** The rate, the levy and its threshold are
+  rows an operator reviews, the same as `risk_thresholds`.
+- **`formatMinor` is what the admin surface uses, never `formatAmount`.** The
+  two look identical at a call site and differ by a factor of a hundred:
+  `formatAmount` takes MAJOR units and the views return `*_minor`. The
+  compliance queue had been rendering ₦500,000,000 for a ₦5,000,000 transfer,
+  which is exactly the error a reviewer deciding whether something is
+  reportable cannot see.
+
 ### Purchases (bills, eSIM, numbers) — non-obvious rules
 
 Schema: `packages/ledger/sql/004_purchases.sql`. One table for every "buy a thing
@@ -1237,6 +1288,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/029_kyc_tiers.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/029_kyc_tiers.seed.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/030_card_lifecycle.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/031_card_settlements.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/032_tax.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -1267,6 +1319,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/028_risk_cases.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/029_kyc_tiers.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/030_card_lifecycle.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/031_card_settlements.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/032_tax.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

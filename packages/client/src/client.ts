@@ -159,8 +159,8 @@ export interface KycStatus {
 /**
  * What a customer's verification tier allows.
  *
- * `daily_limit` is a MINOR-UNIT STRING. A zero here is a real limit, not a
- * missing value: an unverified account may move no crypto at all, because a
+ * `daily_limit` is a MAJOR-UNIT DECIMAL STRING — "0.00", not "0" — like every
+ * amount the API sends. A zero here is a real limit, not a missing value: an unverified account may move no crypto at all, because a
  * chain transaction is the one movement nobody can recall.
  */
 export interface KycLimits {
@@ -427,8 +427,8 @@ export class XetralClient {
    * for exceeding a ceiling can be shown what it is and how to raise it,
    * instead of an error code they can do nothing with.
    *
-   * `daily_limit` is a MINOR-UNIT STRING, like every amount that crosses this
-   * boundary. Format it; never turn it into a number.
+   * `daily_limit` is a MAJOR-UNIT DECIMAL STRING, like every amount that
+   * crosses this boundary. Format it; never turn it into a number.
    */
   async kycLimits(): Promise<KycLimits> {
     return this.#get<KycLimits>('/v1/kyc/limits');
