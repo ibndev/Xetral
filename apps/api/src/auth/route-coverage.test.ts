@@ -182,6 +182,7 @@ describe('the privileged surface is declared as privileged', () => {
       'GET /v1/admin/giftcards/queue (giftcard_reviewer)',
       'GET /v1/admin/kyc (compliance)',
       'GET /v1/admin/overview (support)',
+      'GET /v1/admin/prices (finance)',
       // The compliance queue, on the role that already reviews identity.
       'GET /v1/admin/risk/cases (compliance)',
       'GET /v1/admin/risk/cases/:id (compliance)',
@@ -212,6 +213,11 @@ describe('the privileged surface is declared as privileged', () => {
       'POST /v1/admin/giftcards/:id/reveal (giftcard_reviewer)',
       'POST /v1/admin/giftcards/:id/review (giftcard_reviewer)',
       'POST /v1/admin/kyc/:id/review (compliance)',
+      // Publishing a price. `finance`, and every write takes a PIN — nothing
+      // in the application ever wrote either price table before this.
+      'POST /v1/admin/prices/:id/retire (finance)',
+      'POST /v1/admin/prices/fx (finance)',
+      'POST /v1/admin/prices/giftcard (finance)',
       // Opening and noting take no PIN; closing does, because it resolves
       // every signal the case covers.
       'POST /v1/admin/risk/cases (compliance)',

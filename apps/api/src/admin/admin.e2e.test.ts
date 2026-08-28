@@ -455,6 +455,43 @@ describe('identity verification', () => {
 });
 
 describe('the operations surface', () => {
+  it('shows every queue that has been declared, over HTTP', async () => {
+    /*
+     * THE FAILURE THIS EXISTS TO CATCH is not a wrong number, it is a missing
+     * row. `admin_work_queue` named five sources and was written in Phase 12,
+     * before disputes, monitoring, cases, stuck card holds, consent, data
+     * requests and three drift views existed — so an operator saw five empty
+     * queues and reasonably concluded there was nothing to do.
+     *
+     * The SQL suite proves the view and `attention_sources` agree. This
+     * proves the number reaching a browser is the same one, which is the half
+     * a database test cannot see: three controllers were once imported and
+     * never mounted, and every route answered 404 while a coverage test
+     * reported success.
+     */
+    const support = await register();
+    await grant(support, 'support');
+
+    const res = await request(app.getHttpServer())
+      .get('/v1/admin/overview')
+      .set('Authorization', `Bearer ${support.token}`)
+      .expect(200);
+
+    const queues = res.body.queues as { queue: string; waiting: string }[];
+    const declared = await pool.query<{ queue_name: string }>(
+      `SELECT queue_name FROM attention_sources WHERE decision = 'queue'`,
+    );
+
+    expect(declared.rowCount).toBeGreaterThan(20);
+    expect(queues.map((q) => q.queue).sort()).toEqual(
+      declared.rows.map((r) => r.queue_name).sort(),
+    );
+
+    // An empty queue still reports, because "0 waiting" says it was checked
+    // and an absent row says nothing at all.
+    expect(queues.every((q) => q.waiting !== undefined)).toBe(true);
+  });
+
   it('refuses a signed-in customer with no role', async () => {
     const customer = await register();
 

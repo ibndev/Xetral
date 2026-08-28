@@ -203,6 +203,23 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       .staff('GET', '/v1/admin/data-requests', { pin: false, role: 'compliance' })
       .staff('POST', '/v1/admin/data-requests/:id/erase', { pin: true, role: 'compliance' })
       .staff('POST', '/v1/admin/data-requests/:id/resolve', { pin: true, role: 'compliance' })
+
+      /*
+       * Publishing a price.
+       *
+       * `finance`, and the writes take a PIN. Nothing in the application ever
+       * wrote `fx_spread_policies` or `giftcard_rate_cards`, so a fresh
+       * deployment refused every FX pair and gift cards could be switched on
+       * and then 404 the first quote — with `psql` as the only way out.
+       *
+       * There is deliberately no update route. A published price is
+       * append-only: changing one is retiring it and publishing its
+       * replacement, which is what keeps a quote given last month explicable.
+       */
+      .staff('GET', '/v1/admin/prices', { pin: false, role: 'finance' })
+      .staff('POST', '/v1/admin/prices/fx', { pin: true, role: 'finance' })
+      .staff('POST', '/v1/admin/prices/giftcard', { pin: true, role: 'finance' })
+      .staff('POST', '/v1/admin/prices/:id/retire', { pin: true, role: 'finance' })
       .staff('GET', '/v1/admin/stuck', { pin: false, role: 'support' })
 
       .staff('GET', '/v1/admin/users', { pin: false, role: 'support' })

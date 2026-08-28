@@ -397,6 +397,75 @@ at `/admin/data-requests`.
   be exempt from having to say why — and the reason recorded is the outcome
   itself, which is the answer the customer receives.
 
+### Publishing a price — non-obvious rules
+
+Schema: `packages/ledger/sql/035_price_publication.sql`. Service in
+`apps/api/src/pricing/pricing.service.ts`, screen at `/admin/prices`.
+
+- **NOTHING IN THE APPLICATION EVER WROTE EITHER PRICE TABLE.**
+  `fx_spread_policies` and `giftcard_rate_cards` are read on every quote and
+  were only ever populated by hand. An unpublished FX pair is refused rather
+  than quoted from a default — right, and it means a fresh deployment converts
+  nothing; gift cards are worse, because the flag can be switched on and the
+  first customer quote 404s. `psql` on production was the only way out.
+- **Writing them from a FORM is a different threat model from a prompt.** At a
+  prompt an operator composes the whole statement and can see the table; in a
+  form they see one band and press a button, twice, on a Friday.
+- **TWO LIVE GIFT CARD BANDS MAY NOT OVERLAP**, by EXCLUDE constraint.
+  `#liveRate` selects on `BETWEEN` and then `ORDER BY effective_from DESC LIMIT
+  1`, so an overlap is not an error — the newer band silently reprices the
+  shared range. A `LIMIT 1` resolving an ambiguity is an ambiguity the schema
+  should not have allowed. The range is `'[]'`, inclusive at both ends, because
+  the query is.
+- **An EXCLUDE rather than a unique index**, because the thing refused is a
+  range overlap. Phase 8's "`ON CONFLICT` cannot target an EXCLUDE" mattered
+  there because issuing a virtual account races itself; nothing races here, and
+  the right answer to a collision is to refuse and say what it overlaps.
+- **There is no update endpoint.** Both tables are append-only by trigger:
+  changing a price is retiring one and publishing another, which keeps every
+  past quote reproducible.
+- **`price.retire` is in 009's must-say-why list and `price.publish` is not.**
+  Retiring looks like tidying and its effect is that the flow refuses every
+  customer until a replacement exists. Requiring prose to set a number people
+  set weekly is how a required field becomes the word "update".
+- **Each FX DIRECTION is published separately.** A rate is a ratio, and "minor
+  units per major unit" collapses in one direction — so NGN→USD and USD→NGN are
+  two policies, and an operator who forgets the reverse learns it from
+  `published_prices` rather than from a customer.
+- **`prices_without_an_author` finds prices written at a prompt.** `created_by`
+  stays nullable — rows already exist, and a migration refusing to apply over
+  them would be worse than an unattributed price — so the gap is made visible
+  instead.
+
+### What needs attention — non-obvious rules
+
+Schema: `packages/ledger/sql/036_attention.sql`.
+
+- **`admin_work_queue` named FIVE sources and was written in Phase 12** —
+  before disputes, monitoring, cases, stuck card holds, consent, data requests
+  and three drift views existed. Every one of those shipped with its own view
+  and none reached the overview, so an operator saw five empty queues and
+  reasonably concluded there was nothing to do. An incomplete list that looks
+  complete is trusted; that is worse than no overview.
+- **The fix is not a longer list, it is that a short one fails the build.**
+  `attention_sources` classifies EVERY view — `queue`, `watch` or `internal` —
+  and `attention_coverage` reports an UNDECIDED one and an ORPHANED one, both
+  directions, the same shape as `retention_coverage` and for the same reason:
+  the queue nobody thought of is the one that silently fills.
+- **The queue is WRITTEN OUT, one arm per source, with no dynamic SQL.** An
+  overview assembled by looping over `attention_sources` would be an overview
+  whose behaviour changes with an INSERT — the rule `apply_retention()` and
+  `erase_customer_personal_data()` follow.
+- **Every arm is an unconditional aggregate, so an empty queue still emits a
+  row.** "consent: 0 waiting" says the queue was checked; an absent row says
+  nothing at all, and the two look identical on a dashboard. It is also what
+  makes the coverage comparison exact in both directions.
+- **A `queue` must carry a name and a `watch` must not**, by CHECK, so the
+  classification and the overview cannot drift apart.
+- **A rationale is at least twenty characters.** `internal` is the cheap
+  answer, and a one-word reason is how a view that does need working gets filed
+  under it.
+
 ### Purchases (bills, eSIM, numbers) — non-obvious rules
 
 Schema: `packages/ledger/sql/004_purchases.sql`. One table for every "buy a thing
@@ -1399,6 +1468,8 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/032_tax.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/033_consent.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/033_consent.seed.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/034_data_rights.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/035_price_publication.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/036_attention.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -1432,6 +1503,8 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/031_card_settlements.te
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/032_tax.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/033_consent.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/034_data_rights.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/035_price_publication.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/036_attention.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

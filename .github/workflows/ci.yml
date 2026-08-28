@@ -119,6 +119,8 @@ jobs:
             -f packages/ledger/sql/033_consent.sql \
             -f packages/ledger/sql/033_consent.seed.sql \
             -f packages/ledger/sql/034_data_rights.sql \
+            -f packages/ledger/sql/035_price_publication.sql \
+            -f packages/ledger/sql/036_attention.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       - name: Ledger and identity invariants
@@ -161,6 +163,8 @@ jobs:
                    packages/ledger/sql/032_tax.test.sql \
                    packages/ledger/sql/033_consent.test.sql \
                    packages/ledger/sql/034_data_rights.test.sql \
+                   packages/ledger/sql/035_price_publication.test.sql \
+                   packages/ledger/sql/036_attention.test.sql \
                    packages/ledger/sql/099_least_privilege.test.sql; do
             echo "== $f"
             psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
@@ -233,6 +237,8 @@ jobs:
             -f packages/ledger/sql/033_consent.sql \
             -f packages/ledger/sql/033_consent.seed.sql \
             -f packages/ledger/sql/034_data_rights.sql \
+            -f packages/ledger/sql/035_price_publication.sql \
+            -f packages/ledger/sql/036_attention.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       # ------------------------------------------------------------------
@@ -410,6 +416,12 @@ jobs:
           # PIN in its body — so 401 here proves it is mounted and gated.
           check "data export is mounted" 401 http://127.0.0.1:3100/v1/me/export -X POST
           check "data requests are mounted" 401 http://127.0.0.1:3100/v1/admin/data-requests
+
+          # Publishing a price. Guarded, so 401 rather than 404 — and the
+          # ABSENCE of this route was the bug: nothing in the application ever
+          # wrote either price table, so FX refused every pair on a fresh
+          # deployment and psql was the only way out.
+          check "price publication is mounted" 401 http://127.0.0.1:3100/v1/admin/prices
 
           # Reading a card number. Guarded, so 401 rather than 404 — and this
           # is the route whose ABSENCE was the bug: every card issued since

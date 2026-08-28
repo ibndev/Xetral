@@ -18,6 +18,7 @@ import { AuditService } from './audit.service.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { ConsentService } from '../consent/consent.service.js';
 import { DataRightsService } from '../datarights/data-rights.service.js';
+import { PricingService } from '../pricing/pricing.service.js';
 import { ProviderCredentialService } from '../settings/provider-credentials.service.js';
 import { MonitoringService } from '../risk/monitoring.service.js';
 import { CaseService } from '../risk/case.service.js';
@@ -118,6 +119,37 @@ const listQuery = z.object({
   before: z.string().regex(/^[0-9]+$/).optional(),
 });
 
+const publishFxSchema = z.object({
+  base_currency: z.string().trim().length(3).toUpperCase(),
+  quote_currency: z.string().trim().length(3).toUpperCase(),
+  /* BASIS POINTS as an integer, never a decimal — the rule every rate in this
+     codebase follows. The bound matches the CHECK, so a mistyped figure is
+     refused by the form and by the database. */
+  spread_basis_points: z.coerce.number().int().min(0).max(10_000),
+  /* MINOR UNITS as a string. It is a bigint in Postgres and would lose
+     precision as a JSON number. */
+  min_base_minor: z.string().regex(/^[1-9][0-9]*$/),
+  transaction_pin: z.string().optional(),
+});
+
+const publishRateSchema = z.object({
+  brand: z.string().trim().min(1).max(60),
+  country: z.string().trim().length(2).toUpperCase(),
+  card_type: z.enum(['ecode', 'physical']),
+  face_currency: z.string().trim().length(3).toUpperCase(),
+  payout_currency: z.string().trim().length(3).toUpperCase(),
+  payout_rate_minor: z.string().regex(/^[1-9][0-9]*$/),
+  min_face_minor: z.string().regex(/^[1-9][0-9]*$/),
+  max_face_minor: z.string().regex(/^[1-9][0-9]*$/),
+  transaction_pin: z.string().optional(),
+});
+
+const retirePriceSchema = z.object({
+  kind: z.enum(['fx', 'giftcard']),
+  reason: z.string().trim().min(10).max(500),
+  transaction_pin: z.string().optional(),
+});
+
 const resolveDataRequestSchema = z.object({
   status: z.enum(['completed', 'refused']),
   /* Twenty characters, matching the CHECK. A queue cleared with one-word
@@ -139,6 +171,7 @@ export class AdminController {
     @Inject(SettingsService) private readonly settings: SettingsService,
     @Inject(ConsentService) private readonly consentService: ConsentService,
     @Inject(DataRightsService) private readonly rights: DataRightsService,
+    @Inject(PricingService) private readonly pricing: PricingService,
     @Inject(ProviderCredentialService)
     private readonly credentialStore: ProviderCredentialService,
     @Inject(MonitoringService) private readonly monitoring: MonitoringService,
@@ -673,6 +706,123 @@ export class AdminController {
       ...(ip === undefined ? {} : { ip }),
     });
     return resolved;
+  }
+
+  /* -------------------------------- pricing ----------------------------- */
+
+  /**
+   * What a customer will be quoted today.
+   *
+   * `finance`, and it is READ-ONLY here: publishing is below and takes a PIN.
+   * The unattributed list is the interesting half — a price with no author was
+   * written at a psql prompt, which is what this whole surface exists to make
+   * unnecessary.
+   */
+  @Get('prices')
+  async prices(): Promise<Record<string, unknown>> {
+    const [published, fx, cards] = await Promise.all([
+      this.pricing.published(),
+      this.pricing.fxPolicies(),
+      this.pricing.rateCards(),
+    ]);
+    return { ...published, fx_policies: fx, rate_cards: cards };
+  }
+
+  /**
+   * Publishes an FX spread for one pair and one direction.
+   *
+   * TAKES A PIN, like every action that changes what a customer is charged.
+   * There is no update: changing a spread is retiring one and publishing
+   * another, so every past quote stays reproducible.
+   */
+  @Post('prices/fx')
+  @HttpCode(201)
+  async publishFx(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: unknown,
+  ): Promise<unknown> {
+    const parsed = publishFxSchema.safeParse(body);
+    if (!parsed.success) throw invalid(parsed.error.issues);
+
+    const actor = claims(request).sub;
+    const published = await this.pricing.publishFxSpread(actor, parsed.data);
+
+    const ip = ipOf(request);
+    await this.audit.record({
+      actorId: actor,
+      action: 'price.publish',
+      subjectType: 'price',
+      subjectId: String(published['uuid']),
+      detail: {
+        kind: 'fx_spread',
+        pair: `${parsed.data.base_currency}/${parsed.data.quote_currency}`,
+        spread_basis_points: parsed.data.spread_basis_points,
+      },
+      ...(ip === undefined ? {} : { ip }),
+    });
+    return published;
+  }
+
+  /** Publishes a gift card rate for one brand, country, type and band. */
+  @Post('prices/giftcard')
+  @HttpCode(201)
+  async publishRate(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: unknown,
+  ): Promise<unknown> {
+    const parsed = publishRateSchema.safeParse(body);
+    if (!parsed.success) throw invalid(parsed.error.issues);
+
+    const actor = claims(request).sub;
+    const published = await this.pricing.publishRateCard(actor, parsed.data);
+
+    const ip = ipOf(request);
+    await this.audit.record({
+      actorId: actor,
+      action: 'price.publish',
+      subjectType: 'price',
+      subjectId: String(published['uuid']),
+      detail: {
+        kind: 'giftcard_rate',
+        card: `${parsed.data.brand} ${parsed.data.country} ${parsed.data.card_type}`,
+        payout_rate_minor: parsed.data.payout_rate_minor,
+      },
+      ...(ip === undefined ? {} : { ip }),
+    });
+    return published;
+  }
+
+  /**
+   * Retires a price, which stops it being quoted and keeps it on record.
+   *
+   * DESTRUCTIVE IN THE SENSE 009 MEANS: it takes something away from
+   * customers, because until a replacement is published the flow it priced
+   * refuses them. So a reason is required, by CHECK as well as by this schema.
+   */
+  @Post('prices/:id/retire')
+  @HttpCode(200)
+  async retirePrice(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ): Promise<unknown> {
+    const parsed = retirePriceSchema.safeParse(body);
+    if (!parsed.success) throw invalid(parsed.error.issues);
+
+    const actor = claims(request).sub;
+    const retired = await this.pricing.retire(parsed.data.kind, id);
+
+    const ip = ipOf(request);
+    await this.audit.record({
+      actorId: actor,
+      action: 'price.retire',
+      subjectType: 'price',
+      subjectId: id,
+      detail: { kind: parsed.data.kind },
+      reason: parsed.data.reason,
+      ...(ip === undefined ? {} : { ip }),
+    });
+    return retired;
   }
 
   @Get('settings')

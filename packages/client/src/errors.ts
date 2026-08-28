@@ -95,6 +95,13 @@ const API_ERROR_CODES = [
      different reasons — a balance, or an open investigation — because the API
      answers them identically: tipping off is an offence, and a
      distinguishable refusal is a way to learn you are under review. */
+  /* Publishing a price. `price_band_overlaps` is named separately from
+     `price_already_published` because the fix differs: retire the band it
+     overlaps or narrow this one, versus retire the live policy first. */
+  'price_already_published',
+  'price_band_overlaps',
+  'price_not_found',
+  'invalid_price',
   'erasure_blocked',
   'request_already_open',
   'request_not_found',

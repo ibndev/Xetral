@@ -255,6 +255,48 @@ export interface AdminDataRequest {
   readonly overdue: boolean;
 }
 
+export interface AdminPrices {
+  /** Live only: what a customer will be quoted today. */
+  readonly prices: readonly {
+    readonly kind: string;
+    readonly uuid: string;
+    readonly subject: string;
+    readonly price: string;
+    readonly terms: string;
+    readonly effective_from: string;
+  }[];
+  /** Live prices with no author — written at a psql prompt rather than here. */
+  readonly unattributed: readonly {
+    readonly kind: string;
+    readonly uuid: string;
+    readonly subject: string;
+  }[];
+  readonly fx_policies: readonly {
+    readonly uuid: string;
+    readonly base_currency: string;
+    readonly quote_currency: string;
+    readonly spread_basis_points: number;
+    readonly min_base_minor: string;
+    readonly effective_from: string;
+    readonly retired_at: string | null;
+    readonly published_by: string | null;
+  }[];
+  readonly rate_cards: readonly {
+    readonly uuid: string;
+    readonly brand: string;
+    readonly country: string;
+    readonly card_type: string;
+    readonly face_currency: string;
+    readonly payout_currency: string;
+    readonly payout_rate_minor: string;
+    readonly min_face_minor: string;
+    readonly max_face_minor: string;
+    readonly effective_from: string;
+    readonly retired_at: string | null;
+    readonly published_by: string | null;
+  }[];
+}
+
 export class AdminClient {
   readonly #baseUrl: string;
   readonly #session: Session;
@@ -437,6 +479,77 @@ export class AdminClient {
     return this.#post(`/v1/admin/data-requests/${encodeURIComponent(id)}/resolve`, {
       status,
       outcome,
+      transaction_pin: pin,
+    });
+  }
+
+  /* -------------------------------- pricing ----------------------------- */
+
+  /**
+   * What a customer will be quoted today, and everything that has ever been
+   * published.
+   *
+   * The retired rows are the point rather than clutter: a published price is
+   * append-only precisely so a quote given last month can be explained.
+   */
+  async prices(): Promise<AdminPrices> {
+    return this.#get<AdminPrices>('/v1/admin/prices');
+  }
+
+  /**
+   * Publishes an FX spread for ONE PAIR AND ONE DIRECTION.
+   *
+   * Publishing NGN/USD does not publish USD/NGN: a rate is a ratio, and
+   * "minor units per major unit" collapses in one of the two directions, so
+   * each is priced on its own.
+   */
+  async publishFxSpread(
+    input: {
+      readonly base_currency: string;
+      readonly quote_currency: string;
+      readonly spread_basis_points: number;
+      /** MINOR UNITS as a string. It is a bigint in Postgres. */
+      readonly min_base_minor: string;
+    },
+    pin: string,
+  ): Promise<Record<string, unknown>> {
+    return this.#post('/v1/admin/prices/fx', { ...input, transaction_pin: pin });
+  }
+
+  /** Publishes a gift card rate for one brand, country, type and face band.
+   *  A band overlapping a live one is REFUSED, not merged. */
+  async publishRateCard(
+    input: {
+      readonly brand: string;
+      readonly country: string;
+      readonly card_type: 'ecode' | 'physical';
+      readonly face_currency: string;
+      readonly payout_currency: string;
+      readonly payout_rate_minor: string;
+      readonly min_face_minor: string;
+      readonly max_face_minor: string;
+    },
+    pin: string,
+  ): Promise<Record<string, unknown>> {
+    return this.#post('/v1/admin/prices/giftcard', { ...input, transaction_pin: pin });
+  }
+
+  /**
+   * Retires a price. It stops being quoted and stays on record.
+   *
+   * The reason is required, because until a replacement is published the flow
+   * this priced REFUSES every customer — an unpublished FX pair is not quoted
+   * from a default.
+   */
+  async retirePrice(
+    uuid: string,
+    kind: 'fx' | 'giftcard',
+    reason: string,
+    pin: string,
+  ): Promise<Record<string, unknown>> {
+    return this.#post(`/v1/admin/prices/${encodeURIComponent(uuid)}/retire`, {
+      kind,
+      reason,
       transaction_pin: pin,
     });
   }

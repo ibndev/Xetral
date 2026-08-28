@@ -53,6 +53,7 @@ import { ConsentService } from './consent/consent.service.js';
 import { ConsentController } from './consent/consent.controller.js';
 import { DataRightsService } from './datarights/data-rights.service.js';
 import { DataRightsController } from './datarights/data-rights.controller.js';
+import { PricingService } from './pricing/pricing.service.js';
 import { ProviderCredentialService } from './settings/provider-credentials.service.js';
 import { AuditService } from './admin/audit.service.js';
 import { AdminService } from './admin/admin.service.js';
@@ -696,6 +697,7 @@ export class AppModule {
         TaxService,
         ConsentService,
         DataRightsService,
+        PricingService,
         ProviderCredentialService,
         AuditService,
         AdminService,

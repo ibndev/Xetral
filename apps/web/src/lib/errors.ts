@@ -32,6 +32,14 @@ export function messageFor(error: unknown): string {
       // The honest answer rather than a silent failure. Withdrawing the terms
       // is closing the account, which moves money and has its own path.
       return 'You cannot withdraw this while your account is open. Close the account instead.';
+    case 'price_already_published':
+      return 'A live price already exists for that. Retire it first — that is a separate step because it changes what customers are quoted.';
+    case 'price_band_overlaps':
+      return 'That band overlaps one that is already live. Retire the one it overlaps, or narrow this band.';
+    case 'price_not_found':
+      return 'That price is not live. It may already have been retired.';
+    case 'invalid_price':
+      return 'That price is outside what the platform allows. Check the units — spreads are basis points, amounts are minor units.';
     case 'erasure_blocked':
       // ONE MESSAGE for two reasons, matching the API. The other reason is an
       // open investigation, and telling a customer that is an offence — so

@@ -55,7 +55,13 @@ export type AdminAction =
      UNDONE BY APPENDING, so it is in the schema's destructive list and its
      reason is the outcome itself — what went, and what had to stay. */
   | 'data.erase'
-  | 'data.resolve';
+  | 'data.resolve'
+  /* A price published or retired. Both are recorded: publishing decides what
+     every customer is charged from that moment, and retiring means the flow
+     it priced refuses them until a replacement exists — so retiring is in
+     009's list of actions that must say why. */
+  | 'price.publish'
+  | 'price.retire';
 
 export interface AuditEntry {
   /** The actor's UUID, as it appears in an access token. Resolved to the
@@ -74,7 +80,8 @@ export interface AuditEntry {
     | 'risk_case'
     | 'card'
     | 'dispute'
-    | 'data_request';
+    | 'data_request'
+    | 'price';
   readonly subjectId: string;
   readonly detail?: Record<string, unknown>;
   readonly reason?: string;
