@@ -652,6 +652,13 @@ Review in `apps/mobile/SECURITY.md`, cover in `src/screen-privacy.tsx`.
   ASSERTS the generated manifest in both directions, because a typo in that
   list would take out biometrics and present as "Face ID does not work on
   Android".
+- **THE APK WORKFLOW HAD NEVER ONCE BEEN RUN**, and the first run failed at
+  `mergeDebugResources` after three and a half minutes: `with-lan-cleartext.js`
+  wrote `expo prebuild --clean` into an XML COMMENT, and **two consecutive
+  hyphens are illegal there**. The file is generated into gitignored
+  `android/`, so it appeared in no diff; the only reader was aapt2, on a
+  runner, in a step nobody associates with a config plugin. The plugin now
+  REFUSES such a comment at prebuild — seconds, and it names the line.
 - **`userInterfaceStyle` was declared and ignored.** `expo prebuild` said so on
   every run — `Install expo-system-ui to enable this feature` — and nobody was
   reading prebuild output because nobody ran prebuild locally. Theming worked
