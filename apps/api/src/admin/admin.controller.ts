@@ -26,6 +26,7 @@ import { CaseService } from '../risk/case.service.js';
 import { CardService } from '../cards/card.service.js';
 import { KycService } from '../kyc/kyc.service.js';
 import { ErrorRecorder } from '../observability/error-recorder.service.js';
+import { ReadinessService, type Readiness } from '../golive/readiness.service.js';
 import { kycReviewSchema } from '../kyc/dto.js';
 
 /**
@@ -181,6 +182,7 @@ export class AdminController {
     @Inject(CardService) private readonly cards: CardService,
     @Inject(KycService) private readonly kyc: KycService,
     @Inject(ErrorRecorder) private readonly errors: ErrorRecorder,
+    @Inject(ReadinessService) private readonly readinessService: ReadinessService,
   ) {}
 
   /* ------------------------------ overview ----------------------------- */
@@ -200,6 +202,24 @@ export class AdminController {
   @Get('stuck')
   async stuck(): Promise<Record<string, unknown>> {
     return this.admin.stuck();
+  }
+
+  /**
+   * What this deployment has not been told yet.
+   *
+   * `admin` rather than `support`, because the answer names every provider
+   * this instance can reach, which flows are switched off and which secrets
+   * are absent — a map of where the platform is soft. It carries no secret
+   * and no value, only whether something is set.
+   *
+   * IT ANSWERS FOR THE PROCESS THAT SERVED IT. On a deployment where the
+   * workers run in their own container, the worker intervals read as
+   * `unset-here` on the API and are correctly set on the worker. The response
+   * names the instance for that reason.
+   */
+  @Get('readiness')
+  async readiness(): Promise<Readiness> {
+    return this.readinessService.report();
   }
 
   /* -------------------------------- users ------------------------------ */

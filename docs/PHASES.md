@@ -33,6 +33,21 @@ flows and production traffic.
 
 ---
 
+---
+
+## Before it takes real money
+
+Each phase below ends with its own **"an operator must"** paragraph. Those are
+kept as the record of why each item exists — but the operational list is now
+one thing, in one place, and it is checked by the build:
+
+- **`deploy/GO-LIVE.md`** — what the categories mean and what order to work in.
+- **`apps/api/src/golive/go-live-checklist.ts`** — the list itself, as data.
+  `go-live.test.ts` fails the build if it and the code disagree in either
+  direction.
+- **`GET /v1/admin/readiness`** — the same list asked of a running deployment.
+
+
 ## Phase 0 — Foundation ✅
 
 Monorepo, strict TypeScript, money primitives.

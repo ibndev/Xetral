@@ -242,6 +242,10 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       .staff('POST', '/v1/admin/prices/giftcard', { pin: true, role: 'finance' })
       .staff('POST', '/v1/admin/prices/:id/retire', { pin: true, role: 'finance' })
       .staff('GET', '/v1/admin/stuck', { pin: false, role: 'support' })
+      // `admin`, not `support`: it names every flow that is switched off and
+      // every credential that is absent, which is a map of where this
+      // deployment is soft.
+      .staff('GET', '/v1/admin/readiness', { pin: false, role: 'admin' })
 
       .staff('GET', '/v1/admin/users', { pin: false, role: 'support' })
       .staff('GET', '/v1/admin/users/:id', { pin: false, role: 'support' })

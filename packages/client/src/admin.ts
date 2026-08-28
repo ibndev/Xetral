@@ -297,6 +297,39 @@ export interface AdminPrices {
   }[];
 }
 
+/**
+ * What a deployment has not been told yet.
+ *
+ * `state` is deliberately four values rather than a boolean. `unset-here` is
+ * the one that matters: a worker interval belongs on ONE instance, so its
+ * absence from the API container is correct and reporting it as a fault would
+ * mean nine false findings on every production deployment.
+ */
+export interface AdminReadinessRow {
+  readonly name: string;
+  readonly kind: 'env' | 'setting' | 'credential' | 'action';
+  readonly failure:
+    | 'refuses-to-boot'
+    | 'refuses-the-first-request'
+    | 'silent'
+    | 'wrong-by-default'
+    | 'default-is-deliberate';
+  readonly state: 'set' | 'unset' | 'unset-here' | 'not-observable';
+  readonly ifMissed: string;
+  readonly flow?: string;
+}
+
+export interface AdminReadiness {
+  readonly instance: { readonly environment: string; readonly hostname: string };
+  readonly rows: readonly AdminReadinessRow[];
+  readonly summary: {
+    readonly unset: number;
+    readonly unsetHere: number;
+    readonly notObservable: number;
+    readonly silentAndUnset: number;
+  };
+}
+
 export interface AdminProviderHealth {
   readonly degraded: readonly {
     readonly provider: string;
@@ -524,6 +557,20 @@ export class AdminClient {
    */
   async providerHealth(): Promise<AdminProviderHealth> {
     return this.#get<AdminProviderHealth>('/v1/admin/providers');
+  }
+
+  /* ------------------------------- readiness ---------------------------- */
+
+  /**
+   * What THIS instance has not been told yet.
+   *
+   * It answers for the process that served the request, which is why the
+   * response names it: on a deployment where the workers run in their own
+   * container, every worker interval is `unset-here` on the API and set on
+   * the worker.
+   */
+  async readiness(): Promise<AdminReadiness> {
+    return this.#get<AdminReadiness>('/v1/admin/readiness');
   }
 
   /* -------------------------------- pricing ----------------------------- */

@@ -492,6 +492,105 @@ describe('the operations surface', () => {
     expect(queues.every((q) => q.waiting !== undefined)).toBe(true);
   });
 
+  it('reports what this deployment has not been told yet', async () => {
+    /**
+     * The readiness check, against a real database.
+     *
+     * What a unit test cannot settle is whether the two queries it runs match
+     * the schema — `platform_settings` and the join over
+     * `provider_credential_slots` are SQL strings, invisible to the compiler,
+     * and the two failures this codebase has recorded of exactly that shape
+     * (an UPDATE against a table called `sessions`, a UUID cast to bigint)
+     * both answered 500 in production and passed every unit test.
+     */
+    const operator = await register();
+    await grant(operator, 'admin');
+
+    const res = await request(app.getHttpServer())
+      .get('/v1/admin/readiness')
+      .set('Authorization', `Bearer ${operator.token}`)
+      .expect(200);
+
+    const rows = res.body.rows as {
+      name: string;
+      kind: string;
+      state: string;
+      failure: string;
+      ifMissed: string;
+    }[];
+
+    // The whole checklist, not a filtered view of it: an entry that is fine
+    // still has to appear, for the reason `admin_work_queue` emits a row for
+    // an empty queue. "Nothing to do" and "not checked" look identical
+    // otherwise.
+    expect(rows.length).toBeGreaterThan(100);
+    expect(new Set(rows.map((r) => r.kind))).toEqual(
+      new Set(['env', 'setting', 'credential', 'action']),
+    );
+
+    // Every seeded setting resolves, which is what proves the query matched
+    // the schema rather than returning nothing and reading as "all unset".
+    const settings = rows.filter((r) => r.kind === 'setting');
+    expect(settings.length).toBeGreaterThan(40);
+    expect(settings.every((r) => r.state === 'set')).toBe(true);
+
+    // A role granted to a person is not observable from inside the process,
+    // and the check says so rather than guessing.
+    expect(rows.filter((r) => r.kind === 'action').every((r) => r.state === 'not-observable'))
+      .toBe(true);
+
+    // The number an operator acts on.
+    expect(typeof res.body.summary.silentAndUnset).toBe('number');
+    expect(res.body.instance.environment).toBeDefined();
+
+    // AND IT CARRIES NO SECRET. A credential row says whether the slot is
+    // filled and never what is in it — the same rule that means there is no
+    // endpoint anywhere returning a provider key, masked or otherwise. A
+    // readiness screen is exactly where that rule gets quietly broken.
+    //
+    // Asserted on the SHAPE rather than by scanning for something that looks
+    // like a key. The first version searched the body for `sk_` and failed on
+    // `risk_dormant_days`, which is the trouble with pattern-matching for
+    // secrets: it finds prose and would miss a field somebody adds called
+    // `currentValue`.
+    const allowed = new Set(['name', 'kind', 'failure', 'state', 'ifMissed', 'flow']);
+    for (const row of rows as unknown as Record<string, unknown>[]) {
+      const extra = Object.keys(row).filter((k) => !allowed.has(k));
+      expect(extra, `a readiness row carries ${extra.join(', ')}`).toEqual([]);
+    }
+    for (const slot of rows.filter((r) => r.kind === 'credential')) {
+      expect(['set', 'unset']).toContain(slot.state);
+    }
+
+    // A CREDENTIAL SET ONLY IN THE ENVIRONMENT IS SET. The database is
+    // authoritative and the environment is the fallback, so a slot filled by
+    // `BITNOB_API_KEY` alone works — and the first version of this check
+    // joined only against `provider_credentials`, which would have put a
+    // false finding on every deployment that has not yet used the dashboard.
+    const bitnobKey = rows.find((r) => r.name === 'bitnob.api_key');
+    expect(bitnobKey).toBeDefined();
+    const configuredInEnv = (process.env['BITNOB_API_KEY'] ?? '') !== '';
+    const stored = await pool.query(
+      `SELECT 1 FROM provider_credentials WHERE provider = 'bitnob' AND name = 'api_key'`,
+    );
+    expect(bitnobKey?.state).toBe(
+      configuredInEnv || (stored.rowCount ?? 0) > 0 ? 'set' : 'unset',
+    );
+  });
+
+  it('refuses `support` the readiness report', async () => {
+    // It names every flow that is off and every credential that is absent.
+    // `support` reads customer records all day and does not need a map of
+    // where the platform is soft.
+    const support = await register();
+    await grant(support, 'support');
+
+    const res = await request(app.getHttpServer())
+      .get('/v1/admin/readiness')
+      .set('Authorization', `Bearer ${support.token}`);
+    expect(res.status).toBe(403);
+  });
+
   it('refuses a signed-in customer with no role', async () => {
     const customer = await register();
 

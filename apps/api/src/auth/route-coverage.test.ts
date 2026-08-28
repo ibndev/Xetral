@@ -189,6 +189,10 @@ describe('the privileged surface is declared as privileged', () => {
       // The compliance queue, on the role that already reviews identity.
       // Provider health. `support` — see routes.ts.
       'GET /v1/admin/providers (support)',
+      // What this deployment has not been told yet. `admin` rather than
+      // `support`, because it names every flow that is off and every
+      // credential that is absent — a map of where the platform is soft.
+      'GET /v1/admin/readiness (admin)',
       'GET /v1/admin/risk/cases (compliance)',
       'GET /v1/admin/risk/cases/:id (compliance)',
       'GET /v1/admin/risk/signals (compliance)',

@@ -466,6 +466,46 @@ Schema: `packages/ledger/sql/036_attention.sql`.
   answer, and a one-word reason is how a view that does need working gets filed
   under it.
 
+### Going live — non-obvious rules
+
+The list is `apps/api/src/golive/go-live-checklist.ts`; the prose is
+`deploy/GO-LIVE.md`; the same list asked of a running deployment is
+`GET /v1/admin/readiness`.
+
+- **Every phase ended with its own "an operator must" paragraph** — six in
+  `PHASES.md` alone, more here, more in migration headers. Each correct, and
+  together not a checklist, because nothing listed them and nothing noticed a
+  seventh being written.
+- **THE LIST IS DATA AND THE BUILD CHECKS IT**, in both directions:
+  `go-live.test.ts` fails on a variable `config.ts` reads that the checklist
+  does not name, AND on an entry for something that no longer exists — the
+  second matters as much, because an operator told to set a variable that does
+  nothing will stop trusting the rest.
+- **`platform_settings` is seeded by FOURTEEN migrations**, 009 through 037,
+  not by one seed file. The first reader here scanned `009_admin.seed.sql`,
+  found nineteen keys of fifty-four, and looked plausible. That spread is why
+  nobody had a complete list.
+- **Category `silent` is the one that justifies the whole thing.**
+  `NOTIFICATION_INTERVAL_SECONDS` unset means the outbox fills, the API keeps
+  saying "check your email", and nothing is sent. Nothing errors, because
+  writing the row succeeded.
+- **`default-is-deliberate` is a decision RECORDED, not an omission.** Without
+  a way to say "considered, nothing needed", the honest thing to do with a
+  defensible default is leave it off the list — which is how a list stops being
+  one. The same shape as `attention_sources` requiring a rationale for
+  `internal`.
+- **The readiness check REPORTS and never refuses.** One that could stop the
+  API starting would be a new way to take the platform down at 3am, and what
+  genuinely cannot be missing already refuses at boot in `config.ts`.
+- **It answers for the PROCESS THAT SERVED IT, and says so.** Workers run in
+  their own container, so every interval reads `unset-here` on the api and is
+  correctly set on the worker. A check that claimed to speak for the whole
+  deployment would report nine false findings on every production instance.
+- **It carries no secret and no value**, only whether something is set. The
+  e2e asserts the ROW SHAPE rather than scanning for something key-shaped —
+  the scan version failed on `risk_dormant_days` containing `sk_`, which is
+  the trouble with pattern-matching for secrets in either direction.
+
 ### Provider health — non-obvious rules
 
 Schema: `packages/ledger/sql/037_provider_health.sql`. Recorder and port
