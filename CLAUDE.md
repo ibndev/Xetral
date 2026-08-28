@@ -539,6 +539,30 @@ wrapper in `apps/api/src/observability/provider-health.service.ts`, screen at
   Tuesday is a queue nobody is working; a queue of forty turning over hourly is
   a busy morning. Alerting on depth alone gets both wrong.
 
+### Scanning the running app — non-obvious rules
+
+`ci.yml`'s boot probes, and the `dynamic` job in `scan.yml`.
+
+- **The specific assertions BLOCK; the scanner REPORTS.** Each `check` in
+  ci.yml names a failure this application has actually had — a controller
+  imported and never mounted, a CSP that stops the page hydrating, a webhook
+  answering 500 instead of 401. A baseline scan finds things true of every
+  sign-in page, and failing on those teaches everybody to skip the step.
+- **The API had NO HSTS and the web app always did**, which looked harmless
+  because both sit behind the same edge. They do not have the same clients:
+  `apps/mobile` talks to the API origin directly, so the protection the web app
+  enjoyed never reached the clients holding a customer's PIN in a Keychain. A
+  header that exists only because of a setting in another system is a header
+  nobody owns.
+- **The two apps' `Referrer-Policy` differ deliberately.** The API sends
+  `no-referrer` because it renders nothing; the web app sends
+  `strict-origin-when-cross-origin`, because a browser app needs same-origin
+  referrers to work and what it must never do is send a path carrying a card id
+  to another site.
+- **The dynamic scan runs against a schema-less database, passively.** An
+  active scan sends requests designed to change state, and this API is wired to
+  a real ledger in every environment where running one would be worth anything.
+
 ### Static analysis — non-obvious rules
 
 Rules in `.semgrep/xetral.yml`, probe in `.semgrep/probe/`, workflow in

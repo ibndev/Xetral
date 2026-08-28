@@ -127,3 +127,82 @@ jobs:
             tail -40 /tmp/semgrep.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  dynamic:
+    name: Scan the running app
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    # ------------------------------------------------------------------
+    # The half static analysis cannot see.
+    #
+    # `ci.yml` already boots both bundles and ASSERTS specific things about
+    # them — that every controller is mounted, that a guarded route answers
+    # 401, that every script carries the CSP nonce, that the headers are
+    # there. Those are the checks worth blocking on, because each one names a
+    # failure this application has actually had.
+    #
+    # This is the other question: what does a scanner find that nobody thought
+    # to assert? It REPORTS rather than blocks, for the same reason the generic
+    # Semgrep packs do — a baseline scan over an app this size finds things
+    # about a sign-in page that are true of every sign-in page, and failing on
+    # those teaches everybody to skip the step. When a finding here matters it
+    # becomes a `check` in ci.yml, where it does block.
+    # ------------------------------------------------------------------
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: xetral
+          POSTGRES_PASSWORD: xetral
+          POSTGRES_DB: xetral
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      PGPASSWORD: xetral
+      DATABASE_URL: postgres://xetral:xetral@localhost:5432/xetral
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+
+      - name: Start the API
+        run: |
+          ACCESS_TOKEN_KEYS="v1:$(openssl rand -base64 32)" \
+          ACCESS_TOKEN_CURRENT_VERSION=v1 \
+          XETRAL_ENVIRONMENT=production \
+          PORT=3100 \
+          node apps/api/dist/main.js > /tmp/api.log 2>&1 &
+          for _ in $(seq 1 60); do
+            curl -s -o /dev/null "http://127.0.0.1:3100/health" && break
+            sleep 0.5
+          done
+          curl -sf http://127.0.0.1:3100/health
+
+      # The schema is deliberately NOT applied. A scanner sending thousands of
+      # requests at a database it can write to is a scanner that seeds
+      # thousands of accounts, and none of the findings worth having here need
+      # one — they are about headers, methods, and what an unauthenticated
+      # caller can reach.
+      - name: Baseline scan
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: 'http://127.0.0.1:3100'
+          # Passive only. An ACTIVE scan against a money API sends requests
+          # designed to change state, and this one is wired to a real ledger
+          # schema in every environment where it would be worth running.
+          cmd_options: '-a -I -j'
+          # The findings are the output. A red X here would be a red X on
+          # every push about a sign-in page behaving like a sign-in page.
+          fail_action: false
+          allow_issue_writing: false

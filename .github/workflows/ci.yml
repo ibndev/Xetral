@@ -439,6 +439,42 @@ jobs:
           # Phase 5 was unusable because nothing could show its number.
           check "card reveal is mounted" 401 http://127.0.0.1:3100/v1/cards/x/reveal -X POST
 
+          # ------------------------------------------------------------
+          # The headers, asserted rather than assumed.
+          #
+          # Every one of these was already set, and one of them was NOT: the
+          # web app had sent HSTS since it was written and the API never had,
+          # which looked harmless because both sit behind the same edge. They
+          # do not have the same clients — apps/mobile talks to this origin
+          # directly — and a header that exists only because of a setting in
+          # another system is a header nobody owns.
+          # ------------------------------------------------------------
+          header() { # name pattern
+            got=$(curl -s -D - -o /dev/null "http://127.0.0.1:3100/health"                   | grep -i "^$1:" | tr -d '\r' || true)
+            if echo "$got" | grep -qi "$2"; then
+              echo "ok: $1"
+            else
+              echo "::error::$1 missing or wrong on the API: '${got}'"
+              fail=1
+            fi
+          }
+
+          header "strict-transport-security" "max-age=[0-9]"
+          header "x-content-type-options"    "nosniff"
+          header "x-frame-options"           "DENY"
+          header "referrer-policy"           "no-referrer"
+          # Every response here is about one customer's money, so a shared
+          # cache holding one is a shared cache serving it to somebody else.
+          header "cache-control"             "no-store"
+          header "content-security-policy"   "default-src 'none'"
+
+          # And the framework must NOT announce itself: a version number is
+          # free reconnaissance for whoever is scanning for the next advisory.
+          if curl -s -D - -o /dev/null http://127.0.0.1:3100/health | grep -qi '^x-powered-by:'; then
+            echo "::error::the API is advertising its framework in X-Powered-By"
+            fail=1
+          fi
+
           kill "$api_pid" 2>/dev/null || true
 
           if [ "$fail" != "0" ]; then
@@ -497,3 +533,32 @@ jobs:
             exit 1
           fi
           echo "built web app booted and served $total scripts under its CSP nonce"
+
+          # The web app's own headers. It sets these in next.config.mjs and the
+          # CSP in middleware.ts, and the split is easy to break by moving one.
+          webfail=0
+          webheader() { # name pattern
+            got=$(grep -i "^$1:" /tmp/web.headers | tr -d '\r' || true)
+            if echo "$got" | grep -qi "$2"; then
+              echo "ok: $1"
+            else
+              echo "::error::$1 missing or wrong on the web app: '${got}'"
+              webfail=1
+            fi
+          }
+
+          webheader "strict-transport-security" "max-age=[0-9]"
+          webheader "x-content-type-options"    "nosniff"
+          webheader "x-frame-options"           "DENY"
+          # Not `no-referrer` like the API: a browser app needs same-origin
+          # referrers to work. What it must never do is send a path carrying a
+          # card or transaction id to another site.
+          webheader "referrer-policy"           "strict-origin"
+          webheader "permissions-policy"        "camera=()"
+          # `frame-ancestors` is what a modern browser actually enforces;
+          # X-Frame-Options above is for the ones that do not.
+          webheader "content-security-policy"   "frame-ancestors 'none'"
+
+          if [ "$webfail" != "0" ]; then
+            exit 1
+          fi
