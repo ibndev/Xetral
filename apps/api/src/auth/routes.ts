@@ -216,6 +216,10 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
        * append-only: changing one is retiring it and publishing its
        * replacement, which is what keeps a quote given last month explicable.
        */
+      // Whether the providers are answering. `support`, deliberately the
+      // widest role: the person taking the call about a card that will not
+      // work is the one who needs to know Bitnob has been timing out.
+      .staff('GET', '/v1/admin/providers', { pin: false, role: 'support' })
       .staff('GET', '/v1/admin/prices', { pin: false, role: 'finance' })
       .staff('POST', '/v1/admin/prices/fx', { pin: true, role: 'finance' })
       .staff('POST', '/v1/admin/prices/giftcard', { pin: true, role: 'finance' })

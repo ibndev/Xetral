@@ -121,6 +121,7 @@ jobs:
             -f packages/ledger/sql/034_data_rights.sql \
             -f packages/ledger/sql/035_price_publication.sql \
             -f packages/ledger/sql/036_attention.sql \
+            -f packages/ledger/sql/037_provider_health.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       - name: Ledger and identity invariants
@@ -165,6 +166,7 @@ jobs:
                    packages/ledger/sql/034_data_rights.test.sql \
                    packages/ledger/sql/035_price_publication.test.sql \
                    packages/ledger/sql/036_attention.test.sql \
+                   packages/ledger/sql/037_provider_health.test.sql \
                    packages/ledger/sql/099_least_privilege.test.sql; do
             echo "== $f"
             psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
@@ -239,6 +241,7 @@ jobs:
             -f packages/ledger/sql/034_data_rights.sql \
             -f packages/ledger/sql/035_price_publication.sql \
             -f packages/ledger/sql/036_attention.sql \
+            -f packages/ledger/sql/037_provider_health.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       # ------------------------------------------------------------------
@@ -422,6 +425,7 @@ jobs:
           # wrote either price table, so FX refused every pair on a fresh
           # deployment and psql was the only way out.
           check "price publication is mounted" 401 http://127.0.0.1:3100/v1/admin/prices
+          check "provider health is mounted" 401 http://127.0.0.1:3100/v1/admin/providers
 
           # Reading a card number. Guarded, so 401 rather than 404 — and this
           # is the route whose ABSENCE was the bug: every card issued since

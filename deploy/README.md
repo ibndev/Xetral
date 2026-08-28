@@ -109,6 +109,14 @@ Generate FRESH secrets. A staging box holding production's access-token key
 can mint tokens the real API accepts; sharing the encryption key lets it open
 production's sealed envelopes.
 
+## Recovery objectives and migration rollback
+
+[`RECOVERY.md`](./RECOVERY.md). Two numbers and one stance, derived from the
+configuration in this directory rather than asserted — including the one place
+the configuration does not support the objective: only base backups go
+off-site, so if the primary and the standby are both lost the newest thing
+anywhere else is up to a day old.
+
 ## Failing over
 
 `standby/promote.sh`, and read its header first. Promotion is not reversible

@@ -466,6 +466,44 @@ Schema: `packages/ledger/sql/036_attention.sql`.
   answer, and a one-word reason is how a view that does need working gets filed
   under it.
 
+### Provider health — non-obvious rules
+
+Schema: `packages/ledger/sql/037_provider_health.sql`. Recorder and port
+wrapper in `apps/api/src/observability/provider-health.service.ts`, screen at
+`/admin/providers`.
+
+- **Every kill switch has to be flipped BY HAND, which means noticing first**
+  — and nothing recorded whether a provider call succeeded, so the first
+  reliable signal that a provider had stopped answering was a customer.
+- **A REJECTION IS NOT ILL HEALTH.** `ProviderRejectedError` means they
+  understood and refused: insufficient float, a frozen card, a declined
+  authorization. It is counted and deliberately excluded from the failure rate
+  — an alert that fires every time a card is declined is one people mute.
+  Unavailable, timed out and contract are the health signals.
+- **A CONTRACT ERROR IS THE ONE THAT PAGES.** They changed their API, the same
+  request fails for ever, and no amount of waiting helps. `contract_broken` is
+  its own column for that reason.
+- **BUCKETS, not one row per call**, maintained by one `ON CONFLICT DO UPDATE`
+  — the `record_error` shape, because a row per call is the log 015 exists to
+  avoid.
+- **Recording can never fail the call it records.** Every error out of the
+  write is swallowed, and the write is fire-and-forget: awaiting it would put a
+  database round trip in front of every provider response.
+- **A minimum call count is what stops a quiet endpoint reading as an outage.**
+  One failure out of one is a 100% failure rate and says nothing.
+- **THERE IS NO AUTOMATIC DISABLE, deliberately.** A flapping provider would
+  switch off a flow nobody meant to stop; re-enabling needs a person anyway, so
+  the automation only adds a surprise on the way in; and the switches exist to
+  be used deliberately during an incident by somebody who understands it. What
+  was missing was never the flipping — it was knowing.
+- **Ports are wrapped at the INJECTION BOUNDARY, once, with a Proxy.** Seven
+  hand-written wrappers would drift the way three hand-written contract suites
+  do, and a method added to a port later would silently stop being watched. It
+  leaves synchronous methods alone, because `supportsVerification()` is a type
+  guard and not a provider call.
+- **The fulfilment map is watched per provider**, not as one: VTpass being down
+  is not Airalo being down, and one health row for all three would say neither.
+
 ### Purchases (bills, eSIM, numbers) — non-obvious rules
 
 Schema: `packages/ledger/sql/004_purchases.sql`. One table for every "buy a thing
@@ -1470,6 +1508,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/033_consent.seed.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/034_data_rights.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/035_price_publication.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/036_attention.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/037_provider_health.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -1505,6 +1544,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/033_consent.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/034_data_rights.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/035_price_publication.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/036_attention.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/037_provider_health.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

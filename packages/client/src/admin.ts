@@ -297,6 +297,36 @@ export interface AdminPrices {
   }[];
 }
 
+export interface AdminProviderHealth {
+  readonly degraded: readonly {
+    readonly provider: string;
+    readonly operation: string;
+    readonly attempts: string;
+    readonly failures: string;
+    readonly failure_percent: number;
+    readonly last_error: string | null;
+    /** They changed their API: the same request fails for ever, so waiting
+     *  does not help. The one that should page somebody. */
+    readonly contract_broken: boolean;
+  }[];
+  readonly recent: readonly {
+    readonly provider: string;
+    readonly operation: string;
+    readonly attempts: string;
+    readonly succeeded: string;
+    /** Refusals. NOT counted as ill health: a declined card is the provider
+     *  working. */
+    readonly rejected: string;
+    readonly unavailable: string;
+    readonly timed_out: string;
+    readonly contract: string;
+    readonly failures: string;
+    readonly failure_percent: number;
+    readonly last_seen: string;
+    readonly last_error: string | null;
+  }[];
+}
+
 export class AdminClient {
   readonly #baseUrl: string;
   readonly #session: Session;
@@ -481,6 +511,19 @@ export class AdminClient {
       outcome,
       transaction_pin: pin,
     });
+  }
+
+  /* ---------------------------- provider health ------------------------- */
+
+  /**
+   * Whether the providers are answering.
+   *
+   * `degraded` is what needs acting on; `recent` includes the ones that are
+   * fine, which is what makes "quiet because nothing is wrong"
+   * distinguishable from "quiet because nothing is being called".
+   */
+  async providerHealth(): Promise<AdminProviderHealth> {
+    return this.#get<AdminProviderHealth>('/v1/admin/providers');
   }
 
   /* -------------------------------- pricing ----------------------------- */

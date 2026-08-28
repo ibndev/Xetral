@@ -81,6 +81,7 @@ import { FxController } from './fx/fx.controller.js';
 import { FxService } from './fx/fx.service.js';
 import { NotificationService } from './notifications/notification.service.js';
 import { ErrorRecorder } from './observability/error-recorder.service.js';
+import { ProviderHealthService, watched } from './observability/provider-health.service.js';
 import { ErrorRecordingFilter } from './observability/error.filter.js';
 import { ErrorAlertService } from './observability/error-alert.service.js';
 import { NotificationWorker } from './notifications/notification.worker.js';
@@ -650,33 +651,77 @@ export class AppModule {
           useFactory: (pool: Pool) => new LedgerService(pool),
           inject: [DATABASE],
         },
+        /*
+         * EVERY PORT IS WRAPPED HERE, and this is the only place it happens.
+         *
+         * `watched()` records whether each provider call succeeded, so the
+         * question "is Bitnob down?" has an answer that is not a log grep.
+         * Doing it at the injection boundary rather than at call sites means a
+         * new flow is watched by construction, and a method added to a port
+         * later cannot be silently missed — which is the failure the whole
+         * thing exists to prevent.
+         *
+         * These moved from `useValue` to `useFactory` for one reason: a
+         * factory can inject the pool, and health that lives in process memory
+         * would be lost on exactly the restart an incident causes.
+         */
         {
           provide: CARD_PORT,
-          useValue: options.cardPort ?? createCardPort(options.config),
+          useFactory: (health: ProviderHealthService) => {
+            const port = options.cardPort ?? createCardPort(options.config);
+            return watched(port, 'bitnob', health);
+          },
+          inject: [ProviderHealthService],
         },
         {
           provide: PROVIDER_BALANCE_PORT,
-          useValue: options.providerBalancePort ?? createProviderBalancePort(options.config),
+          useFactory: (health: ProviderHealthService) => {
+            const port = options.providerBalancePort ?? createProviderBalancePort(options.config);
+            // Optional: an instance with no Bitnob credentials has none, and
+            // wrapping `undefined` would turn a deliberate absence into a
+            // proxy that answers every call.
+            return port === undefined ? undefined : watched(port, 'bitnob', health);
+          },
+          inject: [ProviderHealthService],
         },
         {
           provide: FULFILMENT_PORTS,
-          useValue: options.fulfilmentPorts ?? createFulfilmentPorts(options.config),
+          useFactory: (health: ProviderHealthService) => {
+            const ports = options.fulfilmentPorts ?? createFulfilmentPorts(options.config);
+            // A MAP of three different providers behind one port, so each is
+            // watched under its own name: VTpass being down is not Airalo
+            // being down, and one health row for all three would say neither.
+            return new Map(
+              [...ports].map(([kind, port]) => [kind, watched(port, port.provider, health)]),
+            );
+          },
+          inject: [ProviderHealthService],
         },
         {
           provide: FUNDING_PORT,
-          useValue: options.fundingPort ?? createFundingPort(options.config),
+          useFactory: (health: ProviderHealthService) =>
+            watched(options.fundingPort ?? createFundingPort(options.config), 'bitnob', health),
+          inject: [ProviderHealthService],
         },
         {
           provide: CRYPTO_PORT,
-          useValue: options.cryptoPort ?? createCryptoPort(options.config),
+          useFactory: (health: ProviderHealthService) =>
+            watched(options.cryptoPort ?? createCryptoPort(options.config), 'bitnob', health),
+          inject: [ProviderHealthService],
         },
         {
           provide: FX_PORT,
-          useValue: options.fxPort ?? createFxPort(options.config),
+          useFactory: (health: ProviderHealthService) =>
+            watched(options.fxPort ?? createFxPort(options.config), 'bitnob', health),
+          inject: [ProviderHealthService],
         },
         {
           provide: NOTIFICATION_PORT,
-          useValue: options.notificationPort ?? createNotificationPort(options.config),
+          useFactory: (health: ProviderHealthService) => {
+            const port = options.notificationPort ?? createNotificationPort(options.config);
+            return port === undefined ? undefined : watched(port, 'resend', health);
+          },
+          inject: [ProviderHealthService],
         },
         AuthService,
         SignInEventService,
@@ -713,6 +758,7 @@ export class AppModule {
         DepositReconciliationService,
         DepositLifecycle,
         ErrorRecorder,
+        ProviderHealthService,
         ErrorAlertService,
         ErrorAlertLifecycle,
         NotificationService,

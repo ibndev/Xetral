@@ -19,6 +19,7 @@ import { SettingsService } from '../settings/settings.service.js';
 import { ConsentService } from '../consent/consent.service.js';
 import { DataRightsService } from '../datarights/data-rights.service.js';
 import { PricingService } from '../pricing/pricing.service.js';
+import { ProviderHealthService } from '../observability/provider-health.service.js';
 import { ProviderCredentialService } from '../settings/provider-credentials.service.js';
 import { MonitoringService } from '../risk/monitoring.service.js';
 import { CaseService } from '../risk/case.service.js';
@@ -172,6 +173,7 @@ export class AdminController {
     @Inject(ConsentService) private readonly consentService: ConsentService,
     @Inject(DataRightsService) private readonly rights: DataRightsService,
     @Inject(PricingService) private readonly pricing: PricingService,
+    @Inject(ProviderHealthService) private readonly providerHealth: ProviderHealthService,
     @Inject(ProviderCredentialService)
     private readonly credentialStore: ProviderCredentialService,
     @Inject(MonitoringService) private readonly monitoring: MonitoringService,
@@ -823,6 +825,29 @@ export class AdminController {
       ...(ip === undefined ? {} : { ip }),
     });
     return retired;
+  }
+
+  /* ---------------------------- provider health ------------------------- */
+
+  /**
+   * Whether the providers are answering.
+   *
+   * `support`, deliberately the widest role that reads anything here: the
+   * person taking the call about a card that will not work is the one who
+   * needs to know Bitnob has been timing out for ten minutes, and making them
+   * ask somebody with `admin` is how that goes unnoticed for an hour.
+   *
+   * `degraded` is the queue. `recent` includes the providers that are fine,
+   * which is what makes "quiet because nothing is wrong" distinguishable from
+   * "quiet because nothing is being called".
+   */
+  @Get('providers')
+  async providers(): Promise<{ degraded: readonly unknown[]; recent: readonly unknown[] }> {
+    const [degraded, recent] = await Promise.all([
+      this.providerHealth.degraded(),
+      this.providerHealth.recent(),
+    ]);
+    return { degraded, recent };
   }
 
   @Get('settings')

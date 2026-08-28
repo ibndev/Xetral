@@ -208,6 +208,7 @@ const QUEUE_SCREENS: Readonly<Record<string, string>> = {
   errors: '/admin/errors',
   prices_unattributed: '/admin/prices',
   staff_without_totp: '/admin/staff',
+  provider_degraded: '/admin/providers',
 };
 
 function queueLink(queue: string): string | undefined {

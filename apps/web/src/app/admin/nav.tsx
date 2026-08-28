@@ -16,6 +16,7 @@ const TABS = [
   { href: '/admin/data-requests', label: 'Data requests' },
   { href: '/admin/giftcards', label: 'Gift cards' },
   { href: '/admin/prices', label: 'Prices' },
+  { href: '/admin/providers', label: 'Providers' },
   { href: '/admin/settings', label: 'Settings' },
   { href: '/admin/credentials', label: 'Provider keys' },
   { href: '/admin/staff', label: 'Staff' },
