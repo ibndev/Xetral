@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { useFonts } from 'expo-font';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ThemeChoiceContext, isThemeChoice, useResolvedScheme, useTheme } from '@/theme';
 import type { ThemeChoice } from '@/theme';
@@ -19,6 +20,32 @@ export default function Layout() {
    */
   const [choice, setChoice] = useState<ThemeChoice>('system');
 
+  /*
+   * THE BRAND FACES WERE NEVER LOADED.
+   *
+   * `theme.ts` sets `fontFamily: 'BricolageGrotesque'` on every heading and
+   * `'SplineSansMono'` on every amount, and its comment said they were "loaded
+   * by `_layout.tsx` through `expo-font`". They were not: the package was not a
+   * dependency, no font file existed under `apps/mobile`, and nothing called
+   * `useFonts`. An unregistered family name does not error on either platform —
+   * it silently falls back to the system face — so the whole app rendered in
+   * Roboto while the code said otherwise, which is the shape of comment this
+   * codebase keeps having to correct.
+   *
+   * The files are the WEB'S OWN, converted from woff2 to ttf because React
+   * Native cannot read woff2. Same three faces, so a customer on a laptop and
+   * the same customer on a bus are looking at one product.
+   *
+   * THE KEYS ARE WHAT `fontFamily` MATCHES, not the family name inside the
+   * file — Bricolage's internal name is "Bricolage Grotesque 96pt ExtraBold",
+   * which nothing here would ever guess.
+   */
+  const [fontsLoaded, fontError] = useFonts({
+    BricolageGrotesque: require('../assets/fonts/BricolageGrotesque.ttf'),
+    InstrumentSans: require('../assets/fonts/InstrumentSans.ttf'),
+    SplineSansMono: require('../assets/fonts/SplineSansMono.ttf'),
+  });
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -34,6 +61,15 @@ export default function Layout() {
     setChoice(next);
     void writePreference(THEME_CHOICE, next);
   }
+
+  /*
+   * `|| fontError !== null` IS THE IMPORTANT HALF. Waiting only on `loaded`
+   * means a font that fails to decode on some device leaves that customer
+   * looking at a blank screen for ever — a worse outcome than the wrong
+   * typeface, and one only they would ever see. A failure falls through to the
+   * system face, which is exactly what the app rendered before today.
+   */
+  if (!fontsLoaded && fontError === null) return null;
 
   return (
     <SafeAreaProvider>

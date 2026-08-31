@@ -175,8 +175,21 @@ export const radius = { sm: 10, md: 14, lg: 18, xl: 24, pill: 999 } as const;
 export const space = { xs: 6, sm: 10, md: 14, lg: 18, xl: 24, xxl: 32 } as const;
 
 /**
- * The typefaces from the design. Loaded by `_layout.tsx` through
- * `expo-font`; these names are what `fontFamily` expects once they are.
+ * The typefaces from the design.
+ *
+ * These are the KEYS `_layout.tsx` registers the files under, which is what
+ * `fontFamily` matches — not the family name inside the file. Bricolage's is
+ * "Bricolage Grotesque 96pt ExtraBold"; nothing here would guess that.
+ *
+ * This comment used to say they were loaded and they were not: `expo-font` was
+ * not a dependency, no font file existed in this app, and nothing called
+ * `useFonts`. An unregistered family silently falls back to the system face on
+ * both platforms, so the app rendered in Roboto and said otherwise.
+ *
+ * NONE OF THE THREE CONTAINS ₦ (U+20A6) — measured, not assumed, and the same
+ * fact `globals.css` records for the web. Every naira figure therefore renders
+ * its symbol in whatever the platform substitutes. That is a mitigation rather
+ * than a fix in both apps; the fix is a subset with the glyph in it.
  */
 export const font = {
   display: 'BricolageGrotesque',
