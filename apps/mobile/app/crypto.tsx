@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
-import { formatAmount } from '@xetral/client';
-import { CRYPTO_PAIRS } from '@xetral/client';
+import { CRYPTO_PAIRS, formatAmount } from '@xetral/client';
 import type { CryptoAddress, CryptoQuote, Withdrawal } from '@xetral/client';
 import { Shell } from '@/shell';
 import { Button, Done, Empty, Field, FormError, Loading, Panel, VerifyPrompt } from '@/ui';

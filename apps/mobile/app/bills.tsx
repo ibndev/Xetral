@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
-import { formatAmount } from '@xetral/client';
-import { PURCHASE_SERVICES } from '@xetral/client';
+import { formatAmount, PURCHASE_SERVICES } from '@xetral/client';
 import type { CatalogueItem, Purchase, PurchaseService } from '@xetral/client';
 import { Shell } from '@/shell';
 import { Button, Done, Empty, Field, FormError, Loading, Panel } from '@/ui';

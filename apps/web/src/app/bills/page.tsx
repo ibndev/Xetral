@@ -1,8 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { formatAmount } from '@xetral/client';
-import { PURCHASE_SERVICES } from '@xetral/client';
+import { formatAmount, PURCHASE_SERVICES } from '@xetral/client';
 import type { CatalogueItem, Purchase, PurchaseService } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { FormError } from '@/ui/form-error';
