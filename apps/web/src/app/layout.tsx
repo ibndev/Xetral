@@ -57,10 +57,25 @@ export const viewport: Viewport = {
   // account number from doing so. The inputs are 16px instead, which fixes
   // the zoom without taking the control away.
   viewportFit: 'cover',
-  themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#FFFFFF' },
-    { media: '(prefers-color-scheme: dark)', color: '#000000' },
-  ],
+  /*
+   * THE BROWSER CHROME, AND IT MUST FOLLOW THE APP'S THEME RATHER THAN THE
+   * OPERATING SYSTEM'S.
+   *
+   * These were keyed on `prefers-color-scheme`, which is the OS preference —
+   * and this app's theme is `data-theme`, which the CUSTOMER chooses and
+   * `localStorage` remembers. The two disagree the moment anybody uses the
+   * toggle: on a light-OS phone somebody who picks the dark theme gets a
+   * BLACK page under a WHITE status bar and a white gesture bar under it,
+   * which is exactly the "separate section at the top that does not match"
+   * this looked like.
+   *
+   * A media-keyed value cannot express "whatever the customer last chose", so
+   * the media queries are gone and the tag is written by the same script that
+   * sets `data-theme` before first paint, and updated by the toggle. One
+   * value, one source, no state where they can disagree. The static value
+   * here is only what a page renders with before that script runs.
+   */
+  themeColor: '#FFFFFF',
 };
 
 /*
@@ -76,6 +91,14 @@ const THEME_BOOTSTRAP = `
   var t = localStorage.getItem('xetral-theme');
   if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   document.documentElement.dataset.theme = t;
+  // The status bar and the gesture bar, painted with the same decision and in
+  // the same tick — so there is never a frame where the chrome says one theme
+  // and the page says the other. The colours are --bg from globals.css; they
+  // are literals here because this runs before any stylesheet has loaded,
+  // which is the whole reason it is inline.
+  var m = document.querySelector('meta[name="theme-color"]');
+  if (!m) { m = document.createElement('meta'); m.name = 'theme-color'; document.head.appendChild(m); }
+  m.setAttribute('content', t === 'dark' ? '#000000' : '#FFFFFF');
 }catch(e){}})();
 `;
 

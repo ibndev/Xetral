@@ -6,6 +6,7 @@ import type { AdminCaseOutcome, AdminRiskCase } from '@xetral/client';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
 import { AdminError } from '../../access';
+import { Select } from '@/ui/select';
 
 /**
  * Compliance cases: one investigation, one customer.
@@ -173,18 +174,14 @@ function Case({ item, onChanged }: { item: AdminRiskCase; onChanged: () => void 
 
           <hr />
 
-          <label>
+          <label id="case-outcome">
             Outcome
-            <select
+            <Select
+              labelledBy="case-outcome"
               value={outcome}
-              onChange={(e) => setOutcome(e.target.value as AdminCaseOutcome)}
-            >
-              {OUTCOMES.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
+              onChange={(value) => setOutcome(value as AdminCaseOutcome)}
+              options={OUTCOMES.map((o) => ({ value: o.value, label: o.label }))}
+            />
           </label>
           <p className="hint">{chosen?.means}</p>
 

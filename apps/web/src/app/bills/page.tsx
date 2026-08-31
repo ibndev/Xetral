@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { formatAmount, PURCHASE_SERVICES } from '@xetral/client';
 import type { CatalogueItem, Purchase, PurchaseService } from '@xetral/client';
 import { Shell } from '@/ui/shell';
+import { Select } from '@/ui/select';
 import { FormError } from '@/ui/form-error';
 import { Icon } from '@/ui/icon';
 import { messageFor } from '@/lib/errors';
@@ -142,17 +143,23 @@ function Buy({ service, onBought }: { service: ServiceCode; onBought: () => void
         </div>
       )}
 
-      <label>
+      <label id="bills-item-label">
         What to buy
-        <select value={itemCode} onChange={(e) => setItemCode(e.target.value)} required>
-          {items.length === 0 && <option value="">Nothing available</option>}
-          {items.map((item) => (
-            <option key={item.code} value={item.code}>
-              {item.name}
-              {item.price !== null ? ` — ${formatAmount(item.price, item.currency)}` : ''}
-            </option>
-          ))}
-        </select>
+        <Select
+          labelledBy="bills-item-label"
+          value={itemCode}
+          placeholder={items.length === 0 ? 'Nothing available' : 'Choose one'}
+          disabled={items.length === 0}
+          onChange={setItemCode}
+          options={items.map((item) => ({
+            value: item.code,
+            label: item.name,
+            // The price on its own line rather than appended to the name. In a
+            // native option it had to be one string; here it can be what it
+            // is, which matters most on the longest catalogue — data bundles.
+            ...(item.price === null ? {} : { hint: formatAmount(item.price, item.currency) }),
+          }))}
+        />
       </label>
 
       <label>

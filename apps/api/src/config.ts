@@ -340,6 +340,31 @@ export interface ApiConfig {
    * with our branding on it — which is exactly why it is a deployment value
    * and never read from a request header.
    */
+  /**
+   * The one account that may be granted `admin` at boot, and only while
+   * NOBODY holds admin yet.
+   *
+   * The first grant is the one the dashboard cannot make. Every staff role is
+   * granted through `/v1/admin/staff`, which is a staff route, which requires
+   * a staff role — so a fresh deployment has an operations dashboard that no
+   * living person can open, and the documented way in was a hand-written
+   * INSERT against the production database. Handing somebody a psql prompt to
+   * finish an install is how a deployment ends up with a psql prompt open.
+   *
+   * IT FIRES ONLY INTO AN EMPTY ROOM. `grantFirstAdmin()` refuses the moment a
+   * live `admin` grant exists anywhere, so leaving this set after the first
+   * boot is inert rather than a standing back door: an attacker who could
+   * write this variable would already be able to write `DATABASE_URL`.
+   *
+   * It is a DEPLOYMENT value and there is deliberately no endpoint. A request
+   * that could mint the first administrator is a request worth forging.
+   *
+   * The grant is written to `admin_audit_log` like any other, attributed to
+   * the account itself — nobody else exists to attribute it to, and an
+   * unattributed privilege is the thing that table exists to prevent.
+   */
+  readonly adminBootstrapEmail: string | undefined;
+
   readonly appBaseUrl: string | undefined;
   /**
    * How long a password reset link is good for, in minutes.
@@ -781,6 +806,7 @@ export function loadConfig(env: Env): ApiConfig {
     notificationReplyTo: optional(env, 'NOTIFICATION_REPLY_TO'),
     notificationIntervalSeconds: optionalInteger(env, 'NOTIFICATION_INTERVAL_SECONDS'),
     appBaseUrl: appBaseUrl(env),
+    adminBootstrapEmail: adminBootstrapEmail(env),
     passwordResetTtlMinutes: integer(env, 'PASSWORD_RESET_TTL_MINUTES', 30),
     operationsEmail: optional(env, 'OPERATIONS_EMAIL'),
     errorAlertIntervalSeconds: optionalInteger(env, 'ERROR_ALERT_INTERVAL_SECONDS'),
@@ -898,4 +924,33 @@ function appBaseUrl(env: Env): string | undefined {
   // Normalised without a trailing slash so link building is a plain
   // concatenation everywhere rather than each caller guessing.
   return `${url.origin}${url.pathname.replace(/\/+$/, '')}`;
+}
+
+/**
+ * The address that may become the first administrator.
+ *
+ * Normalised and shape-checked here rather than at the point of use, so a
+ * typo is a refusal to boot with the variable named — not a bootstrap that
+ * silently matches nobody and an operator staring at a dashboard that will
+ * not open. That failure would be indistinguishable from "the feature does
+ * not work", which is the worst way for an install step to fail.
+ *
+ * Lowercased because `users.email` is stored lowercased, and an address that
+ * differs only in case is the same address to every person who types it.
+ */
+function adminBootstrapEmail(env: Env): string | undefined {
+  const raw = optional(env, 'ADMIN_BOOTSTRAP_EMAIL');
+  if (raw === undefined) return undefined;
+
+  const email = raw.trim().toLowerCase();
+  // Deliberately not a full RFC 5322 grammar: this only has to catch a value
+  // that could never match a registered account, which is what a typo is.
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new ConfigError(
+      `ADMIN_BOOTSTRAP_EMAIL must be an email address, got '${raw}'. It names the ` +
+        `account that becomes the first administrator, so a value matching no account ` +
+        `would leave the dashboard permanently closed with nothing reporting why.`,
+    );
+  }
+  return email;
 }

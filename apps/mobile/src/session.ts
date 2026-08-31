@@ -57,8 +57,28 @@ export class KeychainTokenStore implements TokenStore {
 /**
  * Where the API is.
  *
- * `EXPO_PUBLIC_API_URL` wins, because a phone talking to a laptop needs that
- * laptop's address on the local network and that address changes with the
+ * IT IS THE WEB APP'S ORIGIN, NOT THE API'S, and that is deliberate.
+ * `app.xetral.com/api/x` is the same-origin proxy the browser already talks
+ * to; it forwards GET and POST verbatim and relays the JSON body, which is the
+ * whole surface `XetralClient` uses. Pointing the phone there rather than at a
+ * second public hostname buys three things:
+ *
+ *  - ONE PUBLISHED ADDRESS. The first APK was baked against `api.xetral.com`,
+ *    which nothing in the deployment publishes — the web app reaches the API
+ *    over a private `XETRAL_API_URL`. So the web worked, the phone could not
+ *    sign in, and the two failures looked unrelated. A hostname that only the
+ *    phone uses is a hostname only the phone notices the loss of.
+ *  - THE API'S ADDRESS STAYS PRIVATE, which is the posture `apps/web` already
+ *    chose for the browser and had no reason to abandon for the phone.
+ *  - ONE HOP COUNT. The proxy COPIES `x-forwarded-for` rather than appending
+ *    to it, so a request from this app now has exactly the same shape at the
+ *    API as one from the browser, and `TRUST_PROXY_HOPS` means one thing.
+ *
+ * There is no CORS question here: a native client has no origin, so the
+ * browser rules the proxy exists to sidestep never applied to it anyway.
+ *
+ * `EXPO_PUBLIC_API_URL` still wins, because a phone talking to a laptop needs
+ * that laptop's address on the local network and that address changes with the
  * café. Editing a committed `app.json` to run the app is how somebody
  * eventually commits their home IP.
  *

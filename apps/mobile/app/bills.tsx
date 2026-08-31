@@ -4,6 +4,7 @@ import { formatAmount, PURCHASE_SERVICES } from '@xetral/client';
 import type { CatalogueItem, Purchase, PurchaseService } from '@xetral/client';
 import { Shell } from '@/shell';
 import { Button, Done, Empty, Field, FormError, Loading, Panel } from '@/ui';
+import { Select } from '@/select';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/hooks';
 import { radius, space, useStyles, useTheme } from '@/theme';
 
@@ -130,39 +131,21 @@ function Buy({
       {catalogue.loading && <Loading />}
 
       {items.length > 0 && (
-        <>
-          <Text style={styles.label}>Choose</Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-            {items.map((option) => {
-              const on = option.code === item;
-              return (
-                <Pressable
-                  key={option.code}
-                  onPress={() => setItem(option.code)}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected: on }}
-                  style={{
-                    paddingHorizontal: 12,
-                    paddingVertical: 9,
-                    borderRadius: radius.md,
-                    borderWidth: 1,
-                    borderColor: on ? colors.link : colors.line,
-                    backgroundColor: on ? colors.infoBg : colors.surface2,
-                  }}
-                >
-                  <Text style={{ color: colors.text, fontSize: 13, fontWeight: '600' }}>
-                    {option.name}
-                  </Text>
-                  {option.price !== null && (
-                    <Text style={[styles.amount, { fontSize: 12 }]}>
-                      {formatAmount(option.price, option.currency)}
-                    </Text>
-                  )}
-                </Pressable>
-              );
-            })}
-          </View>
-        </>
+        <Select
+          label="Choose"
+          value={item}
+          onChange={setItem}
+          placeholder="Choose one"
+          options={items.map((option) => ({
+            value: option.code,
+            label: option.name,
+            // The price on its own line. A data catalogue is the longest list
+            // in this app and the one a wrapping chip cloud served worst.
+            ...(option.price === null
+              ? {}
+              : { hint: formatAmount(option.price, option.currency) }),
+          }))}
+        />
       )}
 
       <Field

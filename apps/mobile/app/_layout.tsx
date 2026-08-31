@@ -3,6 +3,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import * as SystemUI from 'expo-system-ui';
 import { ThemeChoiceContext, isThemeChoice, useResolvedScheme, useTheme } from '@/theme';
 import type { ThemeChoice } from '@/theme';
 import { ScreenPrivacy } from '@/screen-privacy';
@@ -98,6 +99,31 @@ export default function Layout() {
 function Chrome() {
   const colors = useTheme();
   const scheme = useResolvedScheme();
+
+  /*
+   * THE WINDOW ITSELF, not just the views drawn on it.
+   *
+   * Behind every React view is the Android window background, and it comes
+   * from the generated theme XML — which is WHITE, because nothing here ever
+   * said otherwise. That shows up in three places a customer sees and no test
+   * can: for one frame on cold start before the first view paints, behind the
+   * screen during a navigation transition, and under the system bars, since
+   * SDK 54 is edge-to-edge and the bars are transparent by design. On the
+   * dark theme all three are a white flash or a white band.
+   *
+   * `expo-navigation-bar` is deliberately NOT used for this. Under the
+   * edge-to-edge that Android 15 enforces, its colour setter is a no-op: the
+   * platform draws a transparent bar and expects the APP to draw behind it.
+   * The right fix is therefore this window colour plus each screen extending
+   * its own background under the insets, which `Shell` does — not a native
+   * module that would add build risk to change nothing.
+   *
+   * Fire-and-forget: it returns a promise and a window background that failed
+   * to apply must not stop the app rendering.
+   */
+  useEffect(() => {
+    void SystemUI.setBackgroundColorAsync(colors.bg).catch(() => undefined);
+  }, [colors.bg]);
 
   return (
     <>

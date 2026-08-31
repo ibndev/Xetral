@@ -1,14 +1,25 @@
 'use client';
 
 import { useState } from 'react';
-import { formatAmount } from '@xetral/client';
+import { formatAmount, TRANSFER_CURRENCIES } from '@xetral/client';
 import type { FxQuote } from '@xetral/client';
 import { Shell } from '@/ui/shell';
+import { Select } from '@/ui/select';
 import { FormError } from '@/ui/form-error';
 import { Icon } from '@/ui/icon';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/lib/hooks';
 
-const CURRENCIES = ['NGN', 'USD', 'USDT'] as const;
+/**
+ * What can be converted between.
+ *
+ * The same four a customer can send, because conversion and transfer are the
+ * two ways money leaves one balance — and a currency that could be reached by
+ * one and not the other is a wallet with a way in and no way out. Which PAIRS
+ * are actually quotable is decided by the API from published spread policies:
+ * an unpublished pair is refused rather than quoted from a default, so this
+ * list is what may be ASKED and the answer is the operator's.
+ */
+const CURRENCIES = TRANSFER_CURRENCIES;
 
 /**
  * Converting between currencies, and sending across them.
@@ -64,34 +75,30 @@ export default function Fx() {
         <h2>Between your own balances, or straight to someone else</h2>
 
         <div className="field-row two">
-          <label>
+          <label id="fx-from-label">
             From
-            <select
+            <Select
+              labelledBy="fx-from-label"
               value={from}
-              onChange={(e) => {
-                setFrom(e.target.value);
+              onChange={(value) => {
+                setFrom(value);
                 setQuote(undefined);
               }}
-            >
-              {CURRENCIES.map((c) => (
-                <option key={c}>{c}</option>
-              ))}
-            </select>
+              options={CURRENCIES.map((c) => ({ value: c, label: c }))}
+            />
           </label>
 
-          <label>
+          <label id="fx-to-label">
             To
-            <select
+            <Select
+              labelledBy="fx-to-label"
               value={to}
-              onChange={(e) => {
-                setTo(e.target.value);
+              onChange={(value) => {
+                setTo(value);
                 setQuote(undefined);
               }}
-            >
-              {CURRENCIES.map((c) => (
-                <option key={c}>{c}</option>
-              ))}
-            </select>
+              options={CURRENCIES.map((c) => ({ value: c, label: c }))}
+            />
           </label>
         </div>
 

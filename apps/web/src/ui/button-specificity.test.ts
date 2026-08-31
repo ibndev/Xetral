@@ -85,4 +85,37 @@ describe('button styling specificity', () => {
     const hover = css.match(/@media \(hover: hover\) \{[^}]*\.icon-btn:hover[^}]*\}/);
     expect(hover, '.icon-btn:hover must sit inside @media (hover: hover)').not.toBeNull();
   });
+
+  it('EVERY .icon-btn state NEUTRALISES the background rather than omitting it', () => {
+    /*
+     * OMITTING A PROPERTY IS NOT THE SAME AS NEUTRALISING ONE, and that
+     * distinction cost a round here.
+     *
+     * The first attempt at "no disc behind the icon" deleted `background`
+     * from `.icon-btn:hover` and changed only the colour. That does not
+     * override a background the rule never mentions — so
+     * `button:hover:where(:not(:disabled))` applied instead and painted
+     * `--brand-700` on a 44px circle. Measured in a browser as
+     * `rgb(22, 41, 90)` behind the moon, with the icon in near-black on top:
+     * a worse version of exactly the fault being fixed.
+     *
+     * It is invisible in review because the diff REMOVES a background. Every
+     * state rule must therefore say `transparent` out loud.
+     */
+    const css = readFileSync(CSS, 'utf8').replace(/\/\*[\s\S]*?\*\//g, ' ');
+
+    const stateRules = Array.from(
+      css.matchAll(/\.icon-btn(:[a-z-]+(?:\([^)]*\))?)+\s*\{([^}]*)\}/g),
+      (m) => ({ selector: m[0].slice(0, m[0].indexOf('{')).trim(), body: m[2] ?? '' }),
+    );
+    expect(stateRules.length).toBeGreaterThan(0);
+
+    const bare = stateRules.filter((r) => !/background:\s*transparent/.test(r.body));
+    expect(
+      bare.map((r) => r.selector),
+      'these .icon-btn state rules do not state a background, so the generic ' +
+        '`button:hover` fill applies and a solid disc appears behind the icon:\n' +
+        bare.map((r) => r.selector).join('\n'),
+    ).toEqual([]);
+  });
 });

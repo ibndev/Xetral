@@ -1,9 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { exponentFor, formatAmount, isValidAmount } from '@xetral/client';
+import { exponentFor, formatAmount, isValidAmount, TRANSFER_CURRENCIES } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { FormError } from '@/ui/form-error';
+import { Select } from '@/ui/select';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/lib/hooks';
 
 export default function Transfer() {
@@ -35,15 +36,23 @@ export default function Transfer() {
   const attempt = useIdempotencyKey();
 
   /*
-   * THE CURRENCIES COME FROM THE API, not from two hardcoded options.
+   * WHAT MAY BE SENT, NOT WHAT IS HELD.
    *
-   * This select offered NGN and USD, which was the whole of the answer even on
-   * a deployment holding USDT — so a customer with a stablecoin balance could
-   * see it on the home screen and had no way to send it. `/v1/wallets` now
-   * returns everything the platform offers, so the list is the platform's own.
+   * This list came from `/v1/wallets` — the customer's own balances — which
+   * reads as sensible and is the wrong question twice over. A customer holding
+   * only naira was offered exactly one option, so the picker looked broken;
+   * and anything that happened to appear as a balance became a transfer option
+   * nothing had decided to offer.
+   *
+   * `TRANSFER_CURRENCIES` is the decision, shared with the phone app and
+   * checked against the API's own enum by `wallet-currencies.test.ts`. Gift
+   * cards are deliberately not in it: selling one is an offer we review, not
+   * money sent to somebody.
+   *
+   * Balances are still loaded, to show what is behind each choice.
    */
   const balances = useLoad(() => client.balances(), [client]);
-  const options = balances.data?.map((b) => b.currency) ?? ['NGN'];
+  const held = new Map((balances.data ?? []).map((b) => [b.currency, b.spendable]));
 
   const amountValid = amount === '' || isValidAmount(amount, exponentFor(currency));
 
@@ -87,15 +96,21 @@ export default function Transfer() {
           />
         </label>
 
-        <label>
+        <label id="transfer-currency-label">
           Currency
-          <select value={currency} onChange={(e) => setCurrency(e.target.value)}>
-            {options.map((code) => (
-              <option key={code} value={code}>
-                {code}
-              </option>
-            ))}
-          </select>
+          <Select
+            labelledBy="transfer-currency-label"
+            value={currency}
+            onChange={setCurrency}
+            options={TRANSFER_CURRENCIES.map((code) => ({
+              value: code,
+              label: code,
+              // What is actually behind the choice, so a customer picking a
+              // currency they hold none of learns it here rather than from
+              // `insufficient_funds` after typing an amount and a PIN.
+              ...(held.has(code) ? { hint: formatAmount(held.get(code) ?? '0', code) } : {}),
+            }))}
+          />
         </label>
 
         <label>

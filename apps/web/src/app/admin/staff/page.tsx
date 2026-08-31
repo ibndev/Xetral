@@ -5,6 +5,7 @@ import type { StaffRole } from '@xetral/client';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
 import { AdminError } from '../access';
+import { Select } from '@/ui/select';
 
 /**
  * Who can do what.
@@ -209,15 +210,14 @@ function Grant({ onGranted }: { onGranted: () => void }) {
           </span>
         </label>
 
-        <label>
+        <label id="staff-role">
           Role
-          <select value={role} onChange={(e) => setRole(e.target.value as StaffRole)}>
-            {ROLES.map((entry) => (
-              <option key={entry.role} value={entry.role}>
-                {entry.role}
-              </option>
-            ))}
-          </select>
+          <Select
+            labelledBy="staff-role"
+            value={role}
+            onChange={(value) => setRole(value as StaffRole)}
+            options={ROLES.map((entry) => ({ value: entry.role, label: entry.role }))}
+          />
         </label>
       </div>
 

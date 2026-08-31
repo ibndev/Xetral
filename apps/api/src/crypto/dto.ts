@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 const NETWORKS = ['bitcoin', 'ethereum', 'tron', 'bsc'] as const;
-const ASSETS = ['BTC', 'USDT'] as const;
+const ASSETS = ['BTC', 'USDT', 'USDC'] as const;
 
 export const addressSchema = z.object({
   asset: z.enum(ASSETS),

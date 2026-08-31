@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
 import { AdminError } from '../../access';
+import { Select } from '@/ui/select';
 
 /**
  * One customer, and the two things support actually needs to do: see what is
@@ -196,16 +197,18 @@ function ChangeStatus({
       </div>
 
       <div className="field-row two">
-        <label>
+        <label id="user-status">
           New status
-          <select
+          <Select
+            labelledBy="user-status"
             value={status}
-            onChange={(e) => setStatus(e.target.value as 'active' | 'frozen' | 'closed')}
-          >
-            <option value="active">Active</option>
-            <option value="frozen">Frozen</option>
-            <option value="closed">Closed</option>
-          </select>
+            onChange={(value) => setStatus(value as 'active' | 'frozen' | 'closed')}
+            options={[
+              { value: 'active', label: 'Active' },
+              { value: 'frozen', label: 'Frozen', hint: 'Signs out every live session' },
+              { value: 'closed', label: 'Closed' },
+            ]}
+          />
           <span className="hint">Currently {current}.</span>
         </label>
 

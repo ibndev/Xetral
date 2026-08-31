@@ -15,11 +15,16 @@
  * shape this app was sending — shared one, and the third was refused.
  *
  * COPIED, NOT APPENDED, and that is the part worth reading twice. The API
- * resolves the client address with Express's `trust proxy` HOP COUNT, so a
- * header this app added an entry to would be one hop longer than the identical
- * request from the mobile app, and one number cannot be correct for both path
- * lengths. Copying keeps the two shapes identical, so `TRUST_PROXY_HOPS` means
- * the same thing whichever client sent the request.
+ * resolves the client address with Express's `trust proxy` HOP COUNT, and a
+ * header this app added an entry to would be one hop longer than the same
+ * request arriving by any other path — one number cannot be correct for two
+ * path lengths. Copying keeps every shape identical, so `TRUST_PROXY_HOPS`
+ * means one thing.
+ *
+ * That now covers the phone as well as the browser: `apps/mobile` reaches the
+ * API through this proxy rather than through a public API hostname, so a
+ * request from a handset and a request from a tab are the same shape by the
+ * time the limiter counts them.
  *
  * The value is whatever the edge put there. This app never adds to it and never
  * invents one: a header a browser was able to set is the thing the hop count

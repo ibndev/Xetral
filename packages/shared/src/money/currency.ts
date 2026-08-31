@@ -50,6 +50,16 @@ export const CURRENCIES = {
   // the ledger cares about value and the chain is a routing detail.
   BTC: { exponent: 8, symbol: '₿', name: 'Bitcoin', kind: 'crypto' },
   USDT: { exponent: 6, symbol: '₮', name: 'Tether', kind: 'crypto' },
+  /**
+   * Six decimals on every chain Xetral touches — Tron, Ethereum and BNB
+   * Chain — the same as USDT, and it is a coincidence rather than a rule.
+   * Circle issues USDC with 6 on those chains and Solana; a chain that
+   * differed would still be routed through this one entry, because the
+   * ledger holds VALUE and the chain is a routing detail recorded on the
+   * transfer. If a chain with a different exponent is ever added, this is
+   * where that stops being true.
+   */
+  USDC: { exponent: 6, symbol: 'USDC', name: 'USD Coin', kind: 'crypto' },
 } as const satisfies Record<string, CurrencyMeta>;
 
 export interface CurrencyMeta {

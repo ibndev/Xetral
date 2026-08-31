@@ -5,6 +5,7 @@ import type { AdminSetting } from '@xetral/client';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
 import { AdminError } from '../access';
+import { Select } from '@/ui/select';
 
 /**
  * The controls that used to be a deployment.
@@ -82,13 +83,18 @@ function Setting({ setting, onSaved }: { setting: AdminSetting; onSaved: () => v
         </div>
 
         <div>
-          <label>
+          <label id="setting-value">
             Value
             {setting.type === 'boolean' ? (
-              <select value={value} onChange={(e) => setValue(e.target.value)}>
-                <option value="true">On</option>
-                <option value="false">Off</option>
-              </select>
+              <Select
+                labelledBy="setting-value"
+                value={value}
+                onChange={setValue}
+                options={[
+                  { value: 'true', label: 'On' },
+                  { value: 'false', label: 'Off' },
+                ]}
+              />
             ) : (
               <input
                 value={value}

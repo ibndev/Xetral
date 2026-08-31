@@ -47,11 +47,21 @@ export interface BalanceView {
 const HOME_CURRENCY = 'NGN' as const;
 
 /**
- * The chains this platform settles on, from the schema that validates a
- * withdrawal rather than a second list beside it. A copy here would be a
- * currency offered on the home screen that `/v1/crypto/withdrawals` refuses.
+ * The crypto assets this platform settles in.
+ *
+ * IT IS A THIRD COPY OF ONE LIST — `crypto/dto.ts`'s zod enum validates a
+ * withdrawal, `packages/client/src/catalogues.ts` is what both apps offer,
+ * and this decides what the home screen shows a zero balance for. Three
+ * copies drift, and the drift is invisible from inside any one of them: a
+ * currency listed here that the enum refuses is a tile a customer can tap and
+ * cannot use, and one the enum accepts that is missing here is an asset
+ * nobody can find.
+ *
+ * `crypto-networks.test.ts` reads all three as text and fails the build if
+ * they disagree, in every direction. That test was written after the web app
+ * spent months sending `TRON` to a schema expecting `tron`.
  */
-const CRYPTO_ASSETS = ['BTC', 'USDT'] as const;
+const CRYPTO_ASSETS = ['BTC', 'USDT', 'USDC'] as const;
 
 @Injectable()
 export class WalletService {
@@ -159,7 +169,13 @@ export class WalletService {
   async history(
     userUuid: string,
     currency: Currency,
-    options: { readonly limit: number; readonly before?: string },
+    options: {
+      readonly limit: number;
+      readonly before?: string;
+      /** Narrows to particular entry kinds — how "Gift" is expressed, since
+       *  gift cards settle in naira and are not a currency of their own. */
+      readonly kinds?: readonly string[];
+    },
   ): Promise<{
     readonly entries: readonly Record<string, unknown>[];
     readonly next_cursor: string | null;

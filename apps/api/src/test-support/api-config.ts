@@ -135,6 +135,9 @@ export function testApiConfig(databaseUrl: string, overrides: Partial<ApiConfig>
     notificationReplyTo: undefined,
     notificationIntervalSeconds: undefined,
     appBaseUrl: 'https://app.xetral.test',
+    // Off in tests. A suite that granted itself an administrator at boot
+    // would be a suite whose subject is not what it says it is.
+    adminBootstrapEmail: undefined,
     passwordResetTtlMinutes: 30,
     operationsEmail: 'ops@xetral.test',
     errorAlertIntervalSeconds: undefined,

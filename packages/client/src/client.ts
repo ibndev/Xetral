@@ -269,9 +269,18 @@ export class XetralClient {
   async transactions(
     currency: string,
     before?: string,
+    /**
+     * Narrows to particular entry kinds. This is how the "Gift" tab is
+     * expressed: gift cards settle in naira, so it is the naira history asked
+     * a different question rather than a sixth currency.
+     */
+    kinds?: readonly string[],
   ): Promise<{ entries: readonly Transaction[]; nextCursor: string | null }> {
     const query = new URLSearchParams({ currency });
     if (before !== undefined) query.set('before', before);
+    // Comma-separated, because repeating a key in a query string is ambiguous
+    // across HTTP clients and the API parses one string.
+    if (kinds !== undefined && kinds.length > 0) query.set('kinds', kinds.join(','));
 
     const body = await this.#get<{ entries: Transaction[]; next_cursor: string | null }>(
       `/v1/wallets/transactions?${query.toString()}`,

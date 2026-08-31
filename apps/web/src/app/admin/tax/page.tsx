@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { formatMinor } from '@xetral/client';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { AdminError } from '../access';
+import { Select } from '@/ui/select';
 
 /**
  * What was collected for a revenue authority, and what is still held.
@@ -46,13 +47,18 @@ export default function Tax() {
           ledger rather than from a separate count. Tax is a liability, not
           revenue — it sits in its own account until it is remitted.
         </p>
-        <label>
+        <label id="tax-months">
           Months
-          <select value={months} onChange={(event) => setMonths(Number(event.target.value))}>
-            <option value={3}>Last 3</option>
-            <option value={12}>Last 12</option>
-            <option value={36}>Last 36</option>
-          </select>
+          <Select
+            labelledBy="tax-months"
+            value={String(months)}
+            onChange={(value) => setMonths(Number(value))}
+            options={[
+              { value: '3', label: 'Last 3' },
+              { value: '12', label: 'Last 12' },
+              { value: '36', label: 'Last 36' },
+            ]}
+          />
         </label>
         <AdminError error={report.error} code={report.code} role="finance" />
         {report.loading && <p className="spinner">Loading…</p>}
