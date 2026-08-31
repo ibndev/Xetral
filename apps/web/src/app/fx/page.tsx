@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { formatAmount } from '@xetral/client';
 import type { FxQuote } from '@xetral/client';
 import { Shell } from '@/ui/shell';
+import { FormError } from '@/ui/form-error';
 import { Icon } from '@/ui/icon';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/lib/hooks';
 
@@ -27,7 +28,7 @@ export default function Fx() {
   const [pin, setPin] = useState('');
   const [quote, setQuote] = useState<FxQuote | undefined>();
   const attempt = useIdempotencyKey();
-  const { busy, error, done, run } = useSubmit();
+  const { busy, error, code, done, run } = useSubmit();
   const trades = useLoad(() => client.fxTrades(), [client]);
 
   return (
@@ -169,7 +170,7 @@ export default function Fx() {
         </button>
 
         {from === to && <p className="hint">Pick two different currencies.</p>}
-        {error !== undefined && <p className="error">{error}</p>}
+        <FormError error={error} code={code} />
         {done !== undefined && <p className="ok">{done}</p>}
       </form>
 

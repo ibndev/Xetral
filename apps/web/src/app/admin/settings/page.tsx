@@ -4,6 +4,7 @@ import { useState } from 'react';
 import type { AdminSetting } from '@xetral/client';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
+import { AdminError } from '../access';
 
 /**
  * The controls that used to be a deployment.
@@ -40,7 +41,7 @@ export default function Settings() {
           enforced by the database, so a value this page would accept and the
           database would not is refused either way.
         </p>
-        {settings.error !== undefined && <p className="error">{settings.error}</p>}
+        <AdminError error={settings.error} code={settings.code} role="finance" />
         {settings.loading && <p className="spinner">Loading…</p>}
       </div>
 

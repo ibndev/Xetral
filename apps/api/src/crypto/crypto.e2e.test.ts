@@ -388,6 +388,7 @@ describe('a deposit arriving on-chain', () => {
   it('refuses a forged signature', async () => {
     const customer = await onboard();
     const address = (await getAddress(customer).expect(200)).body.address as string;
+    const before = await usdtBalance(customer);
 
     const body = JSON.stringify({
       event_id: `evt_${randomUUID()}`,
@@ -411,7 +412,11 @@ describe('a deposit arriving on-chain', () => {
       .send(body);
 
     expect(res.status).toBe(401);
-    expect(await usdtBalance(customer)).toBeUndefined();
+    // Compared against what it was rather than asserted absent: `/v1/wallets`
+    // now returns a ZERO row for every currency the platform offers, so
+    // "absent" stopped meaning "not credited" the moment crypto was on. What
+    // the forged webhook must not do is MOVE anything.
+    expect(await usdtBalance(customer)).toEqual(before);
   });
 });
 

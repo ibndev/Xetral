@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
+import { AdminError } from '../access';
 
 /**
  * The identity review queue.
@@ -29,7 +30,7 @@ export default function KycQueue() {
           Approving creates this customer&apos;s provider mapping. Until then
           they cannot be issued an account number or a card.
         </p>
-        {queue.error !== undefined && <p className="error">{queue.error}</p>}
+        <AdminError error={queue.error} code={queue.code} role="compliance" />
         {queue.loading && <p className="spinner">Loading…</p>}
         {queue.data !== undefined && queue.data.length === 0 && (
           <p className="empty">Nothing waiting.</p>

@@ -1,6 +1,7 @@
 'use client';
 
 import { useAdmin, useLoad } from '@/lib/hooks';
+import { AdminError } from '../access';
 
 /**
  * What operators have done.
@@ -22,7 +23,7 @@ export default function Audit() {
       <h1>Audit</h1>
       <h2>The hundred most recent operator actions</h2>
 
-      {entries.error !== undefined && <p className="error">{entries.error}</p>}
+      <AdminError error={entries.error} code={entries.code} role="admin" />
       {entries.loading && <p className="spinner">Loading…</p>}
       {entries.data !== undefined && entries.data.length === 0 && (
         <p className="empty">Nothing recorded yet.</p>

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
+import { AdminError } from '../access';
 
 /**
  * Money that arrived and that we could not say belonged to anyone.
@@ -31,7 +32,7 @@ export default function Suspense() {
           Somebody transferred this money and it has not reached them. Every row
           here is a customer who is probably about to call.
         </p>
-        {deposits.error !== undefined && <p className="error">{deposits.error}</p>}
+        <AdminError error={deposits.error} code={deposits.code} role="finance" />
         {deposits.loading && <p className="spinner">Loading…</p>}
         {deposits.data !== undefined && deposits.data.length === 0 && (
           <p className="empty">Nothing in suspense.</p>

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { formatMinor } from '@xetral/client';
 import { useAdmin, useLoad } from '@/lib/hooks';
+import { AdminError } from '../access';
 
 /**
  * What was collected for a revenue authority, and what is still held.
@@ -53,7 +54,7 @@ export default function Tax() {
             <option value={36}>Last 36</option>
           </select>
         </label>
-        {report.error !== undefined && <p className="error">{report.error}</p>}
+        <AdminError error={report.error} code={report.code} role="finance" />
         {report.loading && <p className="spinner">Loading…</p>}
       </div>
 

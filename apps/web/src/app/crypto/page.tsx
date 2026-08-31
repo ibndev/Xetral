@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { formatAmount } from '@xetral/client';
 import type { CryptoAddress, CryptoQuote } from '@xetral/client';
 import { Shell } from '@/ui/shell';
+import { FormError } from '@/ui/form-error';
 import { Icon } from '@/ui/icon';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/lib/hooks';
 import { VerifyPrompt } from '@/ui/verify-prompt';
@@ -82,7 +83,7 @@ function Receive() {
   const client = useXetral();
   const [choice, setChoice] = useState(0);
   const [address, setAddress] = useState<CryptoAddress | undefined>();
-  const { busy, error, run } = useSubmit();
+  const { busy, error, code, run } = useSubmit();
   const selected = ASSETS[choice];
 
   return (
@@ -146,7 +147,7 @@ function Receive() {
         </>
       )}
 
-      {error !== undefined && <p className="error">{error}</p>}
+      <FormError error={error} code={code} />
     </div>
   );
 }
@@ -159,7 +160,7 @@ function Send({ onSent }: { onSent: () => void }) {
   const [pin, setPin] = useState('');
   const [quote, setQuote] = useState<CryptoQuote | undefined>();
   const attempt = useIdempotencyKey();
-  const { busy, error, done, run } = useSubmit();
+  const { busy, error, code, done, run } = useSubmit();
   const selected = ASSETS[choice];
 
   return (
@@ -218,11 +219,8 @@ function Send({ onSent }: { onSent: () => void }) {
           spellCheck={false}
           required
         />
-        <span className="hint">
-          Check every character. We verify the checksum, which catches a
-          mistyped address — but an address that is valid and belongs to
-          somebody else cannot be undone.
-        </span>
+        <span className="hint">          Check every character. We catch a typo; we cannot recall a payment
+          sent to somebody else's valid address.</span>
       </label>
 
       <label>
@@ -287,7 +285,7 @@ function Send({ onSent }: { onSent: () => void }) {
         {busy ? 'Sending…' : 'Send'}
       </button>
 
-      {error !== undefined && <p className="error">{error}</p>}
+      <FormError error={error} code={code} />
       {done !== undefined && <p className="ok">{done}</p>}
     </form>
   );

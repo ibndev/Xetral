@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { formatAmount, formatMinor } from '@xetral/client';
 import { useAdmin, useLoad } from '@/lib/hooks';
+import { AdminError } from './access';
 
 /**
  * The morning screen.
@@ -68,7 +69,7 @@ export default function Overview() {
           </div>
         </div>
 
-        {overview.error !== undefined && <p className="error">{overview.error}</p>}
+        <AdminError error={overview.error} code={overview.code} role="support" />
       </div>
 
       <div className="panel">

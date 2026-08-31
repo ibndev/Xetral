@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import type { AdminReadinessRow } from '@xetral/client';
+import { AdminError } from '../access';
 
 /**
  * What this deployment has not been told yet.
@@ -86,7 +87,7 @@ export default function Readiness() {
           answered this request. It reports and never refuses — what genuinely
           cannot be missing already stops the API starting.
         </p>
-        {report.error !== undefined && <p className="error">{report.error}</p>}
+        <AdminError error={report.error} code={report.code} role="admin" />
         {report.loading && <p className="spinner">Loading…</p>}
         {report.data !== undefined && (
           <p className="hint">

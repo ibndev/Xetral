@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useAdmin, useLoad } from '@/lib/hooks';
+import { AdminError } from '../access';
 
 /**
  * Whether the providers are answering.
@@ -34,13 +35,27 @@ export default function Providers() {
           are shown and deliberately not counted as failures — a declined card
           is the provider working.
         </p>
-        {health.error !== undefined && <p className="error">{health.error}</p>}
+        <AdminError error={health.error} code={health.code} role="support" />
         {health.loading && <p className="spinner">Loading…</p>}
         {health.data !== undefined && health.data.recent.length === 0 && (
-          <p className="empty">
-            No provider calls in the window. That means nothing has been called
-            — not that everything is well.
-          </p>
+          <div className="notice">
+            <p>
+              No provider calls in the window. That means nothing has been
+              called — not that everything is well.
+            </p>
+            {/*
+              Where to go instead, because this screen is named "Providers" and
+              an operator arriving on it is usually looking for provider
+              CONFIGURATION. Health is recorded from real calls, so on a fresh
+              deployment it is empty by definition, and an empty page under
+              that name reads as broken rather than as quiet.
+            */}
+            <p className="hint">
+              Keys are pasted on <Link href="/admin/credentials">Provider keys</Link>,
+              and a flow is switched off on <Link href="/admin/settings">Settings</Link>.
+              This screen only reports what has been observed.
+            </p>
+          </div>
         )}
       </div>
 

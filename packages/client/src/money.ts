@@ -35,6 +35,20 @@ export function parseAmount(amount: string): ParsedAmount {
   };
 }
 
+/**
+ * The symbol a currency is written with, or the code when it has none.
+ *
+ * Exported so a screen that has to render a currency WITHOUT an amount — the
+ * hidden-balance state, a picker, a heading — uses the same table as
+ * `formatAmount`. It was private, and the home screen consequently wrote a
+ * hardcoded '₦' into its masked balance: hiding a dollar balance showed a
+ * naira sign, which is the one moment a customer cannot check the number
+ * against the symbol.
+ */
+export function symbolFor(currency: string): string {
+  return SYMBOLS[currency] ?? currency;
+}
+
 const SYMBOLS: Record<string, string> = {
   NGN: '₦',
   USD: '$',

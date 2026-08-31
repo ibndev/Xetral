@@ -15,6 +15,14 @@ export interface Balance {
   readonly spendable: string;
   readonly pending: string;
   readonly total: string;
+  /**
+   * Fiat or crypto, as the API classifies it.
+   *
+   * Optional because a client can be talking to an older API, and a screen
+   * that crashed on a missing field would be a screen that breaks during a
+   * rolling deploy rather than one that degrades.
+   */
+  readonly kind?: 'fiat' | 'crypto';
 }
 
 export interface Transaction {
@@ -336,6 +344,36 @@ export class XetralClient {
    */
   async verifyPin(pin: string): Promise<void> {
     await this.#post('/v1/auth/pin/verify', { transaction_pin: pin });
+  }
+
+  /* ------------------------ the staff second factor ---------------------- */
+
+  /**
+   * Issue an authenticator secret, unconfirmed.
+   *
+   * THESE TWO CALLS EXISTED ON THE API AND NOWHERE ELSE. Every `/v1/admin/`
+   * route refuses with `totp_not_enrolled` until the factor is confirmed, and
+   * there was no client method and no screen — so the first operator granted a
+   * role found every operations page refusing, with no way to satisfy it short
+   * of curl.
+   *
+   * The secret comes back ONCE and is never returned again: re-reading it
+   * would make any stolen session a way to clone the factor.
+   */
+  async beginTotpEnrolment(): Promise<{ secret: string; otpauth_url: string }> {
+    return this.#post('/v1/auth/totp/enrol', {});
+  }
+
+  /**
+   * Prove the authenticator works, and turn the factor on.
+   *
+   * Until this succeeds the enrolment is inert — which is the point. Trusting
+   * the secret at issue time would lock out somebody who scanned nothing or
+   * scanned into an app on a phone they then wiped, and they would find that
+   * out during whatever made them need the dashboard.
+   */
+  async confirmTotpEnrolment(code: string): Promise<void> {
+    await this.#post('/v1/auth/totp/confirm', { totp_code: code });
   }
 
   /* --------------------------- funding -------------------------- */

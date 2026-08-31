@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { AdminNav } from './nav';
+import { AdminShell } from './nav';
 
 /**
  * The operations backend.
@@ -17,10 +17,5 @@ import { AdminNav } from './nav';
  * answering the phone does not need the ability to change the transfer fee.
  */
 export default function AdminLayout({ children }: { children: ReactNode }) {
-  return (
-    <main className="shell wide">
-      <AdminNav />
-      {children}
-    </main>
-  );
+  return <AdminShell>{children}</AdminShell>;
 }

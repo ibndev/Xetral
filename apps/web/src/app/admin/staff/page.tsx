@@ -4,6 +4,7 @@ import { useState } from 'react';
 import type { StaffRole } from '@xetral/client';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
+import { AdminError } from '../access';
 
 /**
  * Who can do what.
@@ -35,7 +36,7 @@ export default function Staff() {
         <h1>Staff</h1>
         <h2>{staff.data?.length ?? 0} active grant(s)</h2>
 
-        {staff.error !== undefined && <p className="error">{staff.error}</p>}
+        <AdminError error={staff.error} code={staff.code} role="admin" />
         {staff.loading && <p className="spinner">Loading…</p>}
         {staff.data !== undefined && staff.data.length === 0 && (
           <p className="empty">Nobody has a role.</p>

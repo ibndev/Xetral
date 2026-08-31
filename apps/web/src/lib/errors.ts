@@ -91,6 +91,28 @@ export function messageFor(error: unknown): string {
       return 'That service is unavailable right now.';
     case 'forbidden':
       return 'You do not have access to that.';
+
+    /*
+     * THE STAFF SECOND FACTOR. All five fell through to "Something went wrong"
+     * — including `totp_not_enrolled`, which every operations screen returns
+     * until an operator confirms an authenticator. A newly granted operator
+     * therefore saw a generic failure on every page of the dashboard, which is
+     * indistinguishable from the dashboard being broken and is what it was
+     * reported as.
+     */
+    case 'totp_not_enrolled':
+      return 'Set up your authenticator app before using the operations dashboard.';
+    case 'totp_required':
+      return 'Enter the six-digit code from your authenticator app.';
+    case 'invalid_totp':
+      // Deliberately does not say whether the code was wrong or already used.
+      // A code is single-use, and "already used" would tell somebody reading
+      // it off a screen that they were a moment too late rather than wrong.
+      return 'That code is not right. Codes change every 30 seconds and each one works once.';
+    case 'totp_locked':
+      return 'Too many wrong codes. Try again in 15 minutes.';
+    case 'totp_already_enrolled':
+      return 'An authenticator is already set up. Replacing it is an administrator action.';
     case 'network':
       return 'No connection. Check your network and try again.';
     case 'invalid_request':

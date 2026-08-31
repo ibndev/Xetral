@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { formatAmount } from '@xetral/client';
 import type { CatalogueItem, Purchase } from '@xetral/client';
 import { Shell } from '@/ui/shell';
+import { FormError } from '@/ui/form-error';
 import { Icon } from '@/ui/icon';
 import { messageFor } from '@/lib/errors';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/lib/hooks';
@@ -78,7 +79,7 @@ function Buy({ service, onBought }: { service: ServiceCode; onBought: () => void
   const [pin, setPin] = useState('');
   const [verified, setVerified] = useState<string | undefined>();
   const attempt = useIdempotencyKey();
-  const { busy, error, done, run } = useSubmit();
+  const { busy, error, code, done, run } = useSubmit();
 
   useEffect(() => {
     let cancelled = false;
@@ -224,7 +225,7 @@ function Buy({ service, onBought }: { service: ServiceCode; onBought: () => void
         {busy ? 'Working…' : 'Buy'}
       </button>
 
-      {error !== undefined && <p className="error">{error}</p>}
+      <FormError error={error} code={code} />
       {done !== undefined && <p className="ok">{done}</p>}
     </form>
   );

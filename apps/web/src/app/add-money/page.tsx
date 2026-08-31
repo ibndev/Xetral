@@ -1,36 +1,29 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useState } from 'react';
 import type { VirtualAccount } from '@xetral/client';
-import { xetral } from '@/lib/session';
-import { messageFor } from '@/lib/errors';
 import { Shell } from '@/ui/shell';
+import { FormError } from '@/ui/form-error';
 import { Icon } from '@/ui/icon';
+import { useLoad, useXetral } from '@/lib/hooks';
 
 export default function AddMoney() {
-  const router = useRouter();
-  const [account, setAccount] = useState<VirtualAccount | undefined>();
-  const [error, setError] = useState<string | undefined>();
-  const [loading, setLoading] = useState(true);
+  const client = useXetral();
 
-  const signedOut = useCallback(() => router.push('/signin'), [router]);
-
-  useEffect(() => {
-    const { client } = xetral(signedOut);
-    void (async () => {
-      try {
-        // Idempotent by construction on the server: one live account per
-        // customer per currency, so calling this on every visit returns the
-        // same number rather than issuing another.
-        setAccount(await client.fundingAccount());
-      } catch (cause) {
-        setError(messageFor(cause));
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [signedOut]);
+  /*
+   * On `useLoad` rather than its own effect, for the code as much as the
+   * tidiness. This screen refuses without a verified identity, and its
+   * hand-rolled state kept only the sentence — so the customer read "verify
+   * your identity" on the screen they came to in order to receive money, with
+   * nothing to press. Idempotent by construction on the server: one live
+   * account per customer per currency, so calling this on every visit returns
+   * the same number rather than issuing another.
+   */
+  const {
+    data: account,
+    error,
+    code,
+    loading,
+  } = useLoad<VirtualAccount>(() => client.fundingAccount(), [client]);
 
   return (
     <Shell>
@@ -64,7 +57,7 @@ export default function AddMoney() {
           </>
         )}
 
-        {error !== undefined && <p className="error">{error}</p>}
+        <FormError error={error} code={code} />
       </div>
     </Shell>
   );
