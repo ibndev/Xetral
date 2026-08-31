@@ -111,7 +111,22 @@ export function Shell({
         ) : (
           <>
             <Pressable
-              onPress={() => router.replace(back as never)}
+              /*
+               * BACK IF THERE IS A BACK, otherwise the href.
+               *
+               * `router.replace(back)` unconditionally was wrong on the
+               * platform this app is mostly used on: replace does not push,
+               * so Android's gesture and hardware back would leave the app
+               * rather than return to the screen the customer came from —
+               * and a customer who taps Cards from the More list and swipes
+               * back expects the More list, not the launcher.
+               *
+               * The href stays as the fallback for a cold start straight into
+               * a deep link, where there is no history to go back through.
+               */
+              onPress={() =>
+                router.canGoBack() ? router.back() : router.replace(back as never)
+              }
               accessibilityRole="button"
               accessibilityLabel="Back"
               hitSlop={8}
@@ -150,7 +165,15 @@ export function Shell({
         {TABS.map((tab) => {
           const active = isActive(tab.href);
           return (
-            <Link key={tab.href} href={tab.href as never} asChild>
+            /*
+             * `replace`, not push. A tab bar SWITCHES between destinations; it
+             * does not descend into them. Pushing meant tapping Home, Cards,
+             * Home, Cards built a four-deep stack, and Android's back gesture
+             * then walked the customer backwards through every tap they had
+             * ever made instead of leaving the app. The web's tab bar has
+             * always behaved this way because a browser link does.
+             */
+            <Link key={tab.href} href={tab.href as never} replace asChild>
               <Pressable
                 accessibilityRole="tab"
                 accessibilityState={{ selected: active }}
