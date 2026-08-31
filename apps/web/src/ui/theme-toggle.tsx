@@ -25,6 +25,22 @@ export function ThemeToggle() {
     const next = theme === 'dark' ? 'light' : 'dark';
     setTheme(next);
     document.documentElement.dataset['theme'] = next;
+    /*
+     * THE BROWSER CHROME MOVES WITH THE PAGE.
+     *
+     * `theme-color` decides what the phone paints behind the status bar and
+     * the gesture bar. It used to be two media-keyed values reading
+     * `prefers-color-scheme` — the OS preference — while the page follows
+     * `data-theme`, which is this button. So a customer on a light-OS phone
+     * who switched to dark got a black page framed by two white bars, which
+     * is not a subtle mismatch: it is most of what the screen shows.
+     *
+     * Set here as well as in the pre-paint bootstrap, because those are the
+     * only two places the theme ever changes.
+     */
+    document
+      .querySelector('meta[name="theme-color"]')
+      ?.setAttribute('content', next === 'dark' ? '#000000' : '#FFFFFF');
     try {
       localStorage.setItem(KEY, next);
     } catch {

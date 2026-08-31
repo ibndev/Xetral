@@ -544,6 +544,135 @@ wrapper in `apps/api/src/observability/provider-health.service.ts`, screen at
 - **The fulfilment map is watched per provider**, not as one: VTpass being down
   is not Airalo being down, and one health row for all three would say neither.
 
+### Getting in, and what the phone talks to — non-obvious rules
+
+`apps/api/src/auth/admin-bootstrap.service.ts`, `apps/mobile/app.json`.
+
+- **THE FIRST STAFF GRANT IS THE ONE THE DASHBOARD CANNOT MAKE.** Every role
+  is granted through a staff route, so a fresh deployment has an operations
+  dashboard nobody alive can open, and the documented way in was an INSERT
+  typed at a production psql prompt. An install step that asks for a shell on
+  the database holding customer money is an install step people do badly.
+- **`ADMIN_BOOTSTRAP_EMAIL` FIRES ONLY INTO AN EMPTY ROOM**, and that is the
+  whole safety argument. If any live `admin` grant exists it does nothing and
+  says so, so the variable cannot add a second administrator, restore a
+  revoked one, or reach past a revocation. The one moment it has power is the
+  moment nobody has any. It is a deployment value with deliberately NO
+  ENDPOINT — a request that could mint the first administrator is a request
+  worth forging — and it cannot manufacture an account: the address must
+  already belong to a registered, ACTIVE user, so a frozen account cannot be
+  handed the dashboard by an environment variable.
+- The grant is written to `admin_audit_log` attributed to the account itself.
+  The first admin is unavoidably self-granted and the trail says so rather
+  than pretending somebody else approved it.
+- **The phone talks to `app.xetral.com/api/x`, not to an API hostname.** The
+  first APK was baked against `api.xetral.com`, which nothing in the
+  deployment publishes — the web app reaches the API over a private
+  `XETRAL_API_URL`. So the web worked, the phone could not sign in at all, and
+  neither symptom pointed at the other. The proxy forwards GET and POST
+  verbatim, which is the whole surface `XetralClient` uses; a native client
+  has no origin, so the browser rules that proxy exists to sidestep never
+  applied to it. It also gives ONE hop count: the proxy COPIES
+  `x-forwarded-for`, so a handset request and a tab request are the same shape
+  by the time the limiter counts them.
+- **A preview APK's address is compiled in**, so a wrong one is a rebuild, a
+  release and a reinstall. `api-url.test.ts` asserts the `/api/x` path is
+  still there — tidying off the "redundant" suffix would 404 every request
+  into Next's page router — and that the host is not one only the phone would
+  notice the loss of.
+
+### Currencies, filters and pickers — non-obvious rules
+
+- **THREE COPIES OF THE ASSET LIST, bound by one test.** `crypto/dto.ts`'s zod
+  enum validates a withdrawal, `@xetral/client`'s catalogue is what both apps
+  offer, and `wallet.service.ts` decides what the home screen shows a zero
+  balance for. `crypto-networks.test.ts` reads all three as text and fails the
+  build on a disagreement in any direction, because an asset listed in one and
+  refused by another is either a tile that cannot be used or an asset nobody
+  can find — and neither compiles differently.
+- **`historyQuerySchema` accepted only NGN and USD**, so a customer holding
+  USDT could read the balance on the home screen and got `400 invalid_request`
+  for every transaction behind it. Nothing caught it because the only client
+  offered exactly the two the schema accepted: the two halves were wrong
+  together, the same shape as the `TRON` casing bug.
+- **The history list is WIDER than the transfer list, deliberately.** Money can
+  arrive in a currency a customer cannot send from, and it must still be
+  readable.
+- **The transfer picker offers what may be SENT, not what is HELD.** Deriving
+  it from balances gave a customer holding only naira a picker with one entry,
+  which looks broken, and made anything that appeared as a balance a transfer
+  option nothing had decided to offer.
+- **"Gift" IS NOT A CURRENCY.** Gift cards settle in naira, so the fifth
+  activity filter is the naira history narrowed to two entry kinds.
+  `ACTIVITY_FILTERS` carries objects rather than codes so both apps express
+  that the same way; collapsing it to `currency=GIFT` would mean either a
+  currency the money primitives do not know or a special case inside the
+  ledger's history query.
+- **USDC needed a MIGRATION, not just a registry line.** `kyc_tier_coverage`
+  and `risk_currency_coverage` are driven by `SELECT DISTINCT currency FROM
+  accounts`, so the first USDC account would have turned two green suites red
+  — and in the window before anyone noticed, USDC would have been the one
+  asset with no daily ceiling and no monitoring. 038 puts the rows in first,
+  which is the only ordering where the gap never exists.
+- **A NATIVE `<select>` CANNOT BE THEMED WHERE IT MATTERS.** The closed control
+  takes CSS and the open list does not: Android draws a full-screen dialog in
+  the system font, iOS a wheel, and neither knows the app has a dark theme. A
+  customer in dark mode got a white sheet in a stranger's typeface.
+  `ui/select.tsx` replaces every one and `select-coverage.test.ts` fails the
+  build on a new one — the shortcut is invisible on a laptop where the OS list
+  and the page happen to both be light.
+- **The activity rail scrolls INSIDE itself.** Five tabs do not fit across a
+  320px handset, and an inline-flex that does not fit makes the BODY scroll
+  sideways. Wrapping is the other obvious answer and it moves the tabs under
+  the thumb as the selection changes width.
+
+### Toggles and chrome — non-obvious rules
+
+- **OMITTING A PROPERTY IS NOT THE SAME AS NEUTRALISING ONE**, and this cost a
+  round. "No disc behind the icon" was first written by deleting `background`
+  from `.icon-btn:hover` and changing only the colour — which does not
+  override a background the rule never mentions, so
+  `button:hover:where(:not(:disabled))` applied instead and painted
+  `--brand-700` on a 44px circle with the icon in near-black on top. Measured
+  in a browser as `rgb(22, 41, 90)`. Every `.icon-btn` state says
+  `background: transparent` out loud, and `button-specificity.test.ts` fails
+  on one that does not.
+- **There is no filled disc in any state, and the feedback is the ICON.** A
+  44px circle behind a 20px glyph reads as a shape rather than as a state.
+  `@media (hover: hover)` was right and was not enough — Android Chrome
+  reports `hover: hover` whenever anything pointer-like is attached.
+- **`theme-color` MUST follow `data-theme`, not `prefers-color-scheme`.** It
+  was two media-keyed values reading the OS preference while the page follows
+  the customer's own toggle, so somebody on a light-OS phone who chose dark
+  got a black page framed by two white bars. A media query cannot express
+  "whatever the customer last chose", so the tag is written by the pre-paint
+  bootstrap and by the toggle — the only two places the theme changes.
+- **On the phone it is the WINDOW background, and `expo-navigation-bar` is
+  deliberately not used.** Under the edge-to-edge Android 15 enforces, its
+  colour setter is a no-op: the platform draws transparent bars and expects
+  the app to draw behind them. So `expo-system-ui` sets the window colour and
+  each screen extends its own background under the insets — a native module
+  would have added build risk to change nothing.
+
+### Adding money — non-obvious rules
+
+- **THE SCREEN WAS A WALL AND THE POLICY IT IMPLIED WAS FALSE.** Unverified,
+  the account lookup answered `kyc_required` and that refusal was the entire
+  page — on the screen somebody opens in order to put money in. It read as
+  "you may not deposit until you verify".
+- **An unverified account may move ₦50,000 a day.** That is tier 0 in
+  `029_kyc_tiers.seed.sql`, it has been the policy since that migration
+  landed, and nothing showed it to anybody. It is now the first thing on the
+  page, read from `/v1/kyc/limits` so it is the customer's real ceiling rather
+  than a number typed into a screen.
+- **What IS gated is the account NUMBER, and that is a fact about the rail.** A
+  dedicated Nigerian account number is a bank account opened in a person's
+  name; the provider will not create one without a registered customer and
+  regulation does not permit an unidentified one. So the screen names the one
+  thing that needs verifying and why, rather than refusing the whole page.
+- **The deposit history is shown either way.** A customer whose transfer has
+  not arrived needs it more than a verified one does.
+
 ### Metrics — non-obvious rules
 
 `apps/api/src/observability/metrics.{service,controller}.ts`, at `GET /metrics`.
@@ -1740,6 +1869,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/034_data_rights.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/035_price_publication.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/036_attention.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/037_provider_health.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/038_usdc.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -1776,6 +1906,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/034_data_rights.test.sq
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/035_price_publication.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/036_attention.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/037_provider_health.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/038_usdc.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

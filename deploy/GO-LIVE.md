@@ -84,7 +84,7 @@ being a list.
    there is no admin yet to make it through the dashboard. Enrol their second
    factor — TOTP is required on *every* staff route, reads included. See
    **[Getting into the dashboard the first time](#getting-into-the-dashboard-the-first-time)**
-   below for the two statements and the screen.
+   below — one environment variable, one restart, and one screen.
 3. **Open `/admin/readiness`** and work category 3, then category 4.
 4. **Put the worker intervals on exactly one instance.**
    `docker-compose.app.yml` does this by blanking them on `api` and setting
@@ -124,26 +124,49 @@ first thing anybody would find is the last thing anybody would change. So the
 operations dashboard has exactly as many users as you have created, which on a
 fresh deployment is none.
 
-Getting in is three steps, and the first is the only one that needs `psql` —
-which is the point: the bootstrap is a deliberate act on the database host, not
-something reachable from the internet.
+Getting in is three steps, and none of them is reachable from the internet —
+which is the point. The first grant is a deliberate act on the deployment, not
+a request anybody can send.
 
 **1. Register normally.** Open the app and create an account at `/signup`, with
 the address the operator will really use. Staff are customers with roles; there
 is no separate staff table to add somebody to.
 
-**2. Grant `admin`, once, on the database.**
+**2. Name that address in the environment, and restart once.**
+
+```
+ADMIN_BOOTSTRAP_EMAIL=you@yourcompany.com
+```
+
+On boot, the account holding that address is granted `admin` — **and only
+while nobody holds it.** That condition is the whole safety argument: the
+moment one administrator exists the variable is inert, so it cannot add a
+second, cannot restore a revoked one, and cannot reach past a revocation. The
+one moment it has any power is the moment when nobody has any. There is
+deliberately no endpoint, because a request that could mint the first
+administrator is a request worth forging.
+
+It cannot manufacture an account either. The address must already belong to a
+registered, **active** user, so a frozen account cannot be handed the dashboard
+by an environment variable.
+
+The API logs what it did at every boot — granted, already exists, or no such
+account — and **unset the variable afterwards** regardless. It is harmless once
+an admin exists; a variable nobody needs is a variable nobody reviews.
+
+The grant is written to `admin_audit_log` like any other, attributed to the
+account itself with `"via": "ADMIN_BOOTSTRAP_EMAIL"`. The first admin is
+unavoidably self-granted, and the trail says so rather than pretending somebody
+else approved it.
+
+If you would rather do it by hand on the database host, the equivalent is:
 
 ```sql
--- The one grant that cannot be made through the dashboard, because the
--- dashboard is what it unlocks. `granted_by` is the same row: the first
--- admin is, unavoidably, self-granted, and the audit trail says so rather
--- than pretending somebody else approved it.
 INSERT INTO staff_roles (user_id, role, granted_by)
 SELECT id, 'admin', id FROM users WHERE email = 'you@yourcompany.com';
 ```
 
-Roles are read **fresh from the database on every request**, so this takes
+Roles are read **fresh from the database on every request**, so either takes
 effect on the next page load. There is no sign-out, no token to refresh, and —
 equally — no fifteen-minute window in which a *revoked* role keeps working.
 

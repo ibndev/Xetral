@@ -165,6 +165,20 @@ export const ENVIRONMENT: readonly Item[] = [
       'fresh deployment is in.',
     flow: 'password reset',
   },
+  {
+    name: 'ADMIN_BOOTSTRAP_EMAIL',
+    kind: 'env',
+    failure: 'silent',
+    ifMissed:
+      'the operations dashboard cannot be opened by anyone, and the only way ' +
+      'in is an INSERT typed at a production psql prompt. Every staff role is ' +
+      'granted through a staff route, so the FIRST grant is the one the ' +
+      'dashboard cannot make. Set this to an address that has already ' +
+      'registered, restart once, then UNSET it — it is inert as soon as an ' +
+      'administrator exists, but a variable nobody needs is a variable nobody ' +
+      'reviews.',
+    flow: 'the operations dashboard',
+  },
 ];
 
 /**

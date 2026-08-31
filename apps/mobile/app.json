@@ -34,7 +34,7 @@
       "./plugins/with-lan-cleartext"
     ],
     "extra": {
-      "apiUrl": "https://api.xetral.com"
+      "apiUrl": "https://app.xetral.com/api/x"
     }
   }
 }

@@ -49,11 +49,13 @@ on:
         options: [development, preview]
       api_url:
         description: >-
-          PREVIEW ONLY, and required for it. Where the phone should reach the
-          API — a deployed host, or your machine's address on the same Wi-Fi
-          (http://192.168.x.x:3100). "localhost" is the phone itself and will
-          never work. Ignored for a development build, which takes the address
-          from the shell you run `npx expo start` in.
+          PREVIEW ONLY. Where the phone should reach the API. LEAVE IT BLANK
+          for the deployed address in app.json — https://app.xetral.com/api/x,
+          the web app's own proxy, which is the one origin the deployment
+          actually publishes. Set it only to point at your machine on the same
+          Wi-Fi (http://192.168.x.x:3100). "localhost" is the phone itself and
+          will never work. Ignored for a development build, which takes the
+          address from the shell you run `npx expo start` in.
         required: false
         type: string
       publish_release:
@@ -112,8 +114,15 @@ jobs:
           fi
 
           if [ -z "$url" ]; then
-            echo "::error::a preview APK has the address bundled into it, so api_url is required"
-            exit 1
+            # Blank is the ORDINARY case now, not a mistake. app.json carries
+            # the deployed address and `apiUrl()` falls back to it, so the
+            # common build takes no input at all — and an input that is
+            # required for the common case is an input somebody fills in
+            # wrongly. It is echoed rather than assumed, because "the address
+            # in app.json" is only reassuring if you can see what it says.
+            configured=$(node -p "require('./apps/mobile/app.json').expo.extra.apiUrl")
+            echo "preview build against the address in app.json: $configured"
+            exit 0
           fi
           # Nothing but the characters a URL is made of. As an environment
           # variable a quote is already inert, so this is not the injection

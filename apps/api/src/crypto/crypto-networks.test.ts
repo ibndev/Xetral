@@ -26,6 +26,7 @@ import { describe, expect, it } from 'vitest';
 const HERE = new URL('.', import.meta.url).pathname;
 const DTO = join(HERE, 'dto.ts');
 const CATALOGUES = join(HERE, '..', '..', '..', '..', 'packages', 'client', 'src', 'catalogues.ts');
+const WALLET = join(HERE, '..', 'wallet', 'wallet.service.ts');
 
 /** A `const X = ['a', 'b'] as const;` declaration, read as text. */
 function listNamed(source: string, name: string): readonly string[] {
@@ -37,6 +38,7 @@ function listNamed(source: string, name: string): readonly string[] {
 describe('the chain names the clients send', () => {
   const dto = readFileSync(DTO, 'utf8');
   const catalogues = readFileSync(CATALOGUES, 'utf8');
+  const wallet = readFileSync(WALLET, 'utf8');
 
   it('matches the schema exactly, in both directions', () => {
     expect([...listNamed(catalogues, 'CRYPTO_NETWORKS')].sort()).toEqual(
@@ -46,6 +48,24 @@ describe('the chain names the clients send', () => {
 
   it('and so do the asset codes', () => {
     expect([...listNamed(catalogues, 'CRYPTO_ASSETS')].sort()).toEqual(
+      [...listNamed(dto, 'ASSETS')].sort(),
+    );
+  });
+
+  it('AND SO DOES THE HOME SCREEN, which is the third copy of the same list', () => {
+    /*
+     * `wallet.service.ts` decides which currencies get a zero-balance row, so
+     * it is what a customer SEES. It drifted from the other two the moment
+     * USDC was added to them — and the two failures it produces are opposite
+     * and both silent: an asset listed there and refused by the schema is a
+     * tile that can be tapped and cannot be used, and one the schema accepts
+     * that is missing there is an asset nobody can find on the home page.
+     *
+     * Neither compiles differently. Both lists are string literals in
+     * different workspaces, each internally consistent — the shape this whole
+     * file exists for.
+     */
+    expect([...listNamed(wallet, 'CRYPTO_ASSETS')].sort()).toEqual(
       [...listNamed(dto, 'ASSETS')].sort(),
     );
   });

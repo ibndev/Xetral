@@ -1,15 +1,15 @@
 import { useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
-import { exponentFor, formatAmount, isValidAmount } from '@xetral/client';
+import { Text, View } from 'react-native';
+import { exponentFor, formatAmount, isValidAmount, TRANSFER_CURRENCIES } from '@xetral/client';
 import { Shell } from '@/shell';
 import { Button, Done, Field, FormError, Panel } from '@/ui';
+import { Select } from '@/select';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/hooks';
-import { radius, useStyles, useTheme } from '@/theme';
+import { useStyles } from '@/theme';
 
 export default function Transfer() {
   const client = useXetral();
   const styles = useStyles();
-  const colors = useTheme();
   const { busy, error, code, done, run } = useSubmit();
 
   /**
@@ -27,12 +27,19 @@ export default function Transfer() {
   const [pin, setPin] = useState('');
 
   /*
-   * THE CURRENCIES COME FROM THE API. This screen had `const currency =
-   * 'NGN'`, so a customer holding dollars or USDT could see the balance on the
-   * home screen and had no way to send it from the phone at all.
+   * WHAT MAY BE SENT, NOT WHAT IS HELD.
+   *
+   * This list came from the customer's own balances, which reads as sensible
+   * and asks the wrong question: a customer holding only naira was offered
+   * exactly one option, so the picker looked broken, and anything that
+   * happened to appear as a balance became a transfer option nothing had
+   * decided to offer. `TRANSFER_CURRENCIES` is the decision, shared with the
+   * web app and checked against the API's own enum by the build.
+   *
+   * Balances are still loaded, to show what is behind each choice.
    */
   const balances = useLoad(() => client.balances(), [client]);
-  const options = balances.data?.map((b) => b.currency) ?? ['NGN'];
+  const held = new Map((balances.data ?? []).map((b) => [b.currency, b.spendable]));
 
   const amountValid = amount === '' || isValidAmount(amount, exponentFor(currency));
 
@@ -48,36 +55,19 @@ export default function Transfer() {
           onChangeText={setRecipient}
         />
 
-        <Text style={styles.label}>Currency</Text>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-          {options.map((option) => {
-            const on = option === currency;
-            return (
-              <Pressable
-                key={option}
-                onPress={() => setCurrency(option)}
-                accessibilityRole="radio"
-                accessibilityState={{ selected: on }}
-                style={{
-                  paddingHorizontal: 14,
-                  paddingVertical: 9,
-                  borderRadius: radius.pill,
-                  backgroundColor: on ? colors.brand : colors.surface2,
-                }}
-              >
-                <Text
-                  style={{
-                    fontSize: 13,
-                    fontWeight: '600',
-                    color: on ? colors.onBrand : colors.text2,
-                  }}
-                >
-                  {option}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
+        <Select
+          label="Currency"
+          value={currency}
+          onChange={setCurrency}
+          options={TRANSFER_CURRENCIES.map((code) => ({
+            value: code,
+            label: code,
+            // What is actually behind the choice, so picking a currency they
+            // hold none of is answered here rather than by `insufficient_funds`
+            // after an amount and a PIN.
+            ...(held.has(code) ? { hint: formatAmount(held.get(code) ?? '0', code) } : {}),
+          }))}
+        />
 
         <Field
           label="Amount"

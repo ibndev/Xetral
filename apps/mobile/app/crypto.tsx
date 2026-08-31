@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { CRYPTO_PAIRS, formatAmount } from '@xetral/client';
 import type { CryptoAddress, CryptoQuote, Withdrawal } from '@xetral/client';
 import { Shell } from '@/shell';
 import { Button, Done, Empty, Field, FormError, Loading, Panel, VerifyPrompt } from '@/ui';
+import { Select } from '@/select';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/hooks';
-import { radius, space, useStyles, useTheme } from '@/theme';
+import { space, useStyles, useTheme } from '@/theme';
 
 /**
  * Crypto: an address to receive on, and an irreversible way to send.
@@ -43,31 +44,21 @@ export default function Crypto() {
       <Text style={styles.lead}>Receive and send stablecoins and Bitcoin.</Text>
 
       <Panel title="Asset and network">
-        <View style={{ gap: 6 }}>
-          {PAIRS.map((option, index) => {
-            const on = index === pair;
-            return (
-              <Pressable
-                key={option.label}
-                onPress={() => setPair(index)}
-                accessibilityRole="radio"
-                accessibilityState={{ selected: on }}
-                style={{
-                  paddingHorizontal: 14,
-                  paddingVertical: 12,
-                  borderRadius: radius.md,
-                  borderWidth: 1,
-                  borderColor: on ? colors.link : colors.line,
-                  backgroundColor: on ? colors.infoBg : colors.surface2,
-                }}
-              >
-                <Text style={{ color: colors.text, fontWeight: '600', fontSize: 14 }}>
-                  {option.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
+        {/*
+          A sheet rather than seven stacked cards. With USDC on three chains
+          this list is now seven entries, and seven full-width rows pushed the
+          screen a customer actually came for — the address, and the send form
+          — below the fold on every phone.
+        */}
+        <Select
+          label="Asset and network"
+          value={String(pair)}
+          onChange={(value) => setPair(Number(value))}
+          options={PAIRS.map((option, index) => ({
+            value: String(index),
+            label: option.label,
+          }))}
+        />
       </Panel>
 
       <Receive key={`${chosen.asset}:${chosen.network}`} pair={chosen} />

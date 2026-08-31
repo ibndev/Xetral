@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
-import { formatAmount } from '@xetral/client';
+import { Text, View } from 'react-native';
+import { formatAmount, TRANSFER_CURRENCIES } from '@xetral/client';
 import type { FxQuote, FxTrade } from '@xetral/client';
 import { Shell } from '@/shell';
 import { Button, Done, Empty, Field, FormError, Loading, Panel } from '@/ui';
+import { Select } from '@/select';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/hooks';
 import { radius, space, useStyles, useTheme } from '@/theme';
 
@@ -25,7 +26,19 @@ export default function Fx() {
 
   const balances = useLoad(() => client.balances(), [client]);
   const trades = useLoad(() => client.fxTrades(), [client]);
-  const codes = balances.data?.map((b) => b.currency) ?? ['NGN'];
+  /*
+   * WHAT CAN BE CONVERTED BETWEEN — the same four a customer can send, not
+   * whatever currencies they happen to hold. Which PAIRS are quotable is the
+   * API's answer, from published spread policies: an unpublished pair is
+   * refused rather than quoted from a default. So this is what may be ASKED.
+   */
+  const codes = TRANSFER_CURRENCIES;
+  const held = new Map((balances.data ?? []).map((b) => [b.currency, b.spendable]));
+  const option = (c: string) => ({
+    value: c,
+    label: c,
+    ...(held.has(c) ? { hint: formatAmount(held.get(c) ?? '0', c) } : {}),
+  });
 
   const [from, setFrom] = useState('NGN');
   const [to, setTo] = useState('USD');
@@ -40,11 +53,19 @@ export default function Fx() {
       <Text style={styles.lead}>The rate you see is the rate you get.</Text>
 
       <Panel>
-        <Text style={styles.label}>From</Text>
-        <Picker options={codes} value={from} onChange={(next) => { setFrom(next); setQuote(undefined); }} />
+        <Select
+          label="From"
+          value={from}
+          onChange={(next) => { setFrom(next); setQuote(undefined); }}
+          options={codes.map(option)}
+        />
 
-        <Text style={styles.label}>To</Text>
-        <Picker options={codes} value={to} onChange={(next) => { setTo(next); setQuote(undefined); }} />
+        <Select
+          label="To"
+          value={to}
+          onChange={(next) => { setTo(next); setQuote(undefined); }}
+          options={codes.map(option)}
+        />
 
         <Field
           label="Amount"
@@ -170,48 +191,5 @@ export default function Fx() {
         ))}
       </Panel>
     </Shell>
-  );
-}
-
-function Picker({
-  options,
-  value,
-  onChange,
-}: {
-  readonly options: readonly string[];
-  readonly value: string;
-  readonly onChange: (next: string) => void;
-}) {
-  const colors = useTheme();
-  return (
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-      {options.map((option) => {
-        const on = option === value;
-        return (
-          <Pressable
-            key={option}
-            onPress={() => onChange(option)}
-            accessibilityRole="radio"
-            accessibilityState={{ selected: on }}
-            style={{
-              paddingHorizontal: 14,
-              paddingVertical: 9,
-              borderRadius: radius.pill,
-              backgroundColor: on ? colors.brand : colors.surface2,
-            }}
-          >
-            <Text
-              style={{
-                fontSize: 13,
-                fontWeight: '600',
-                color: on ? colors.onBrand : colors.text2,
-              }}
-            >
-              {option}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </View>
   );
 }

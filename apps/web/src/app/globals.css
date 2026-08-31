@@ -387,16 +387,39 @@ h3 { font-size: 16px; }
               transform var(--t-fast) var(--ease);
 }
 /*
- * HOVER IS FENCED OFF FROM TOUCH, and that is half of what made this look
- * broken. A phone has no pointer to leave, so a tapped button keeps :hover
- * until something else is tapped — the customer taps the eye to hide their
- * balance and the icon keeps a filled disc behind it, which reads as a
- * rendering fault rather than a state.
+ * THERE IS NO FILLED DISC, IN ANY STATE, AND THAT IS THE POINT.
+ *
+ * It used to fill with `--surface-2` on hover, fenced behind
+ * `@media (hover: hover)` because a phone has no pointer to leave and a
+ * tapped button keeps `:hover` until something else is tapped. The fence was
+ * right and it was not enough: Android Chrome reports `hover: hover` whenever
+ * anything pointer-like is attached, some WebViews report it unconditionally,
+ * and a large circle appearing behind the eye or the moon is read as a
+ * rendering fault every time — because a 44px disc is far larger than the
+ * 20px glyph it sits behind, so it reads as a shape rather than as a state.
+ *
+ * So feedback is CARRIED BY THE ICON: it goes from `--text-2` to `--text`,
+ * which is the same signal in a form that cannot be mistaken for a component.
+ * The 44px target is unchanged — it is still the whole tappable area, it is
+ * simply never painted.
+ *
+ * `:focus-visible` is deliberately left to the global outline rule. A
+ * keyboard user needs a ring; a ring is not a fill.
+ *
+ * `background: transparent` IS STATED IN EVERY STATE, and leaving it out is
+ * the exact bug this replaced. `button:hover:where(:not(:disabled))` sets
+ * `--brand-700` on every button in the product; a `.icon-btn:hover` that only
+ * changes `color` does not override a background it never mentions, so the
+ * generic rule wins by default and paints a SOLID NAVY DISC behind the moon —
+ * measured in a browser as `rgb(22, 41, 90)` on a 44px circle, with the icon
+ * rendered in near-black on top of it. Omitting a property is not the same as
+ * neutralising one.
  */
 @media (hover: hover) {
-  .icon-btn:hover { background: var(--surface-2); color: var(--text); }
+  .icon-btn:hover { background: transparent; color: var(--text); }
 }
-.icon-btn:active { transform: scale(.94); }
+.icon-btn:active { background: transparent; transform: scale(.94); color: var(--text); }
+.icon-btn:focus-visible { background: transparent; }
 
 /* ═══════════════════════════ desktop nav ═══════════════════════════ */
 
@@ -1330,6 +1353,30 @@ td.right, th.right { text-align: right; padding-right: 0; }
 .segmented button.active { background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm); }
 .segmented button:hover:not(.active) { background: transparent; color: var(--text); }
 
+/* ONE LINE, AND IT SCROLLS RATHER THAN WRAPPING OR PUSHING THE PAGE.
+ *
+ * `.segmented` is an inline-flex with no wrap, which is right for two or three
+ * options and breaks at five: NGN, USD, USDT, USDC and Gift do not fit across
+ * a 320px handset, and an inline-flex that does not fit makes the BODY scroll
+ * sideways — the one thing every layout here is supposed to prevent. Wrapping
+ * to a second line is the other obvious answer and it is not what a rail of
+ * filters should do: the tabs move under the customer's thumb as the selection
+ * changes width.
+ *
+ * So the overflow is the control's own. `scroll-snap` makes a partly-visible
+ * tab land square rather than half-cut, and the hidden scrollbar keeps a
+ * desktop, where all five fit and nothing scrolls, looking untouched. */
+.segmented.rail {
+  display: flex;
+  max-width: 100%;
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.segmented.rail::-webkit-scrollbar { display: none; }
+.segmented.rail button { flex: none; scroll-snap-align: center; }
+
 /* ═══════════════════════════ empty & loading ═══════════════════════════ */
 
 .empty {
@@ -1833,4 +1880,124 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
   padding-top: 18px;
   border-top: 1px solid var(--line);
   font-size: 14px;
+}
+
+/* ---------------------------------------------------------------------------
+   THE DROPDOWN THIS APP DRAWS.
+
+   A native `<select>` takes CSS on the closed control and NONE on the open
+   list — Android draws that as a full-screen dialog in the system font, iOS as
+   a wheel, and neither knows this app has a dark theme. So a customer in dark
+   mode opened a currency picker and got a white sheet in a stranger's
+   typeface. `ui/select.tsx` is what replaces it; this is what paints it.
+
+   Every colour here is a token, so the list is light on a light page and dark
+   on a dark one for the same reason every other surface is — not because two
+   themes were drawn twice.
+   --------------------------------------------------------------------------- */
+
+.xselect { position: relative; }
+
+/* Matches `input` exactly: this sits in the same forms, and a picker a pixel
+   off from the field above it is the kind of thing nobody names and everybody
+   sees. */
+.xselect-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 13px 15px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  font-weight: 400;
+  min-height: 50px;
+  text-align: left;
+  transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
+}
+@media (min-width: 720px) { .xselect-trigger { font-size: 15px; } }
+
+/* The button rules above set a background, and `button:hover` in the base
+   layer sets `--brand-700`. Without this a currency picker turns solid orange
+   under a cursor — the same cascade collision the icon buttons had. */
+@media (hover: hover) {
+  .xselect-trigger:hover:where(:not(:disabled)) {
+    background: var(--surface);
+    border-color: var(--text-3);
+  }
+}
+.xselect-trigger:active:where(:not(:disabled)) { transform: none; }
+.xselect-trigger:focus-visible,
+.xselect[data-open] .xselect-trigger {
+  outline: none;
+  border-color: var(--link);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--link) 14%, transparent);
+}
+.xselect-trigger:disabled { background: var(--surface-2); opacity: .7; }
+.xselect-trigger svg { flex: none; color: var(--text-3); transition: transform var(--t-fast) var(--ease); }
+.xselect[data-open] .xselect-trigger svg { transform: rotate(180deg); }
+.xselect-placeholder { color: var(--text-3); }
+
+.xselect-list {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  /* `--surface-2`, not `--surface`: the list floats ABOVE fields painted in
+     `--surface`, and two identical planes with a hairline between them read
+     as one box with a stray border. */
+  background: var(--surface-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r);
+  box-shadow: var(--shadow-lg, 0 18px 40px rgb(0 0 0 / 28%));
+  /* Ten rows before it scrolls. Longer than any list here and short enough
+     that the whole thing stays on a phone screen. */
+  max-height: 320px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.xselect-list:focus { outline: none; }
+
+.xselect-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  border-radius: calc(var(--r) - 4px);
+  color: var(--text);
+  font-size: 15px;
+  cursor: pointer;
+  /* 44px, so a thumb on a phone hits the row rather than the gap. */
+  min-height: 44px;
+}
+.xselect-label { flex: 1 1 auto; }
+.xselect-hint { color: var(--text-3); font-size: 13px; }
+.xselect-list li svg { flex: none; color: var(--brand); }
+
+/* Highlight follows the KEYBOARD and the pointer alike — `data-active` is set
+   by both — so there is one visible "where am I" rather than two competing
+   ones. It is a surface change, not the brand colour: a solid orange row
+   under a moving cursor is the thing that reads as a bug. */
+.xselect-list li[data-active='true'] {
+  /* A BRAND TINT, not a surface swap. `--surface` is lighter than
+     `--surface-2` in the light theme and darker in the dark one, so a
+     highlight built from those two reads as "lifted" on one page and "sunken"
+     on the other. A translucent tint of the accent moves the same direction on
+     both grounds, and at 12% it is unmistakably a highlight rather than the
+     solid orange that reads as a rendering fault. */
+  background: color-mix(in srgb, var(--brand) 12%, transparent);
+}
+.xselect-list li[data-selected='true'] { font-weight: 600; }
+.xselect-list li[aria-disabled='true'] { color: var(--text-3); cursor: default; }
+
+@media (prefers-reduced-motion: reduce) {
+  .xselect-trigger svg { transition: none; }
 }

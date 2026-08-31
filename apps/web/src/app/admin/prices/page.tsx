@@ -5,6 +5,7 @@ import { formatMinor } from '@xetral/client';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
 import { AdminError } from '../access';
+import { Select } from '@/ui/select';
 
 /**
  * What a customer will be quoted, and the only place it can be set.
@@ -325,15 +326,17 @@ function PublishRate({
         </label>
       </div>
       <div className="field-row two">
-        <label>
+        <label id="price-card-type">
           Type
-          <select
+          <Select
+            labelledBy="price-card-type"
             value={cardType}
-            onChange={(e) => setCardType(e.target.value as 'ecode' | 'physical')}
-          >
-            <option value="ecode">E-code</option>
-            <option value="physical">Physical</option>
-          </select>
+            onChange={(value) => setCardType(value as 'ecode' | 'physical')}
+            options={[
+              { value: 'ecode', label: 'E-code' },
+              { value: 'physical', label: 'Physical' },
+            ]}
+          />
         </label>
         <label>
           Face currency

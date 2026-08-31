@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { CRYPTO_PAIRS, formatAmount } from '@xetral/client';
 import type { CryptoAddress, CryptoQuote } from '@xetral/client';
 import { Shell } from '@/ui/shell';
+import { Select } from '@/ui/select';
 import { FormError } from '@/ui/form-error';
 import { Icon } from '@/ui/icon';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/lib/hooks';
@@ -102,21 +103,17 @@ function Receive() {
       <h1>Receive</h1>
       <h2>An address of your own, for one asset on one network</h2>
 
-      <label>
+      <label id="crypto-receive-pair">
         Asset and network
-        <select
-          value={choice}
-          onChange={(e) => {
-            setChoice(Number(e.target.value));
+        <Select
+          labelledBy="crypto-receive-pair"
+          value={String(choice)}
+          onChange={(value) => {
+            setChoice(Number(value));
             setAddress(undefined);
           }}
-        >
-          {ASSETS.map((a, index) => (
-            <option key={a.label} value={index}>
-              {a.label}
-            </option>
-          ))}
-        </select>
+          options={ASSETS.map((a, index) => ({ value: String(index), label: a.label }))}
+        />
       </label>
 
       <button
@@ -203,21 +200,17 @@ function Send({ onSent }: { onSent: () => void }) {
     >
       <h2>Send</h2>
 
-      <label>
+      <label id="crypto-send-pair">
         Asset and network
-        <select
-          value={choice}
-          onChange={(e) => {
-            setChoice(Number(e.target.value));
+        <Select
+          labelledBy="crypto-send-pair"
+          value={String(choice)}
+          onChange={(value) => {
+            setChoice(Number(value));
             setQuote(undefined);
           }}
-        >
-          {ASSETS.map((a, index) => (
-            <option key={a.label} value={index}>
-              {a.label}
-            </option>
-          ))}
-        </select>
+          options={ASSETS.map((a, index) => ({ value: String(index), label: a.label }))}
+        />
       </label>
 
       <label>

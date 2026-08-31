@@ -25,10 +25,11 @@ export class WalletController {
         fields: parsed.error.issues.map((i) => i.path.join('.')),
       });
     }
-    const { currency, limit, before } = parsed.data;
+    const { currency, limit, before, kinds } = parsed.data;
     return this.wallets.history(claimsOf(request).sub, currency, {
       limit,
       ...(before === undefined ? {} : { before }),
+      ...(kinds === undefined ? {} : { kinds }),
     });
   }
 

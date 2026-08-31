@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { AdminError } from '../access';
+import { Select } from '@/ui/select';
 
 /**
  * Finding a customer.
@@ -48,16 +49,19 @@ export default function Users() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <select
-          style={{ flex: '0 1 160px', marginTop: 0 }}
-          value={status}
-          onChange={(e) => setStatus(e.target.value)}
-        >
-          <option value="">Any status</option>
-          <option value="active">Active</option>
-          <option value="frozen">Frozen</option>
-          <option value="closed">Closed</option>
-        </select>
+        <div style={{ flex: '0 1 160px' }}>
+          <Select
+            value={status}
+            onChange={setStatus}
+            placeholder="Any status"
+            options={[
+              { value: '', label: 'Any status' },
+              { value: 'active', label: 'Active' },
+              { value: 'frozen', label: 'Frozen' },
+              { value: 'closed', label: 'Closed' },
+            ]}
+          />
+        </div>
         <button type="submit" className="ghost">
           Search
         </button>

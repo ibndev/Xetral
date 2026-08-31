@@ -388,7 +388,20 @@ export class LedgerService {
   async history(
     ownerId: string,
     currency: string,
-    options: { readonly limit?: number; readonly before?: string } = {},
+    options: {
+      readonly limit?: number;
+      readonly before?: string;
+      /**
+       * Narrows to particular entry kinds, for a screen that asks "what
+       * happened with gift cards?" rather than "what happened in naira?".
+       *
+       * The values are checked against a closed enum at the HTTP boundary and
+       * are passed as a PARAMETER here regardless — an array interpolated into
+       * the SQL would be the one dynamic clause in a query about somebody's
+       * money.
+       */
+      readonly kinds?: readonly string[];
+    } = {},
   ): Promise<readonly HistoryEntry[]> {
     const limit = Math.min(Math.max(options.limit ?? 50, 1), 200);
 
@@ -417,9 +430,19 @@ export class LedgerService {
           AND a.kind = 'customer_wallet'
           AND p.currency = $2
           AND ($3::bigint IS NULL OR p.id < $3::bigint)
+          -- NULL means "every kind", so one query serves both the unfiltered
+          -- history and a narrowed one. A second query would be a second set
+          -- of assumptions about which leg belongs to the customer.
+          AND ($5::text[] IS NULL OR e.kind::text = ANY($5::text[]))
         ORDER BY p.id DESC
         LIMIT $4`,
-      [ownerId, currency, options.before ?? null, limit],
+      [
+        ownerId,
+        currency,
+        options.before ?? null,
+        limit,
+        options.kinds === undefined ? null : [...options.kinds],
+      ],
     );
 
     return result.rows.map((row) => ({
