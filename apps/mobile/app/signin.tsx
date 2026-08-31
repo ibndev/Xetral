@@ -1,22 +1,10 @@
 import { useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
-import { router } from 'expo-router';
-import * as SecureStore from 'expo-secure-store';
+import { Link, router } from 'expo-router';
+import { deviceDescriptor } from '@/device';
 import { resetXetral, xetral } from '@/session';
 import { messageFor } from '@/errors';
 import { useStyles } from '@/theme';
-
-/** A per-install identifier the server binds sessions to. Kept in the Keychain
- *  with everything else so it survives an app update but not a reinstall. */
-async function deviceFingerprint(): Promise<string> {
-  const key = 'xetral.device';
-  const held = await SecureStore.getItemAsync(key);
-  if (held !== null) return held;
-
-  const created = `${Date.now()}-${Math.random().toString(36).slice(2)}-mobile`;
-  await SecureStore.setItemAsync(key, created);
-  return created;
-}
 
 export default function SignIn() {
   const styles = useStyles();
@@ -30,10 +18,7 @@ export default function SignIn() {
     setError(undefined);
     try {
       resetXetral();
-      await xetral().session.signIn(identifier, password, {
-        fingerprint: await deviceFingerprint(),
-        platform: 'ios',
-      });
+      await xetral().session.signIn(identifier, password, await deviceDescriptor());
       router.replace('/wallet');
     } catch (cause) {
       setError(messageFor(cause));
@@ -72,6 +57,10 @@ export default function SignIn() {
         </Pressable>
 
         {error !== undefined && <Text style={styles.error}>{error}</Text>}
+
+        <Link href="/signup" style={styles.link}>
+          New here? Create an account
+        </Link>
       </View>
     </View>
   );

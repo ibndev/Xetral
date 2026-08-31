@@ -23,6 +23,7 @@ export default function Layout() {
       >
         <Stack.Screen name="index" options={{ title: 'Xetral' }} />
         <Stack.Screen name="signin" options={{ title: 'Sign in' }} />
+        <Stack.Screen name="signup" options={{ title: 'Create account' }} />
         <Stack.Screen name="wallet" options={{ title: 'Wallet' }} />
         <Stack.Screen name="transfer" options={{ title: 'Send money' }} />
         <Stack.Screen name="add-money" options={{ title: 'Add money' }} />
