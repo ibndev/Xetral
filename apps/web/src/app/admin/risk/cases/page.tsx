@@ -5,6 +5,7 @@ import { useState } from 'react';
 import type { AdminCaseOutcome, AdminRiskCase } from '@xetral/client';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
+import { AdminError } from '../../access';
 
 /**
  * Compliance cases: one investigation, one customer.
@@ -62,7 +63,7 @@ export default function Cases() {
         <p className="hint">
           <Link href="/admin/risk">← the signal queue</Link>
         </p>
-        {cases.error !== undefined && <p className="error">{cases.error}</p>}
+        <AdminError error={cases.error} code={cases.code} role="compliance" />
         {cases.loading && <p className="spinner">Loading…</p>}
         {cases.data !== undefined && cases.data.length === 0 && (
           <p className="hint">No open cases.</p>

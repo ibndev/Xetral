@@ -6,6 +6,7 @@ import { messageFor } from '@/errors';
 import { biometricName, biometricSupport, enrol, forget, isEnrolled } from '@/biometrics';
 import type { BiometricSupport } from '@/biometrics';
 import { useStyles, useTheme } from '@/theme';
+import { Shell } from '@/shell';
 
 /**
  * Turning biometric unlock on and off.
@@ -59,10 +60,10 @@ export default function Security() {
     support?.available === true ? biometricName(support.kind) : 'Biometric unlock';
 
   return (
-    <View style={styles.screen}>
+    <Shell back="/more" title="Security">
       <View style={styles.card}>
         <Text style={styles.h1}>Security</Text>
-        <Text style={styles.h2}>How you approve payments</Text>
+        <Text style={styles.lead}>How you approve payments</Text>
 
         {support?.available === false && (
           <Text style={styles.muted}>
@@ -117,6 +118,6 @@ export default function Security() {
 
         {error !== undefined && <Text style={styles.error}>{error}</Text>}
       </View>
-    </View>
+    </Shell>
   );
 }

@@ -142,20 +142,38 @@ afterAll(async () => {
 });
 
 describe('balances', () => {
-  it('starts empty and reflects funding', async () => {
+  it('starts at zero in every offered currency, and reflects funding', async () => {
     const customer = await onboard();
-    expect(await balancesOf(customer)).toEqual([]);
+
+    /*
+     * ZERO ROWS, NOT NO ROWS, and the difference is the point.
+     *
+     * This asserted an EMPTY array, which was true only because
+     * `walletBalances` reads the accounts table and an account is created by
+     * its first posting. That is an accident of the storage, not a statement
+     * about the product — and the home screen read it faithfully and told
+     * every new customer the platform was naira-only.
+     *
+     * A missing row says "this currency does not exist here"; a zero row says
+     * "you hold none of it". Only the second is true of a currency we offer.
+     */
+    const before = await balancesOf(customer);
+    expect(before.map((b) => b.currency)).toContain('NGN');
+    expect(before.every((b) => /^0(\.0+)?$/.test(b.total))).toBe(true);
 
     await fund(customer.userId, 20_000_00);
 
     const balances = await balancesOf(customer);
-    expect(balances).toHaveLength(1);
-    expect(balances[0]).toMatchObject({
+    const ngn = balances.find((b) => b.currency === 'NGN');
+    expect(ngn).toMatchObject({
       currency: 'NGN',
       spendable: '20000.00',
       pending: '0.00',
       total: '20000.00',
     });
+    // Nothing else moved: crediting naira must not invent a balance anywhere.
+    expect(balances.filter((b) => b.currency !== 'NGN').every((b) => /^0(\.0+)?$/.test(b.total)))
+      .toBe(true);
   });
 
   it('needs a token', async () => {

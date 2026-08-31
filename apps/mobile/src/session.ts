@@ -67,7 +67,7 @@ export class KeychainTokenStore implements TokenStore {
  * read out of the bundle. An API base URL is not secret; an API key would be,
  * which is why none is here.
  */
-function apiUrl(): string {
+export function apiUrl(): string {
   const fromEnv = process.env['EXPO_PUBLIC_API_URL'];
   if (typeof fromEnv === 'string' && fromEnv !== '') return fromEnv.replace(/\/+$/, '');
 

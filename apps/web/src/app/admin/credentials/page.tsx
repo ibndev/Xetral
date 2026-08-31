@@ -4,6 +4,7 @@ import { useState } from 'react';
 import type { AdminCredential } from '@xetral/client';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
+import { AdminError } from '../access';
 
 /**
  * Where an operator pastes a provider key.
@@ -47,8 +48,37 @@ export default function Credentials() {
           installed. Replacing one records who did it and when, and never what
           it was.
         </p>
-        {credentials.error !== undefined && <p className="error">{credentials.error}</p>}
+        <AdminError error={credentials.error} code={credentials.code} role="admin" />
         {credentials.loading && <p className="spinner">Loading…</p>}
+
+        {/*
+          THE EMPTY CASE NAMES ITS CAUSE, because "no boxes to type in" is what
+          this page looks like when the catalogue has not been loaded — and an
+          operator reasonably reads that as "there is nowhere to put the Bitnob
+          key", which is the report that brought us here.
+
+          The slots are a CATALOGUE, seeded by a file that is separate from the
+          migration that creates the table. A deployment that applied the
+          migrations and not the seeds gets exactly this: a working page with
+          nothing to configure and no error, because the query succeeded and
+          returned no rows.
+        */}
+        {credentials.data !== undefined && credentials.data.length === 0 && (
+          <div className="notice warn">
+            <p>
+              No credential slots are defined, so there is nowhere to paste a key.
+            </p>
+            <p className="hint">
+              The catalogue is seeded separately from the schema. On the database,
+              apply{' '}
+              <span className="mono">
+                packages/ledger/sql/026_provider_credentials.seed.sql
+              </span>
+              , then reload. Until then every adapter falls back to its
+              environment variable.
+            </p>
+          </div>
+        )}
       </div>
 
       {[...byProvider.entries()].map(([provider, items]) => (

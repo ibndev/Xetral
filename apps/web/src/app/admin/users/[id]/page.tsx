@@ -4,6 +4,7 @@ import { use, useState } from 'react';
 import Link from 'next/link';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
+import { AdminError } from '../../access';
 
 /**
  * One customer, and the two things support actually needs to do: see what is
@@ -36,7 +37,7 @@ export default function UserDetail({ params }: { params: Promise<{ id: string }>
         </h2>
 
         {detail.loading && <p className="spinner">Loading…</p>}
-        {detail.error !== undefined && <p className="error">{detail.error}</p>}
+        <AdminError error={detail.error} code={detail.code} role="support" />
 
         <div className="row">
           <span className="muted">Status</span>

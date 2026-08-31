@@ -1,6 +1,7 @@
 'use client';
 
 import { useAdmin, useLoad } from '@/lib/hooks';
+import { AdminError } from '../access';
 
 /**
  * Who has not agreed to the words currently in force.
@@ -28,7 +29,7 @@ export default function Consents() {
           can be shown later. This is who has not agreed to the version
           currently published.
         </p>
-        {report.error !== undefined && <p className="error">{report.error}</p>}
+        <AdminError error={report.error} code={report.code} role="compliance" />
         {report.loading && <p className="spinner">Loading…</p>}
         {report.data !== undefined && report.data.outstanding.length === 0 && (
           <p className="empty">

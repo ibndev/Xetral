@@ -50,7 +50,7 @@ export default function Activity() {
       <h1 className="animate-in">Activity</h1>
       <p className="lead animate-in d1">Every movement, newest first.</p>
 
-      <div className="segmented animate-in d1" style={{ margin: '16px 0 4px' }}>
+      <div className="segmented animate-in d1">
         {CURRENCIES.map((c) => (
           <button
             key={c}
@@ -63,7 +63,7 @@ export default function Activity() {
         ))}
       </div>
 
-      <section className="card animate-in d2" style={{ marginTop: 14 }}>
+      <section className="card animate-in d2">
         {first.loading && <p className="spinner">Loading…</p>}
         {first.error !== undefined && (
           <p className="error"><Icon name="alert" size={16} /> {first.error}</p>

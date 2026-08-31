@@ -165,7 +165,7 @@ export default function SignUp() {
         between here and using the product. Most of Xetral works the moment
         this form is submitted.
       */}
-      <div className="notice animate-in d3" style={{ marginTop: 20 }}>
+      <div className="notice animate-in d3">
         <span className="notice-icon"><Icon name="shield" size={19} /></span>
         <p>
           Your wallet, transfers, airtime, data and bills work straight away.

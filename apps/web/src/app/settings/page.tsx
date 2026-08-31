@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { Shell } from '@/ui/shell';
+import { FormError } from '@/ui/form-error';
 import { Icon } from '@/ui/icon';
 import { useLoad, useSubmit, useXetral } from '@/lib/hooks';
 
@@ -74,7 +75,7 @@ export default function Settings() {
 
 function SetPin() {
   const client = useXetral();
-  const { busy, error, done, run } = useSubmit();
+  const { busy, error, code, done, run } = useSubmit();
   const [current, setCurrent] = useState('');
   const [pin, setPin] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -82,6 +83,9 @@ function SetPin() {
 
   return (
     <form
+      // Named so every screen that refuses an action for a missing PIN can
+      // link straight here rather than telling a customer to go and find it.
+      id="transaction-pin"
       className="card"
       onSubmit={(event) => {
         event.preventDefault();
@@ -151,7 +155,7 @@ function SetPin() {
       </button>
 
       {mismatch && <p className="error">Those two PINs are not the same.</p>}
-      {error !== undefined && <p className="error">{error}</p>}
+      <FormError error={error} code={code} />
       {done !== undefined && <p className="ok">{done}</p>}
 
       <p className="hint">
@@ -178,7 +182,7 @@ function SetPin() {
 function Consents() {
   const client = useXetral();
   const state = useLoad(() => client.consents(), [client]);
-  const { busy, error, run } = useSubmit();
+  const { busy, error, code, run } = useSubmit();
 
   const marketing = state.data?.documents.find((d) => d.kind === 'marketing_email');
 
@@ -239,16 +243,13 @@ function Consents() {
           />
           <span>
             {marketing.summary}
-            <span className="hint" style={{ display: 'block' }}>
-              Turning this off takes effect immediately. It never affects
-              security alerts or receipts — those are not marketing, and you
-              cannot be opted out of being told somebody signed in as you.
-            </span>
+            <span className="hint" style={{ display: 'block' }}>            Takes effect immediately. Security alerts and receipts are not
+            marketing and keep coming.</span>
           </span>
         </label>
       )}
 
-      {error !== undefined && <p className="error">{error}</p>}
+      <FormError error={error} code={code} />
     </div>
   );
 }
@@ -272,7 +273,7 @@ function YourData() {
   const client = useXetral();
   const requests = useLoad(() => client.myDataRequests(), [client]);
   const scope = useLoad(() => client.erasureScope(), [client]);
-  const { busy, error, done, run } = useSubmit();
+  const { busy, error, code, done, run } = useSubmit();
   const [pin, setPin] = useState('');
 
   const retained = scope.data?.filter((row) => row.scope === 'retained') ?? [];
@@ -316,11 +317,8 @@ function YourData() {
             onChange={(e) => setPin(e.target.value)}
             required
           />
-          <span className="hint">
-            This one file has every balance, every transaction and every place
-            you have signed in from. We ask for your PIN because it is the
-            thing somebody who stole your session would not have.
-          </span>
+          <span className="hint">          One file with every balance, transaction and sign-in. The PIN is asked
+          for because a stolen session would not have it.</span>
         </label>
         <button type="submit" disabled={busy}>
           {busy ? 'Preparing…' : 'Download my data'}
@@ -379,7 +377,7 @@ function YourData() {
         </table>
       )}
 
-      {error !== undefined && <p className="error">{error}</p>}
+      <FormError error={error} code={code} />
       {done !== undefined && <p className="ok">{done}</p>}
     </div>
   );

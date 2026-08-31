@@ -1,24 +1,28 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
-import { useCallback, useMemo, useState } from 'react';
+import { useState } from 'react';
 import { exponentFor, formatAmount, isValidAmount } from '@xetral/client';
-import { xetral } from '@/lib/session';
-import { messageFor } from '@/lib/errors';
 import { Shell } from '@/ui/shell';
-import { Icon } from '@/ui/icon';
+import { FormError } from '@/ui/form-error';
+import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/lib/hooks';
 
 export default function Transfer() {
-  const router = useRouter();
+  const client = useXetral();
   const [recipient, setRecipient] = useState('');
   const [amount, setAmount] = useState('');
   const [currency, setCurrency] = useState('NGN');
   const [pin, setPin] = useState('');
-  const [error, setError] = useState<string | undefined>();
-  const [done, setDone] = useState<string | undefined>();
-  const [busy, setBusy] = useState(false);
 
-  const signedOut = useCallback(() => router.push('/signin'), [router]);
+  /*
+   * ON THE SHARED HOOKS, which is what gives this screen the error CODE.
+   *
+   * It kept its own busy/error/done state and only ever saw the sentence, so
+   * a customer with no transaction PIN was told to set one with no way to get
+   * there — on the screen where that refusal is most likely to happen. The
+   * hooks carry the code alongside the message, which is what `FormError`
+   * needs to offer the next step.
+   */
+  const { busy, error, code, done, run } = useSubmit();
 
   /**
    * One key per attempt at THIS transfer, generated when the form is first
@@ -28,38 +32,42 @@ export default function Transfer() {
    * connection drops mid-request, must not send twice. Generating it inside
    * the submit handler would defeat it entirely.
    */
-  const idempotencyKey = useMemo(() => crypto.randomUUID(), []);
+  const attempt = useIdempotencyKey();
+
+  /*
+   * THE CURRENCIES COME FROM THE API, not from two hardcoded options.
+   *
+   * This select offered NGN and USD, which was the whole of the answer even on
+   * a deployment holding USDT — so a customer with a stablecoin balance could
+   * see it on the home screen and had no way to send it. `/v1/wallets` now
+   * returns everything the platform offers, so the list is the platform's own.
+   */
+  const balances = useLoad(() => client.balances(), [client]);
+  const options = balances.data?.map((b) => b.currency) ?? ['NGN'];
 
   const amountValid = amount === '' || isValidAmount(amount, exponentFor(currency));
 
-  async function submit(event: React.FormEvent) {
+  function submit(event: React.FormEvent) {
     event.preventDefault();
-    setBusy(true);
-    setError(undefined);
-    setDone(undefined);
-
-    try {
-      const { client } = xetral(signedOut);
+    void run(async () => {
       const result = await client.transfer({
         recipient,
         amount,
         currency,
         pin,
-        idempotencyKey,
+        idempotencyKey: attempt.key,
       });
-      setDone(
-        `Sent ${formatAmount(result.amount, result.currency)}${
-          result.fee === '0.00' ? '' : ` (fee ${formatAmount(result.fee, result.currency)})`
-        }.`,
-      );
+      // The attempt is over, so the next Send is a new transfer and needs a
+      // new key — reusing this one would have the server replay this transfer
+      // and report success for money that never moved.
+      attempt.next();
       // The PIN is cleared immediately and never kept in state between
       // actions. It is not a password: it authorises one instruction.
       setPin('');
-    } catch (cause) {
-      setError(messageFor(cause));
-    } finally {
-      setBusy(false);
-    }
+      return `Sent ${formatAmount(result.amount, result.currency)}${
+        result.fee === '0.00' ? '' : ` (fee ${formatAmount(result.fee, result.currency)})`
+      }.`;
+    });
   }
 
   return (
@@ -82,8 +90,11 @@ export default function Transfer() {
         <label>
           Currency
           <select value={currency} onChange={(e) => setCurrency(e.target.value)}>
-            <option value="NGN">NGN</option>
-            <option value="USD">USD</option>
+            {options.map((code) => (
+              <option key={code} value={code}>
+                {code}
+              </option>
+            ))}
           </select>
         </label>
 
@@ -124,7 +135,7 @@ export default function Transfer() {
           {busy ? 'Sending…' : 'Send'}
         </button>
 
-        {error !== undefined && <p className="error">{error}</p>}
+        <FormError error={error} code={code} />
         {done !== undefined && <p className="ok">{done}</p>}
       </form>
     </Shell>

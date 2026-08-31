@@ -75,7 +75,7 @@ export default function More() {
       {/* Verification is the gate on cards and account numbers, so it is the
           first thing here rather than buried under Account. */}
       {!kyc.loading && !verified && (
-        <Link href="/kyc" className="notice warn animate-in d1" style={{ marginTop: 16 }}>
+        <Link href="/kyc" className="notice warn animate-in d1">
           <span className="notice-icon"><Icon name="shield" size={19} /></span>
           <span>
             <strong>Verify your identity</strong>
@@ -88,7 +88,7 @@ export default function More() {
       )}
 
       {GROUPS.map((g, i) => (
-        <section className={`card animate-in d${Math.min(i + 1, 4)}`} key={g.title} style={{ marginTop: 14 }}>
+        <section className={`card animate-in d${Math.min(i + 1, 4)}`} key={g.title}>
           <div className="card-head"><h2>{g.title}</h2></div>
           <div className="list">
             {g.items.map((item) => (
@@ -105,7 +105,7 @@ export default function More() {
         </section>
       ))}
 
-      <div className="actions animate-in d4" style={{ marginTop: 18 }}>
+      <div className="actions animate-in d4">
         <button type="button" className="ghost block" onClick={signOut}>
           <Icon name="logout" size={18} /> Sign out
         </button>

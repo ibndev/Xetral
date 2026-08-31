@@ -4,6 +4,7 @@ import { useState } from 'react';
 import type { AdminDataRequest } from '@xetral/client';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
+import { AdminError } from '../access';
 
 /**
  * Requests for a copy of somebody's data, or for it to be erased.
@@ -31,7 +32,7 @@ export default function DataRequests() {
           ours — an overdue row is a regulatory finding rather than a slow
           reply.
         </p>
-        {requests.error !== undefined && <p className="error">{requests.error}</p>}
+        <AdminError error={requests.error} code={requests.code} role="compliance" />
         {requests.loading && <p className="spinner">Loading…</p>}
         {requests.data !== undefined && requests.data.length === 0 && (
           <p className="empty">Nothing outstanding.</p>

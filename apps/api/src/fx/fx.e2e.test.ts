@@ -373,9 +373,12 @@ describe('converting', () => {
     const res = await convert(customer);
     expect(res.status).toBe(409);
     expect(res.body.error).toBe('fx_outcome_unknown');
-    // Nothing moved.
+    // Nothing moved. Zero dollars rather than NO dollar row: `/v1/wallets`
+    // returns a zero for every currency the platform offers, so "absent"
+    // stopped meaning "not credited" — what matters is that the figure is
+    // nothing.
     expect((await balances(customer))['NGN']).toBe('2000000.00');
-    expect((await balances(customer))['USD']).toBeUndefined();
+    expect((await balances(customer))['USD']).toBe('0.00');
   });
 
   it('moves nothing when the provider refuses', async () => {
@@ -415,10 +418,11 @@ describe('remittance', () => {
     const res = await convert(sender, { recipient: recipient.identifier }).expect(200);
     expect(res.body.recipient).toBe(recipient.identifier);
 
-    // The sender paid naira and holds no dollars.
+    // The sender paid naira and holds no dollars — zero of them, which is the
+    // same claim now that an offered currency always has a row.
     const senderBalances = await balances(sender);
     expect(senderBalances['NGN']).toBe('349750.00');
-    expect(senderBalances['USD']).toBeUndefined();
+    expect(senderBalances['USD']).toBe('0.00');
 
     // The recipient holds the dollars and no naira.
     const recipientBalances = await balances(recipient);

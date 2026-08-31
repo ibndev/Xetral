@@ -9,7 +9,7 @@ import {
 import type { Pool, PoolClient } from 'pg';
 import { InsufficientFundsError, LedgerService, posting } from '@xetral/ledger';
 import type { AccountRef, LedgerIntent, WrittenEntry } from '@xetral/ledger';
-import { applyBasisPoints, fromMajor, subtract, toMajor } from '@xetral/shared';
+import { applyBasisPoints, CURRENCIES, fromMajor, isCurrency, subtract, toMajor } from '@xetral/shared';
 import type { Currency, Money } from '@xetral/shared';
 import { API_CONFIG, DATABASE, LEDGER } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
@@ -32,7 +32,26 @@ export interface BalanceView {
   readonly spendable: string;
   readonly pending: string;
   readonly total: string;
+  /** So a client can group fiat and crypto without a second currency table. */
+  readonly kind: 'fiat' | 'crypto';
 }
+
+/**
+ * The naira wallet is always offered.
+ *
+ * It is the currency the funding rail deposits into, so it is the one wallet
+ * a customer can put money in without first holding money somewhere else —
+ * which makes it the only one that is offered on the strength of the platform
+ * existing rather than of something an operator has published.
+ */
+const HOME_CURRENCY = 'NGN' as const;
+
+/**
+ * The chains this platform settles on, from the schema that validates a
+ * withdrawal rather than a second list beside it. A copy here would be a
+ * currency offered on the home screen that `/v1/crypto/withdrawals` refuses.
+ */
+const CRYPTO_ASSETS = ['BTC', 'USDT'] as const;
 
 @Injectable()
 export class WalletService {
@@ -46,20 +65,95 @@ export class WalletService {
     @Inject(TaxService) private readonly tax: TaxService,
   ) {}
 
+  /**
+   * What the customer holds, and what they could hold.
+   *
+   * `walletBalances` reads the ACCOUNTS TABLE, and an account is created on
+   * its first posting — so a customer who has never received a dollar has no
+   * USD row, and this endpoint returned naira alone. The home screen was
+   * reading that faithfully and concluding the platform was naira-only, which
+   * is why every other currency was invisible until the moment money happened
+   * to arrive in it.
+   *
+   * A zero row and a missing row are different claims: the first says "you
+   * hold none of this", the second says "this does not exist here". Only the
+   * first is true of a currency the platform offers.
+   *
+   * WHAT IS OFFERED IS DERIVED, NEVER LISTED. Naira always; a fiat currency
+   * when an operator has published an FX spread that reaches it, because an
+   * unpublished pair is refused rather than quoted from a default and
+   * offering one would be offering a wallet nothing can fund; the chains when
+   * crypto is on. So switching crypto off removes the assets from this
+   * response, and publishing NGN/GBP adds sterling — no deploy either way.
+   *
+   * A currency the customer HOLDS is always returned even if it is no longer
+   * offered. Money that has arrived is owed to them whatever an operator has
+   * since retired.
+   */
   async balances(userUuid: string): Promise<readonly BalanceView[]> {
     const userId = await this.#userIdOf(userUuid);
-    const balances = await this.ledger.walletBalances(userId);
+    const [held, offered] = await Promise.all([
+      this.ledger.walletBalances(userId),
+      this.#offeredCurrencies(),
+    ]);
 
-    return balances.map((b) => {
+    const views = new Map<string, BalanceView>();
+    for (const currency of offered) views.set(currency, this.#zero(currency));
+    for (const b of held) {
       const currency = b.currency as Currency;
-      return {
+      views.set(currency, {
         currency: b.currency,
         // Formatted per currency, never with a hardcoded two decimal places.
         spendable: toMajor({ amount: b.spendableMinor, currency }),
         pending: toMajor({ amount: b.pendingMinor, currency }),
         total: toMajor({ amount: b.totalMinor, currency }),
-      };
-    });
+        kind: CURRENCIES[currency].kind,
+      });
+    }
+
+    // Naira first — it is the currency almost every customer reads — then
+    // the rest alphabetically, so the order does not move under somebody as
+    // balances appear.
+    return [...views.values()].sort((a, b) =>
+      a.currency === HOME_CURRENCY ? -1
+      : b.currency === HOME_CURRENCY ? 1
+      : a.currency.localeCompare(b.currency),
+    );
+  }
+
+  #zero(currency: Currency): BalanceView {
+    const nothing = toMajor({ amount: 0n, currency });
+    return {
+      currency,
+      spendable: nothing,
+      pending: nothing,
+      total: nothing,
+      kind: CURRENCIES[currency].kind,
+    };
+  }
+
+  async #offeredCurrencies(): Promise<readonly Currency[]> {
+    const offered = new Set<Currency>([HOME_CURRENCY]);
+
+    if (await this.settings.fxEnabled()) {
+      // Both sides of every live pair. A published NGN→USD is a statement
+      // that dollars can be reached from here; the reverse direction is
+      // published separately and says the same about naira.
+      const pairs = await this.pool.query<{ base_currency: string; quote_currency: string }>(
+        `SELECT base_currency, quote_currency FROM fx_spread_policies WHERE retired_at IS NULL`,
+      );
+      for (const row of pairs.rows) {
+        for (const code of [row.base_currency, row.quote_currency]) {
+          if (isCurrency(code)) offered.add(code);
+        }
+      }
+    }
+
+    if (await this.settings.cryptoEnabled()) {
+      for (const asset of CRYPTO_ASSETS) offered.add(asset);
+    }
+
+    return [...offered];
   }
 
   async history(

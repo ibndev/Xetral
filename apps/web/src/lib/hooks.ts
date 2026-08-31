@@ -51,6 +51,61 @@ export function useIdempotencyKey(): { key: string; next: () => void } {
 }
 
 /**
+ * A preference this browser remembers.
+ *
+ * IT INITIALISES TO `fallback` ON BOTH SIDES AND READS STORAGE IN AN EFFECT,
+ * and both halves of that are deliberate. Reading `localStorage` in a lazy
+ * initialiser is the obvious shape and it is wrong twice: it throws during
+ * server rendering, and once guarded it makes the server and the client
+ * disagree about the first paint, which React resolves by rendering the
+ * server's answer anyway.
+ *
+ * So the FIRST PAINT IS ALWAYS THE FALLBACK, and callers choose a fallback
+ * that is safe to be wrong about. For the balance that is `hidden`: a moment
+ * of dots for somebody who wanted the number is nothing, and a moment of the
+ * number for somebody who asked for dots is the whole point of the control.
+ *
+ * A private window refuses storage entirely. That is caught and ignored — the
+ * preference simply does not outlive the tab, which is better than throwing on
+ * a page that shows a balance.
+ */
+export function useRemembered<T extends string>(
+  key: string,
+  fallback: T,
+  accepts: (stored: string) => boolean,
+): [T, (next: T) => void] {
+  const [value, setValue] = useState<T>(fallback);
+  const check = useRef(accepts);
+  check.current = accepts;
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(key);
+      // Validated rather than cast. Storage is shared with everything else on
+      // this origin and is trivially editable, so a value out of it is input,
+      // not state — and this one reaches a currency code and a render.
+      if (stored !== null && check.current(stored)) setValue(stored as T);
+    } catch {
+      // No storage in this context. The default stands for this session.
+    }
+  }, [key]);
+
+  const write = useCallback(
+    (next: T) => {
+      setValue(next);
+      try {
+        localStorage.setItem(key, next);
+      } catch {
+        // Same as above: the choice still applies, it is just not remembered.
+      }
+    },
+    [key],
+  );
+
+  return [value, write];
+}
+
+/**
  * Loads something once, with the loading, error and cancelled states that
  * every screen otherwise reimplements slightly differently.
  *

@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { useAdmin, useLoad } from '@/lib/hooks';
+import { AdminError } from '../access';
 
 /**
  * Finding a customer.
@@ -63,7 +64,7 @@ export default function Users() {
       </form>
 
       {users.loading && <p className="spinner">Loading…</p>}
-      {users.error !== undefined && <p className="error">{users.error}</p>}
+      <AdminError error={users.error} code={users.code} role="support" />
       {users.data !== undefined && users.data.length === 0 && (
         <p className="empty">No customers match that.</p>
       )}

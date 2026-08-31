@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { formatAmount } from '@xetral/client';
 import type { KycLimits, KycStatus } from '@xetral/client';
 import { Shell } from '@/ui/shell';
+import { FormError } from '@/ui/form-error';
 import { Icon } from '@/ui/icon';
 import { useLoad, useSubmit, useXetral } from '@/lib/hooks';
 
@@ -21,7 +22,7 @@ import { useLoad, useSubmit, useXetral } from '@/lib/hooks';
 export default function Kyc() {
   const client = useXetral();
   const { data, loading, reload } = useLoad<KycStatus | null>(() => client.kyc(), [client]);
-  const { busy, error, run } = useSubmit();
+  const { busy, error, code, run } = useSubmit();
 
   const [form, setForm] = useState({
     fullName: '',
@@ -124,7 +125,7 @@ export default function Kyc() {
           {busy ? 'Submitting…' : 'Submit for review'}
         </button>
 
-        {error !== undefined && <p className="error">{error}</p>}
+        <FormError error={error} code={code} />
       </form>
     </Shell>
   );

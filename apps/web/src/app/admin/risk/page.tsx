@@ -6,6 +6,7 @@ import type { AdminRiskSignal } from '@xetral/client';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
 import { formatMinor } from '@xetral/client';
+import { AdminError } from '../access';
 
 /**
  * The compliance queue.
@@ -75,7 +76,7 @@ export default function Risk() {
             one investigation →
           </Link>
         </p>
-        {signals.error !== undefined && <p className="error">{signals.error}</p>}
+        <AdminError error={signals.error} code={signals.code} role="compliance" />
         {signals.loading && <p className="spinner">Loading…</p>}
         {signals.data !== undefined && signals.data.length === 0 && (
           <p className="hint">

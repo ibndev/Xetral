@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { formatMinor } from '@xetral/client';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
+import { AdminError } from '../access';
 
 /**
  * What a customer will be quoted, and the only place it can be set.
@@ -51,7 +52,7 @@ export default function Prices() {
           are never edited — retire one and publish its replacement, so a quote
           given last month can still be explained.
         </p>
-        {prices.error !== undefined && <p className="error">{prices.error}</p>}
+        <AdminError error={prices.error} code={prices.code} role="finance" />
         {prices.loading && <p className="spinner">Loading…</p>}
 
         {/* The state a fresh deployment is actually in, said plainly. An

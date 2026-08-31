@@ -150,6 +150,21 @@ async function balances(
   return res.body.balances;
 }
 
+/**
+ * Every figure zero, in every currency the platform offers.
+ *
+ * A regex rather than `=== '0.00'`, because the API sends MAJOR UNITS and zero
+ * is written per currency: "0.00" for naira, "0.000000" for USDT, "0.00000000"
+ * for BTC. Comparing against one literal would pass for naira and quietly stop
+ * checking the rest.
+ */
+function holdsNothing(
+  rows: readonly { spendable: string; pending: string }[],
+): boolean {
+  const zero = (amount: string) => /^-?0(\.0+)?$/.test(amount);
+  return rows.every((row) => zero(row.spendable) && zero(row.pending));
+}
+
 beforeAll(async () => {
   pool = new pg.Pool({ connectionString: DATABASE_URL, max: 8 });
 
@@ -268,7 +283,11 @@ describe('submitting', () => {
     // Nothing moved. A submission is an offer, not a transaction — writing a
     // provisional entry here would put money in a pending balance for a card
     // nobody has looked at.
-    expect(await balances(customer)).toEqual([]);
+    //
+    // Asserted as "every figure is zero" rather than "no rows": `/v1/wallets`
+    // returns a zero row for every currency the platform offers, so an empty
+    // array stopped being the shape of an untouched account.
+    expect(holdsNothing(await balances(customer))).toBe(true);
   });
 
   it('never returns the card code to the customer', async () => {
@@ -411,7 +430,7 @@ describe('review', () => {
     expect(res.body).toMatchObject({ status: 'rejected', rejection_reason: 'already redeemed' });
     // No entry was ever written, so there is nothing to reverse and no trace
     // in the customer's balance.
-    expect(await balances(seller)).toEqual([]);
+    expect(holdsNothing(await balances(seller))).toBe(true);
   });
 
   it('refuses a reviewer approving their own submission', async () => {

@@ -64,6 +64,14 @@
   --text:         #0D1B3E;
   --text-2:       #4A5878;   /* labels, secondary */
   --text-3:       #8695B4;   /* hints, placeholders */
+  /* An alias for --text-2, and it exists because three rules were already
+     asking for it and getting nothing. An undefined custom property is not an
+     error: the declaration is simply dropped and the element INHERITS its
+     parent's colour, so `.panel > h2` — the subtitle under every operations
+     heading — rendered at full heading contrast and read as a second title.
+     Nothing in the toolchain has an opinion about a name that does not
+     resolve, which is why `undefined-variables.test.ts` now does. */
+  --text-muted:   #4A5878;
   --on-brand:     #FFFFFF;
 
   /* Status */
@@ -81,6 +89,25 @@
 
   /* Radii */
   --r-sm: 10px;  --r: 14px;  --r-md: 18px;  --r-lg: 24px;  --r-pill: 999px;
+
+  /*
+   * SPACING, AS SIX STEPS.
+   *
+   * There were twenty-seven inline `marginTop` values across the customer
+   * pages — 8, 12, 14, 16, 18, 20, 22 and 28 — each chosen on its own, which
+   * is why nothing lined up between one screen and the next and why some
+   * sections read as joined and others as adrift. Nobody was careless; there
+   * was simply no scale to be consistent WITH.
+   *
+   * Six steps, and a gap between blocks is one of them. The rule below spaces
+   * siblings, so a page adds a section without deciding anything.
+   */
+  --s-1:  6px;   /* a label to its field, a heading to its own subtitle */
+  --s-2: 10px;
+  --s-3: 14px;   /* inside a card */
+  --s-4: 18px;
+  --s-5: 22px;   /* between blocks on a page */
+  --s-6: 32px;   /* between parts of a page that are about different things */
 
   /*
    * Type.
@@ -148,6 +175,7 @@
   --text:         #EEF2FA;
   --text-2:       #A3B0CC;
   --text-3:       #6B7A9B;
+  --text-muted:   #A3B0CC;
   --on-brand:     #0D1B3E;
 
   --ok:      #4ADE80;  --ok-bg:      #10291C;
@@ -223,8 +251,19 @@ h3 { font-size: 16px; }
   text-transform: uppercase;
   color: var(--text-3);
 }
-.lead   { color: var(--text-2); margin: 6px 0 0; }
-.hint   { color: var(--text-3); font-size: 13px; margin: 6px 0 0; }
+.lead   { color: var(--text-2); margin: var(--s-1) 0 0; line-height: 1.5; }
+/*
+ * A HINT IS A BLOCK, and it was not.
+ *
+ * Twenty of the eighty-three hints in this app are `<span className="hint">`
+ * inside a `<label>`, because that is where helper text belongs. A span is
+ * inline, so `margin-top` did nothing at all and the hint ran straight into
+ * the next field's label: "…never show it again.Residential address" on the
+ * identity form, "…cannot be undone.Amount" on the withdrawal form. One call
+ * site had already been patched with an inline `display: block`, which is the
+ * usual sign that the rule belongs in the stylesheet.
+ */
+.hint   { display: block; color: var(--text-3); font-size: 13px; margin: 6px 0 0; line-height: 1.45; }
 .muted  { color: var(--text-2); }
 .nowrap { white-space: nowrap; }
 
@@ -250,6 +289,23 @@ h3 { font-size: 16px; }
   .shell { max-width: 720px; padding: 24px 24px 64px; }
   .shell.wide { max-width: 1240px; }
 }
+
+/*
+ * THE PAGE SPACES ITSELF.
+ *
+ * Every block that follows another gets one step, from the stylesheet, so a
+ * screen cannot be built with a different gap from the screen beside it — and
+ * a section added later needs no decision at all. This replaces the inline
+ * margins the pages used to carry, which is where the unevenness came from.
+ *
+ * A lead paragraph is the exception, and stays tight to the heading it
+ * belongs to: the two are one unit, and a full step between them reads as two
+ * unrelated lines. Same for a hint that follows a control.
+ */
+.shell > * + * { margin-top: var(--s-5); }
+.shell > .lead { margin-top: var(--s-1); }
+.shell > .hint { margin-top: var(--s-1); }
+@media (min-width: 720px) { .shell > * + * { margin-top: var(--s-6); } }
 
 .stack   { display: flex; flex-direction: column; gap: 14px; }
 .row-between { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -330,7 +386,16 @@ h3 { font-size: 16px; }
   transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease),
               transform var(--t-fast) var(--ease);
 }
-.icon-btn:hover { background: var(--surface-2); color: var(--text); }
+/*
+ * HOVER IS FENCED OFF FROM TOUCH, and that is half of what made this look
+ * broken. A phone has no pointer to leave, so a tapped button keeps :hover
+ * until something else is tapped — the customer taps the eye to hide their
+ * balance and the icon keeps a filled disc behind it, which reads as a
+ * rendering fault rather than a state.
+ */
+@media (hover: hover) {
+  .icon-btn:hover { background: var(--surface-2); color: var(--text); }
+}
 .icon-btn:active { transform: scale(.94); }
 
 /* ═══════════════════════════ desktop nav ═══════════════════════════ */
@@ -437,7 +502,38 @@ h3 { font-size: 16px; }
 .card.interactive:hover { box-shadow: var(--shadow-md); border-color: var(--line-strong); }
 .card.interactive:active { transform: translateY(1px); }
 
-.card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: var(--s-3); }
+
+/*
+ * A CARD'S OWN HEADINGS, which had no rules at all.
+ *
+ * `.panel` — the operations surface — styles its `h1`/`h2` pair as a title and
+ * a quiet subtitle. `.card`, which is every customer screen, did not: both
+ * came out at the global heading weight, so "Verify your identity" and
+ * "Required before you can be issued an account number or a card" read as two
+ * titles stacked, and the first field's label started immediately under the
+ * second with no gap at all.
+ *
+ * `h1 + h2` rather than every `h2`, because an h2 that FOLLOWS the title is a
+ * subtitle, and an h2 on its own further down the card is a section heading
+ * and should keep its weight.
+ */
+.card > h1 { margin: 0 0 var(--s-1); }
+.card > h1 + h2 {
+  font-family: var(--font-sans);
+  font-size: 14.5px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--text-muted);
+  margin: 0 0 var(--s-4);
+}
+.card > h2 { margin: 0 0 var(--s-3); }
+.card > h1 + .lead,
+.card > h2 + .lead { margin-top: 0; }
+.card > .lead { margin-bottom: var(--s-4); }
+/* The same head, for a section that is not itself a card — "Products" and its
+   "View all", above a grid of tiles. */
+.section-head { margin-bottom: var(--s-3); }
 
 /* The balance card — the one piece of chrome a customer looks at daily. */
 .balance-card {
@@ -458,10 +554,69 @@ h3 { font-size: 16px; }
   line-height: 1.1;
 }
 @media (min-width: 720px) { .balance-value { font-size: 40px; } }
-.balance-sub { font-size: 13px; color: var(--text-3); }
+.balance-sub { font-size: 13px; color: var(--text-3); margin-top: var(--s-1); }
+
+/* The figure and the eye beside it. The button is 44px and the figure is
+   34px, so the row is centred on the digits rather than on the box. */
+.balance-line { display: flex; align-items: center; gap: 10px; }
+.balance-line .balance-value { min-width: 0; flex: 1 1 auto; }
+
+/* ── the currency rail ────────────────────────────────────────────────
+   Every currency the platform offers, not only the ones this customer has
+   received. It SCROLLS SIDEWAYS rather than wrapping: a second row of chips
+   pushes Send and Top up below the fold on a 360px phone, and those are what
+   most people opened the app for. */
+.asset-rail {
+  display: flex;
+  gap: 8px;
+  margin-top: var(--s-4);
+  overflow-x: auto;
+  scrollbar-width: none;
+  /* Bleeds to the card's edge so a half-visible chip says "there is more",
+     then puts the inset back so the first chip lines up with the figure. */
+  margin-left: -22px;
+  margin-right: -22px;
+  padding: 2px 22px;
+  scroll-padding-left: 22px;
+}
+.asset-rail::-webkit-scrollbar { display: none; }
+
+.asset-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  flex: 0 0 auto;
+  min-height: 0;
+  padding: 8px 14px;
+  border-radius: var(--r);
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-family: var(--font-sans);
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease),
+              color var(--t-fast) var(--ease);
+}
+.asset-chip .asset-code { font-size: 11.5px; letter-spacing: .04em; }
+.asset-chip .asset-amount {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  font-weight: 600;
+}
+.asset-chip.active {
+  background: color-mix(in srgb, var(--link) 12%, transparent);
+  border-color: var(--link);
+  color: var(--text);
+}
+@media (hover: hover) {
+  .asset-chip:hover:where(:not(.active)) { border-color: var(--line-strong); color: var(--text); }
+}
 
 /* Withdraw / Top Up / Convert */
-.quick-actions { display: flex; gap: 10px; margin-top: 18px; flex-wrap: wrap; }
+.quick-actions { display: flex; gap: 10px; margin-top: var(--s-4); flex-wrap: wrap; }
 .quick-actions .btn { flex: 1 1 0; min-width: 0; padding: 12px 12px; font-size: 14px; }
 @media (min-width: 420px) { .quick-actions .btn { padding: 12px 18px; font-size: 15px; } }
 
@@ -471,14 +626,22 @@ h3 { font-size: 16px; }
 @media (min-width: 380px) { .tiles { gap: 10px; } }
 @media (min-width: 720px) { .tiles { gap: 14px; } }
 
+/*
+ * COMPACT, WITH THE ICON THE SAME SIZE.
+ *
+ * The tiles read as bulky on a phone — the row took a quarter of the fold for
+ * four one-word labels. What was making them tall was the PADDING and the gap,
+ * not the icons, so those come down and the 38px icon plate does not: shrinking
+ * it would cost the one thing in the tile that is recognised at a glance.
+ */
 .tile {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 9px;
-  padding: 14px 6px;
-  min-height: 88px;
+  gap: 7px;
+  padding: 10px 6px;
+  min-height: 76px;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r);
@@ -494,7 +657,9 @@ h3 { font-size: 16px; }
   transition: transform var(--t) var(--ease-out), box-shadow var(--t) var(--ease),
               border-color var(--t) var(--ease);
 }
-.tile:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); border-color: var(--line-strong); }
+@media (hover: hover) {
+  .tile:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); border-color: var(--line-strong); }
+}
 .tile:active { transform: translateY(0) scale(.98); }
 .tile .tile-icon {
   display: grid;
@@ -508,6 +673,101 @@ h3 { font-size: 16px; }
 .tile.t-green .tile-icon { background: var(--ok-bg);    color: var(--ok); }
 .tile.t-blue  .tile-icon { background: var(--info-bg);  color: var(--info); }
 .tile.t-navy  .tile-icon { background: color-mix(in srgb, var(--brand) 10%, transparent); color: var(--brand); }
+
+/* ═══════════════════════ the virtual card ═══════════════════════
+
+   A card is RECOGNISED before it is read — the shape, the mark, four digits
+   where four digits go — and that recognition is most of what tells somebody
+   the product is real. What was here was a figure and a grey box: an accurate
+   summary of the row, and nothing like the thing the customer thinks they
+   have.
+
+   `--ink` and not `--brand`: --brand INVERTS for the dark theme, so a navy
+   surface built from it turns near-white with white text on it. The same trap
+   the navy promo card fell into. This face is dark in both themes. */
+
+.card-holder { display: flex; flex-direction: column; gap: var(--s-3); }
+
+.virtual-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  width: 100%;
+  max-width: 380px;
+  /* The real proportion, so it reads as a card at any width rather than as a
+     panel that happens to be dark. */
+  aspect-ratio: 1.586;
+  padding: 18px;
+  border-radius: var(--r-md);
+  background:
+    radial-gradient(120% 140% at 85% 0%, rgba(245, 166, 35, .28) 0%, transparent 55%),
+    linear-gradient(150deg, var(--ink-700) 0%, var(--ink) 62%, #060B1C 100%);
+  color: #fff;
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+}
+/* A single soft highlight, drawn rather than imported. Two gradients and one
+   arc is the whole decoration — a card covered in flourishes reads as a toy,
+   and this one has a balance on it. */
+.virtual-card::after {
+  content: '';
+  position: absolute;
+  right: -22%;
+  bottom: -55%;
+  width: 78%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 255, 255, .10) 0%, transparent 68%);
+  pointer-events: none;
+}
+@media (min-width: 420px) { .virtual-card { padding: 22px; } }
+
+.vc-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+/* The status pill sits on a dark face, so it cannot use the light-theme
+   badge grounds — those are pale tints designed for white. */
+.virtual-card .badge {
+  background: rgba(255, 255, 255, .14);
+  color: #fff;
+  border-color: rgba(255, 255, 255, .22);
+}
+.virtual-card .badge.ok     { background: rgba(74, 222, 128, .20); color: #4ADE80; border-color: transparent; }
+.virtual-card .badge.warn   { background: rgba(251, 191, 36, .22); color: #FBBF24; border-color: transparent; }
+.virtual-card .badge.danger { background: rgba(248, 113, 113, .20); color: #F87171; border-color: transparent; }
+
+.vc-number {
+  font-size: clamp(15px, 4.6vw, 20px);
+  letter-spacing: .12em;
+  /* Optically centred in the space between the mark and the footer, which is
+     where the embossed number sits on a physical card. */
+  margin: auto 0;
+  color: rgba(255, 255, 255, .94);
+}
+
+.vc-foot { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
+.vc-field { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.vc-right { align-items: flex-end; text-align: right; }
+.vc-label {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, .55);
+}
+.vc-value {
+  font-size: 13px;
+  font-weight: 600;
+  /* A long verified name must not push the balance off the card. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A frozen card is still the customer's, so it dims rather than greys out —
+   and a terminated one reads as finished without being unreadable, because a
+   customer disputing a charge still has to see which card it was. */
+.virtual-card.is-frozen     { filter: saturate(.55); }
+.virtual-card.is-terminated { filter: grayscale(.85) brightness(.8); }
 
 /* ═══════════════════════════ promo ═══════════════════════════ */
 
@@ -581,8 +841,25 @@ h3 { font-size: 16px; }
   transition: transform var(--t-fast) var(--ease), background var(--t-fast) var(--ease),
               box-shadow var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease);
 }
-.btn:hover:not(:disabled), button:hover:not(:disabled) { background: var(--brand-700); }
-.btn:active:not(:disabled), button:active:not(:disabled) { transform: scale(.97); }
+/*
+ * `:where(:not(:disabled))` RATHER THAN `:not(:disabled)`, AND THE DIFFERENCE
+ * WAS A VISIBLE BUG.
+ *
+ * `:not()` contributes the specificity of its argument, so
+ * `button:hover:not(:disabled)` scores (0,2,1) — which beats `.icon-btn:hover`
+ * at (0,2,0). The generic rule therefore won on every <button class="icon-btn">
+ * and painted `--brand-700` behind it: near-white in dark mode. The balance
+ * eye and the theme toggle both wore a white disc, and so did the password
+ * reveal on sign-in, while the markup and every class name read correctly.
+ *
+ * `:where()` contributes ZERO specificity and matches identically, so this
+ * drops to (0,1,1) and a TYPE SELECTOR CAN NO LONGER OUTRANK A COMPONENT
+ * CLASS. Every variant below is written the same way for the same reason.
+ */
+.btn:hover:where(:not(:disabled)),
+button:hover:where(:not(:disabled)) { background: var(--brand-700); }
+.btn:active:where(:not(:disabled)),
+button:active:where(:not(:disabled)) { transform: scale(.97); }
 .btn:disabled, button:disabled { opacity: .5; cursor: not-allowed; }
 
 .btn.block, button.block { width: 100%; }
@@ -592,7 +869,8 @@ h3 { font-size: 16px; }
   border-color: var(--line-strong);
   color: var(--text);
 }
-.btn.ghost:hover:not(:disabled), button.ghost:hover:not(:disabled) {
+.btn.ghost:hover:where(:not(:disabled)),
+button.ghost:hover:where(:not(:disabled)) {
   background: var(--surface-2);
   border-color: var(--text-3);
 }
@@ -602,10 +880,12 @@ h3 { font-size: 16px; }
   color: var(--text);
   border-color: transparent;
 }
-.btn.quiet:hover:not(:disabled), button.quiet:hover:not(:disabled) { background: var(--line); }
+.btn.quiet:hover:where(:not(:disabled)),
+button.quiet:hover:where(:not(:disabled)) { background: var(--line); }
 
 .btn.danger, button.danger { background: var(--danger); color: #fff; }
-.btn.danger:hover:not(:disabled), button.danger:hover:not(:disabled) { filter: brightness(.94); }
+.btn.danger:hover:where(:not(:disabled)),
+button.danger:hover:where(:not(:disabled)) { filter: brightness(.94); }
 
 .btn.small, button.small { min-height: 38px; padding: 8px 14px; font-size: 13.5px; }
 .btn.link, button.link {
@@ -614,11 +894,17 @@ h3 { font-size: 16px; }
 }
 .btn.link:hover, button.link:hover { background: none; color: var(--link-600); }
 
-.actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+/* A row of buttons. It carries its own top margin because a button pressed
+   against the paragraph explaining it was the most common of the reported
+   collisions — and `.actions` is the one class every such row already had. */
+.actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: var(--s-3); }
+/* Unless it is the first thing in its container, where the container's own
+   padding is already the space. */
+.actions:first-child { margin-top: 0; }
 
 /* ═══════════════════════════ forms ═══════════════════════════ */
 
-.field { margin-bottom: 16px; }
+.field { margin-bottom: var(--s-4); }
 .field > label,
 label.field-label {
   display: block;
@@ -627,6 +913,45 @@ label.field-label {
   font-weight: 600;
   color: var(--text-2);
 }
+
+/*
+ * A LABEL WRAPPING ITS OWN CONTROL, which is 74 of the 80 labels in this app
+ * and had no styling at all.
+ *
+ * `<label>Amount<input/></label>` is the right markup — the control is its own
+ * label's target with no `for`/`id` pair to get wrong — and a <label> is
+ * INLINE by default, so none of this applied: no weight, no colour, and
+ * critically no margin, because vertical margin does nothing on an inline box.
+ * Two fields in a row therefore had NO GAP between them, and a hint under one
+ * ran straight into the next one's text: "…never show it again.Residential
+ * address" on the identity form.
+ *
+ * The `.field > label` rule above looked like it covered this and does not —
+ * it only matches the six auth-page labels, which are separate elements inside
+ * a `.field` wrapper. That is why the gap was invisible in review: the
+ * stylesheet plainly had a rule for labels.
+ */
+label {
+  display: block;
+  margin-bottom: var(--s-4);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+/* The control does not inherit the label's voice. Without this the value a
+   customer types is rendered at 600 in the secondary colour, which reads as
+   placeholder text in their own input. */
+label > input,
+label > select,
+label > textarea,
+label > .input-affix {
+  margin-top: var(--s-1);
+  font-weight: 400;
+  color: var(--text);
+}
+/* `.field-row` sets `gap: 0 12px` — column gap only — so the vertical
+   separation between a two-up row and whatever follows it comes from the
+   labels' own margin, which is now the same step as everywhere else. */
 
 input, select, textarea {
   width: 100%;
@@ -682,7 +1007,9 @@ select {
   color: var(--text-3);
   border-radius: var(--r-pill);
 }
-.input-affix .affix:hover { background: var(--surface-2); color: var(--text); }
+@media (hover: hover) {
+  .input-affix .affix:hover { background: var(--surface-2); color: var(--text); }
+}
 
 fieldset { border: 0; padding: 0; margin: 0; }
 
@@ -772,8 +1099,24 @@ td.right, th.right { text-align: right; padding-right: 0; }
 .badge.info   { background: var(--info-bg);   color: var(--info); }
 .badge .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 
+/*
+ * A NOTICE IS A ROW WITH AN ICON, OR A STACK OF PARAGRAPHS, and it was only
+ * ever the first.
+ *
+ * `display: flex` with the default row direction laid consecutive <p> children
+ * side by side, so the fourteen notices written as
+ * `<div class="notice"><p>…</p><p class="hint">…</p></div>` rendered as two
+ * columns of text — the sentence and its explanation reading across each
+ * other. The `p + p { margin-top }` rule below says plainly that a stack was
+ * intended; it simply never applied.
+ *
+ * `flex-wrap` plus a full-width basis on paragraphs fixes both shapes without
+ * touching either: an icon and its body still sit on one line, and a bare
+ * paragraph takes a line of its own.
+ */
 .notice {
   display: flex;
+  flex-wrap: wrap;
   gap: 11px;
   padding: 14px 16px;
   border-radius: var(--r);
@@ -782,16 +1125,133 @@ td.right, th.right { text-align: right; padding-right: 0; }
   font-size: 14px;
   border: 1px solid transparent;
 }
+.notice > p { flex: 1 1 100%; }
 .notice .notice-icon { color: var(--info); flex-shrink: 0; margin-top: 1px; }
 .notice.warn   { background: var(--warn-bg); }
 .notice.warn   .notice-icon { color: var(--warn); }
 .notice.danger { background: var(--danger-bg); }
 .notice.danger .notice-icon { color: var(--danger); }
 .notice p { margin: 0; }
-.notice p + p { margin-top: 6px; }
+/* The gap already separates wrapped rows, so this only has to close the space
+   the flex gap adds between two paragraphs — otherwise a two-line notice sits
+   17px apart internally and reads as two notices. */
+.notice > p + p { margin-top: -5px; }
 
-.error { color: var(--danger); font-size: 13.5px; margin: 10px 0 0; display: flex; gap: 6px; align-items: center; }
-.ok    { color: var(--ok);     font-size: 13.5px; margin: 10px 0 0; display: flex; gap: 6px; align-items: center; }
+/* `align-items: flex-start` because a two-line refusal centred its icon
+   against the middle of the paragraph, which put the warning triangle level
+   with the second line. */
+.error { color: var(--danger); font-size: 13.5px; margin: var(--s-2) 0 0; display: flex; gap: 6px; align-items: flex-start; line-height: 1.45; }
+.error svg { flex: 0 0 auto; margin-top: 2px; }
+.ok    { color: var(--ok);     font-size: 13.5px; margin: var(--s-2) 0 0; display: flex; gap: 6px; align-items: center; line-height: 1.45; }
+
+/* A refusal, and the way out of it where there is one. See `FormError`: the
+   control sits UNDER the sentence rather than beside it, so a long message on
+   a narrow screen does not squeeze the button into two words on three lines. */
+.form-error { display: flex; flex-direction: column; align-items: flex-start; gap: var(--s-2); }
+.form-error .error { margin-top: var(--s-2); }
+
+/* ═══════════════════ the operations sidebar ═══════════════════
+
+   Sixteen destinations. As a horizontal strip under the header they wrapped
+   or scrolled out of sight on a laptop, so Provider keys, Staff, Audit and
+   Readiness — the four somebody reaches for during an incident — were the
+   four you had to go looking for.
+
+   Narrow-first, like the rest of this stylesheet: the sidebar is a DRAWER
+   until 1000px and a column after it. One list either way; a second copy for
+   small screens is how an entry ends up in one and not the other. */
+
+.admin-frame { min-height: 100vh; }
+
+.admin-side {
+  position: fixed;
+  z-index: 60;
+  top: 0; left: 0; bottom: 0;
+  width: 264px;
+  max-width: 84vw;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  padding: 16px 12px 24px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+  /* Off-screen rather than `display: none`, so opening it is a transform the
+     compositor can animate and the links stay in the accessibility tree in
+     the same order they render on a desktop. */
+  transform: translateX(-100%);
+  transition: transform var(--t) var(--ease);
+}
+.drawer-open .admin-side { transform: translateX(0); }
+
+.admin-side .spacer { flex: 1; }
+.admin-side-brand { padding: 4px 10px 4px; }
+
+.admin-side-group { display: flex; flex-direction: column; gap: 2px; }
+.admin-side-group .eyebrow { padding: 0 12px var(--s-1); }
+
+.admin-side a,
+.admin-side button {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 11px;
+  width: 100%;
+  min-height: 42px;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-2);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 500;
+  text-align: left;
+  letter-spacing: 0;
+}
+.admin-side a svg,
+.admin-side button svg { flex: 0 0 auto; color: var(--text-3); }
+
+@media (hover: hover) {
+  .admin-side a:hover,
+  .admin-side button:hover { background: var(--surface-2); color: var(--text); }
+}
+.admin-side a.active {
+  background: color-mix(in srgb, var(--link) 12%, transparent);
+  color: var(--text);
+  font-weight: 600;
+}
+.admin-side a.active svg { color: var(--link); }
+
+/* Covers the page while the drawer is out. A button rather than a div so it
+   is reachable from the keyboard and announces what it does. */
+.admin-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: rgba(0, 0, 0, .45);
+  cursor: pointer;
+}
+
+.admin-menu { display: grid; }
+.admin-wide-only { display: none; }
+
+@media (min-width: 1000px) {
+  /* The column layout. The sidebar stops being a sheet and the header stops
+     carrying a menu button — nothing else about the page changes. */
+  .admin-frame { display: grid; grid-template-columns: 264px 1fr; }
+  .admin-side { position: sticky; height: 100vh; transform: none; max-width: none; }
+  .admin-menu,
+  .admin-brand-compact { display: none; }
+  .admin-wide-only { display: inline-flex; }
+  .admin-main { min-width: 0; }
+}
+
 
 /* ═══════════════════════════ stats ═══════════════════════════ */
 
@@ -1056,7 +1516,9 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
   font-size: 16px;
   transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
 }
-.auth-card .field input:hover:not(:focus) { border-color: var(--line); }
+@media (hover: hover) {
+  .auth-card .field input:hover:where(:not(:focus)) { border-color: var(--line); }
+}
 .auth-card .field input:focus,
 .auth-card .input-affix input:focus {
   background: var(--surface);
@@ -1117,11 +1579,16 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
   border-radius: var(--r-md);
   padding: 18px;
   box-shadow: var(--shadow-sm);
-  margin-bottom: 16px;
+  margin-bottom: var(--s-5);
 }
 @media (min-width: 720px) { .panel { padding: 22px; } }
-.panel > h1 { font-size: 22px; margin: 0 0 2px; }
-.panel > h2 { font-size: 14px; font-weight: 500; color: var(--text-muted); margin: 0 0 14px; }
+.panel > h1 { font-size: 22px; margin: 0 0 var(--s-1); }
+.panel > h2 { font-size: 14px; font-weight: 500; color: var(--text-muted); margin: 0 0 var(--s-3); }
+/* A panel's own prose, then whatever acts on it. Two paragraphs of lead ran
+   into each other and into the first field. */
+.panel > .lead + .lead { margin-top: var(--s-2); }
+.panel > .lead + * { margin-top: var(--s-4); }
+.panel > table { margin-top: var(--s-3); }
 .panel > h2 a { color: var(--link); text-decoration: none; }
 .panel > h2 a:hover { text-decoration: underline; }
 .panel > :last-child { margin-bottom: 0; }

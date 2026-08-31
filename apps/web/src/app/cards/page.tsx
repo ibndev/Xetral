@@ -4,7 +4,9 @@ import { useEffect, useState } from 'react';
 import { formatAmount } from '@xetral/client';
 import type { Card, CardSecrets } from '@xetral/client';
 import { Shell } from '@/ui/shell';
+import { FormError } from '@/ui/form-error';
 import { Icon } from '@/ui/icon';
+import { Logo } from '@/ui/logo';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/lib/hooks';
 import { VerifyPrompt } from '@/ui/verify-prompt';
 
@@ -19,6 +21,12 @@ import { VerifyPrompt } from '@/ui/verify-prompt';
 export default function Cards() {
   const client = useXetral();
   const { data, loading, error, code, reload } = useLoad(() => client.cards(), [client]);
+
+  // The name to print on the card face. A card cannot be issued without an
+  // approved identity, so this is present whenever a card is — and it is the
+  // customer's own verified name rather than anything the card carries.
+  const identity = useLoad(() => client.kyc().catch(() => null), [client]);
+  const holder = identity.data?.full_name;
 
   return (
     <Shell>
@@ -40,7 +48,7 @@ export default function Cards() {
         )}
 
         {data?.map((card) => (
-          <CardRow key={card.id} card={card} onChange={reload} />
+          <CardRow key={card.id} card={card} holder={holder} onChange={reload} />
         ))}
       </div>
 
@@ -49,9 +57,18 @@ export default function Cards() {
   );
 }
 
-function CardRow({ card, onChange }: { card: Card; onChange: () => void }) {
+function CardRow({
+  card,
+  holder,
+  onChange,
+}: {
+  card: Card;
+  /** The verified name, from KYC. See the card face below. */
+  holder: string | undefined;
+  onChange: () => void;
+}) {
   const client = useXetral();
-  const { busy, error, run } = useSubmit();
+  const { busy, error, code, run } = useSubmit();
   const [pin, setPin] = useState('');
   const [open, setOpen] = useState(false);
   const funding = useIdempotencyKey();
@@ -77,22 +94,60 @@ function CardRow({ card, onChange }: { card: Card; onChange: () => void }) {
   const badge =
     card.status === 'active' ? 'ok' : card.status === 'frozen' ? 'warn' : 'danger';
 
+  const expiry =
+    card.expiry_month === null || card.expiry_year === null
+      ? '••/••'
+      : `${String(card.expiry_month).padStart(2, '0')}/${String(card.expiry_year).slice(-2)}`;
+
   return (
-    <div className="card" style={{ background: 'var(--surface-2)' }}>
-      <div className="balance">
-        <div>
-          <div className="amount">{formatAmount(card.balance, card.currency)}</div>
-          <div className="pending mono">
-            {card.last4 === null ? 'issuing' : `•••• ${card.last4}`}
-            {card.expiry_month !== null &&
-              ` · ${String(card.expiry_month).padStart(2, '0')}/${String(card.expiry_year).slice(-2)}`}
+    <div className="card card-holder">
+      {/*
+        THE CARD FACE.
+        
+        It was a figure and a grey box, which is an accurate summary of the
+        row and looks nothing like the thing a customer thinks they have. A
+        card is recognised before it is read — the shape, the mark, the four
+        digits in the place four digits go — and that recognition is most of
+        what tells somebody the product is real.
+
+        NOTHING NEW IS SHOWN. The number is the same masked `last4` the list
+        has always carried; there is no PAN here and no field that could hold
+        one. The full number arrives only from a reveal, into `secrets`, which
+        is separate state with a sixty-second life.
+
+        The cardholder name comes from the VERIFIED IDENTITY, not from the
+        card: `name_on_card` is sent to the provider at issue and never stored
+        here, and a card cannot exist without an approved KYC record, so the
+        name is always available and is the customer's own.
+      */}
+      <article className={`virtual-card is-${card.status}`} aria-label={`Card ending ${card.last4 ?? 'unknown'}`}>
+        <div className="vc-head">
+          <Logo size={20} tone="metal" />
+          <span className={`badge ${badge}`}>{card.status}</span>
+        </div>
+
+        <div className="vc-number mono">
+          {card.last4 === null ? '•••• •••• •••• ••••' : `•••• •••• •••• ${card.last4}`}
+        </div>
+
+        <div className="vc-foot">
+          <div className="vc-field">
+            <span className="vc-label">Cardholder</span>
+            <span className="vc-value">{holder ?? '—'}</span>
+          </div>
+          <div className="vc-field">
+            <span className="vc-label">Expires</span>
+            <span className="vc-value mono">{expiry}</span>
+          </div>
+          <div className="vc-field vc-right">
+            <span className="vc-label">Balance</span>
+            <span className="vc-value mono">{formatAmount(card.balance, card.currency)}</span>
           </div>
         </div>
-        <span className={`badge ${badge}`}>{card.status}</span>
-      </div>
+      </article>
 
       {card.status !== 'terminated' && (
-        <div className="actions" style={{ marginTop: 12 }}>
+        <div className="actions">
           {/*
             Freezing asks for nothing. The server does not require a PIN either,
             and the reason is the same on both sides: a customer watching
@@ -213,7 +268,7 @@ function CardRow({ card, onChange }: { card: Card; onChange: () => void }) {
       )}
 
       {secrets !== undefined && (
-        <div className="panel" style={{ marginTop: 12 }}>
+        <div className="panel">
           <div className="row">
             <span>Card number</span>
             <strong className="mono">{group(secrets.pan)}</strong>
@@ -235,7 +290,7 @@ function CardRow({ card, onChange }: { card: Card; onChange: () => void }) {
         </div>
       )}
 
-      {error !== undefined && <p className="error">{error}</p>}
+      <FormError error={error} code={code} />
     </div>
   );
 }
@@ -252,7 +307,7 @@ function group(pan: string): string {
 
 function Issue({ onIssued }: { onIssued: () => void }) {
   const client = useXetral();
-  const { busy, error, done, run } = useSubmit();
+  const { busy, error, code, done, run } = useSubmit();
   const attempt = useIdempotencyKey();
   const [name, setName] = useState('');
   const [funding, setFunding] = useState('');
@@ -313,7 +368,7 @@ function Issue({ onIssued }: { onIssued: () => void }) {
         {busy ? 'Requesting…' : 'Get a card'}
       </button>
 
-      {error !== undefined && <p className="error">{error}</p>}
+      <FormError error={error} code={code} />
       {done !== undefined && <p className="ok">{done}</p>}
 
       <p className="hint">

@@ -135,3 +135,34 @@ rules:
       # the first version of this rule matched nothing at all and looked
       # perfectly correct.
       - pattern-regex: '(?:this\s*\.\s*)?#?(?:logger|console)\s*\.\s*(?:log|info|warn|error|debug)\s*\([^)]*\$\{[^}]*(?:[Pp]in|PIN|[Pp]an\b|PAN|[Bb]vn|BVN|[Pp]assword|[Pp]assphrase|[Ss]ecret|[Cc]ardNumber|card_number|[Aa]piKey|api_key|[Aa]ccessToken|[Rr]efreshToken|[Rr]awToken|[Pp]laintext)'
+
+  - id: no-math-random-in-an-app
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >-
+      `Math.random()` in an app. It is seeded per JS context and is not
+      designed to resist guessing, and the values reached for here are never
+      only decorative — a device fingerprint the server BINDS SESSIONS to, an
+      idempotency key that decides whether money moves twice. Use
+      `crypto.randomUUID()` on the web, `randomUUID()` from `expo-crypto` on
+      the phone. CodeQL flags this high, and it was right: the first
+      idempotency key here used `Math.random` behind a comment arguing it was
+      not a credential, which is true and is the wrong instinct in a money app,
+      because the next person wanting a random string reaches for whatever is
+      already imported.
+    paths:
+      # NO `include:`. It had one — `apps/**` and `packages/client/**` — and
+      # the probe runs from a temp directory, so the rule matched nothing there
+      # and `run.sh` correctly reported five of six. A path filter that also
+      # filters the thing proving the rule works is a rule with no proof.
+      exclude:
+        - "*.test.ts"
+        - "*.test.tsx"
+        - "*.e2e.test.ts"
+        # The API's Redis limiter builds a sorted-set MEMBER, which only has to
+        # be distinct within one millisecond bucket and is never presented to
+        # anyone. Named rather than covered by a broad exclude, so a second use
+        # in that file still fails.
+        - "apps/api/src/auth/rate-limit.ts"
+    patterns:
+      - pattern: Math.random()

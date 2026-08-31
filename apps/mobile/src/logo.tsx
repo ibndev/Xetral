@@ -1,6 +1,6 @@
-import { Text, useColorScheme, View } from 'react-native';
+import { Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
-import { font, logoInk } from './theme';
+import { font, logoInk, useResolvedScheme } from './theme';
 
 /**
  * The Xetral mark — the SAME geometry as `apps/web/src/ui/logo.tsx`.
@@ -22,9 +22,16 @@ const RIGHT_CHEVRON =
   'M539 459l-162 -199l-14 -19l1 -10l5 -7l130 -153h-110l-6 2l-4 2l-13 14l-124 142' +
   'l-4 8v13l2 5l150 185l11 12l12 5z';
 
-/** Black on light, metal on dark — see `logoInk`. `inverse` is for a mark on
- *  a coloured surface, where the device theme is not what decides legibility. */
-function inkFor(tone: 'auto' | 'inverse', scheme: ReturnType<typeof useColorScheme>): string {
+/**
+ * Black on light, metal on dark — see `logoInk`. `inverse` is for a mark on a
+ * coloured surface, where the theme is not what decides legibility.
+ *
+ * The scheme comes from `useResolvedScheme`, NOT from `useColorScheme`. It
+ * read the device directly, which was right while the device was the only
+ * thing deciding — and became a bug the moment the app gained a theme toggle:
+ * switching to dark repainted every surface and left the mark black on black.
+ */
+function inkFor(tone: 'auto' | 'inverse', scheme: 'light' | 'dark'): string {
   if (tone === 'inverse') return '#FFFFFF';
   return scheme === 'dark' ? logoInk.dark : logoInk.light;
 }
@@ -36,7 +43,7 @@ export function LogoMark({
   readonly size?: number;
   readonly tone?: 'auto' | 'inverse';
 }) {
-  const fill = inkFor(tone, useColorScheme());
+  const fill = inkFor(tone, useResolvedScheme());
   return (
     <Svg width={(size * VB_W) / VB_H} height={size} viewBox={`0 0 ${VB_W} ${VB_H}`}>
       <Path d={RIGHT_CHEVRON} fill={fill} />
@@ -63,7 +70,7 @@ export function Logo({
   readonly wordmark?: boolean;
   readonly tone?: 'auto' | 'inverse';
 }) {
-  const ink = inkFor(tone, useColorScheme());
+  const ink = inkFor(tone, useResolvedScheme());
   if (!wordmark) return <LogoMark size={size} tone={tone} />;
 
   return (
