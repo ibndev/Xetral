@@ -118,10 +118,17 @@ jobs:
             # the deployed address and `apiUrl()` falls back to it, so the
             # common build takes no input at all — and an input that is
             # required for the common case is an input somebody fills in
-            # wrongly. It is echoed rather than assumed, because "the address
-            # in app.json" is only reassuring if you can see what it says.
-            configured=$(node -p "require('./apps/mobile/app.json').expo.extra.apiUrl")
-            echo "preview build against the address in app.json: $configured"
+            # wrongly.
+            #
+            # It deliberately does NOT read app.json here. THIS STEP RUNS
+            # BEFORE CHECKOUT, which is the whole point of it — refusing a bad
+            # address should cost seconds rather than forty minutes of Gradle
+            # — so the working directory is an empty runner workspace and a
+            # `require('./apps/mobile/app.json')` fails with MODULE_NOT_FOUND.
+            # That is not hypothetical: it failed exactly that way on the first
+            # run after the fallback was added. The address is echoed after
+            # checkout instead, by the step that bundles with it.
+            echo "no api_url given: the preview will use the address in app.json"
             exit 0
           fi
           # Nothing but the characters a URL is made of. As an environment
@@ -229,6 +236,21 @@ jobs:
           EXPO_PUBLIC_API_URL: ${{ inputs.variant == 'preview' && inputs.api_url || '' }}
           VARIANT: ${{ inputs.variant }}
         run: |
+          # WHICH ADDRESS THIS APK IS ACTUALLY BEING BUILT WITH, said out loud
+          # in the log of the job that bakes it in. A preview APK's address is
+          # compiled into the bundle, so a wrong one is a rebuild, a release
+          # and a reinstall — and the first APK shipped against a hostname
+          # nothing published, which nobody could see from any log. Read HERE
+          # rather than in the pre-flight check, because that step runs before
+          # checkout and app.json is not on disk yet.
+          if [ "$VARIANT" = 'preview' ]; then
+            if [ -n "$EXPO_PUBLIC_API_URL" ]; then
+              echo "baking in api_url from the workflow input: $EXPO_PUBLIC_API_URL"
+            else
+              echo "baking in the address from app.json: $(node -p "require('./apps/mobile/app.json').expo.extra.apiUrl")"
+            fi
+          fi
+
           cd apps/mobile/android
           chmod +x gradlew
           if [ "$VARIANT" = 'development' ]; then
