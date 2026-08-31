@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
+import { randomUUID } from 'expo-crypto';
 
 /**
  * What this install tells the server about itself.
@@ -45,7 +46,16 @@ export async function deviceFingerprint(): Promise<string> {
   const held = await SecureStore.getItemAsync(FINGERPRINT_KEY);
   if (held !== null) return held;
 
-  const created = `${Date.now()}-${Math.random().toString(36).slice(2)}-${devicePlatform()}`;
+  /*
+   * A CSPRNG, not `Math.random`, and this one is not merely hygiene.
+   *
+   * The server BINDS SESSIONS to this value: a refresh token is only accepted
+   * from the device family it was issued to, and reuse detection revokes that
+   * family. A guessable fingerprint is therefore a way to present a stolen
+   * token as the device it was stolen from. `Math.random` is seeded per JS
+   * context and is not designed to resist that.
+   */
+  const created = `${Date.now()}-${randomUUID()}-${devicePlatform()}`;
   await SecureStore.setItemAsync(FINGERPRINT_KEY, created);
   return created;
 }

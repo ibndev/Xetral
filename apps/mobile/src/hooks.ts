@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { router } from 'expo-router';
+import { randomUUID } from 'expo-crypto';
 import type { ApiErrorCode, XetralClient } from '@xetral/client';
 import { codeOf, messageFor } from '@xetral/client';
 import { xetral } from '@/session';
@@ -39,20 +40,23 @@ export function useIdempotencyKey(): { key: string; next: () => void } {
 }
 
 /**
- * `crypto.randomUUID` is not in React Native's Hermes runtime.
+ * `crypto.randomUUID` is not in React Native's Hermes runtime, so the web
+ * hook's one-liner would throw here.
  *
- * The web hook uses it directly and would throw here. `expo-crypto` would be a
- * new native dependency for one string, so this builds a v4-shaped id from
- * `Math.random`. THAT IS SAFE HERE AND WOULD NOT BE FOR A TOKEN: an
- * idempotency key is scoped to one customer, is not a secret, and its only job
- * is to be different from that customer's other attempts. Nothing in this app
- * generates a credential — every one of those is minted by the server.
+ * `expo-crypto` RATHER THAN `Math.random`, and the first version of this did
+ * use `Math.random` with a comment arguing that an idempotency key is not a
+ * credential. The argument is true and it is the wrong instinct in a file
+ * inside a money app: CodeQL flagged it high as insecure randomness, and it
+ * was right to, because the next person to want a random string here reaches
+ * for whatever is already imported. A native CSPRNG costs one module in an app
+ * that already ships six, and removes the question.
+ *
+ * It also makes the key genuinely unique. `Math.random` is seeded per JS
+ * context, and two attempts from a phone that was killed and relaunched are
+ * exactly the case this key exists to tell apart.
  */
 function newKey(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
-  });
+  return randomUUID();
 }
 
 /**

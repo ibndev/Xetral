@@ -5,6 +5,7 @@ import { Link } from 'expo-router';
 import type { ApiErrorCode } from '@xetral/client';
 import { Icon } from '@/icon';
 import type { IconName } from '@/icon';
+import { apiUrl } from '@/session';
 import { radius, space, useStyles, useTheme } from '@/theme';
 
 /**
@@ -51,6 +52,21 @@ export function FormError({
         </View>
         <Text style={[styles.error, { marginTop: 0, flex: 1 }]}>{error}</Text>
       </View>
+      {/*
+        WHICH HOST IT TRIED, and only when nothing answered.
+
+        An installed APK has its API address compiled into the bundle, so a
+        build pointed at the wrong host is an app where every screen fails and
+        nothing on it says why — indistinguishable from a broken app, or from
+        the phone having no signal. Naming the address turns that into a
+        five-second diagnosis.
+
+        It discloses nothing: the address is already in the bundle in plain
+        text, readable by anyone who unzips the APK. It is shown ONLY for
+        `network`, so an ordinary refusal — a wrong PIN, a declined card —
+        never carries infrastructure detail a customer has no use for.
+      */}
+      {code === 'network' && <Text style={styles.hint}>Tried {safeHost()}</Text>}
       {next !== undefined && (
         <Link href={next.href as never} asChild>
           <Pressable
@@ -71,6 +87,17 @@ export function FormError({
       )}
     </View>
   );
+}
+
+/** The host the bundle was built against, or a note that it was never set. */
+function safeHost(): string {
+  try {
+    return apiUrl();
+  } catch {
+    // `apiUrl` throws when neither EXPO_PUBLIC_API_URL nor `extra.apiUrl` is
+    // set, which is its own diagnosis and a worse one to swallow.
+    return 'no API address was configured in this build';
+  }
 }
 
 /** A success line, so `done` never has to be styled at a call site. */

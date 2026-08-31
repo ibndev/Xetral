@@ -37,3 +37,6 @@ export function d(): string {
 export function e(): void {
   logger.warn(`verifying ${userPin} now`);
 }
+export function f(): string {
+  return `device-${Math.random().toString(36).slice(2)}`;
+}
