@@ -1,0 +1,180 @@
+import type { ReactNode } from 'react';
+import { Pressable, ScrollView, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Link, router, usePathname } from 'expo-router';
+import { Icon } from '@/icon';
+import type { IconName } from '@/icon';
+import { Logo } from '@/logo';
+import { space, useStyles, useTheme, useThemeChoice, useResolvedScheme } from '@/theme';
+
+/**
+ * ONE NAVIGATION, THE SAME AS THE WEB'S.
+ *
+ * The phone had a stack of seven screens and no navigation at all: the wallet
+ * carried two text links and a sign-out, and everything else was reachable
+ * only by going back. The web has a four-item tab bar and a header, so the two
+ * apps were not the same product — which is the report this is answering.
+ *
+ * The tabs and their icons are the WEB'S LIST, in the web's order. A separate
+ * list here would drift the way the refusal messages did, and the failure is
+ * quiet: a destination added to one app and forgotten in the other is a screen
+ * half the customers cannot reach.
+ */
+interface Tab {
+  readonly href: string;
+  readonly label: string;
+  readonly icon: IconName;
+}
+
+export const TABS: readonly Tab[] = [
+  { href: '/wallet', label: 'Home', icon: 'home' },
+  { href: '/cards', label: 'Cards', icon: 'card' },
+  { href: '/activity', label: 'Activity', icon: 'activity' },
+  { href: '/more', label: 'More', icon: 'grid' },
+];
+
+/**
+ * Light and dark, remembered — the sun/moon the web has carried since it was
+ * built and the phone did not.
+ *
+ * It cycles through the RESOLVED scheme rather than through three states.
+ * Offering "system" as a third tap is honest and nobody wants it: the control
+ * a customer reaches for means "make this screen light" or "make it dark",
+ * and `system` remains the default until the first tap says otherwise.
+ */
+export function ThemeToggle() {
+  const colors = useTheme();
+  const scheme = useResolvedScheme();
+  const { set } = useThemeChoice();
+
+  return (
+    <Pressable
+      onPress={() => set(scheme === 'dark' ? 'light' : 'dark')}
+      accessibilityRole="button"
+      accessibilityLabel={scheme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+      // 44pt, and NO BACKGROUND IN ANY STATE. The web's equivalent was
+      // painting a near-white disc behind itself because a bare `button` rule
+      // outranked its class; there is no cascade to lose to here, and the hit
+      // area is padding rather than a filled box so it cannot come back.
+      hitSlop={8}
+      style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
+    >
+      <Icon name={scheme === 'dark' ? 'sun' : 'moon'} size={20} color={colors.text2} />
+    </Pressable>
+  );
+}
+
+/**
+ * The frame every signed-in screen sits in.
+ *
+ * `back` swaps the mark for a chevron, exactly as the web's `Shell` does, so a
+ * screen one level down is recognisable as one.
+ */
+export function Shell({
+  children,
+  title,
+  back,
+  scroll = true,
+}: {
+  readonly children: ReactNode;
+  readonly title?: string;
+  /** Show a back chevron instead of the mark — for a screen one level down. */
+  readonly back?: string;
+  /** Off for a screen that scrolls its own list. */
+  readonly scroll?: boolean;
+}) {
+  const styles = useStyles();
+  const colors = useTheme();
+  const insets = useSafeAreaInsets();
+  const pathname = usePathname();
+
+  const isActive = (href: string) =>
+    href === '/wallet' ? pathname === href : pathname.startsWith(href);
+
+  const body = (
+    <View style={{ padding: space.lg, paddingBottom: space.xxl }}>{children}</View>
+  );
+
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.bg, paddingTop: insets.top }}>
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: space.sm,
+          height: 56,
+          paddingHorizontal: space.md,
+        }}
+      >
+        {back === undefined ? (
+          <Logo size={22} />
+        ) : (
+          <>
+            <Pressable
+              onPress={() => router.replace(back as never)}
+              accessibilityRole="button"
+              accessibilityLabel="Back"
+              hitSlop={8}
+              style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
+            >
+              <Icon name="chevronLeft" size={22} color={colors.text2} />
+            </Pressable>
+            <Text style={[styles.h2, { fontSize: 17 }]}>{title}</Text>
+          </>
+        )}
+        <View style={{ flex: 1 }} />
+        <ThemeToggle />
+      </View>
+
+      {scroll ? (
+        <ScrollView
+          style={{ flex: 1 }}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{ paddingBottom: space.xxl }}
+        >
+          {body}
+        </ScrollView>
+      ) : (
+        <View style={{ flex: 1 }}>{body}</View>
+      )}
+
+      <View
+        style={{
+          flexDirection: 'row',
+          borderTopWidth: 1,
+          borderTopColor: colors.line,
+          backgroundColor: colors.surface,
+          paddingBottom: insets.bottom,
+        }}
+      >
+        {TABS.map((tab) => {
+          const active = isActive(tab.href);
+          return (
+            <Link key={tab.href} href={tab.href as never} asChild>
+              <Pressable
+                accessibilityRole="tab"
+                accessibilityState={{ selected: active }}
+                style={{ flex: 1, alignItems: 'center', paddingVertical: 10, gap: 3 }}
+              >
+                <Icon
+                  name={tab.icon}
+                  size={22}
+                  color={active ? colors.text : colors.text3}
+                />
+                <Text
+                  style={{
+                    fontSize: 11,
+                    fontWeight: active ? '700' : '500',
+                    color: active ? colors.text : colors.text3,
+                  }}
+                >
+                  {tab.label}
+                </Text>
+              </Pressable>
+            </Link>
+          );
+        })}
+      </View>
+    </View>
+  );
+}

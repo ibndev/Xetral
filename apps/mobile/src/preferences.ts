@@ -39,3 +39,8 @@ export async function writePreference(key: string, value: string): Promise<void>
 
 /** Whether the balance is masked. See the wallet screen. */
 export const BALANCE_VISIBILITY = 'xetral.balance-visibility';
+
+/** `light`, `dark` or `system`. The web keeps the same choice in
+ *  `localStorage` under `xetral-theme`; the two apps are separate installs
+ *  with separate storage, so a customer sets it once per device. */
+export const THEME_CHOICE = 'xetral.theme';

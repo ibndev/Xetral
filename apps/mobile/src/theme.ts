@@ -1,3 +1,4 @@
+import { createContext, useContext } from 'react';
 import { Platform, StyleSheet, useColorScheme } from 'react-native';
 
 /**
@@ -82,21 +83,78 @@ export const dark: Palette = {
 };
 
 /**
- * The palette the device is currently asking for.
+ * What the customer has chosen, or `system` to follow the phone.
  *
- * THERE IS DELIBERATELY NO `colors` EXPORT. There used to be — `export const
- * colors = light`, with a comment calling it "the palette in force, swapped
- * by the theme provider". No provider existed, and a module-level `const`
- * cannot be swapped from outside its module anyway, so every screen importing
- * it was pinned to light whatever the phone was set to. The app had a dark
- * palette defined and unreachable.
+ * THREE STATES, NOT TWO, and it matches the web exactly. A toggle that only
+ * knows light and dark has to pick one the first time it runs, and whichever
+ * it picks is wrong for half the people who never touch it.
+ */
+export type ThemeChoice = 'light' | 'dark' | 'system';
+
+export function isThemeChoice(value: string): value is ThemeChoice {
+  return value === 'light' || value === 'dark' || value === 'system';
+}
+
+/**
+ * The choice in force, and how to change it.
  *
- * Removing the binding rather than leaving it beside the hook is the point:
- * with it gone the compiler names every screen that still has to move, and
- * there is no shorter path for the next screen to take by accident.
+ * A CONTEXT rather than a module-level variable, and that is the second time
+ * this file has had to learn the lesson: `export const colors = light` was
+ * here once, described as "swapped by the theme provider", with no provider —
+ * and a module `const` cannot be swapped from outside its module anyway, so
+ * every screen was pinned to light whatever the phone was set to.
+ *
+ * Defaults to `system` so a screen rendered outside the provider — which
+ * should not happen, and did — follows the device rather than freezing on one
+ * palette. `set` is a no-op there, which is visible in a way a wrong colour is
+ * not.
+ */
+export const ThemeChoiceContext = createContext<{
+  readonly choice: ThemeChoice;
+  readonly set: (next: ThemeChoice) => void;
+}>({ choice: 'system', set: () => undefined });
+
+export function useThemeChoice(): {
+  readonly choice: ThemeChoice;
+  readonly set: (next: ThemeChoice) => void;
+} {
+  return useContext(ThemeChoiceContext);
+}
+
+/**
+ * THE RULE, AS A PURE FUNCTION: the customer's choice wins, `system` falls
+ * back to the device, and anything unreadable is light.
+ *
+ * Separated from the hook so it can be TESTED WITHOUT A RENDERER. The hooks
+ * below are two lines of plumbing over this; the decision is here, where a
+ * test can put every combination through it.
+ */
+export function schemeFor(
+  choice: ThemeChoice,
+  device: 'light' | 'dark' | null | undefined,
+): 'light' | 'dark' {
+  const resolved = choice === 'system' ? device : choice;
+  return resolved === 'dark' ? 'dark' : 'light';
+}
+
+export function paletteFor(scheme: 'light' | 'dark'): Palette {
+  return scheme === 'dark' ? dark : light;
+}
+
+/**
+ * The palette in force.
+ *
+ * It used to read `useColorScheme()` alone, so the phone had a dark palette
+ * and NO WAY TO ASK FOR IT — the web has carried a sun/moon toggle since it
+ * was built, and the two apps disagreed about whether that control existed.
  */
 export function useTheme(): Palette {
-  return useColorScheme() === 'dark' ? dark : light;
+  return paletteFor(useResolvedScheme());
+}
+
+/** What the toggle should offer next, and which icon says so. */
+export function useResolvedScheme(): 'light' | 'dark' {
+  return schemeFor(useContext(ThemeChoiceContext).choice, useColorScheme());
 }
 
 /**
@@ -176,15 +234,25 @@ export function shadowsFor(palette: Palette) {
  */
 const SHEETS = new Map<Palette, ReturnType<typeof buildSheet>>();
 
-/** The sheet for the palette in force. */
-export function useStyles(): ReturnType<typeof buildSheet> {
-  const palette = useTheme();
+/**
+ * The sheet for a palette, built once and cached.
+ *
+ * Also separated from the hook, for the same reason: `StyleSheet.create`
+ * freezes whatever colours it was handed, which is the exact failure this
+ * cache exists to prevent, and it is worth a test that does not need React.
+ */
+export function stylesFor(palette: Palette): ReturnType<typeof buildSheet> {
   let sheet = SHEETS.get(palette);
   if (sheet === undefined) {
     sheet = buildSheet(palette);
     SHEETS.set(palette, sheet);
   }
   return sheet;
+}
+
+/** The sheet for the palette in force. */
+export function useStyles(): ReturnType<typeof buildSheet> {
+  return stylesFor(useTheme());
 }
 
 function buildSheet(colors: Palette) {

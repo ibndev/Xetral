@@ -82,7 +82,9 @@ being a list.
 1. **Boot it.** Category 1 is a deploy loop; get through it first.
 2. **Grant `admin` to a real person.** The first grant is an `INSERT`, because
    there is no admin yet to make it through the dashboard. Enrol their second
-   factor — TOTP is required on *every* staff route, reads included.
+   factor — TOTP is required on *every* staff route, reads included. See
+   **[Getting into the dashboard the first time](#getting-into-the-dashboard-the-first-time)**
+   below for the two statements and the screen.
 3. **Open `/admin/readiness`** and work category 3, then category 4.
 4. **Put the worker intervals on exactly one instance.**
    `docker-compose.app.yml` does this by blanking them on `api` and setting
@@ -111,6 +113,58 @@ being a list.
     backup is a hope with a cron entry, and a truncated copy starts perfectly.
 11. **Rotate every credential used during testing.** A sandbox key pasted into
     a terminal, a chat window or a CI log is a key somebody else has.
+
+---
+
+## Getting into the dashboard the first time
+
+**There are no seeded credentials, and there is no default account.** A
+platform that shipped with one would ship with the same one everywhere, and the
+first thing anybody would find is the last thing anybody would change. So the
+operations dashboard has exactly as many users as you have created, which on a
+fresh deployment is none.
+
+Getting in is three steps, and the first is the only one that needs `psql` —
+which is the point: the bootstrap is a deliberate act on the database host, not
+something reachable from the internet.
+
+**1. Register normally.** Open the app and create an account at `/signup`, with
+the address the operator will really use. Staff are customers with roles; there
+is no separate staff table to add somebody to.
+
+**2. Grant `admin`, once, on the database.**
+
+```sql
+-- The one grant that cannot be made through the dashboard, because the
+-- dashboard is what it unlocks. `granted_by` is the same row: the first
+-- admin is, unavoidably, self-granted, and the audit trail says so rather
+-- than pretending somebody else approved it.
+INSERT INTO staff_roles (user_id, role, granted_by)
+SELECT id, 'admin', id FROM users WHERE email = 'you@yourcompany.com';
+```
+
+Roles are read **fresh from the database on every request**, so this takes
+effect on the next page load. There is no sign-out, no token to refresh, and —
+equally — no fifteen-minute window in which a *revoked* role keeps working.
+
+**3. Enrol a second factor**, at **`/admin/security`**. Every operations route
+refuses with `totp_not_enrolled` until this is done, reads included: gating
+only the acting half would leave the customer database behind one password.
+The screen issues a secret, you add it to an authenticator app, and you type
+one code to prove it works. **The secret is shown once.** Until you type that
+code the enrolment is inert, so losing it before confirming costs nothing —
+start again.
+
+After that, grant the narrower roles from `/admin/staff`. Somebody answering
+the phone needs `support`, not the ability to change the transfer fee.
+
+### What a stranger sees at `/admin`
+
+Nothing useful, deliberately. A visitor with no session is sent to sign-in; one
+signed in without a role is told the dashboard exists and that they cannot use
+it, and is not told which roles there are. The refusal that matters is the
+server's — every `/v1/admin/` route checks a role on every request — and the
+screen only avoids handing out a map of the operations surface to whoever asks.
 
 ---
 
