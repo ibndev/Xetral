@@ -19,7 +19,6 @@ import { space, useStyles, useTheme } from '@/theme';
  */
 export default function Kyc() {
   const client = useXetral();
-  const styles = useStyles();
   const status = useLoad<KycStatus | null>(() => client.kyc(), [client]);
   const { busy, error, code, done, run } = useSubmit();
 

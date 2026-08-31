@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { formatAmount } from '@xetral/client';
+import { CRYPTO_PAIRS, formatAmount } from '@xetral/client';
 import type { CryptoAddress, CryptoQuote } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { FormError } from '@/ui/form-error';
@@ -18,11 +18,22 @@ import { VerifyPrompt } from '@/ui/verify-prompt';
  * accept a maximum fee, because network fees move between the quote and the
  * request and a fee they did not agree to is money taken quietly.
  */
-const ASSETS = [
-  { asset: 'USDT', network: 'TRON', label: 'USDT on Tron (TRC-20)' },
-  { asset: 'USDT', network: 'ETHEREUM', label: 'USDT on Ethereum (ERC-20)' },
-  { asset: 'BTC', network: 'BITCOIN', label: 'Bitcoin' },
-] as const;
+/*
+ * THE PAIRS COME FROM `@xetral/client`, and this list is why.
+ *
+ * It read `TRON`, `ETHEREUM` and `BITCOIN`. The API's schema is
+ * `z.enum(['bitcoin','ethereum','tron','bsc'])` and zod is case-sensitive, so
+ * EVERY crypto action from a browser was refused with `400 invalid_request` on
+ * the `network` field — a deposit address, a fee quote, a withdrawal — and the
+ * customer read "Some details are missing or invalid" about a form they had
+ * filled in correctly. BNB Chain was missing entirely.
+ *
+ * Nothing could see it: the API's e2e drives its endpoints with the right
+ * casing, this file compiled because a string is a string, and the two lists
+ * lived in different workspaces. One list now, and
+ * `crypto-networks.test.ts` fails the build if it drifts from the schema.
+ */
+const ASSETS = CRYPTO_PAIRS;
 
 export default function Crypto() {
   const client = useXetral();

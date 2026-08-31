@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { formatAmount } from '@xetral/client';
+import { CRYPTO_PAIRS } from '@xetral/client';
 import type { CryptoAddress, CryptoQuote, Withdrawal } from '@xetral/client';
 import { Shell } from '@/shell';
 import { Button, Done, Empty, Field, FormError, Loading, Panel, VerifyPrompt } from '@/ui';
@@ -10,16 +11,12 @@ import { radius, space, useStyles, useTheme } from '@/theme';
 /**
  * Crypto: an address to receive on, and an irreversible way to send.
  *
- * THE ASSET AND CHAIN PAIRS ARE THE SERVER'S, from `crypto/dto.ts`. A pair
- * offered here that the API refuses is a customer generating an address for a
- * chain nothing will ever watch.
+ * THE PAIRS COME FROM `@xetral/client`, which holds the API's own casing. The
+ * web's copy of this list used uppercase chain names and was refused by the
+ * schema on every request; one list is what stops that happening again in
+ * either direction.
  */
-const PAIRS = [
-  { asset: 'USDT', network: 'tron', label: 'USDT on Tron (TRC-20)' },
-  { asset: 'USDT', network: 'ethereum', label: 'USDT on Ethereum (ERC-20)' },
-  { asset: 'USDT', network: 'bsc', label: 'USDT on BNB Chain (BEP-20)' },
-  { asset: 'BTC', network: 'bitcoin', label: 'Bitcoin' },
-] as const;
+const PAIRS = CRYPTO_PAIRS;
 
 export default function Crypto() {
   const client = useXetral();

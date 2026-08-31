@@ -6,7 +6,7 @@ import { LogoMark } from '@/logo';
 import { Shell } from '@/shell';
 import { Button, Done, Empty, Field, FormError, Loading, Panel, VerifyPrompt } from '@/ui';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/hooks';
-import { radius, space, useStyles, useTheme } from '@/theme';
+import { radius, space, useStyles } from '@/theme';
 
 /**
  * Virtual USD cards, on the phone.

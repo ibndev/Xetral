@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { formatAmount } from '@xetral/client';
-import type { CatalogueItem, Purchase } from '@xetral/client';
+import { PURCHASE_SERVICES } from '@xetral/client';
+import type { CatalogueItem, Purchase, PurchaseService } from '@xetral/client';
 import { Shell } from '@/shell';
 import { Button, Done, Empty, Field, FormError, Loading, Panel } from '@/ui';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/hooks';
@@ -11,19 +12,13 @@ import { radius, space, useStyles, useTheme } from '@/theme';
  * Airtime, data, bills, eSIM and virtual numbers — five services behind one
  * purchase flow, exactly as the web has them.
  *
- * The five differ only in what the target field is called and what keyboard it
- * wants. The MONEY QUESTION does not differ at all, which is why the API has
- * one endpoint and this screen has one form.
+ * THE LIST IS THE WEB'S, from `@xetral/client`. It was written out in both
+ * apps; the crypto screen's equivalent duplication is how the browser spent
+ * the whole life of that feature sending chain names the API refused.
  */
-const SERVICES = [
-  { code: 'airtime', label: 'Airtime', target: 'Phone number', mode: 'tel' },
-  { code: 'data', label: 'Data', target: 'Phone number', mode: 'tel' },
-  { code: 'electricity', label: 'Electricity', target: 'Meter number', mode: 'numeric' },
-  { code: 'esim', label: 'eSIM', target: 'Email for the QR code', mode: 'email' },
-  { code: 'number', label: 'Virtual number', target: 'Country code', mode: 'text' },
-] as const;
+const SERVICES = PURCHASE_SERVICES;
 
-type ServiceCode = (typeof SERVICES)[number]['code'];
+type ServiceCode = PurchaseService['code'];
 
 export default function Bills() {
   const client = useXetral();
@@ -125,8 +120,11 @@ function Buy({
 
   const items = catalogue.data ?? [];
   const selected = items.find((i) => i.code === item);
-  // A catalogue price is fixed; only an open-value service asks for an amount.
-  const priced = selected?.price !== null && selected?.price !== undefined;
+  // A fixed-price item has nothing for the customer to type; a variable one
+  // (airtime, electricity) does. Showing an amount box for a ₦500 data bundle
+  // invites somebody to type a different number and be confused when it is
+  // ignored. Same rule, same wording, as the web's bills screen.
+  const fixedPrice = selected?.price !== null && selected?.price !== undefined;
 
   return (
     <Panel title={`Buy ${service.label.toLowerCase()}`}>
@@ -176,7 +174,7 @@ function Buy({
         onChangeText={setTarget}
       />
 
-      {!priced && (
+      {!fixedPrice && (
         <Field
           label="Amount (NGN)"
           inputMode="decimal"
@@ -198,14 +196,14 @@ function Buy({
       <Button
         label="Buy"
         busy={busy}
-        disabled={item === '' || target === '' || pin === '' || (!priced && amount === '')}
+        disabled={item === '' || target === '' || pin === '' || (!fixedPrice && amount === '')}
         onPress={() =>
           void run(async () => {
             const purchase = await client.buy({
               service: service.code,
               itemCode: item,
               target,
-              amount: priced && selected?.price !== null ? (selected?.price ?? amount) : amount,
+              amount: fixedPrice ? (selected?.price ?? '') : amount,
               pin,
               idempotencyKey: attempt.key,
             });
@@ -214,7 +212,7 @@ function Buy({
             onBought();
             return purchase.status === 'delivered'
               ? 'Done.'
-              : 'Sent. We will confirm shortly.';
+              : 'Submitted. We will confirm shortly.';
           })
         }
       />

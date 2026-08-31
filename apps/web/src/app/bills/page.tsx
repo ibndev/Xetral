@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { formatAmount } from '@xetral/client';
-import type { CatalogueItem, Purchase } from '@xetral/client';
+import { PURCHASE_SERVICES } from '@xetral/client';
+import type { CatalogueItem, Purchase, PurchaseService } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { FormError } from '@/ui/form-error';
 import { Icon } from '@/ui/icon';
@@ -18,15 +19,12 @@ import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/lib/hooks';
  * which is the whole point of the port, and it would be undone by three
  * screens that each knew which provider they were talking to.
  */
-const SERVICES = [
-  { code: 'airtime', label: 'Airtime', target: 'Phone number', mode: 'tel' },
-  { code: 'data', label: 'Data', target: 'Phone number', mode: 'tel' },
-  { code: 'electricity', label: 'Electricity', target: 'Meter number', mode: 'numeric' },
-  { code: 'esim', label: 'eSIM', target: 'Email for the QR code', mode: 'email' },
-  { code: 'number', label: 'Virtual number', target: 'Country code', mode: 'text' },
-] as const;
+/* One list, in `@xetral/client`. It was written out here and again on the
+ * phone — the same duplication that let the crypto screen's chain names drift
+ * from the schema for the whole life of that feature. */
+const SERVICES = PURCHASE_SERVICES;
 
-type ServiceCode = (typeof SERVICES)[number]['code'];
+type ServiceCode = PurchaseService['code'];
 
 export default function Bills() {
   const client = useXetral();

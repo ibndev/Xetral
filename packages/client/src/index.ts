@@ -1,4 +1,5 @@
 export * from './admin.js';
+export * from './catalogues.js';
 export * from './client.js';
 export * from './errors.js';
 export * from './icons.js';

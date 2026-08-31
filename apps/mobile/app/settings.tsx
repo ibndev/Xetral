@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Pressable, Switch, Text, View } from 'react-native';
 import { router } from 'expo-router';
-import type { ConsentKind, DataRequest } from '@xetral/client';
+import type { DataRequest } from '@xetral/client';
 import { Shell } from '@/shell';
 import { Button, Done, Field, FormError, Loading, Panel } from '@/ui';
 import { useLoad, useSubmit, useXetral } from '@/hooks';
@@ -184,7 +184,7 @@ function Consents() {
       {state.loading && <Loading />}
       <View style={styles.rowBetween}>
         <View style={{ flex: 1, paddingRight: space.md }}>
-          <Text style={{ color: styles.h2.color, fontWeight: '600' }}>Product news</Text>
+          <Text style={[styles.h2, { fontSize: 15 }]}>Product news</Text>
           <Text style={styles.hint}>
             Takes effect immediately. Security alerts and receipts are not marketing
             and keep coming.
@@ -194,7 +194,7 @@ function Consents() {
           value={marketing?.granted === true}
           onValueChange={(next) =>
             void run(async () => {
-              await client.setConsent('marketing_email' as ConsentKind, next);
+              await client.setConsent('marketing_email', next);
               state.reload();
               return undefined;
             })
