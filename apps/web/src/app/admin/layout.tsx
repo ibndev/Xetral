@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { ElevationProvider } from '@/lib/elevation';
 import { AdminGate } from './gate';
 import { AdminShell } from './nav';
 
@@ -24,7 +25,16 @@ import { AdminShell } from './nav';
 export default function AdminLayout({ children }: { children: ReactNode }) {
   return (
     <AdminGate>
-      <AdminShell>{children}</AdminShell>
+      {/*
+        The second factor, asked for ONCE per work session and handled at the
+        client boundary rather than on each form. Without it every acting
+        route answered `totp_required` for ever after the ten minutes that
+        follow enrolment, because nothing in the product could elevate a
+        session again — see lib/elevation.tsx.
+      */}
+      <ElevationProvider>
+        <AdminShell>{children}</AdminShell>
+      </ElevationProvider>
     </AdminGate>
   );
 }

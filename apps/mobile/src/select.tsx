@@ -37,6 +37,8 @@ export function Select({
   options,
   placeholder = 'Select…',
   disabled = false,
+  variant = 'field',
+  renderMark,
 }: {
   readonly label: string;
   readonly value: string;
@@ -44,6 +46,15 @@ export function Select({
   readonly options: readonly SelectOption[];
   readonly placeholder?: string;
   readonly disabled?: boolean;
+  /**
+   * `field` is a labelled input in a form. `pill` is a compact control that
+   * sits INSIDE a card header — the currency selector on the balance card —
+   * where a full-width field with a label above it would be a second heading.
+   * The sheet is identical either way; only the trigger differs.
+   */
+  readonly variant?: 'field' | 'pill';
+  /** An optional badge before the label, on the trigger and in the sheet. */
+  readonly renderMark?: (value: string) => React.ReactNode;
 }) {
   const styles = useStyles();
   const colors = useTheme();
@@ -52,9 +63,11 @@ export function Select({
 
   const selected = options.find((o) => o.value === value);
 
+  const pill = variant === 'pill';
+
   return (
-    <View>
-      <Text style={styles.label}>{label}</Text>
+    <View style={pill ? undefined : { alignSelf: 'stretch' }}>
+      {!pill && <Text style={styles.label}>{label}</Text>}
 
       <Pressable
         accessibilityRole="button"
@@ -62,17 +75,39 @@ export function Select({
         accessibilityLabel={`${label}: ${selected?.label ?? placeholder}`}
         disabled={disabled}
         onPress={() => setOpen(true)}
+        // No ripple and no pressed tint: the disc that appears behind a
+        // control on touch is the thing the balance card was reported for.
+        android_ripple={null}
         style={[
-          styles.input,
-          {
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            opacity: disabled ? 0.6 : 1,
-          },
+          pill
+            ? {
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 6,
+                paddingLeft: 12,
+                paddingRight: 10,
+                height: 40,
+                borderRadius: radius.pill,
+                backgroundColor: colors.surface2,
+              }
+            : {
+                ...styles.input,
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              },
+          { opacity: disabled ? 0.6 : 1 },
         ]}
       >
-        <Text style={{ color: selected === undefined ? colors.text3 : colors.text, fontSize: 16 }}>
+        {renderMark !== undefined && selected !== undefined && renderMark(selected.value)}
+        <Text
+          style={{
+            color: selected === undefined ? colors.text3 : colors.text,
+            fontSize: pill ? 15 : 16,
+            fontWeight: pill ? '700' : '400',
+            flex: pill ? 0 : 1,
+          }}
+        >
           {selected?.label ?? placeholder}
         </Text>
         <Icon name="chevronDown" size={18} color={colors.text3} />
@@ -151,6 +186,7 @@ export function Select({
                       paddingVertical: space.sm,
                     }}
                   >
+                    {renderMark !== undefined && renderMark(item.value)}
                     <View style={{ flex: 1 }}>
                       <Text
                         style={{

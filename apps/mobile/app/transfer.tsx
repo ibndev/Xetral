@@ -1,11 +1,13 @@
 import { useState } from 'react';
-import { Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
+import { router } from 'expo-router';
 import { exponentFor, formatAmount, isValidAmount, TRANSFER_CURRENCIES } from '@xetral/client';
 import { Shell } from '@/shell';
-import { Button, Done, Field, FormError, Panel } from '@/ui';
+import { Button, Done, Field, FormError, Loading, Panel } from '@/ui';
 import { Select } from '@/select';
+import { Icon } from '@/icon';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/hooks';
-import { useStyles } from '@/theme';
+import { font, radius, space, useTheme, useStyles } from '@/theme';
 
 export default function Transfer() {
   const client = useXetral();
@@ -43,12 +45,81 @@ export default function Transfer() {
 
   const amountValid = amount === '' || isValidAmount(amount, exponentFor(currency));
 
+  /*
+   * THE PIN IS ASKED ABOUT BEFORE THE FORM, and WHO is asked before that.
+   *
+   * Both were discovered at the end: a customer with no transaction PIN filled
+   * in a recipient, an amount and a PIN box before being told the PIN box was
+   * never going to work; and "recipient email" was the only way to name
+   * somebody, which is the identifier people are least willing to share.
+   */
+  const session = useLoad(() => client.currentSession(), [client]);
+  const needsPin = session.data !== undefined && !session.data.has_pin;
+  const [via, setVia] = useState<'link' | 'wallet' | undefined>();
+
+  if (session.loading) {
+    return (
+      <Shell back="/wallet" title="Send money">
+        <Loading />
+      </Shell>
+    );
+  }
+
+  if (needsPin) {
+    return (
+      <Shell back="/wallet" title="Send money">
+        <Panel title="First, a transaction PIN" subtitle="It authorises every payment you make">
+          <Text style={styles.lead}>
+            Your password signs you in. A separate PIN approves money leaving your
+            account, so somebody who reaches an unlocked phone still cannot spend
+            from it. You will only set it once.
+          </Text>
+          <Button label="Set my transaction PIN" onPress={() => router.push('/settings')} />
+        </Panel>
+      </Shell>
+    );
+  }
+
+  if (via === undefined) {
+    return (
+      <Shell back="/wallet" title="Send money">
+        <Panel title="Send money" subtitle="Who are you paying?">
+          <View style={{ gap: 10, marginTop: space.md }}>
+            <Choice
+              icon="globe"
+              title="A payment link"
+              sub="Somebody sent you their Xetral link or @handle"
+              onPress={() => setVia('link')}
+            />
+            <Choice
+              icon="wallet"
+              title="A Xetral wallet"
+              sub="You know their email address or phone number"
+              onPress={() => setVia('wallet')}
+            />
+          </View>
+          <Text style={styles.hint}>
+            Both go to the same place. Your own link is on your settings screen if
+            somebody needs it.
+          </Text>
+        </Panel>
+      </Shell>
+    );
+  }
+
   return (
     <Shell back="/wallet" title="Send money">
-      <Panel title="Send money" subtitle="To another Xetral account">
+      <Panel
+        title="Send money"
+        subtitle={via === 'link' ? 'Using a payment link' : 'To a Xetral wallet'}
+      >
         <Field
-          label="Recipient email"
-          inputMode="email"
+          label={via === 'link' ? 'Their link or @handle' : 'Their email or phone number'}
+          // `url` on the link path so the keyboard offers a slash rather than
+          // an @ — but the API resolves all four shapes from this one field
+          // either way, so neither keyboard can produce something it refuses.
+          inputMode={via === 'link' ? 'url' : 'email'}
+          placeholder={via === 'link' ? '@olawale' : 'you@example.com'}
           autoCapitalize="none"
           autoCorrect={false}
           value={recipient}
@@ -127,5 +198,64 @@ export default function Transfer() {
         <Done message={done} />
       </Panel>
     </Shell>
+  );
+}
+
+/**
+ * One of two ways to name a recipient.
+ *
+ * A row rather than a segmented control, because these are not two views of
+ * one form: the answer changes what the next screen asks for, and a segment
+ * would imply the fields below stay put.
+ */
+function Choice({
+  icon,
+  title,
+  sub,
+  onPress,
+}: {
+  readonly icon: 'globe' | 'wallet';
+  readonly title: string;
+  readonly sub: string;
+  readonly onPress: () => void;
+}) {
+  const colors = useTheme();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${title}. ${sub}`}
+      onPress={onPress}
+      android_ripple={null}
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 13,
+        padding: 15,
+        borderRadius: radius.md,
+        borderWidth: 1,
+        borderColor: colors.lineStrong,
+        backgroundColor: colors.surface,
+      }}
+    >
+      <View
+        style={{
+          width: 42,
+          height: 42,
+          borderRadius: radius.md,
+          backgroundColor: colors.surface2,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <Icon name={icon} size={20} color={colors.text2} />
+      </View>
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text style={{ color: colors.text, fontFamily: font.sansSemi, fontSize: 15 }}>{title}</Text>
+        <Text style={{ color: colors.text3, fontFamily: font.sans, fontSize: 13, lineHeight: 18 }}>
+          {sub}
+        </Text>
+      </View>
+      <Icon name="chevronRight" size={18} color={colors.text3} />
+    </Pressable>
   );
 }

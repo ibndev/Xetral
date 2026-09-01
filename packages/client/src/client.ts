@@ -339,8 +339,28 @@ export class XetralClient {
     user_id: string;
     device_id: string;
     expires_at: string;
+    /** What to call this customer, or null when they have submitted no
+     *  identity documents — which is the only place this system holds a name.
+     *  A screen that greets them falls back rather than inventing one from an
+     *  email address. */
+    first_name: string | null;
+    /** Whether a transaction PIN exists, so a screen can send somebody to
+     *  create one BEFORE they fill in a form that will refuse without it. */
+    has_pin: boolean;
+    /** Their own payment handle, or null until `profile()` mints one. */
+    handle: string | null;
   }> {
     return this.#get('/v1/auth/session');
+  }
+
+  /**
+   * The customer's own payment handle and the link built from it.
+   *
+   * Mints one on the first call and returns the same one after that, so it is
+   * safe to call whenever a screen wants to show the link.
+   */
+  async profile(): Promise<{ handle: string; link: string }> {
+    return this.#get('/v1/auth/profile');
   }
 
   /**
@@ -383,6 +403,26 @@ export class XetralClient {
    */
   async confirmTotpEnrolment(code: string): Promise<void> {
     await this.#post('/v1/auth/totp/confirm', { totp_code: code });
+  }
+
+  /**
+   * Start a work session on the operations dashboard.
+   *
+   * WITHOUT THIS THE ACTING SURFACE WAS UNREACHABLE. Elevation is a property
+   * of the session and only two things could ever set it: enrolment, which
+   * runs once, and an acting request that carried a code — which no client
+   * ever sent. So the dashboard worked for ten minutes after somebody
+   * enrolled and then refused every action for ever, with a message telling
+   * the operator to enter a code into a form that had nowhere to put one.
+   *
+   * One code buys the whole window rather than one action. Codes are
+   * single-use and change every thirty seconds, so a per-action code would
+   * refuse a reviewer on their second approval — and the predictable end of
+   * that is a shared authenticator on somebody's desk, which looks like
+   * control and is not.
+   */
+  async elevateStaffSession(code: string): Promise<void> {
+    await this.#post('/v1/auth/totp/elevate', { totp_code: code });
   }
 
   /* --------------------------- funding -------------------------- */

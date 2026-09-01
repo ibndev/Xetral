@@ -17,9 +17,17 @@ import { describe, expect, it } from 'vitest';
  * otherwise. That is the exact shape `class-coverage.test.ts` exists to catch
  * on the web: a name asked for and never defined.
  *
- * Checked in three directions, because two of them fail silently: a face named
- * with no file, a file registered under a key nothing uses, and a `fontFamily`
- * string anywhere in the app that is not one of the three.
+ * Checked in four directions, because three of them fail silently: a face
+ * named with no file, a file registered under a key nothing uses, a
+ * `fontFamily` string anywhere in the app that is not one of them, and — the
+ * one that cost a round — a `fontWeight` set beside a custom family.
+ *
+ * THAT LAST ONE IS WHY THERE IS A FACE PER WEIGHT. React Native does not
+ * synthesize weight: on Android a custom `fontFamily` is matched by NAME and
+ * `fontWeight` is ignored entirely. So one Regular file meant every label,
+ * button and currency code in the app rendered at 400 while the stylesheet
+ * said 600 — reported as "the mobile text is too thin", and invisible to
+ * every test here because the NUMBERS matched the web's exactly.
  */
 
 const HERE = new URL('.', import.meta.url).pathname;
@@ -47,7 +55,13 @@ function registered(): readonly string[] {
   const source = readFileSync(LAYOUT, 'utf8');
   const block = source.match(/useFonts\(\{([\s\S]*?)\}\)/);
   if (block === null) throw new Error('nothing calls useFonts in _layout.tsx');
-  return Array.from((block[1] ?? '').matchAll(/(\w+):\s*require/g), (m) => m[1] as string);
+  // Quoted, because a face key with a hyphen — `'InstrumentSans-Bold'` — is
+  // not a bare identifier and an unquoted-only pattern silently matches none
+  // of them, which reads as "nothing is registered".
+  return Array.from(
+    (block[1] ?? '').matchAll(/'?([\w-]+)'?:\s*require/g),
+    (m) => m[1] as string,
+  );
 }
 
 describe('the brand typefaces', () => {
@@ -88,8 +102,49 @@ describe('the brand typefaces', () => {
         if (!allowed.has(m[1] as string)) strays.push(`${file.slice(HERE.length)}: ${m[1]}`);
       }
     }
-    expect(strays, `fontFamily strings that are not one of the three:\n${strays.join('\n')}`)
+    expect(strays, `fontFamily strings the theme does not name:\n${strays.join('\n')}`)
       .toEqual([]);
+  });
+
+  it('NO STYLE SETS fontWeight BESIDE A CUSTOM FAMILY', () => {
+    /*
+     * The bug this whole arrangement exists for. `fontFamily` plus
+     * `fontWeight` reads as obviously correct — it is what the web does — and
+     * on Android the weight is dropped, so the text renders at whatever
+     * weight the single registered file happens to be. On iOS it is worse in
+     * a different way: a faux-bold is synthesized ON TOP of an already-bold
+     * face, which looks deliberate.
+     *
+     * The weights are real files now. Picking one is naming it.
+     */
+    const files = [...walk(join(HERE, '..', 'app')), ...walk(HERE)]
+      .filter((f) => !f.endsWith('.test.ts'));
+    const offenders: string[] = [];
+
+    for (const file of files) {
+      // COMMENTS STRIPPED FIRST. This rule is worth explaining at its call
+      // sites, and an explanation that names both properties is otherwise
+      // read as a violation of itself — which it did, on the very comment
+      // saying not to do the thing.
+      const source = readFileSync(file, 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+
+      // A style object literal that mentions both, in either order, with
+      // nothing but other properties between them.
+      for (const m of source.matchAll(/\{[^{}]*\}/g)) {
+        const block = m[0];
+        if (/fontFamily:/.test(block) && /fontWeight:/.test(block)) {
+          offenders.push(`${file.slice(HERE.length)}: ${block.replace(/\s+/g, ' ').slice(0, 90)}`);
+        }
+      }
+    }
+
+    expect(
+      offenders,
+      'these set a weight beside a custom family, which Android ignores — use ' +
+        `the face that IS the weight (font.sansSemi, font.displayBold, …):\n${offenders.join('\n')}`,
+    ).toEqual([]);
   });
 });
 

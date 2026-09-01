@@ -6,7 +6,7 @@ import type { ApiErrorCode } from '@xetral/client';
 import { Icon } from '@/icon';
 import type { IconName } from '@/icon';
 import { apiUrl } from '@/session';
-import { radius, space, useStyles, useTheme } from '@/theme';
+import { font, radius, space, useStyles, useTheme } from '@/theme';
 
 /**
  * The small pieces every screen repeats, so they repeat identically.
@@ -79,7 +79,7 @@ export function FormError({
               backgroundColor: colors.brand,
             }}
           >
-            <Text style={{ color: colors.onBrand, fontWeight: '600', fontSize: 13.5 }}>
+            <Text style={{ color: colors.onBrand, fontFamily: font.sansSemi, fontSize: 13.5 }}>
               {next.label}
             </Text>
           </Pressable>

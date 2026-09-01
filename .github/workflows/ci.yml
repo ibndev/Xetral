@@ -123,6 +123,7 @@ jobs:
             -f packages/ledger/sql/036_attention.sql \
             -f packages/ledger/sql/037_provider_health.sql \
             -f packages/ledger/sql/038_usdc.sql \
+            -f packages/ledger/sql/039_profile_handles.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       - name: Ledger and identity invariants
@@ -169,6 +170,7 @@ jobs:
                    packages/ledger/sql/036_attention.test.sql \
                    packages/ledger/sql/037_provider_health.test.sql \
                    packages/ledger/sql/038_usdc.test.sql \
+                   packages/ledger/sql/039_profile_handles.test.sql \
                    packages/ledger/sql/099_least_privilege.test.sql; do
             echo "== $f"
             psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
@@ -245,6 +247,7 @@ jobs:
             -f packages/ledger/sql/036_attention.sql \
             -f packages/ledger/sql/037_provider_health.sql \
             -f packages/ledger/sql/038_usdc.sql \
+            -f packages/ledger/sql/039_profile_handles.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       # ------------------------------------------------------------------

@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import { Pressable, Switch, Text, View } from 'react-native';
+import { Pressable, Share, Switch, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import type { DataRequest } from '@xetral/client';
 import { Shell } from '@/shell';
 import { Button, Done, Field, FormError, Loading, Panel } from '@/ui';
 import { useLoad, useSubmit, useXetral } from '@/hooks';
 import { resetXetral, xetral } from '@/session';
-import { space, useStyles, useTheme, useThemeChoice } from '@/theme';
+import { font, space, useStyles, useTheme, useThemeChoice } from '@/theme';
 
 /**
  * The account screen — the phone's copy of the web's `/settings`.
@@ -32,6 +32,7 @@ export default function Settings() {
 
   return (
     <Shell back="/more" title="Account">
+      <PaymentLink />
       <SetPin />
 
       <Panel title="Appearance">
@@ -84,7 +85,7 @@ function Choice({
         backgroundColor: on ? colors.brand : colors.surface2,
       }}
     >
-      <Text style={{ fontWeight: '600', fontSize: 13.5, color: on ? colors.onBrand : colors.text2 }}>
+      <Text style={{ fontFamily: font.sansSemi, fontSize: 13.5, color: on ? colors.onBrand : colors.text2 }}>
         {label}
       </Text>
     </Pressable>
@@ -276,6 +277,75 @@ function YourData() {
 
       <FormError error={error} code={code} />
       <Done message={done} />
+    </Panel>
+  );
+}
+
+/**
+ * The customer's own payment link, and the one action worth having for it.
+ *
+ * SHARE RATHER THAN COPY, on the phone. A clipboard copy is the web's answer
+ * because a browser has nowhere to send the link; a handset has a share sheet
+ * that puts it straight into the WhatsApp message somebody was about to type,
+ * which is where these links actually go.
+ *
+ * Fetching it here is what MINTS it — `profile()` creates a handle on the
+ * first call and returns the same one afterwards.
+ */
+function PaymentLink() {
+  const client = useXetral();
+  const styles = useStyles();
+  const colors = useTheme();
+  const profile = useLoad(() => client.profile(), [client]);
+
+  return (
+    <Panel title="Your payment link" subtitle="Share it and anyone can pay you">
+      <Text style={styles.lead}>
+        It is safe to post publicly — it identifies you for receiving money and
+        reveals nothing else, which is the point of having one instead of giving
+        out your email address.
+      </Text>
+
+      {profile.loading && <Loading />}
+
+      {profile.data !== undefined && (
+        <>
+          <View
+            style={{
+              marginTop: space.sm,
+              padding: space.md,
+              borderRadius: 14,
+              backgroundColor: colors.surface2,
+              gap: 4,
+            }}
+          >
+            <Text style={[styles.amount, { fontSize: 20 }]} selectable>
+              @{profile.data.handle}
+            </Text>
+            <Text style={styles.muted} selectable>
+              {profile.data.link}
+            </Text>
+          </View>
+
+          <Button
+            label="Share my link"
+            icon="send"
+            onPress={() => {
+              // Failure is silent on purpose: the link is on screen and
+              // selectable, and a dismissed share sheet rejects on iOS —
+              // which is a customer changing their mind, not an error.
+              void Share.share({ message: profile.data?.link ?? '' }).catch(() => undefined);
+            }}
+          />
+
+          <Text style={styles.hint}>
+            A handle is yours permanently. It cannot be given up and reissued to
+            somebody else, so a link you shared last year still pays you.
+          </Text>
+        </>
+      )}
+
+      <FormError error={profile.error} code={profile.code} />
     </Panel>
   );
 }

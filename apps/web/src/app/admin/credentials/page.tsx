@@ -181,6 +181,18 @@ function Credential({
                 value={pin}
                 onChange={(e) => setPin(e.target.value)}
               />
+              {/*
+                NAMED, because this field and the authenticator code were
+                confused and the confusion was the product's fault. The
+                dashboard used to refuse this action with "enter the six-digit
+                code from your authenticator app" and offer nowhere to put
+                one — so the code went in here, the PIN check refused it, and
+                an operator holding both correct secrets was told they were
+                wrong. The code is now asked for in its own dialog.
+              */}
+              <span className="hint">
+                Your own PIN — not the six-digit code from your authenticator app.
+              </span>
             </label>
           )}
 

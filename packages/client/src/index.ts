@@ -6,3 +6,4 @@ export * from './icons.js';
 export * from './messages.js';
 export * from './money.js';
 export * from './session.js';
+export * from './currency-marks.js';

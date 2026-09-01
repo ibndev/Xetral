@@ -1,9 +1,11 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { exponentFor, formatAmount, isValidAmount, TRANSFER_CURRENCIES } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { FormError } from '@/ui/form-error';
+import { Icon } from '@/ui/icon';
 import { Select } from '@/ui/select';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/lib/hooks';
 
@@ -54,6 +56,30 @@ export default function Transfer() {
   const balances = useLoad(() => client.balances(), [client]);
   const held = new Map((balances.data ?? []).map((b) => [b.currency, b.spendable]));
 
+  /*
+   * THE PIN IS ASKED ABOUT BEFORE THE FORM, NOT AFTER IT.
+   *
+   * Every money-moving route verifies a transaction PIN, and a customer who
+   * has never set one could only find that out by filling in a recipient, an
+   * amount and a PIN box — and being told the PIN box was never going to
+   * work. `has_pin` is on the session for exactly this, so the refusal
+   * arrives as a step to take rather than as an error at the end.
+   */
+  const session = useLoad(() => client.currentSession(), [client]);
+  const needsPin = session.data !== undefined && !session.data.has_pin;
+
+  /*
+   * WHO IS BEING PAID, asked first.
+   *
+   * A transfer used to be "type an email address", which is the identifier
+   * people are most careful with and least willing to post — so the ordinary
+   * case, paying somebody whose payment link you were sent, had no shape at
+   * all. Both routes end at the same field because the API resolves all four
+   * forms; what differs is what the screen ASKS FOR, and asking for the wrong
+   * thing is what makes somebody paste an address into a box labelled link.
+   */
+  const [via, setVia] = useState<'link' | 'wallet' | undefined>();
+
   const amountValid = amount === '' || isValidAmount(amount, exponentFor(currency));
 
   function submit(event: React.FormEvent) {
@@ -79,17 +105,97 @@ export default function Transfer() {
     });
   }
 
+  if (session.loading) {
+    return (
+      <Shell>
+        <div className="card"><p className="spinner">Loading…</p></div>
+      </Shell>
+    );
+  }
+
+  if (needsPin) {
+    return (
+      <Shell>
+        <div className="card">
+          <h1>First, a transaction PIN</h1>
+          <h2>It authorises every payment you make</h2>
+          <p className="lead">
+            Your password signs you in. A separate PIN approves money leaving your
+            account, so somebody who reaches an unlocked phone still cannot spend
+            from it. You will only set it once.
+          </p>
+          <Link className="btn" href="/settings#transaction-pin">
+            Set my transaction PIN
+          </Link>
+        </div>
+      </Shell>
+    );
+  }
+
+  if (via === undefined) {
+    return (
+      <Shell>
+        <div className="card">
+          <h1>Send money</h1>
+          <h2>Who are you paying?</h2>
+
+          <div className="choice-list">
+            <button type="button" className="choice" onClick={() => setVia('link')}>
+              <span className="choice-icon"><Icon name="globe" size={20} /></span>
+              <span className="choice-main">
+                <span className="choice-title">A payment link</span>
+                <span className="choice-sub">
+                  Somebody sent you their Xetral link or @handle
+                </span>
+              </span>
+              <Icon name="chevronRight" size={18} />
+            </button>
+
+            <button type="button" className="choice" onClick={() => setVia('wallet')}>
+              <span className="choice-icon"><Icon name="wallet" size={20} /></span>
+              <span className="choice-main">
+                <span className="choice-title">A Xetral wallet</span>
+                <span className="choice-sub">
+                  You know their email address or phone number
+                </span>
+              </span>
+              <Icon name="chevronRight" size={18} />
+            </button>
+          </div>
+
+          <p className="hint">
+            Both go to the same place. Your own link is on{' '}
+            <Link href="/settings">your settings page</Link> if somebody needs it.
+          </p>
+        </div>
+      </Shell>
+    );
+  }
+
   return (
     <Shell>
 
       <form className="card" onSubmit={submit}>
-        <h1>Send money</h1>
-        <h2>To another Xetral account</h2>
+        <div className="section-head">
+          <h1>Send money</h1>
+          <button type="button" className="btn link" onClick={() => setVia(undefined)}>
+            Change
+          </button>
+        </div>
+        <h2>{via === 'link' ? 'Using a payment link' : 'To a Xetral wallet'}</h2>
 
         <label>
-          Recipient email
+          {via === 'link' ? 'Their link or @handle' : 'Their email or phone number'}
           <input
-            type="email"
+            // `text`, not `email`, on BOTH paths. The API resolves a link, an
+            // @handle, an address and a phone number from one field, and a
+            // browser refusing anything without an `@` in it would reject
+            // three of the four.
+            type="text"
+            inputMode={via === 'link' ? 'url' : 'email'}
+            autoCapitalize="none"
+            spellCheck={false}
+            placeholder={via === 'link' ? '@olawale' : 'you@example.com'}
             value={recipient}
             onChange={(e) => setRecipient(e.target.value)}
             required

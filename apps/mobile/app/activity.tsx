@@ -6,7 +6,7 @@ import { Icon } from '@/icon';
 import { Shell } from '@/shell';
 import { Empty, FormError, Loading } from '@/ui';
 import { useLoad, useXetral } from '@/hooks';
-import { radius, space, useStyles, useTheme } from '@/theme';
+import { font, radius, space, useStyles, useTheme } from '@/theme';
 
 /**
  * Every transaction, one currency at a time.
@@ -103,7 +103,7 @@ export default function Activity() {
               <Text
                 style={{
                   fontSize: 13,
-                  fontWeight: '600',
+                  fontFamily: font.sansSemi,
                   color: on ? colors.onBrand : colors.text2,
                 }}
               >
@@ -136,7 +136,7 @@ export default function Activity() {
                 />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={{ color: colors.text, fontWeight: '600' }} numberOfLines={1}>
+                <Text style={{ color: colors.text, fontFamily: font.sansSemi }} numberOfLines={1}>
                   {t.description}
                 </Text>
                 <Text style={styles.muted}>

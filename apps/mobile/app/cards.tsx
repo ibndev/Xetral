@@ -6,7 +6,7 @@ import { LogoMark } from '@/logo';
 import { Shell } from '@/shell';
 import { Button, Done, Empty, Field, FormError, Loading, Panel, VerifyPrompt } from '@/ui';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/hooks';
-import { radius, space, useStyles } from '@/theme';
+import { font, radius, space, useStyles } from '@/theme';
 
 /**
  * Virtual USD cards, on the phone.
@@ -114,14 +114,14 @@ function CardFace({
             backgroundColor: pill.bg,
           }}
         >
-          <Text style={{ color: pill.fg, fontSize: 11, fontWeight: '700' }}>{status}</Text>
+          <Text style={{ color: pill.fg, fontSize: 11, fontFamily: font.sansBold }}>{status}</Text>
         </View>
       </View>
 
       <Text
         style={{
           color: 'rgba(255,255,255,.94)',
-          fontFamily: 'SplineSansMono',
+          fontFamily: font.mono,
           fontSize: 17,
           letterSpacing: 2,
         }}
@@ -162,7 +162,7 @@ function FaceField({
         style={{
           color: 'rgba(255,255,255,.55)',
           fontSize: 9,
-          fontWeight: '700',
+          fontFamily: font.sansBold,
           letterSpacing: 1,
           textAlign: right === true ? 'right' : 'left',
         }}
@@ -174,9 +174,9 @@ function FaceField({
         style={{
           color: '#fff',
           fontSize: 13,
-          fontWeight: '600',
+          fontFamily: font.sansSemi,
           textAlign: right === true ? 'right' : 'left',
-          ...(mono === true ? { fontFamily: 'SplineSansMono' } : {}),
+          ...(mono === true ? { fontFamily: font.mono } : {}),
         }}
       >
         {value}

@@ -6,7 +6,7 @@ import { Shell } from '@/shell';
 import { Button, Done, Empty, Field, FormError, Loading, Panel } from '@/ui';
 import { Select } from '@/select';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/hooks';
-import { radius, space, useStyles, useTheme } from '@/theme';
+import { font, radius, space, useStyles, useTheme } from '@/theme';
 
 /**
  * Converting, and sending across currencies.
@@ -178,7 +178,7 @@ export default function Fx() {
         {trades.data?.slice(0, 10).map((trade: FxTrade) => (
           <View key={trade.id} style={styles.row}>
             <View style={{ flex: 1 }}>
-              <Text style={{ color: colors.text, fontWeight: '600' }}>
+              <Text style={{ color: colors.text, fontFamily: font.sansSemi }}>
                 {trade.from} → {trade.to}
               </Text>
               <Text style={styles.muted}>

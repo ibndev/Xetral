@@ -107,6 +107,22 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // granted operator could never open.
       .authenticated('POST', '/v1/auth/totp/enrol', { pin: false })
       .authenticated('POST', '/v1/auth/totp/confirm', { pin: false })
+      /*
+       * NOT `staff()`, deliberately, and this is the one place that asymmetry
+       * is correct. Its whole purpose is to be reachable by a session that is
+       * not yet elevated — a staff policy would refuse the request that exists
+       * to make elevation possible, which is the deadlock this endpoint was
+       * added to break. `StaffTotpService.elevate` refuses anybody without a
+       * confirmed second factor, so it grants a customer nothing at all.
+       *
+       * No PIN: this proves possession of the authenticator, which is a
+       * different factor from the one a PIN proves, and demanding both to
+       * start a work session is how a shared authenticator ends up on a desk.
+       */
+      .authenticated('POST', '/v1/auth/totp/elevate', { pin: false })
+      // A customer's own handle. No PIN: it moves no money and is meant to be
+      // shared, which is the opposite of a secret.
+      .authenticated('GET', '/v1/auth/profile', { pin: false })
 
       .authenticated('GET', '/v1/auth/devices', { pin: false })
       // Acting on it does. All three are reachable with a stolen access token,

@@ -21,8 +21,59 @@ export default function Settings() {
   const session = useLoad(() => client.currentSession(), [client]);
   const kyc = useLoad(() => client.kyc(), [client]);
 
+  /*
+   * The link, fetched here rather than on the Send screen, because this is
+   * where somebody comes to FIND it. `profile()` mints one on the first call
+   * and returns the same one afterwards, so opening this page is what gives a
+   * customer a handle.
+   */
+  const profile = useLoad(() => client.profile(), [client]);
+  const [copied, setCopied] = useState(false);
+
   return (
     <Shell>
+
+      <div className="card">
+        <h1>Your payment link</h1>
+        <h2>Share it and anyone can pay you</h2>
+        <p className="lead">
+          It is safe to post publicly — it identifies you for receiving money and
+          reveals nothing else, which is the point of having one instead of giving
+          out your email address.
+        </p>
+
+        {profile.loading && <p className="spinner">Loading…</p>}
+        {profile.data !== undefined && (
+          <>
+            <div className="balance">
+              <div>
+                <div className="amount mono">@{profile.data.handle}</div>
+                <div className="pending">{profile.data.link}</div>
+              </div>
+            </div>
+            <div className="actions">
+              <button
+                type="button"
+                onClick={() => {
+                  void navigator.clipboard
+                    ?.writeText(profile.data?.link ?? '')
+                    .then(() => setCopied(true))
+                    // A clipboard a browser refused is not an error worth a
+                    // banner — the link is on screen and can be selected.
+                    .catch(() => undefined);
+                }}
+              >
+                <Icon name="copy" size={16} /> {copied ? 'Copied' : 'Copy my link'}
+              </button>
+            </div>
+            <p className="hint">
+              A handle is yours permanently. It cannot be given up and reissued to
+              somebody else, so a link you shared last year still pays you.
+            </p>
+          </>
+        )}
+        <FormError error={profile.error} code={profile.code} />
+      </div>
 
       <div className="card">
         <h1>Your account</h1>
