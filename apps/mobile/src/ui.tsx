@@ -134,8 +134,8 @@ export function VerifyPrompt({ what }: { readonly what: string }) {
       </View>
       <Text style={styles.h2}>Verify your identity for {what}</Text>
       <Text style={styles.lead}>
-        {what} is provided through a licensed partner, and they can only issue
-        it to a verified person. It takes a few minutes, once.
+        {what} is issued through a licensed partner, who can only issue it to a
+        verified person.
       </Text>
       <Text style={styles.hint}>
         Your naira wallet, transfers, airtime, data and bills all work without

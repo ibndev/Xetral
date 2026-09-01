@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { exponentFor, formatAmount, isValidAmount, TRANSFER_CURRENCIES } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { FormError } from '@/ui/form-error';
@@ -9,9 +10,34 @@ import { Icon } from '@/ui/icon';
 import { Select } from '@/ui/select';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/lib/hooks';
 
-export default function Transfer() {
+/**
+ * `useSearchParams` suspends, so the screen it is read on must sit inside a
+ * boundary or the whole route opts out of static rendering with a build error
+ * naming neither this file nor the hook.
+ */
+export default function TransferPage() {
+  return (
+    <Suspense fallback={null}>
+      <Transfer />
+    </Suspense>
+  );
+}
+
+function Transfer() {
   const client = useXetral();
-  const [recipient, setRecipient] = useState('');
+  const params = useSearchParams();
+
+  /*
+   * ARRIVED FROM A PAYMENT LINK.
+   *
+   * `/pay/<handle>` redirects here with the handle in `to`, so somebody who
+   * followed a link does not retype what the link already said. It is the
+   * INITIAL value of ordinary state rather than a controlled one, because the
+   * customer must be able to correct it — a recipient the page keeps putting
+   * back is a recipient they cannot change.
+   */
+  const arrivedWith = params.get('to') ?? '';
+  const [recipient, setRecipient] = useState(arrivedWith);
   const [amount, setAmount] = useState('');
   const [currency, setCurrency] = useState('NGN');
   const [pin, setPin] = useState('');
@@ -66,7 +92,17 @@ export default function Transfer() {
    * arrives as a step to take rather than as an error at the end.
    */
   const session = useLoad(() => client.currentSession(), [client]);
-  const needsPin = session.data !== undefined && !session.data.has_pin;
+  /*
+   * ONLY WHEN WE KNOW. `has_pin` is `boolean | null` and null means the server
+   * could not tell — which must NOT route somebody into creating a PIN they
+   * already have. That is exactly what happened when a failed query answered
+   * `false`: a customer who had set one was sent back to set it again.
+   *
+   * Unknown falls through to the ordinary form, where the server's own
+   * `pin_not_set` refusal decides — and that refusal already carries a link to
+   * the right screen, so the worst case is one extra step rather than a loop.
+   */
+  const needsPin = session.data?.has_pin === false;
 
   /*
    * WHO IS BEING PAID, asked first.
@@ -78,7 +114,10 @@ export default function Transfer() {
    * forms; what differs is what the screen ASKS FOR, and asking for the wrong
    * thing is what makes somebody paste an address into a box labelled link.
    */
-  const [via, setVia] = useState<'link' | 'wallet' | undefined>();
+  // A link already answered "who are you paying?", so the chooser is skipped.
+  const [via, setVia] = useState<'link' | 'wallet' | undefined>(
+    arrivedWith === '' ? undefined : 'link',
+  );
 
   const amountValid = amount === '' || isValidAmount(amount, exponentFor(currency));
 
@@ -120,9 +159,7 @@ export default function Transfer() {
           <h1>First, a transaction PIN</h1>
           <h2>It authorises every payment you make</h2>
           <p className="lead">
-            Your password signs you in. A separate PIN approves money leaving your
-            account, so somebody who reaches an unlocked phone still cannot spend
-            from it. You will only set it once.
+            A separate PIN approves money leaving your account. You set it once.
           </p>
           <Link className="btn" href="/settings#transaction-pin">
             Set my transaction PIN

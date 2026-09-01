@@ -112,9 +112,8 @@ export default function AddMoney() {
           <View style={{ marginTop: space.md, gap: space.xs }}>
             <Text style={styles.h2}>Your own account number needs your identity</Text>
             <Text style={styles.lead}>
-              A dedicated Nigerian account number is a bank account opened in your name,
-              so the bank has to know whose it is. That is the one part of adding money
-              that needs verifying — not the deposit itself.
+              A dedicated account number is a bank account in your name, so the bank
+              has to know whose it is.
             </Text>
           </View>
         )}

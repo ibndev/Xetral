@@ -29,8 +29,7 @@ export default function Suspense() {
         <h1>Suspense</h1>
         <h2>{deposits.data?.length ?? 0} unattributed deposit(s)</h2>
         <p className="lead">
-          Somebody transferred this money and it has not reached them. Every row
-          here is a customer who is probably about to call.
+          Money that arrived and has not reached anybody yet.
         </p>
         <AdminError error={deposits.error} code={deposits.code} role="finance" />
         {deposits.loading && <p className="spinner">Loading…</p>}

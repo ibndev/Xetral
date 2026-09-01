@@ -68,6 +68,19 @@ export interface AdminUserDetail {
  * carry one even if somebody added the field. `hint` is the last four
  * characters, which answers "is this the key I pasted?" and nothing else.
  */
+export interface AdminWebhookEndpoint {
+  /** The path this API serves, exactly as the controller declares it. */
+  readonly path: string;
+  /** What a provider is being asked to send there. */
+  readonly label: string;
+  /** Which stored secret verifies its signature. */
+  readonly secret: string;
+  /** The whole URL when `WEBHOOK_BASE_URL` is configured, the bare path when
+   *  it is not — never a hostname the server invented. */
+  readonly url: string;
+  readonly absolute: boolean;
+}
+
 export interface AdminCredential {
   readonly provider: string;
   readonly name: string;
@@ -785,9 +798,22 @@ export class AdminClient {
 
   /* ------------------------ provider credentials ----------------------- */
 
-  async credentials(): Promise<readonly AdminCredential[]> {
-    const body = await this.#get<{ credentials: AdminCredential[] }>('/v1/admin/credentials');
-    return body.credentials;
+  /**
+   * The credential slots, and the webhook endpoints those secrets verify.
+   *
+   * One call, because it is one job: an operator configuring a provider pastes
+   * a key here and a URL into the provider's dashboard, and showing only the
+   * first half is how the second gets guessed.
+   */
+  async credentials(): Promise<{
+    slots: readonly AdminCredential[];
+    webhooks: readonly AdminWebhookEndpoint[];
+  }> {
+    const body = await this.#get<{
+      credentials: AdminCredential[];
+      webhooks: AdminWebhookEndpoint[];
+    }>('/v1/admin/credentials');
+    return { slots: body.credentials, webhooks: body.webhooks ?? [] };
   }
 
   /** That a credential was replaced, by whom and when — never what it was. */
@@ -803,15 +829,19 @@ export class AdminClient {
 
   /** Returns the slot's new STATUS, which carries a hint and no secret. There
    *  is no response shape here that could echo the pasted value back. */
-  async setCredential(
-    provider: string,
-    name: string,
-    secret: string,
-    pin: string,
-  ): Promise<AdminCredential> {
+  /**
+   * Store a provider key.
+   *
+   * NO TRANSACTION PIN, and its removal is a correction rather than a
+   * loosening. A transaction PIN authorises money leaving a CUSTOMER'S OWN
+   * account; pasting a provider key moves nothing and is already gated by the
+   * `admin` role and by a session elevated with an authenticator code. Asking
+   * for it meant every operator had to hold a customer PIN to do their job.
+   */
+  async setCredential(provider: string, name: string, secret: string): Promise<AdminCredential> {
     return this.#post(
       `/v1/admin/credentials/${encodeURIComponent(provider)}/${encodeURIComponent(name)}`,
-      { secret, transaction_pin: pin },
+      { secret },
     );
   }
 

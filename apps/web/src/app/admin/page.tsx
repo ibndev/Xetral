@@ -40,8 +40,7 @@ export default function Overview() {
             materialised balance disagrees with the sum of its own postings.
           </p>
           <p className="hint">
-            Stop and investigate before acting on anything else on this page.
-            Every figure below is computed from the same postings.
+            Investigate this before acting on anything else here.
           </p>
         </div>
       )}

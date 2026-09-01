@@ -31,9 +31,8 @@ export default function Providers() {
       <div className="panel">
         <h1>Providers</h1>
         <p className="lead">
-          How every provider has been answering, over the last window. Refusals
-          are shown and deliberately not counted as failures — a declined card
-          is the provider working.
+          How every provider has been answering. Refusals are shown and not counted
+          as failures.
         </p>
         <AdminError error={health.error} code={health.code} role="support" />
         {health.loading && <p className="spinner">Loading…</p>}
@@ -51,9 +50,8 @@ export default function Providers() {
               that name reads as broken rather than as quiet.
             */}
             <p className="hint">
-              Keys are pasted on <Link href="/admin/credentials">Provider keys</Link>,
-              and a flow is switched off on <Link href="/admin/settings">Settings</Link>.
-              This screen only reports what has been observed.
+              Keys go on <Link href="/admin/credentials">Provider keys</Link>; flows
+              are switched off on <Link href="/admin/settings">Settings</Link>.
             </p>
           </div>
         )}
@@ -63,9 +61,8 @@ export default function Providers() {
         <div className="panel">
           <h2 className="danger">Failing</h2>
           <p className="lead">
-            Nothing has been switched off. Turning a flow off is a deliberate
-            act on the <Link href="/admin/settings">settings</Link> screen, and
-            it takes seconds.
+            Nothing has been switched off. Flows are turned off on{' '}
+            <Link href="/admin/settings">Settings</Link>.
           </p>
           <table>
             <thead>
@@ -99,9 +96,8 @@ export default function Providers() {
           </table>
           {health.data.degraded.some((row) => row.contract_broken) && (
             <p className="hint">
-              A <strong>contract</strong> failure means the provider replied
-              with something the adapter cannot parse — they changed their API.
-              The same request will fail for ever, so waiting does not help.
+              A <strong>contract</strong> failure means they changed their API. It
+              will not resolve on its own.
             </p>
           )}
         </div>

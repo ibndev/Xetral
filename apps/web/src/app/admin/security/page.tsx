@@ -37,17 +37,14 @@ export default function StaffSecurity() {
       <h2>Required before any operations screen will answer</h2>
 
       <p className="lead">
-        Every screen in this dashboard reads customer data or moves money, so
-        all of them ask for a second factor — including the read-only ones. A
-        password alone in front of the customer database is not a control.
+        Every screen here asks for a second factor, reads included.
       </p>
 
       {enrolment === undefined ? (
         <>
           <p className="lead">
-            You will get a secret to add to an authenticator app, then type one
-            code to prove it works. The secret is shown ONCE and is never
-            shown again.
+            You will get a secret to add to an authenticator app, then type one code
+            to prove it works. It is shown once.
           </p>
           <div className="actions">
             <button
@@ -93,8 +90,7 @@ export default function StaffSecurity() {
               {enrolment.secret}
             </p>
             <p className="hint">
-              Shown once. If you lose it before confirming, start the setup
-              again — nothing is active until you type a code below.
+              Shown once. Lose it before confirming and you start again.
             </p>
           </div>
 

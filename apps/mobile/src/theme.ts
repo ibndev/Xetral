@@ -19,7 +19,8 @@ import { Platform, StyleSheet, useColorScheme } from 'react-native';
 export interface Palette {
   readonly brand: string; readonly brand700: string; readonly accent: string;
   readonly link: string; readonly bg: string; readonly surface: string;
-  readonly surface2: string; readonly line: string; readonly lineStrong: string;
+  readonly surface2: string; readonly surfaceRaised: string;
+  readonly line: string; readonly lineStrong: string;
   readonly text: string; readonly text2: string; readonly text3: string;
   readonly onBrand: string;
   readonly ok: string; readonly okBg: string;
@@ -35,17 +36,23 @@ export const light: Palette = {
   link: '#4B7BF5',
 
   /*
-   * THE GROUND IS OFF-WHITE AND EVERY CONTAINER ON IT IS PAPER WHITE, exactly
-   * as `globals.css` defines it for the web. These are the SAME hex values,
-   * not an approximation: the two apps are one product and a customer holding
-   * both should not be able to tell which they are looking at from the colour
-   * of the page.
+   * THE GROUND IS PURE WHITE AND EVERY CONTAINER ON IT IS RECESSED INTO IT,
+   * exactly as `globals.css` defines it for the web. These are the SAME hex
+   * values, not an approximation: the two apps are one product and a customer
+   * holding both should not be able to tell which they are looking at from
+   * the colour of the page.
+   *
+   * `surfaceRaised` goes the other way — lighter than the ground — and is for
+   * the only things that genuinely sit in front of the page: a dropdown, a
+   * sheet. Everything else is flat and darker. See the long note in
+   * `globals.css` for why this file has now argued the question twice.
    */
-  bg: '#F4F6F9',
-  surface: '#FFFFFF',
-  surface2: '#F6F7F9',
-  line: '#E5E7EB',
-  lineStrong: '#D0D4DB',
+  bg: '#FFFFFF',
+  surface: '#F7F8FB',
+  surface2: '#EFF1F6',
+  surfaceRaised: '#FFFFFF',
+  line: '#E7EAF0',
+  lineStrong: '#D5D9E2',
 
   text: '#0D1B3E',
   text2: '#4A5878',
@@ -71,6 +78,7 @@ export const dark: Palette = {
   bg: '#000000',
   surface: '#0C0D10',
   surface2: '#141519',
+  surfaceRaised: '#1B1D23',
   line: '#212227',
   lineStrong: '#303237',
 
@@ -246,6 +254,11 @@ export const font = {
  * reads as a smudge. On black the shadow is black — which is invisible, and
  * correctly so, because a card on a true-black page is separated by its
  * lightness rather than by a glow.
+ *
+ * NOTHING IN THE SHARED SHEET USES `card` ANY MORE. A container is recessed
+ * into the page — darker fill, no shadow — and a shadow under a recess reads
+ * as neither. Kept because a sheet or a menu drawn over the screen is still
+ * in front of it and still needs `raised`; a container is not.
  */
 export function shadowsFor(palette: Palette) {
   const tint = palette.bg === '#000000' ? '#000000' : '#0D1B3E';
@@ -309,11 +322,14 @@ export function useStyles(): ReturnType<typeof buildSheet> {
 }
 
 function buildSheet(colors: Palette) {
-  const shadow = shadowsFor(colors);
   return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   content: { padding: space.lg, paddingBottom: space.xxl * 2 },
 
+  /* Flat, matching `.card` on the web to the pixel: the fill is one shade
+     below the page and that is the whole of what makes it a card. Android's
+     `elevation` was the visible half of this — a real drop shadow under every
+     container, which is the raised look the design does not want. */
   card: {
     backgroundColor: colors.surface,
     borderColor: colors.line,
@@ -321,7 +337,6 @@ function buildSheet(colors: Palette) {
     borderRadius: radius.lg,
     padding: space.lg,
     marginBottom: space.md,
-    ...(shadow.card as object),
   },
 
   h1: {

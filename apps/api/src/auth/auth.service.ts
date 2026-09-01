@@ -76,7 +76,16 @@ export interface SessionSummary {
    *
    * A boolean, never the PIN or anything derived from it.
    */
-  readonly has_pin: boolean;
+  /**
+   * Whether a transaction PIN exists, or NULL when we could not tell.
+   *
+   * The null is the point. It used to be a plain boolean and a failed query
+   * answered `false` — telling a customer who had set a PIN that they had
+   * none, and sending them to create one they already had. "I do not know" and
+   * "there is none" are different claims and only one of them is safe to act
+   * on.
+   */
+  readonly has_pin: boolean | null;
   /** The customer's own payment handle, or null if they have not been given
    *  one yet. `GET /v1/profile` mints one on first ask. */
   readonly handle: string | null;
@@ -534,38 +543,57 @@ export class AuthService {
   }
 
   /**
-   * The three things a screen needs about the person, in ONE query.
+   * The three things a screen needs about the person.
    *
-   * Three round trips for a name, a boolean and a handle would put three
-   * queries in front of every session check — and `/v1/auth/session` is what
-   * both apps call on mount.
+   * TWO QUERIES, DELIBERATELY, AND THIS COST A ROUND. It was one, selecting
+   * `users.handle` alongside the PIN state — and `handle` arrives in migration
+   * 039. On a deployment that has not applied it the column does not exist,
+   * the whole query throws, and a bare `catch` returned
+   * `{ first_name: null, has_pin: false, handle: null }`.
    *
-   * Failure returns the safe answers rather than throwing: no name, NO PIN,
-   * no handle. `has_pin: false` is the one that has to be right in the
-   * failure case — it sends a customer to set a PIN they may already have,
-   * which is an extra screen, whereas `true` would send them to a transfer
-   * that refuses.
+   * That answer is not a failure, it is a LIE THAT LOOKS LIKE DATA. A
+   * customer who had set a transaction PIN was told they had none, so the Send
+   * screen routed them back into creating one they already had; and the
+   * greeting fell back to "there" for somebody whose name we hold. Neither
+   * looked like a broken query, which is why it was reported as two unrelated
+   * bugs.
+   *
+   * So the PIN state — which depends only on tables that have existed since
+   * 002 — is read on its own and cannot be taken out by a schema that is
+   * behind. The handle is read separately and is allowed to be missing.
    */
   async #profile(
     userUuid: string,
-  ): Promise<{ first_name: string | null; has_pin: boolean; handle: string | null }> {
+  ): Promise<{ first_name: string | null; has_pin: boolean | null; handle: string | null }> {
+    const [core, handle] = await Promise.all([this.#core(userUuid), this.#handle(userUuid)]);
+    return { ...core, handle };
+  }
+
+  /**
+   * The name and the PIN state, from tables as old as the schema.
+   *
+   * `has_pin` is `boolean | null` and the null is load-bearing: it means WE DO
+   * NOT KNOW, which is a different thing from "no PIN". A screen that gets
+   * null shows the ordinary form and lets the server's own `pin_not_set`
+   * refusal decide — because being told to create a PIN you already have is a
+   * dead end, while being allowed to try is at worst one extra refusal that
+   * already carries a link to the right place.
+   */
+  async #core(
+    userUuid: string,
+  ): Promise<{ first_name: string | null; has_pin: boolean | null }> {
     try {
-      const result = await this.pool.query<{
-        full_name: string | null;
-        has_pin: boolean;
-        handle: string | null;
-      }>(
+      const result = await this.pool.query<{ full_name: string | null; has_pin: boolean }>(
         `SELECT (SELECT k.full_name FROM kyc_submissions k
                   WHERE k.user_id = u.id ORDER BY k.created_at DESC LIMIT 1) AS full_name,
-                (p.user_id IS NOT NULL) AS has_pin,
-                u.handle
+                (p.user_id IS NOT NULL) AS has_pin
            FROM users u
            LEFT JOIN transaction_pins p ON p.user_id = u.id
           WHERE u.uuid = $1`,
         [userUuid],
       );
       const row = result.rows[0];
-      if (row === undefined) return { first_name: null, has_pin: false, handle: null };
+      if (row === undefined) return { first_name: null, has_pin: null };
 
       const full = row.full_name?.trim();
       return {
@@ -573,10 +601,40 @@ export class AuthService {
         // first is the one somebody is called.
         first_name: full === undefined || full === '' ? null : (full.split(/\s+/)[0] ?? null),
         has_pin: row.has_pin,
-        handle: row.handle,
       };
-    } catch {
-      return { first_name: null, has_pin: false, handle: null };
+    } catch (error: unknown) {
+      // LOUD. The previous version swallowed this and returned an answer, and
+      // the answer was wrong in the direction that breaks a customer's day.
+      this.#logger.error(
+        `could not read the profile for ${userUuid}: ${describe(error)}. ` +
+          `Reporting the PIN state as UNKNOWN rather than guessing.`,
+      );
+      return { first_name: null, has_pin: null };
+    }
+  }
+
+  /**
+   * The payment handle, which arrives in migration 039.
+   *
+   * Its absence is EXPECTED on a deployment that has not applied 039 yet, and
+   * is the one failure here that must not disturb anything else — so it is its
+   * own query and its own catch. Logged at warn rather than error, with the
+   * migration named, because the fix is a deployment step rather than a bug.
+   */
+  async #handle(userUuid: string): Promise<string | null> {
+    try {
+      const result = await this.pool.query<{ handle: string | null }>(
+        `SELECT handle FROM users WHERE uuid = $1`,
+        [userUuid],
+      );
+      return result.rows[0]?.handle ?? null;
+    } catch (error: unknown) {
+      this.#logger.warn(
+        `no payment handle for ${userUuid}: ${describe(error)}. ` +
+          `If this says the column does not exist, apply ` +
+          `packages/ledger/sql/039_profile_handles.sql.`,
+      );
+      return null;
     }
   }
 
@@ -607,4 +665,10 @@ export class AuthService {
  *  duplicate email into a 409 rather than a 500. */
 function isUniqueViolation(error: unknown): boolean {
   return typeof error === 'object' && error !== null && (error as { code?: string }).code === '23505';
+}
+
+/** An error's message, or its stringification. Used by the profile reads,
+ *  which must log what went wrong without letting it reach a customer. */
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

@@ -44,8 +44,7 @@ export default function Tax() {
         <h1>Tax</h1>
         <p className="lead">
           What was collected on a revenue authority&rsquo;s behalf, read from the
-          ledger rather than from a separate count. Tax is a liability, not
-          revenue — it sits in its own account until it is remitted.
+          ledger. It is a liability, not revenue.
         </p>
         <label id="tax-months">
           Months
@@ -74,8 +73,7 @@ export default function Tax() {
         <div className="panel">
           <h2 className="danger">Unexplained tax held</h2>
           <p className="lead">
-            More is sitting in the tax account than any recorded collection
-            accounts for. Something posted the money and did not record it.
+            More is held than any recorded collection accounts for.
           </p>
           <table>
             <thead>
@@ -105,9 +103,7 @@ export default function Tax() {
       <div className="panel">
         <h2>Held, not yet remitted</h2>
         <p className="lead">
-          From the account balance, which is the money itself — not from the
-          record describing it. If the two disagree, this is the one that is
-          true.
+          From the account balance, not from the record describing it.
         </p>
         {report.data !== undefined && report.data.payable.length === 0 && (
           <p className="empty">Nothing held.</p>
@@ -135,9 +131,7 @@ export default function Tax() {
       <div className="panel">
         <h2>Collected by month</h2>
         <p className="lead">
-          A Lagos month, and a row per currency: a return is filed in one
-          currency, and adding kobo to cents is the arithmetic the ledger
-          refuses everywhere else.
+          A Lagos month, and a row per currency.
         </p>
         {report.data !== undefined && report.data.collected.length === 0 && (
           <p className="empty">Nothing collected yet.</p>
@@ -173,8 +167,7 @@ export default function Tax() {
       <div className="panel">
         <h2>Revenue by month</h2>
         <p className="lead">
-          Read from postings. The tax row is shown alongside deliberately — it
-          is the part of every fee that was never ours.
+          Read from postings, with the tax part of each fee shown alongside.
         </p>
         {report.data !== undefined && report.data.revenue.length === 0 && (
           <p className="empty">No revenue yet.</p>

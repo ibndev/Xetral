@@ -134,7 +134,10 @@ export function Select({
           <Pressable
             onPress={() => undefined}
             style={{
-              backgroundColor: colors.surface,
+              // `surfaceRaised`, because a sheet over a scrim is in front of
+              // the page. `surface` is the recessed fill every container uses
+              // and would put this visually BEHIND what it is covering.
+              backgroundColor: colors.surfaceRaised,
               borderTopLeftRadius: radius.xl,
               borderTopRightRadius: radius.xl,
               borderTopWidth: 1,

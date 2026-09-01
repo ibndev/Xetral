@@ -54,7 +54,17 @@ export default function Transfer() {
    * somebody, which is the identifier people are least willing to share.
    */
   const session = useLoad(() => client.currentSession(), [client]);
-  const needsPin = session.data !== undefined && !session.data.has_pin;
+  /*
+   * ONLY WHEN WE KNOW. `has_pin` is `boolean | null` and null means the server
+   * could not tell — which must NOT route somebody into creating a PIN they
+   * already have. That is exactly what happened when a failed query answered
+   * `false`: a customer who had set one was sent back to set it again.
+   *
+   * Unknown falls through to the ordinary form, where the server's own
+   * `pin_not_set` refusal decides — and that refusal already carries a link to
+   * the right screen, so the worst case is one extra step rather than a loop.
+   */
+  const needsPin = session.data?.has_pin === false;
   const [via, setVia] = useState<'link' | 'wallet' | undefined>();
 
   if (session.loading) {
@@ -70,9 +80,7 @@ export default function Transfer() {
       <Shell back="/wallet" title="Send money">
         <Panel title="First, a transaction PIN" subtitle="It authorises every payment you make">
           <Text style={styles.lead}>
-            Your password signs you in. A separate PIN approves money leaving your
-            account, so somebody who reaches an unlocked phone still cannot spend
-            from it. You will only set it once.
+            A separate PIN approves money leaving your account. You set it once.
           </Text>
           <Button label="Set my transaction PIN" onPress={() => router.push('/settings')} />
         </Panel>

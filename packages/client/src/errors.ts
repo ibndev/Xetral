@@ -181,6 +181,14 @@ const API_ERROR_CODES = [
 
   /* gift cards */
   'gift_cards_disabled',
+  /*
+   * A part of the product this DEPLOYMENT does not have — a migration that has
+   * not been applied, rather than a switch somebody turned off. It exists
+   * because the alternative was an unhandled 500 rendering as "Something went
+   * wrong. Please try again.", which invites a customer to retry for ever at a
+   * schema that will not change on its own.
+   */
+  'feature_unavailable',
   // The kill switches. Each names its service so a screen can say which part
   // of the product is paused rather than showing one generic message.
   'crypto_disabled',

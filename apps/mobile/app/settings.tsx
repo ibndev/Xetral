@@ -301,9 +301,7 @@ function PaymentLink() {
   return (
     <Panel title="Your payment link" subtitle="Share it and anyone can pay you">
       <Text style={styles.lead}>
-        It is safe to post publicly — it identifies you for receiving money and
-        reveals nothing else, which is the point of having one instead of giving
-        out your email address.
+        Safe to post publicly. It reveals nothing but the name on your account.
       </Text>
 
       {profile.loading && <Loading />}
@@ -322,25 +320,33 @@ function PaymentLink() {
             <Text style={[styles.amount, { fontSize: 20 }]} selectable>
               @{profile.data.handle}
             </Text>
-            <Text style={styles.muted} selectable>
-              {profile.data.link}
-            </Text>
+            {profile.data.link !== null && (
+              <Text style={styles.muted} selectable>
+                {profile.data.link}
+              </Text>
+            )}
           </View>
 
+          {/*
+            SHARE WHAT THERE IS. With no APP_BASE_URL the server sends no
+            link, and sharing an empty message — or a relative path — puts
+            something into a WhatsApp thread that nobody can open. The handle
+            works on its own, typed into the Send screen.
+          */}
           <Button
-            label="Share my link"
+            label={profile.data.link === null ? 'Share my handle' : 'Share my link'}
             icon="send"
             onPress={() => {
+              const message = profile.data?.link ?? `@${profile.data?.handle ?? ''}`;
               // Failure is silent on purpose: the link is on screen and
               // selectable, and a dismissed share sheet rejects on iOS —
               // which is a customer changing their mind, not an error.
-              void Share.share({ message: profile.data?.link ?? '' }).catch(() => undefined);
+              void Share.share({ message }).catch(() => undefined);
             }}
           />
 
           <Text style={styles.hint}>
-            A handle is yours permanently. It cannot be given up and reissued to
-            somebody else, so a link you shared last year still pays you.
+            Yours permanently. It is never reissued to anybody else.
           </Text>
         </>
       )}

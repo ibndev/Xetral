@@ -31,11 +31,40 @@ const CSS = join(HERE, '..', 'app', 'globals.css');
 /** Element names this stylesheet deliberately styles without a class. */
 const BARE = ['button', 'input', 'select', 'textarea', 'table'];
 
+/**
+ * Split a selector list on its TOP-LEVEL commas only.
+ *
+ * `group.split(',')` was wrong and reported a false positive the first time a
+ * selector carried a comma inside brackets: `:where(:not([type='checkbox'],
+ * [type='radio']))` came back as the fragment `input:where(:not([type='checkbox']`,
+ * which has an unbalanced `:where(` — so the `:where()` filter below could not
+ * see it and the rule was reported as taking specificity it does not take. A
+ * test that fails on correct CSS gets suppressed, so the parser has to be
+ * right about the syntax it is judging.
+ */
+function splitSelectorList(group: string): readonly string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let current = '';
+  for (const ch of group) {
+    if (ch === '(' || ch === '[') depth += 1;
+    else if (ch === ')' || ch === ']') depth -= 1;
+    if (ch === ',' && depth === 0) {
+      out.push(current);
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  out.push(current);
+  return out;
+}
+
 /** Selectors, with comments and declaration blocks removed. */
 function selectors(): readonly string[] {
   const css = readFileSync(CSS, 'utf8').replace(/\/\*[\s\S]*?\*\//g, ' ');
   return Array.from(css.matchAll(/(^|[};])\s*([^{};@]+)\{/g), (m) => (m[2] ?? '').trim())
-    .flatMap((group) => group.split(','))
+    .flatMap((group) => splitSelectorList(group))
     .map((one) => one.trim())
     .filter((one) => one !== '');
 }

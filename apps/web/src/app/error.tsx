@@ -39,8 +39,7 @@ export default function Error({
         <h1>Something went wrong on this screen</h1>
         <h2>Your balance and your transactions are not affected</h2>
         <p className="lead">
-          This is a fault in the page, not in your account. Nothing was
-          submitted twice and no money moved because of it.
+          A fault in the page, not in your account. No money moved.
         </p>
         <div className="actions">
           <button type="button" onClick={reset}>

@@ -27,8 +27,7 @@ export default function KycQueue() {
         <h1>Identity review</h1>
         <h2>{queue.data?.length ?? 0} waiting</h2>
         <p className="lead">
-          Approving creates this customer&apos;s provider mapping. Until then
-          they cannot be issued an account number or a card.
+          Approving creates the provider mapping an account number or card needs.
         </p>
         <AdminError error={queue.error} code={queue.code} role="compliance" />
         {queue.loading && <p className="spinner">Loading…</p>}

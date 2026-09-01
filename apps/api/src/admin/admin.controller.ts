@@ -28,6 +28,9 @@ import { KycService } from '../kyc/kyc.service.js';
 import { ErrorRecorder } from '../observability/error-recorder.service.js';
 import { ReadinessService, type Readiness } from '../golive/readiness.service.js';
 import { kycReviewSchema } from '../kyc/dto.js';
+import { webhookEndpoints } from '../settings/webhook-endpoints.js';
+import { API_CONFIG } from '../tokens.js';
+import type { ApiConfig } from '../config.js';
 
 /**
  * The operations backend.
@@ -168,6 +171,7 @@ const taxQuery = z.object({
 @Controller('v1/admin')
 export class AdminController {
   constructor(
+    @Inject(API_CONFIG) private readonly config: ApiConfig,
     @Inject(AdminService) private readonly admin: AdminService,
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(SettingsService) private readonly settings: SettingsService,
@@ -563,9 +567,24 @@ export class AdminController {
    * reads it is the adapter that uses it, in process. An operator confirming
    * they pasted the right thing has the four-character hint.
    */
+  /**
+   * The credential slots, and the WEBHOOK ENDPOINTS they verify.
+   *
+   * Together, because they are one job: an operator configuring Bitnob pastes
+   * a key here and a URL there, and the dashboard used to show only half of
+   * it. A webhook URL nobody publishes is a URL somebody guesses — and a
+   * guessed one answers 404 to a provider who will keep POSTing to it while
+   * deposits go unrecorded on our side, with nothing on either side reporting
+   * anything.
+   */
   @Get('credentials')
-  async credentials(): Promise<{ credentials: readonly unknown[] }> {
-    return { credentials: await this.credentialStore.status() };
+  async credentials(): Promise<{ credentials: readonly unknown[]; webhooks: readonly unknown[] }> {
+    return {
+      credentials: await this.credentialStore.status(),
+      // Built from `WEBHOOK_BASE_URL`, and left as bare paths when it is
+      // unset. Never a hostname this code invented.
+      webhooks: webhookEndpoints(this.config.webhookBaseUrl),
+    };
   }
 
   /** That a credential was replaced, by whom, and when — never what it was.

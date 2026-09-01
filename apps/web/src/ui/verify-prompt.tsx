@@ -34,8 +34,8 @@ export function VerifyPrompt({
         <h2>Verify your identity for {what}</h2>
         <p>
           {detail ??
-            `${what} is provided through a licensed partner, and they can only issue it to a
-             verified person. It takes a few minutes and you only do it once.`}
+            `${what} is issued through a licensed partner, who can only issue it to a
+             verified person.`}
         </p>
         <p className="hint">
           Your naira wallet, transfers, airtime, data and bills all work without this.

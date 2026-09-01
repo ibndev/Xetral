@@ -86,6 +86,10 @@ export function messageFor(error: unknown): string {
       return 'That device is not on your account.';
     case 'account_not_active':
       return 'This account cannot make transactions right now.';
+    case 'feature_unavailable':
+      // Names the product, not the schema. A customer cannot act on a missing
+      // migration and should not be asked to try again at one.
+      return 'That part of Xetral is not switched on yet. We are on it.';
     case 'gift_cards_disabled':
       return 'Gift cards are not available yet.';
     // Paused by an operator, usually because a provider is having an incident.

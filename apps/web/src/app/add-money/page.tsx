@@ -80,9 +80,8 @@ export default function AddMoney() {
               <div className="pending">{account.data.currency}</div>
             </div>
             <p className="hint">
-              Send to <strong>{account.data.account_name}</strong>. This account is yours
-              permanently — save it as a beneficiary and money you send lands in your
-              wallet automatically.
+              Send to <strong>{account.data.account_name}</strong>. Yours permanently —
+              save it as a beneficiary.
             </p>
             {account.data.status !== 'active' && (
               <p className="hint">
@@ -99,9 +98,8 @@ export default function AddMoney() {
               <strong>Your own account number needs your identity.</strong>
             </p>
             <p>
-              A dedicated Nigerian account number is a bank account opened in your name,
-              so the bank has to know whose it is. That is the one part of adding money
-              that needs verifying — not the deposit itself.
+              A dedicated account number is a bank account in your name, so the bank
+              has to know whose it is.
             </p>
             <p>
               <a className="btn" href="/kyc">

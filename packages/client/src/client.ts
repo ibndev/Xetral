@@ -359,7 +359,7 @@ export class XetralClient {
    * Mints one on the first call and returns the same one after that, so it is
    * safe to call whenever a screen wants to show the link.
    */
-  async profile(): Promise<{ handle: string; link: string }> {
+  async profile(): Promise<{ handle: string; link: string | null }> {
     return this.#get('/v1/auth/profile');
   }
 

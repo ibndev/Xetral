@@ -69,7 +69,7 @@ export default function Security() {
           <Text style={styles.muted}>
             {support.reason === 'no_hardware'
               ? 'This device has no biometric sensor. You will type your PIN for each payment.'
-              : 'No face or fingerprint is set up on this device yet. Add one in your phone settings to use it here.'}
+              : 'No face or fingerprint is set up on this device. Add one in your phone settings.'}
           </Text>
         )}
 
@@ -90,9 +90,7 @@ export default function Security() {
                 their PIN still guards their money and the scan only saves
                 them typing it. */}
             <Text style={styles.muted}>
-              {label} unlocks your transaction PIN on this device. It does not replace
-              it — every payment is still approved with your PIN, and you can type it
-              at any time instead.
+              {label} unlocks your transaction PIN. Every payment still needs the PIN itself.
             </Text>
 
             {asking && (

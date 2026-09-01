@@ -140,8 +140,7 @@ export default function SignUp() {
         <p className="hint" style={{ margin: '0 0 14px' }}>
           By creating an account you agree to our{' '}
           <Link href="/legal/terms">terms</Link> and{' '}
-          <Link href="/legal/privacy">privacy notice</Link>. We record which
-          version you agreed to, and when.
+          <Link href="/legal/privacy">privacy notice</Link>.
         </p>
 
         <button type="submit" className="block" disabled={busy}>
