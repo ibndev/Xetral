@@ -361,6 +361,78 @@ describe('the staff surface', () => {
     WAIT_FOR_STEP_TIMEOUT_MS,
   );
 
+  it(
+    'ELEVATES A SESSION ON ITS OWN, which is what made the dashboard usable',
+    async () => {
+      /*
+       * THE DEADLOCK THIS CLOSES. Elevation is recorded on the session, and
+       * before this endpoint existed only two things could ever set it:
+       * confirming an enrolment, which happens once per operator, and an
+       * acting request that carried a code — which no client ever sent.
+       * `totp_code` appeared in exactly one request in the whole product, the
+       * enrolment confirm.
+       *
+       * So the operations dashboard worked for the ten minutes after somebody
+       * enrolled and then refused every action for ever. What an operator saw
+       * was a refusal telling them to enter a code into a form whose only
+       * field was the transaction PIN — so the code went there, the PIN check
+       * refused it, and somebody holding two correct secrets was told they
+       * were wrong.
+       *
+       * The test is therefore in three parts: a fresh session refuses, one
+       * call to the new endpoint elevates it, and the SAME action then
+       * succeeds carrying no code at all.
+       */
+      const operator = await register();
+      await grant(operator, 'compliance');
+      const code = await enrol(operator);
+      const subject = await register();
+
+      const token = await signInAgain(operator);
+
+      // 1. Unelevated, exactly as every operator was permanently stuck.
+      const refused = await request(app.getHttpServer())
+        .post(`/v1/admin/users/${subject.uuid}/status`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ status: 'frozen', reason: 'before elevating', transaction_pin: PIN })
+        .expect(400);
+      expect(refused.body.error).toBe('totp_required');
+
+      // 2. One code, to the endpoint whose absence was the bug. No PIN: this
+      //    proves possession of the authenticator, which is a different factor.
+      await waitForNextCode(code);
+      await request(app.getHttpServer())
+        .post('/v1/auth/totp/elevate')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ totp_code: code() })
+        .expect(204);
+
+      // 3. The same request, now allowed, and still requiring the PIN.
+      await request(app.getHttpServer())
+        .post(`/v1/admin/users/${subject.uuid}/status`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ status: 'frozen', reason: 'after elevating', transaction_pin: PIN })
+        .expect(200);
+    },
+    WAIT_FOR_STEP_TIMEOUT_MS,
+  );
+
+  it('refuses to elevate for somebody with no second factor', async () => {
+    // The endpoint is declared `authenticated` rather than `staff`, because it
+    // must be reachable by a session that is not yet elevated — which is every
+    // caller by definition. So the refusal has to come from the service, and
+    // this is the test that it does: an ordinary customer gets nothing from it.
+    const customer = await register();
+    const token = await signInAgain(customer);
+
+    const refused = await request(app.getHttpServer())
+      .post('/v1/auth/totp/elevate')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ totp_code: '123456' })
+      .expect(403);
+    expect(refused.body.error).toBe('totp_not_enrolled');
+  });
+
   it('still requires the PIN inside an elevated window', async () => {
     const operator = await register();
     await grant(operator, 'compliance');

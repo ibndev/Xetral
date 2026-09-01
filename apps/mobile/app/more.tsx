@@ -4,7 +4,7 @@ import { Icon } from '@/icon';
 import type { IconName } from '@/icon';
 import { Shell } from '@/shell';
 import { useLoad, useXetral } from '@/hooks';
-import { radius, space, useStyles, useTheme } from '@/theme';
+import { font, radius, space, useStyles, useTheme } from '@/theme';
 
 /**
  * Everything the four tabs do not reach.
@@ -74,7 +74,7 @@ export default function More() {
           >
             <Icon name="shield" size={20} color={colors.warn} />
             <View style={{ flex: 1 }}>
-              <Text style={{ color: colors.text, fontWeight: '700' }}>
+              <Text style={{ color: colors.text, fontFamily: font.sansBold }}>
                 Verify your identity
               </Text>
               <Text style={styles.hint}>
@@ -96,7 +96,7 @@ export default function More() {
                   <Icon name={item.icon} size={18} color={colors.text2} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ color: colors.text, fontWeight: '600' }}>{item.label}</Text>
+                  <Text style={{ color: colors.text, fontFamily: font.sansSemi }}>{item.label}</Text>
                   <Text style={styles.muted}>{item.hint}</Text>
                 </View>
                 <Icon name="chevronRight" size={18} color={colors.text3} />

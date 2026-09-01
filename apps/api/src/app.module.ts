@@ -45,6 +45,7 @@ import {
 import { GiftCardService } from './giftcards/giftcard.service.js';
 import { GiftCardHoldService } from './giftcards/hold-release.service.js';
 import { StaffService } from './auth/staff.service.js';
+import { ProfileService } from './auth/profile.service.js';
 import { AdminBootstrapService } from './auth/admin-bootstrap.service.js';
 import { StaffTotpService } from './auth/staff-totp.service.js';
 import { HealthController } from './health/health.controller.js';
@@ -742,6 +743,7 @@ export class AppModule {
         PurchaseService,
         PurchaseOutcome,
         StaffService,
+        ProfileService,
         AdminBootstrapService,
         StaffTotpService,
         SettingsService,

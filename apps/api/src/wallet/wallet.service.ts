@@ -487,7 +487,35 @@ export class WalletService {
     return { id: row.id, email: row.email };
   }
 
+  /**
+   * Who to pay, from whatever the customer pasted.
+   *
+   * FOUR SHAPES, ONE FIELD. An email, a phone number, an `@handle`, or a whole
+   * profile URL copied out of a message — `https://app.xetral.com/pay/olawale`
+   * and every variation of it somebody's keyboard produces. The alternative is
+   * a second form field the customer has to classify their own input into,
+   * which is asking them to do the parsing.
+   *
+   * The handle is matched against `payable_handles`, which excludes closed
+   * accounts and carries no contact detail — so resolving a link cannot be
+   * turned into a way to read the address behind it.
+   */
   async #recipientByIdentifier(identifier: string): Promise<{ id: string }> {
+    const handle = handleIn(identifier);
+    if (handle !== undefined) {
+      const byHandle = await this.pool.query<{ id: string }>(
+        `SELECT u.id FROM users u
+           JOIN payable_handles p ON p.user_uuid = u.uuid
+          WHERE p.handle = $1`,
+        [handle],
+      );
+      const row = byHandle.rows[0];
+      // The SAME refusal as an unknown email. A link that answered differently
+      // from an address would say which handles exist.
+      if (row === undefined) throw new NotFoundException({ error: 'recipient_not_found' });
+      return { id: row.id };
+    }
+
     const result = await this.pool.query<{ id: string; status: string }>(
       `SELECT id, status FROM users
         WHERE lower(email) = lower($1) OR phone = $1
@@ -504,6 +532,40 @@ export class WalletService {
     }
     return { id: row.id };
   }
+}
+
+/**
+ * The handle inside whatever was pasted, or undefined if this is not one.
+ *
+ * Deliberately permissive about the WRAPPER and strict about the handle. A
+ * customer copying a payment link gets whatever their app decided to include —
+ * a scheme or not, a trailing slash, a query string a share sheet appended —
+ * and none of that is their mistake to fix. What is not permissive is the
+ * handle itself: it must match the same shape the database enforces, so a
+ * malformed one is a clean "no such recipient" rather than a query.
+ */
+export function handleIn(raw: string): string | undefined {
+  let value = raw.trim();
+  if (value === '' || value.includes('@') === false && value.startsWith('http') === false
+      && !/^[a-z0-9_]+$/i.test(value)) {
+    return undefined;
+  }
+
+  // A URL, in any of the forms a share sheet produces.
+  const asUrl = value.match(/^(?:https?:\/\/)?[^\s/]+\/pay\/([^/?#\s]+)/i);
+  if (asUrl !== null) {
+    value = asUrl[1] ?? '';
+  } else if (value.startsWith('@')) {
+    value = value.slice(1);
+  } else if (value.includes('@') || value.startsWith('http')) {
+    // An email address, or a URL that is not a payment link. Neither is a
+    // handle, and guessing at one would turn a mistyped address into a
+    // transfer to somebody else entirely.
+    return undefined;
+  }
+
+  const handle = value.toLowerCase();
+  return /^[a-z0-9](?:[a-z0-9_]{1,18})[a-z0-9]$/.test(handle) ? handle : undefined;
 }
 
 function negate<C extends Currency>(amount: Money<C>): Money<C> {

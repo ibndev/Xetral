@@ -34,7 +34,14 @@ export const light: Palette = {
   accent: '#F5A623',
   link: '#4B7BF5',
 
-  bg: '#FFFFFF',
+  /*
+   * THE GROUND IS OFF-WHITE AND EVERY CONTAINER ON IT IS PAPER WHITE, exactly
+   * as `globals.css` defines it for the web. These are the SAME hex values,
+   * not an approximation: the two apps are one product and a customer holding
+   * both should not be able to tell which they are looking at from the colour
+   * of the page.
+   */
+  bg: '#F4F6F9',
   surface: '#FFFFFF',
   surface2: '#F6F7F9',
   line: '#E5E7EB',
@@ -191,10 +198,43 @@ export const space = { xs: 6, sm: 10, md: 14, lg: 18, xl: 24, xxl: 32 } as const
  * its symbol in whatever the platform substitutes. That is a mitigation rather
  * than a fix in both apps; the fix is a subset with the glyph in it.
  */
+/**
+ * A FAMILY PER WEIGHT, because React Native does not synthesize one.
+ *
+ * This was three keys — `display`, `sans`, `mono` — and every style set
+ * `fontFamily` alongside a `fontWeight` of 600 or 700. On the web that is
+ * exactly right: all three faces are VARIABLE fonts and the browser
+ * interpolates any weight in the range from the one file. Android does no
+ * such thing. With a custom `fontFamily` it matches a registered face by NAME
+ * and ignores `fontWeight` entirely, so a single Regular file meant every
+ * label, button, currency code and "Available balance" in the app rendered at
+ * 400 while the code said 600.
+ *
+ * That is what "the mobile text is too thin" was, and it could not be seen
+ * from the stylesheet: the numbers there already matched the web's exactly.
+ * The weights are now real files, instanced from the SAME variable fonts the
+ * web serves, so the two apps render the same shapes at the same weights.
+ *
+ * NEVER set `fontWeight` beside one of these. Pick the family that is the
+ * weight — `fontWeight` alongside a custom family is either ignored (Android)
+ * or synthesizes a faux-bold on top of an already-bold face (iOS), and the
+ * second is worse than the first because it looks deliberate.
+ */
 export const font = {
-  display: 'BricolageGrotesque',
-  sans: 'InstrumentSans',
-  mono: 'SplineSansMono',
+  /** Display — headings and the balance. */
+  display: 'BricolageGrotesque-Regular',
+  displaySemi: 'BricolageGrotesque-SemiBold',
+  displayBold: 'BricolageGrotesque-ExtraBold',
+
+  /** Body, labels, buttons. */
+  sans: 'InstrumentSans-Regular',
+  sansMedium: 'InstrumentSans-Medium',
+  sansSemi: 'InstrumentSans-SemiBold',
+  sansBold: 'InstrumentSans-Bold',
+
+  /** Figures. */
+  mono: 'SplineSansMono-Regular',
+  monoSemi: 'SplineSansMono-SemiBold',
 } as const;
 
 /**
@@ -286,27 +326,41 @@ function buildSheet(colors: Palette) {
 
   h1: {
     color: colors.text,
-    fontFamily: font.display,
+    // The 800 face BY NAME. `fontWeight: '800'` beside a custom family is
+    // ignored on Android, which is why the greeting rendered thin.
+    fontFamily: font.displayBold,
     fontSize: 26,
-    fontWeight: '800',
     letterSpacing: -0.6,
   },
   h2: {
     color: colors.text,
-    fontFamily: font.display,
-    fontSize: 18,
-    fontWeight: '800',
+    fontFamily: font.displayBold,
+    // 19, matching the web's `h2` rather than sitting a point under it.
+    fontSize: 19,
     letterSpacing: -0.3,
   },
-  lead: { color: colors.text2, fontSize: 15, marginTop: 6 },
-  hint: { color: colors.text3, fontSize: 13, marginTop: 6 },
+  lead: { color: colors.text2, fontFamily: font.sans, fontSize: 15, marginTop: 6, lineHeight: 22 },
+  hint: { color: colors.text3, fontFamily: font.sans, fontSize: 13, marginTop: 6, lineHeight: 19 },
 
   label: {
     color: colors.text2,
+    fontFamily: font.sansSemi,
     fontSize: 13.5,
-    fontWeight: '600',
     marginBottom: 7,
     marginTop: space.md,
+  },
+
+  /**
+   * A label on an AUTH form, which the web sizes differently from a label in
+   * the app: 13 rather than 13.5, and no top margin because `.auth-card` is a
+   * grid with an 18px gap doing the spacing. Matching that here is what stops
+   * the sign-in screen being a near-miss of the web's.
+   */
+  fieldLabel: {
+    color: colors.text2,
+    fontFamily: font.sansSemi,
+    fontSize: 13,
+    marginBottom: 7,
   },
   input: {
     backgroundColor: colors.surface,
@@ -333,8 +387,7 @@ function buildSheet(colors: Palette) {
   },
   buttonText: {
     color: colors.onBrand,
-    fontFamily: font.sans,
-    fontWeight: '600',
+    fontFamily: font.sansSemi,
     fontSize: 15,
   },
   buttonQuiet: { backgroundColor: colors.surface2 },
@@ -344,9 +397,8 @@ function buildSheet(colors: Palette) {
      does not shift the ones beside it. */
   balance: {
     color: colors.text,
-    fontFamily: font.display,
+    fontFamily: font.displayBold,
     fontSize: 34,
-    fontWeight: '800',
     letterSpacing: -1,
     fontVariant: ['tabular-nums'],
   },
@@ -381,11 +433,11 @@ function buildSheet(colors: Palette) {
     borderRadius: radius.pill,
     backgroundColor: colors.surface2,
   },
-  badgeText: { color: colors.text2, fontSize: 12, fontWeight: '600' },
+  badgeText: { color: colors.text2, fontFamily: font.sansSemi, fontSize: 12 },
 
   error: { color: colors.danger, fontSize: 13.5, marginTop: 10 },
   ok: { color: colors.ok, fontSize: 13.5, marginTop: 10 },
-  muted: { color: colors.text3, fontSize: 12.5 },
-    link: { color: colors.link, fontSize: 14.5, fontWeight: '600' },
+  muted: { color: colors.text3, fontFamily: font.sans, fontSize: 12.5 },
+    link: { color: colors.link, fontFamily: font.sansSemi, fontSize: 14.5 },
   });
 }

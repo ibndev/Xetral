@@ -21,6 +21,15 @@ export interface SelectProps {
   /** Points at the visible <label>, which a native select got for free. */
   readonly labelledBy?: string;
   readonly id?: string;
+  /**
+   * An optional badge drawn before each label, in the list AND on the trigger.
+   *
+   * A render prop rather than an `icon` field on the option, because the thing
+   * being drawn — a flag clipped to a circle — is a component, and putting
+   * components in a data array makes the options list something a screen
+   * cannot build from an API response.
+   */
+  readonly renderMark?: (value: string) => React.ReactNode;
 }
 
 /**
@@ -61,6 +70,7 @@ export function Select({
   placeholder = 'Select…',
   labelledBy,
   id,
+  renderMark,
 }: SelectProps): React.JSX.Element {
   const generatedId = useId();
   const listId = `${id ?? generatedId}-list`;
@@ -220,8 +230,11 @@ export function Select({
         onClick={() => setOpen((o) => !o)}
         onKeyDown={onKeyDown}
       >
-        <span className={selected === undefined ? 'xselect-placeholder' : undefined}>
-          {selected?.label ?? placeholder}
+        <span className="xselect-chosen">
+          {renderMark !== undefined && selected !== undefined && renderMark(selected.value)}
+          <span className={selected === undefined ? 'xselect-placeholder' : undefined}>
+            {selected?.label ?? placeholder}
+          </span>
         </span>
         <Icon name="chevronDown" size={18} />
       </button>
@@ -256,6 +269,7 @@ export function Select({
                 if (option.disabled !== true) setActive(index);
               }}
             >
+              {renderMark !== undefined && renderMark(option.value)}
               <span className="xselect-label">{option.label}</span>
               {option.hint !== undefined && <span className="xselect-hint">{option.hint}</span>}
               {option.value === value && <Icon name="check" size={16} />}

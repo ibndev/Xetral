@@ -6,8 +6,10 @@ import { Icon } from '@/icon';
 import type { IconName } from '@/icon';
 import { Shell } from '@/shell';
 import { Empty, FormError, Loading } from '@/ui';
+import { Select } from '@/select';
+import { CurrencyMark } from '@/currency-mark';
 import { useLoad, useRemembered, useXetral } from '@/hooks';
-import { radius, space, useStyles, useTheme } from '@/theme';
+import { font, radius, space, useStyles, useTheme } from '@/theme';
 import { BALANCE_VISIBILITY } from '@/preferences';
 
 /** A fixed mask. As many dots as the amount has digits would be a picture of
@@ -54,6 +56,7 @@ export default function Home() {
     looksLikeACurrency,
   );
 
+  const session = useLoad(() => client.currentSession(), [client]);
   const balances = useLoad(() => client.balances(), [client]);
 
   // Every currency the platform OFFERS, not only the ones this customer has
@@ -77,17 +80,38 @@ export default function Home() {
 
   return (
     <Shell>
-      <Text style={styles.h1}>Hello there</Text>
-      <Text style={styles.lead}>Here is where your money stands today.</Text>
+      {/*
+        BY NAME, and nothing under it — the same as the web. The subtitle
+        described the screen to somebody already looking at it and pushed the
+        balance a line down. The name is the customer's own, from their
+        identity submission, which is the only place this system holds one.
+      */}
+      <Text style={styles.h1}>Hello {session.data?.first_name ?? 'there'}</Text>
 
       <View style={[styles.card, { marginTop: space.lg }]}>
         <View style={styles.rowBetween}>
-          <Text style={{ color: colors.text2, fontSize: 13.5, fontWeight: '500' }}>
+          <Text style={{ color: colors.text2, fontSize: 13.5, fontFamily: font.sansMedium }}>
             Available balance
           </Text>
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>{currency}</Text>
-          </View>
+          {/*
+            THE SELECTOR IS HERE AND NOWHERE ELSE, exactly as on the web. There
+            used to be a badge — which named the currency and could not change
+            it — plus a wrap of chips below the balance that could. Two
+            controls for one decision, and the chips repeated every figure the
+            balance was already showing.
+          */}
+          <Select
+            variant="pill"
+            label="Currency"
+            value={currency}
+            onChange={setPreferred}
+            options={assets.map((b: Balance) => ({
+              value: b.currency,
+              label: b.currency,
+              ...(hidden ? {} : { hint: formatAmount(b.spendable, b.currency) }),
+            }))}
+            renderMark={(code) => <CurrencyMark currency={code} size={20} />}
+          />
         </View>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
@@ -104,6 +128,11 @@ export default function Home() {
           */}
           <Pressable
             onPress={() => setVisibility(hidden ? 'shown' : 'hidden')}
+            // ANDROID DRAWS A RIPPLE ON TOUCH unless told not to, and on a
+            // 44pt square around a 20pt glyph that ripple IS the circular
+            // background that was reported. `null` is the documented way to
+            // refuse it; omitting the prop accepts the platform default.
+            android_ripple={null}
             accessibilityRole="button"
             accessibilityState={{ selected: hidden }}
             accessibilityLabel={hidden ? 'Show balance' : 'Hide balance'}
@@ -121,45 +150,6 @@ export default function Home() {
           </Text>
         )}
 
-        {assets.length > 1 && (
-          <View
-            style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: space.md }}
-          >
-            {assets.map((b: Balance) => {
-              const on = b.currency === currency;
-              return (
-                <Pressable
-                  key={b.currency}
-                  onPress={() => setPreferred(b.currency)}
-                  accessibilityRole="tab"
-                  accessibilityState={{ selected: on }}
-                  style={{
-                    paddingHorizontal: 14,
-                    paddingVertical: 8,
-                    borderRadius: radius.md,
-                    borderWidth: 1,
-                    borderColor: on ? colors.link : colors.line,
-                    backgroundColor: on ? colors.infoBg : colors.surface2,
-                  }}
-                >
-                  <Text
-                    style={{
-                      fontSize: 11.5,
-                      fontWeight: '600',
-                      letterSpacing: 0.4,
-                      color: on ? colors.text : colors.text2,
-                    }}
-                  >
-                    {b.currency}
-                  </Text>
-                  <Text style={[styles.amount, { fontSize: 13 }]}>
-                    {hidden ? MASK : formatAmount(b.spendable, b.currency)}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        )}
 
         <View style={{ flexDirection: 'row', gap: 8, marginTop: space.lg }}>
           <QuickAction href="/transfer" icon="send" label="Send" primary />
@@ -214,7 +204,7 @@ export default function Home() {
                 numberOfLines={2}
                 style={{
                   fontSize: 11.5,
-                  fontWeight: '600',
+                  fontFamily: font.sansSemi,
                   textAlign: 'center',
                   color: colors.text,
                 }}
@@ -257,7 +247,7 @@ export default function Home() {
                 />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={{ color: colors.text, fontWeight: '600' }} numberOfLines={1}>
+                <Text style={{ color: colors.text, fontFamily: font.sansSemi }} numberOfLines={1}>
                   {t.description}
                 </Text>
                 <Text style={styles.muted}>
@@ -309,7 +299,7 @@ function QuickAction({
         <Text
           style={{
             fontSize: 14,
-            fontWeight: '600',
+            fontFamily: font.sansSemi,
             color: primary === true ? colors.onBrand : colors.text,
           }}
         >

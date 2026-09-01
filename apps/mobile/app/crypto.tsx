@@ -6,7 +6,7 @@ import { Shell } from '@/shell';
 import { Button, Done, Empty, Field, FormError, Loading, Panel, VerifyPrompt } from '@/ui';
 import { Select } from '@/select';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/hooks';
-import { space, useStyles, useTheme } from '@/theme';
+import { font, space, useStyles, useTheme } from '@/theme';
 
 /**
  * Crypto: an address to receive on, and an irreversible way to send.
@@ -72,7 +72,7 @@ export default function Crypto() {
         {withdrawals.data?.slice(0, 10).map((w: Withdrawal) => (
           <View key={w.id} style={styles.row}>
             <View style={{ flex: 1 }}>
-              <Text style={{ color: colors.text, fontWeight: '600' }}>
+              <Text style={{ color: colors.text, fontFamily: font.sansSemi }}>
                 {w.asset} · {w.network}
               </Text>
               <Text style={styles.muted} numberOfLines={1}>

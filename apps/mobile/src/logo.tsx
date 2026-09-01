@@ -83,8 +83,9 @@ export function Logo({
       <LogoMark size={size} tone={tone} />
       <Text
         style={{
-          fontFamily: font.display,
-          fontWeight: '800',
+          // The 800 face by name. A weight beside a custom family is dropped
+          // on Android and synthesizes a faux-bold on iOS.
+          fontFamily: font.displayBold,
           // Bricolage's cap height is ~0.72em, so the word is set larger for
           // its capitals to match the mark's height.
           fontSize: Math.round(size / 0.72),

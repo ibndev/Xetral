@@ -29,6 +29,8 @@ import {
 } from './dto.js';
 import { PasswordResetService } from './password-reset.service.js';
 import { StaffTotpService } from './staff-totp.service.js';
+import { ProfileService } from './profile.service.js';
+import type { ProfileView } from './profile.service.js';
 import type { TotpEnrolment } from './staff-totp.service.js';
 import { AccountSecurityService } from './account-security.service.js';
 import type { DeviceView } from './account-security.service.js';
@@ -48,6 +50,7 @@ export class AuthController {
     @Inject(AccountSecurityService) private readonly security: AccountSecurityService,
     @Inject(PasswordResetService) private readonly resets: PasswordResetService,
     @Inject(StaffTotpService) private readonly totp: StaffTotpService,
+    @Inject(ProfileService) private readonly profile: ProfileService,
   ) {}
 
   /**
@@ -352,5 +355,58 @@ export class AuthController {
       });
     }
     await this.totp.confirmEnrolment(auth.sub, auth.sid, parsed.data.totp_code);
+  }
+
+  /**
+   * Elevate this session for the acting window.
+   *
+   * The endpoint that was missing, and whose absence made the entire acting
+   * staff surface unreachable: enrolment elevated the session it ran on, and
+   * after that window nothing could ever elevate one again. See
+   * `StaffTotpService.elevate`.
+   *
+   * `authenticated`, not `staff`: it must be callable by somebody whose
+   * session is NOT currently elevated, which is every caller by definition —
+   * a staff policy would refuse the one request that exists to fix that. The
+   * service still refuses anybody without a confirmed factor, so this grants
+   * nothing to a customer.
+   *
+   * 204: it changes the session, and there is nothing to say back. How long
+   * the elevation lasts is the server's business and telling a client would
+   * invite it to cache a countdown that the next revocation makes a lie.
+   */
+  /**
+   * The customer's own payment handle and link.
+   *
+   * A GET that WRITES on its first call, which is worth naming: it mints a
+   * handle if there is none. That is idempotent — the second call returns the
+   * same one — so it is safe to repeat, and minting at registration instead
+   * would put a uniqueness retry inside the one transaction that must not
+   * fail.
+   */
+  @Get('profile')
+  async profileMine(@Req() request: AuthenticatedRequest): Promise<ProfileView> {
+    const auth = request.auth;
+    if (auth === undefined) throw new UnauthorizedException({ error: 'invalid_token' });
+    return this.profile.mine(auth.sub);
+  }
+
+  @Post('totp/elevate')
+  @HttpCode(204)
+  async elevateTotp(
+    @Body() body: unknown,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<void> {
+    const auth = request.auth;
+    if (auth === undefined) throw new UnauthorizedException({ error: 'invalid_token' });
+
+    const parsed = totpCodeSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException({
+        error: 'invalid_request',
+        fields: parsed.error.issues.map((issue) => issue.path.join('.')),
+      });
+    }
+    await this.totp.elevate(auth.sub, auth.sid, parsed.data.totp_code);
   }
 }

@@ -50,6 +50,11 @@ export function ThemeToggle() {
   return (
     <Pressable
       onPress={() => set(scheme === 'dark' ? 'light' : 'dark')}
+      // ANDROID DRAWS A RIPPLE ON TOUCH unless told not to, and on a
+      // 44pt square around a 20pt glyph that ripple IS the circular
+      // background that was reported. `null` is the documented way to
+      // refuse it; omitting the prop accepts the platform default.
+      android_ripple={null}
       accessibilityRole="button"
       accessibilityLabel={scheme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
       // 44pt, and NO BACKGROUND IN ANY STATE. The web's equivalent was
@@ -111,6 +116,9 @@ export function Shell({
         ) : (
           <>
             <Pressable
+              // No ripple: the same circular flash the balance toggle was
+              // reported for, on the same 44pt icon target.
+              android_ripple={null}
               /*
                * BACK IF THERE IS A BACK, otherwise the href.
                *
@@ -174,6 +182,12 @@ export function Shell({
              * always behaved this way because a browser link does.
              */
             <Link key={tab.href} href={tab.href as never} replace asChild>
+              {/*
+                The tab bar keeps its ripple deliberately. It is a full-width
+                target, so the ripple reads as the tab lighting up rather than
+                as a disc appearing behind a glyph — which is what made the
+                same effect wrong on a 44pt icon button.
+              */}
               <Pressable
                 accessibilityRole="tab"
                 accessibilityState={{ selected: active }}

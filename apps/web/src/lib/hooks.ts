@@ -6,6 +6,7 @@ import type { XetralClient } from '@xetral/client';
 import { AdminClient } from '@xetral/client';
 import { xetral } from '@/lib/session';
 import { codeOf, messageFor } from '@/lib/errors';
+import { useElevating } from '@/lib/elevation';
 import type { ApiErrorCode } from '@xetral/client';
 
 /**
@@ -23,13 +24,27 @@ export function useXetral(): XetralClient {
 }
 
 /** The same, for the operations surface. */
+/**
+ * The operations client, with the second factor handled for it.
+ *
+ * `useElevating` wraps every method so a `totp_required` refusal becomes a
+ * prompt for a code and a retry, rather than an error each of the seventeen
+ * screens would have to interpret. Outside `/admin` there is no provider above
+ * it and the client comes back untouched, so nothing else changes shape.
+ *
+ * That refusal used to be a DEAD END: nothing in the product could elevate a
+ * session after the ten minutes following enrolment, so the acting half of the
+ * dashboard was permanently unreachable while telling the operator to type a
+ * code into a form with nowhere to put one.
+ */
 export function useAdmin(): AdminClient {
   const router = useRouter();
   const signedOut = useCallback(() => router.push('/signin'), [router]);
-  return useMemo(
+  const client = useMemo(
     () => new AdminClient({ baseUrl: '/api/x', session: xetral(signedOut).session }),
     [signedOut],
   );
+  return useElevating(client);
 }
 
 /**

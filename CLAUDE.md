@@ -581,6 +581,103 @@ wrapper in `apps/api/src/observability/provider-health.service.ts`, screen at
   into Next's page router — and that the host is not one only the phone would
   notice the loss of.
 
+### The staff second factor, and why the dashboard was shut — non-obvious rules
+
+`apps/api/src/auth/staff-totp.service.ts`, `apps/web/src/lib/elevation.tsx`.
+
+- **THE ACTING SURFACE WAS UNREACHABLE, and every part of it looked correct.**
+  Elevation is recorded on the SESSION, and only two things could ever set
+  `totp_verified_at`: confirming an enrolment, which happens once per operator,
+  and an acting request carrying a code. No client sent one — `totp_code`
+  appeared in exactly one request in the whole product. So the dashboard
+  worked for the ten minutes after somebody enrolled and refused every action
+  for ever after.
+- **THE REFUSAL POINTED AT THE WRONG SECRET, which is why it read as a bug in
+  the code rather than a missing endpoint.** `totp_required` renders as "enter
+  the six-digit code from your authenticator app", and the only field on the
+  provider-key form is the transaction PIN — so the code went in there, the PIN
+  check refused it, and an operator holding two correct secrets was told they
+  were wrong.
+- **`/v1/auth/totp/elevate` is declared `authenticated`, NOT `staff`.** Its
+  whole purpose is to be reachable by a session that is not elevated, which is
+  every caller by definition; a staff policy would refuse the one request that
+  exists to fix that. The service refuses anybody without a confirmed factor,
+  so it grants a customer nothing.
+- **The prompt is at the CLIENT BOUNDARY, not on each form.** `AdminClient` has
+  forty-seven methods; a Proxy wraps every one of them and any added later,
+  which a hand-written list cannot promise — the same argument that wraps
+  provider ports once at the injection boundary.
+- **One code buys the WINDOW, not one action.** Codes are single-use and change
+  every thirty seconds, so a per-action code refuses a reviewer on their second
+  approval, and the end of that is a shared authenticator on a desk.
+
+### Paying somebody — non-obvious rules
+
+Schema: `packages/ledger/sql/039_profile_handles.sql`.
+
+- **SENDING MONEY REQUIRED KNOWING AN EMAIL ADDRESS**, which is the identifier
+  people are most careful with and least willing to post. So the ordinary case
+  — a trader publishing a way to be paid, somebody splitting a bill — had no
+  shape at all.
+- **A HANDLE IS CLAIMED ONCE AND NEVER REISSUED**, by `handle_history` and its
+  trigger rather than by the unique index. The index only sees LIVE handles, and
+  the whole point is that a RELEASED one is still taken: if changing yours freed
+  it, whoever took it next would receive payments from every link you had
+  already shared, out of message threads nobody re-reads.
+- **The shape refuses the CONFUSABLE cases, not just the invalid ones.**
+  Lowercase only, because `@Olawale` and `@olawale` must not be two people; no
+  leading or trailing underscore, because `_olawale` reads as the same handle
+  at a glance and that is how one person is impersonated to another.
+- **`payable_handles` carries a name and NOT an email.** A link resolver has to
+  show who is about to be paid; if it could also show the address behind the
+  handle, every published payment link would be an email harvester.
+- **An unknown handle answers exactly as an unknown email does.** A link that
+  refused differently from an address would say which handles exist.
+- **The suffix on a generated handle comes from a CSPRNG.** A handle is public
+  and permanent, so a predictable one lets somebody work out what the next
+  customer with that name will be given and claim it first — a cheap way to
+  intercept payments meant for a person who has not signed up yet. The local
+  Semgrep rule refuses `Math.random` here and caught exactly that.
+- **`has_pin` is on the session so the Send screen can ask FIRST.** Without it
+  the only way to learn was to try to move money and read `pin_not_set` off the
+  refusal — a customer filled in a recipient, an amount and a PIN box before
+  being told the PIN box was never going to work.
+
+### Surfaces, weights and the tap circle — non-obvious rules
+
+- **THE GROUND IS OFF-WHITE AND EVERY CONTAINER ON IT IS PAPER WHITE**, which
+  reverses what `globals.css` used to argue. One white everywhere makes a card
+  only a border, so a screen of stacked cards reads as one sheet with lines
+  ruled across it. The contrast cost is now paid by the ground, where there is
+  no text, instead of by the card, where all of it is.
+- **REACT NATIVE DOES NOT SYNTHESIZE FONT WEIGHT.** On Android a custom
+  `fontFamily` is matched by name and `fontWeight` is IGNORED, so the single
+  Regular face meant every label, button and currency code rendered at 400
+  while the stylesheet said 600 — "the mobile text is too thin", and invisible
+  to every test because the NUMBERS already matched the web's exactly. There is
+  a face per weight now, instanced from the same variable woff2 the web serves,
+  and `fonts.test.ts` fails on a `fontWeight` beside a custom family.
+- **THE CIRCLE APPEARED ON TAP, NOT AT REST, and that is a different set of
+  mechanisms.** The resting and hover states were already transparent. A tap
+  focuses a button, and the product's focus ring is an `outline`, which follows
+  the element's own 999px radius — so a tap left a blue circle around the icon.
+  `:focus-visible` keeps the ring for keyboard users and removes it for thumbs;
+  Android's `Pressable` ripple is refused with `android_ripple={null}` on every
+  icon button, and kept on the tab bar, where a full-width target lighting up
+  is the platform convention rather than a disc behind a glyph.
+- **NOT EMOJI FLAGS.** Windows ships no flag glyphs, so `🇳🇬` renders there as
+  the letters "NG" in a box — on the currency selector, on the screen every
+  customer opens. The marks are data in `@xetral/client` and drawn as SVG by
+  each app, so both platforms draw the same shape.
+- **A flag only where a flag is the recognisable thing.** Naira, cedi and
+  shilling are each one country's money. A dollar is not, and a US flag beside
+  USD would be actively wrong next to USDT and USDC, which are dollars
+  belonging to no country.
+- **The currency selector replaced a BADGE and a RAIL** — a label that named the
+  currency and could not change it, plus a row of chips that could and repeated
+  every figure the balance was already showing. Two controls for one decision,
+  and the card's height varied with how many currencies the platform offered.
+
 ### Currencies, filters and pickers — non-obvious rules
 
 - **THREE COPIES OF THE ASSET LIST, bound by one test.** `crypto/dto.ts`'s zod
@@ -1870,6 +1967,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/035_price_publication.s
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/036_attention.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/037_provider_health.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/038_usdc.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/039_profile_handles.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -1907,6 +2005,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/035_price_publication.t
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/036_attention.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/037_provider_health.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/038_usdc.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/039_profile_handles.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

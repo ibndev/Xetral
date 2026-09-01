@@ -44,6 +44,42 @@ export interface SessionSummary {
   readonly user_id: string;
   readonly device_id: string;
   readonly expires_at: string;
+  /**
+   * What to call this customer, or null.
+   *
+   * FROM THEIR KYC SUBMISSION, because that is the only place this system
+   * holds a name at all — `users` has an email, a phone and a status, and
+   * registration asks for nothing else deliberately. So a customer who has
+   * not submitted identity documents genuinely has no name here and the
+   * screens say so by falling back rather than by inventing one from an email
+   * address.
+   *
+   * THE FIRST NAME ONLY, and not because of screen width: a greeting is the
+   * one place a product speaks to somebody the way a person would, and "Hello
+   * Olawale Adeyemi" is a form letter. The rest of the name is on the identity
+   * screen where it belongs.
+   *
+   * It is NOT in the access token. A token is signed and cannot be revoked
+   * mid-life, so a name baked into one would still be the old name fifteen
+   * minutes after a customer corrected it — the same rule this codebase
+   * applies to roles and to `users.status`.
+   */
+  readonly first_name: string | null;
+  /**
+   * Whether a transaction PIN exists.
+   *
+   * SO A SCREEN CAN ASK BEFORE IT NEEDS TO. Without it the only way to learn
+   * was to try to move money and read `pin_not_set` off the refusal — which
+   * means a customer fills in a recipient, an amount and a PIN box before
+   * being told the PIN box was never going to work. The Send screen routes
+   * them through creating one first.
+   *
+   * A boolean, never the PIN or anything derived from it.
+   */
+  readonly has_pin: boolean;
+  /** The customer's own payment handle, or null if they have not been given
+   *  one yet. `GET /v1/profile` mints one on first ask. */
+  readonly handle: string | null;
 }
 
 /**
@@ -493,8 +529,57 @@ export class AuthService {
       user_id: claims.sub,
       device_id: claims.did,
       expires_at: new Date(claims.exp * 1000).toISOString(),
+      ...(await this.#profile(claims.sub)),
     };
   }
+
+  /**
+   * The three things a screen needs about the person, in ONE query.
+   *
+   * Three round trips for a name, a boolean and a handle would put three
+   * queries in front of every session check — and `/v1/auth/session` is what
+   * both apps call on mount.
+   *
+   * Failure returns the safe answers rather than throwing: no name, NO PIN,
+   * no handle. `has_pin: false` is the one that has to be right in the
+   * failure case — it sends a customer to set a PIN they may already have,
+   * which is an extra screen, whereas `true` would send them to a transfer
+   * that refuses.
+   */
+  async #profile(
+    userUuid: string,
+  ): Promise<{ first_name: string | null; has_pin: boolean; handle: string | null }> {
+    try {
+      const result = await this.pool.query<{
+        full_name: string | null;
+        has_pin: boolean;
+        handle: string | null;
+      }>(
+        `SELECT (SELECT k.full_name FROM kyc_submissions k
+                  WHERE k.user_id = u.id ORDER BY k.created_at DESC LIMIT 1) AS full_name,
+                (p.user_id IS NOT NULL) AS has_pin,
+                u.handle
+           FROM users u
+           LEFT JOIN transaction_pins p ON p.user_id = u.id
+          WHERE u.uuid = $1`,
+        [userUuid],
+      );
+      const row = result.rows[0];
+      if (row === undefined) return { first_name: null, has_pin: false, handle: null };
+
+      const full = row.full_name?.trim();
+      return {
+        // The first token. Nigerian names are commonly three parts and the
+        // first is the one somebody is called.
+        first_name: full === undefined || full === '' ? null : (full.split(/\s+/)[0] ?? null),
+        has_pin: row.has_pin,
+        handle: row.handle,
+      };
+    } catch {
+      return { first_name: null, has_pin: false, handle: null };
+    }
+  }
+
 
   #issue(
     userUuid: string,

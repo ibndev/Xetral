@@ -5,7 +5,7 @@ import { Icon } from '@/icon';
 import { Shell } from '@/shell';
 import { Empty, FormError, Loading, Panel } from '@/ui';
 import { useLoad, useXetral } from '@/hooks';
-import { radius, space, useStyles, useTheme } from '@/theme';
+import { font, radius, space, useStyles, useTheme } from '@/theme';
 
 /**
  * Adding money, and WHAT IS AND IS NOT GATED ON VERIFICATION.
@@ -68,7 +68,7 @@ export default function AddMoney() {
             <Icon name="info" size={18} color={colors.info} />
             <Text style={[styles.hint, { flex: 1, marginTop: 0 }]}>
               Your account can receive and move up to{' '}
-              <Text style={{ fontWeight: '700' }}>{formatAmount(ngn.daily_limit, 'NGN')}</Text>{' '}
+              <Text style={{ fontFamily: font.sansBold }}>{formatAmount(ngn.daily_limit, 'NGN')}</Text>{' '}
               a day{limits.data?.tier === 0 ? ' without verifying your identity' : ''}.
             </Text>
           </View>
@@ -94,7 +94,7 @@ export default function AddMoney() {
             </View>
 
             <Text style={styles.hint}>
-              Send to <Text style={{ fontWeight: '700' }}>{account.data.account_name}</Text>.
+              Send to <Text style={{ fontFamily: font.sansBold }}>{account.data.account_name}</Text>.
               This account is yours permanently — save it as a beneficiary and money you
               send lands in your wallet automatically.
             </Text>
@@ -144,7 +144,7 @@ export default function AddMoney() {
             }}
           >
             <View style={{ flex: 1 }}>
-              <Text style={{ color: colors.text, fontWeight: '600' }}>
+              <Text style={{ color: colors.text, fontFamily: font.sansSemi }}>
                 {d.sender_name ?? 'Bank transfer'}
               </Text>
               <Text style={styles.muted}>{new Date(d.created_at).toLocaleString()}</Text>

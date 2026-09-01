@@ -49,14 +49,26 @@
 
   /* Surfaces.
 
-     The page is PURE WHITE and a card is the same white, separated by a
-     hairline rather than by a fill. Tinting the page grey to make white cards
-     "pop" is the older move and it costs contrast everywhere else: body text
-     on #F2F4F8 is measurably flatter than the same text on paper, and every
-     screenshot picks up a grey cast. Borders do the separating instead. */
-  --bg:           #FFFFFF;   /* the page */
-  --surface:      #FFFFFF;   /* cards */
-  --surface-2:    #F6F7F9;   /* inputs, wells */
+     THE PAGE IS OFF-WHITE AND EVERY CONTAINER ON IT IS PAPER WHITE, and that
+     is a reversal of what this file used to argue. It read: the page is pure
+     white, a card is the same white, and a hairline separates them — because
+     tinting the ground grey costs a little contrast on body text and gives
+     screenshots a grey cast.
+
+     Both halves of that were true and the conclusion was still wrong. With
+     one white everywhere, a card is only a border, so a screen of stacked
+     cards reads as a single sheet with lines ruled across it and the eye has
+     nothing to group by. The sign-in page had already solved it locally — its
+     fields sit on a light ground and are obviously fields — and the fix is to
+     make that relationship the app's rather than one page's.
+
+     So: the GROUND is `--bg`, and anything a customer reads a number or types
+     into is `--surface`, which is pure white. The contrast cost is paid by the
+     ground, where there is no text, instead of by the card, where all of it
+     is. */
+  --bg:           #F4F6F9;   /* the page, behind everything */
+  --surface:      #FFFFFF;   /* cards, inputs, every container */
+  --surface-2:    #F6F7F9;   /* wells and hovers INSIDE a white container */
   --line:         #E5E7EB;
   --line-strong:  #D0D4DB;
 
@@ -419,6 +431,27 @@ h3 { font-size: 16px; }
   .icon-btn:hover { background: transparent; color: var(--text); }
 }
 .icon-btn:active { background: transparent; transform: scale(.94); color: var(--text); }
+
+/*
+ * AND NOTHING APPEARS WHEN IT IS TAPPED, which is the half the first fix
+ * missed. The resting and hover states were made transparent and a circle was
+ * still reported — because a tap is neither, and three separate mechanisms
+ * can each paint one:
+ *
+ *  - `:focus`. A pointer tap focuses a button, and the product's focus ring is
+ *    an `outline`, which follows the element's own `border-radius` — 999px
+ *    here. So a tap left a 44px BLUE CIRCLE around the icon until something
+ *    else was clicked. `:focus-visible` is what distinguishes a keyboard user
+ *    from a thumb, so the ring is kept for that and removed for this. The
+ *    keyboard case genuinely needs it and is not what was reported.
+ *  - The mobile tap highlight, a translucent square-ish flash that reads as a
+ *    disc on a round control. It is transparent on `button` already; stated
+ *    again here because this rule is what somebody will read.
+ *  - `:focus-within`, which a wrapper picks up and can paint through.
+ */
+.icon-btn { -webkit-tap-highlight-color: transparent; }
+.icon-btn:focus { background: transparent; }
+.icon-btn:focus:not(:focus-visible) { outline: none; background: transparent; }
 .icon-btn:focus-visible { background: transparent; }
 
 /* ═══════════════════════════ desktop nav ═══════════════════════════ */
@@ -584,59 +617,12 @@ h3 { font-size: 16px; }
 .balance-line { display: flex; align-items: center; gap: 10px; }
 .balance-line .balance-value { min-width: 0; flex: 1 1 auto; }
 
-/* ── the currency rail ────────────────────────────────────────────────
-   Every currency the platform offers, not only the ones this customer has
-   received. It SCROLLS SIDEWAYS rather than wrapping: a second row of chips
-   pushes Send and Top up below the fold on a 360px phone, and those are what
-   most people opened the app for. */
-.asset-rail {
-  display: flex;
-  gap: 8px;
-  margin-top: var(--s-4);
-  overflow-x: auto;
-  scrollbar-width: none;
-  /* Bleeds to the card's edge so a half-visible chip says "there is more",
-     then puts the inset back so the first chip lines up with the figure. */
-  margin-left: -22px;
-  margin-right: -22px;
-  padding: 2px 22px;
-  scroll-padding-left: 22px;
-}
-.asset-rail::-webkit-scrollbar { display: none; }
-
-.asset-chip {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  flex: 0 0 auto;
-  min-height: 0;
-  padding: 8px 14px;
-  border-radius: var(--r);
-  border: 1px solid var(--line);
-  background: var(--surface-2);
-  color: var(--text-2);
-  font-family: var(--font-sans);
-  font-weight: 600;
-  white-space: nowrap;
-  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease),
-              color var(--t-fast) var(--ease);
-}
-.asset-chip .asset-code { font-size: 11.5px; letter-spacing: .04em; }
-.asset-chip .asset-amount {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  font-size: 13px;
-  font-weight: 600;
-}
-.asset-chip.active {
-  background: color-mix(in srgb, var(--link) 12%, transparent);
-  border-color: var(--link);
-  color: var(--text);
-}
-@media (hover: hover) {
-  .asset-chip:hover:where(:not(.active)) { border-color: var(--line-strong); color: var(--text); }
-}
+/* The currency rail is GONE, and the balance card is shorter for it. It was a
+   second control for a decision the selector at the top of the card already
+   makes, and it repeated every figure the balance was already showing — so
+   the card's height varied with how many currencies the platform offered, and
+   Send and Top up moved down the screen as that list grew. See `.ccy-select`.
+   -------------------------------------------------------------------------- */
 
 /* Withdraw / Top Up / Convert */
 .quick-actions { display: flex; gap: 10px; margin-top: var(--s-4); flex-wrap: wrap; }
@@ -1556,7 +1542,11 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
    a border means something. */
 .auth-card .field input,
 .auth-card .input-affix input {
-  background: var(--surface-2);
+  /* PAPER WHITE, like every other field in the product. These were the one
+     place a field sat on the tinted grey — which is where the ground colour
+     came from in the first place — and now that the tint is the PAGE, a grey
+     field on a white card is the odd one out rather than the pattern. */
+  background: var(--surface);
   border: 1px solid transparent;
   border-radius: var(--r);
   min-height: 54px;
@@ -1951,10 +1941,12 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
   margin: 0;
   padding: 6px;
   list-style: none;
-  /* `--surface-2`, not `--surface`: the list floats ABOVE fields painted in
-     `--surface`, and two identical planes with a hairline between them read
-     as one box with a stray border. */
-  background: var(--surface-2);
+  /* `--surface`, and the SHADOW is what lifts it. This was `--surface-2` when
+     the page was pure white and a tinted list read as clearly on top; now
+     that `--surface-2` is within a couple of points of the page ground, a
+     list painted in it looks like a hole rather than a panel. Every real
+     dropdown solves this the same way: same plane, raised by light. */
+  background: var(--surface);
   border: 1px solid var(--line-strong);
   border-radius: var(--r);
   box-shadow: var(--shadow-lg, 0 18px 40px rgb(0 0 0 / 28%));
@@ -1979,7 +1971,17 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
   min-height: 44px;
 }
 .xselect-label { flex: 1 1 auto; }
-.xselect-hint { color: var(--text-3); font-size: 13px; }
+.xselect-hint {
+  color: var(--text-3);
+  font-size: 13px;
+  /* One line. A figure that wraps makes its row twice as tall as the ones
+     around it, and the balance beside a currency is secondary information —
+     better truncated than allowed to reflow the list. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 45%;
+}
 .xselect-list li svg { flex: none; color: var(--brand); }
 
 /* Highlight follows the KEYBOARD and the pointer alike — `data-active` is set
@@ -2001,3 +2003,148 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
 @media (prefers-reduced-motion: reduce) {
   .xselect-trigger svg { transition: none; }
 }
+
+/* ---------------------------------------------------------------------------
+   THE SECOND-FACTOR PROMPT.
+
+   Asked once per work session, at the client boundary, so it can appear over
+   whichever of the seventeen operations screens the operator happened to act
+   on. That is why it is a dialog with its own scrim rather than a field on a
+   form: there is no one form it belongs to.
+   --------------------------------------------------------------------------- */
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(0 0 0 / 55%);
+  /* Backdrop only. The dialog under it must not inherit the blur, and a
+     `filter` on the parent would create a containing block that breaks the
+     fixed positioning. */
+  backdrop-filter: blur(2px);
+}
+
+.elevate-card {
+  width: 100%;
+  max-width: 380px;
+  /* `--surface`, so it reads as a card lifted off the page rather than as
+     part of it — the same relationship every other card has to the ground. */
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+.elevate-card .actions { display: flex; gap: 10px; margin-top: var(--s-4); }
+.elevate-card .actions button { flex: 1 1 auto; }
+/* Six digits, spaced and monospaced, because a code is read off another
+   screen and transcribed — the two places a wrong digit is easiest to make
+   and hardest to see. */
+.elevate-card input {
+  font-family: var(--font-mono);
+  font-size: 22px;
+  letter-spacing: 0.22em;
+  text-align: center;
+}
+
+/* The symbol half of a currency mark. The flag half is an <svg> and needs
+   nothing. `inline-grid` rather than flex so the glyph centres on both axes
+   without a line-height fight. */
+.ccy-mark {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  border-radius: 999px;
+  font-weight: 700;
+  font-family: var(--font-sans);
+  /* The tints are light-theme colours from the shared marks. On a dark card
+     they stay light on purpose: a currency mark is a token badge, and the
+     tokens are the same colour everywhere a customer has seen them. */
+  line-height: 1;
+}
+
+/* The trigger's own content: a mark and a label that stay together while the
+   chevron is pushed to the far edge by the trigger's `space-between`. */
+.xselect-chosen { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+
+/* ---------------------------------------------------------------------------
+   THE CURRENCY SELECTOR ON THE BALANCE CARD.
+
+   The same component as every other dropdown, sized down to sit as a control
+   in a card header rather than as a form field. It replaced a `.badge`, which
+   was a label — it named the currency and could not change it — and a rail of
+   chips underneath, which could change it and repeated every figure the
+   balance already showed. One control, at the top, beside the number.
+   --------------------------------------------------------------------------- */
+.ccy-select { flex: none; width: auto; }
+.ccy-select .xselect-trigger {
+  width: auto;
+  min-height: 40px;
+  padding: 7px 10px 7px 12px;
+  gap: 6px;
+  border-radius: var(--r-pill);
+  font-weight: 700;
+  font-size: 15px;
+  /* `--surface-2`, not `--surface`: it sits ON a white card, so it needs the
+     one step of separation a field on the page gets from the ground. */
+  background: var(--surface-2);
+  border-color: transparent;
+}
+@media (hover: hover) {
+  .ccy-select .xselect-trigger:hover:where(:not(:disabled)) {
+    background: var(--surface-2);
+    border-color: var(--line-strong);
+  }
+}
+/* Right-aligned to its trigger and wide enough for a figure, rather than
+   stretched to the trigger's width — which is only as wide as "USDT". */
+.ccy-select .xselect-list { left: auto; right: 0; min-width: 244px; }
+
+/* ---------------------------------------------------------------------------
+   A CHOICE BETWEEN TWO WAYS OF DOING THE SAME THING.
+
+   Two full-width rows rather than a segmented control, because these are not
+   two views of one form — they are a question asked before the form, and the
+   answer changes what the next screen asks for. A segmented control would
+   imply the fields below it stay put.
+   --------------------------------------------------------------------------- */
+.choice-list { display: grid; gap: 10px; margin-top: var(--s-4); }
+
+.choice {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  width: 100%;
+  padding: 15px 16px;
+  text-align: left;
+  /* Not the primary button. These are two equal options, and painting either
+     in the brand colour would say one of them is the expected answer. */
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r);
+  color: var(--text);
+  font-weight: 400;
+  min-height: 0;
+}
+@media (hover: hover) {
+  .choice:hover:where(:not(:disabled)) {
+    background: var(--surface);
+    border-color: var(--brand);
+  }
+}
+.choice:active:where(:not(:disabled)) { transform: scale(.995); }
+.choice > svg:last-child { flex: none; color: var(--text-3); }
+
+.choice-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 42px;
+  height: 42px;
+  border-radius: var(--r);
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+.choice-main { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-width: 0; }
+.choice-title { font-weight: 600; font-size: 15px; }
+.choice-sub { color: var(--text-3); font-size: 13px; line-height: 1.4; }

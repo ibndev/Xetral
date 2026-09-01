@@ -5,6 +5,8 @@ import { formatAmount, symbolFor } from '@xetral/client';
 import type { Balance, Transaction } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { Icon } from '@/ui/icon';
+import { Select } from '@/ui/select';
+import { CurrencyMark } from '@/ui/currency-mark';
 import type { IconName } from '@/ui/icon';
 import { useLoad, useRemembered, useXetral } from '@/lib/hooks';
 
@@ -60,6 +62,7 @@ export default function Wallet() {
     looksLikeACurrency,
   );
 
+  const session = useLoad(() => client.currentSession(), [client]);
   const balances = useLoad(() => client.balances(), [client]);
 
   /*
@@ -87,13 +90,47 @@ export default function Wallet() {
 
   return (
     <Shell>
-      <h1 className="animate-in">Hello there</h1>
-      <p className="lead animate-in d1">Here is where your money stands today.</p>
+      {/*
+        BY NAME, and nothing under it.
+        
+        "Here is where your money stands today" was a subtitle that described
+        the screen to somebody already looking at it — and it pushed the
+        balance, which is what they opened the app for, a line further down.
+        The name comes from the customer's own identity submission, which is
+        the only place this system holds one; `there` is the honest fallback
+        for somebody who has not made one yet.
+      */}
+      <h1 className="animate-in">Hello {session.data?.first_name ?? 'there'}</h1>
 
       <section className="balance-card animate-in d1">
         <div className="row-between">
-          <span className="balance-label">Available balance</span>
-          <span className="badge">{currency}</span>
+          <span className="balance-label" id="balance-currency-label">
+            Available balance
+          </span>
+          {/*
+            THE SELECTOR IS HERE AND NOWHERE ELSE. There used to be a rail of
+            currency chips under the balance as well, which meant two controls
+            for one decision: the chips repeated every figure the balance was
+            already showing, pushed Send and Top up toward the fold, and gave
+            the card a different height depending on how many currencies the
+            platform happened to offer. One dropdown, at the top, beside the
+            number it changes.
+          */}
+          <div className="ccy-select">
+            <Select
+              labelledBy="balance-currency-label"
+              value={currency}
+              onChange={setPreferred}
+              options={assets.map((b: Balance) => ({
+                value: b.currency,
+                label: b.currency,
+                // The figure, so choosing is a decision made with the numbers
+                // rather than one that reveals them.
+                ...(hidden ? {} : { hint: formatAmount(b.spendable, b.currency) }),
+              }))}
+              renderMark={(code) => <CurrencyMark currency={code} size={20} />}
+            />
+          </div>
         </div>
 
         <div className="balance-line">
@@ -129,31 +166,6 @@ export default function Wallet() {
         {active !== undefined && !isZero(active.pending) && (
           <div className="balance-sub">
             {formatAmount(active.pending, currency)} pending — held, not yet spendable
-          </div>
-        )}
-
-        {/*
-          The currency rail. It scrolls sideways rather than wrapping, because
-          a second row of chips pushes Send and Top up below the fold on a
-          360px phone — and those are what most people opened the app for.
-        */}
-        {assets.length > 1 && (
-          <div className="asset-rail" role="tablist" aria-label="Currency">
-            {assets.map((b: Balance) => (
-              <button
-                key={b.currency}
-                type="button"
-                role="tab"
-                aria-selected={b.currency === currency}
-                className={b.currency === currency ? 'asset-chip active' : 'asset-chip'}
-                onClick={() => setPreferred(b.currency)}
-              >
-                <span className="asset-code">{b.currency}</span>
-                <span className="asset-amount">
-                  {hidden ? MASK : formatAmount(b.spendable, b.currency)}
-                </span>
-              </button>
-            ))}
           </div>
         )}
 

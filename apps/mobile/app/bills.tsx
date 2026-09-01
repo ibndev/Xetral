@@ -6,7 +6,7 @@ import { Shell } from '@/shell';
 import { Button, Done, Empty, Field, FormError, Loading, Panel } from '@/ui';
 import { Select } from '@/select';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/hooks';
-import { radius, space, useStyles, useTheme } from '@/theme';
+import { font, radius, space, useStyles, useTheme } from '@/theme';
 
 /**
  * Airtime, data, bills, eSIM and virtual numbers — five services behind one
@@ -52,7 +52,7 @@ export default function Bills() {
               <Text
                 style={{
                   fontSize: 13,
-                  fontWeight: '600',
+                  fontFamily: font.sansSemi,
                   color: on ? colors.onBrand : colors.text2,
                 }}
               >
@@ -73,7 +73,7 @@ export default function Bills() {
         {history.data?.slice(0, 10).map((purchase: Purchase) => (
           <View key={purchase.id} style={styles.row}>
             <View style={{ flex: 1 }}>
-              <Text style={{ color: colors.text, fontWeight: '600' }}>
+              <Text style={{ color: colors.text, fontFamily: font.sansSemi }}>
                 {purchase.service} · {purchase.target}
               </Text>
               <Text style={styles.muted}>

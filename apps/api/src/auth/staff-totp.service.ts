@@ -223,6 +223,56 @@ export class StaffTotpService {
     );
   }
 
+  /**
+   * Elevate this session, on its own, with a code.
+   *
+   * THE SURFACE WAS UNREACHABLE WITHOUT THIS, and the shape of the failure is
+   * worth writing down because everything about it looked correct.
+   * `confirmEnrolment` elevates the session it ran on, so the ten minutes
+   * after enrolling worked perfectly — and nothing else in the system could
+   * ever set `totp_verified_at` again. `assertElevated` is the only other
+   * writer and it needs a code the caller supplied, but no client sent one:
+   * `totp_code` appeared in exactly one request in the whole codebase, the
+   * enrolment confirm. So every acting staff route answered `totp_required`
+   * for ever, from eleven minutes after enrolment onwards.
+   *
+   * What an operator actually saw was worse than a plain refusal. The message
+   * for `totp_required` reads "Enter the six-digit code from your
+   * authenticator app" — and the only field on the provider-key form is the
+   * transaction PIN, so the code went in there, the PIN check refused it, and
+   * the answer was "that is not right". A correct code, a correct PIN, and a
+   * dead end that blamed the operator.
+   *
+   * It is its own endpoint rather than a field on every action because the
+   * elevation is a property of the SESSION. One prompt, one code, ten minutes
+   * of work — which is the trade `assertElevated` already documents, and
+   * threading an optional code through thirty admin methods would have been
+   * thirty places to forget it.
+   */
+  async elevate(userUuid: string, sessionUuid: string, code: string): Promise<void> {
+    const row = await this.#row(userUuid);
+    if (row === undefined || row.confirmed_at === null) {
+      throw new ForbiddenException(TOTP_NOT_ENROLLED);
+    }
+    // Verified and SPENT before anything is elevated. A code that fails here
+    // must not leave a session elevated, and one that succeeds must not be
+    // usable a second time — both are `#check`'s job, and it is called first
+    // for that reason.
+    await this.#check(userUuid, row, code);
+
+    await this.pool.query(
+      `UPDATE staff_totp SET last_used_at = now()
+        WHERE user_id = (SELECT id FROM users WHERE uuid = $1)`,
+      [userUuid],
+    );
+    // On the SESSION, so revoking the session revokes the elevation with it.
+    await this.pool.query(
+      `UPDATE auth_sessions SET totp_verified_at = now()
+        WHERE uuid = $1 AND revoked_at IS NULL`,
+      [sessionUuid],
+    );
+  }
+
   /** Verify a code and spend it, without elevating anything. Used by
    *  enrolment confirmation, which has no session to elevate yet. */
   async assertCode(userUuid: string, code: string): Promise<void> {

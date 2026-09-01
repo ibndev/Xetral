@@ -4,7 +4,7 @@ import type { KycLimits, KycStatus } from '@xetral/client';
 import { Shell } from '@/shell';
 import { Button, Done, Field, FormError, Loading, Panel } from '@/ui';
 import { useLoad, useSubmit, useXetral } from '@/hooks';
-import { space, useStyles, useTheme } from '@/theme';
+import { font, space, useStyles, useTheme } from '@/theme';
 
 /**
  * Identity verification, on the phone.
@@ -136,7 +136,7 @@ function Submitted({ status }: { readonly status: KycStatus }) {
     <Panel title={state.title}>
       <View style={[styles.rowBetween, { marginTop: space.sm }]}>
         <Text style={styles.muted}>Status</Text>
-        <Text style={{ color: state.tint, fontWeight: '700' }}>{status.status}</Text>
+        <Text style={{ color: state.tint, fontFamily: font.sansBold }}>{status.status}</Text>
       </View>
       <View style={styles.row}>
         <Text style={[styles.muted, { flex: 1 }]}>Name</Text>

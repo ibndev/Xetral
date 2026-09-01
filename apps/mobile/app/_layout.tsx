@@ -24,7 +24,7 @@ export default function Layout() {
   /*
    * THE BRAND FACES WERE NEVER LOADED.
    *
-   * `theme.ts` sets `fontFamily: 'BricolageGrotesque'` on every heading and
+   * `theme.ts` names a display face on every heading and
    * `'SplineSansMono'` on every amount, and its comment said they were "loaded
    * by `_layout.tsx` through `expo-font`". They were not: the package was not a
    * dependency, no font file existed under `apps/mobile`, and nothing called
@@ -41,10 +41,31 @@ export default function Layout() {
    * file — Bricolage's internal name is "Bricolage Grotesque 96pt ExtraBold",
    * which nothing here would ever guess.
    */
+  /*
+   * ONE FACE PER WEIGHT, and the KEYS are what `fontFamily` matches.
+   *
+   * It used to be three files, one per family, and every heading and label in
+   * the app asked for weight 600 or 800 beside them. On the web that works —
+   * all three are variable fonts and the browser interpolates. Android does
+   * not: it matches a registered face by name and ignores `fontWeight`, so a
+   * single Regular file rendered every label, button and currency code at 400
+   * while the stylesheet said 600. That is what "the mobile text is too thin"
+   * was, and no unit test could see it, because the numbers in the stylesheet
+   * already matched the web's exactly.
+   *
+   * These are instanced from the SAME variable woff2 files `apps/web` serves,
+   * so the two apps draw the same shapes at the same weights.
+   */
   const [fontsLoaded, fontError] = useFonts({
-    BricolageGrotesque: require('../assets/fonts/BricolageGrotesque.ttf'),
-    InstrumentSans: require('../assets/fonts/InstrumentSans.ttf'),
-    SplineSansMono: require('../assets/fonts/SplineSansMono.ttf'),
+    'BricolageGrotesque-Regular': require('../assets/fonts/BricolageGrotesque-Regular.ttf'),
+    'BricolageGrotesque-SemiBold': require('../assets/fonts/BricolageGrotesque-SemiBold.ttf'),
+    'BricolageGrotesque-ExtraBold': require('../assets/fonts/BricolageGrotesque-ExtraBold.ttf'),
+    'InstrumentSans-Regular': require('../assets/fonts/InstrumentSans-Regular.ttf'),
+    'InstrumentSans-Medium': require('../assets/fonts/InstrumentSans-Medium.ttf'),
+    'InstrumentSans-SemiBold': require('../assets/fonts/InstrumentSans-SemiBold.ttf'),
+    'InstrumentSans-Bold': require('../assets/fonts/InstrumentSans-Bold.ttf'),
+    'SplineSansMono-Regular': require('../assets/fonts/SplineSansMono-Regular.ttf'),
+    'SplineSansMono-SemiBold': require('../assets/fonts/SplineSansMono-SemiBold.ttf'),
   });
 
   useEffect(() => {
