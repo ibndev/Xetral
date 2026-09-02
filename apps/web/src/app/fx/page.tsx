@@ -118,7 +118,7 @@ export default function Fx() {
         <div className="actions" style={{ marginBottom: 14 }}>
           <button
             type="button"
-            className="ghost small"
+            className="accent small"
             disabled={amount === '' || from === to}
             onClick={() =>
               void run(async () => {

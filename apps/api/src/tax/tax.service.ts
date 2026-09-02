@@ -105,13 +105,24 @@ export class TaxService {
    * `ON CONFLICT DO NOTHING`, because a retried transfer is a replay at the
    * ledger and must be one here.
    */
-  async record(
+  /**
+   * GENERIC OVER THE CURRENCY, even though it only reads `.amount` and
+   * `.currency`.
+   *
+   * `Money` is declared `in out`, so a bare `Money<Currency>` parameter is the
+   * UNION and `Money<'USD'>` is not assignable to it. This read `Money<Currency>`
+   * and compiled for as long as every caller happened to hold a currency typed
+   * as the union — the card issuance fee, which is `Money<'USD'>` by
+   * construction, is the first caller that does not. The rule is in CLAUDE.md
+   * and the code still walked into it, which is why the rule is written down.
+   */
+  async record<C extends Currency>(
     client: PoolClient,
     input: {
       readonly kind: 'vat' | 'transfer_levy';
       readonly entryId: string;
       readonly userId: string;
-      readonly amount: Money<Currency>;
+      readonly amount: Money<C>;
       readonly baseMinor: bigint;
       readonly rateApplied: string;
       readonly occurredAt: Date;

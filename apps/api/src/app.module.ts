@@ -169,26 +169,79 @@ export interface AppModuleOptions {
  * check at all: every float would look like a discrepancy the size of the whole
  * balance, and the queue this exists to fill would be unreadable on day one.
  */
-export function createProviderBalancePort(config: ApiConfig): ProviderBalancePort | undefined {
-  const { bitnobBaseUrl, bitnobApiKey } = config;
-  if (bitnobBaseUrl === undefined || bitnobApiKey === undefined) return undefined;
+/**
+ * HOW A PASTED KEY REACHES BITNOB, which until now it did not.
+ *
+ * Every port below was built once at module construction from
+ * `config.bitnobApiKey` — the environment. `026_provider_credentials.sql`
+ * stores a key, hints it, audits it and logs its rotation; the admin screen
+ * writes one; `secretFor()` reads one with a five-second cache built for
+ * exactly this. Nothing joined the two, so an operator pasted a key, the
+ * dashboard showed it as set, and every card, quote, address and account
+ * number went on refusing. The migration's own header says the database is
+ * authoritative and the environment is the fallback — true of the service and
+ * false of every caller.
+ *
+ * A FUNCTION rather than a string, so the answer is asked for on each call:
+ * that is what makes a rotation take effect in five seconds instead of at the
+ * next restart, which is the whole reason to be able to replace a key during
+ * an incident. `secretFor` already falls back to the environment, so an
+ * unchanged deployment behaves exactly as before.
+ */
+export function bitnobApiKeyResolver(
+  config: ApiConfig,
+  credentials?: ProviderCredentialService,
+): string | (() => Promise<string | undefined>) {
+  // No service — the e2e app factories and the unit tests build ports
+  // directly. Falls back to the value it always used.
+  if (credentials === undefined) return config.bitnobApiKey ?? '';
+  return () => credentials.secretFor('bitnob', 'api_key', config.bitnobApiKey);
+}
+
+export function createProviderBalancePort(
+  config: ApiConfig,
+  credentials?: ProviderCredentialService,
+): ProviderBalancePort | undefined {
+  const { bitnobBaseUrl } = config;
+  if (bitnobBaseUrl === undefined) return undefined;
 
   return new BitnobBalanceAdapter(
-    new BitnobClient({ baseUrl: bitnobBaseUrl, apiKey: bitnobApiKey }),
+    new BitnobClient({
+      baseUrl: bitnobBaseUrl,
+      apiKey: bitnobApiKeyResolver(config, credentials),
+    }),
   );
 }
 
-export function createCardPort(config: ApiConfig): CardPort {
-  const { bitnobBaseUrl, bitnobApiKey } = config;
+export function createCardPort(
+  config: ApiConfig,
+  credentials?: ProviderCredentialService,
+): CardPort {
+  const { bitnobBaseUrl } = config;
 
-  if (bitnobBaseUrl === undefined || bitnobApiKey === undefined) {
+  /*
+   * ONLY THE BASE URL DECIDES THIS NOW, and the key deliberately does not.
+   *
+   * A missing key used to mean an inert stub for the life of the process — so
+   * a deployment that started without one could never be fixed by pasting a
+   * key, only by a restart. The address is still required here because there
+   * is nothing to call without it and no credential slot supplies one; the
+   * key is asked for per request, and `BitnobClient` refuses with a message
+   * naming where to put one.
+   */
+  if (bitnobBaseUrl === undefined) {
     new Logger('Cards').warn(
-      'BITNOB_BASE_URL or BITNOB_API_KEY is not set: card routes will refuse requests.',
+      'BITNOB_BASE_URL is not set: card routes will refuse requests.',
     );
     return unconfiguredCardPort();
   }
 
-  return new BitnobCardAdapter(new BitnobClient({ baseUrl: bitnobBaseUrl, apiKey: bitnobApiKey }));
+  return new BitnobCardAdapter(
+    new BitnobClient({
+      baseUrl: bitnobBaseUrl,
+      apiKey: bitnobApiKeyResolver(config, credentials),
+    }),
+  );
 }
 
 function unconfiguredCardPort(): CardPort {
@@ -300,12 +353,18 @@ export function createFulfilmentPorts(config: ApiConfig): ReadonlyMap<ServiceKin
  * unavailable" really are the same statement, and a customer asking for an
  * account number deserves a clear refusal rather than a 500.
  */
-export function createFundingPort(config: ApiConfig): FundingPort {
-  const { bitnobBaseUrl, bitnobApiKey } = config;
+export function createFundingPort(
+  config: ApiConfig,
+  credentials?: ProviderCredentialService,
+): FundingPort {
+  // Only the address decides this — the key is resolved per request, so a
+  // deployment started without one is fixed by pasting a key rather than by
+  // a restart. See `bitnobApiKeyResolver`.
+  const { bitnobBaseUrl } = config;
 
-  if (bitnobBaseUrl === undefined || bitnobApiKey === undefined) {
+  if (bitnobBaseUrl === undefined) {
     new Logger('Funding').warn(
-      'BITNOB_BASE_URL or BITNOB_API_KEY is not set: customers CANNOT be issued account ' +
+      'BITNOB_BASE_URL is not set: customers CANNOT be issued account ' +
         'numbers and cannot fund their wallets.',
     );
     const refuse = async (): Promise<never> => {
@@ -320,19 +379,28 @@ export function createFundingPort(config: ApiConfig): FundingPort {
   }
 
   return new BitnobFundingAdapter({
-    client: new BitnobClient({ baseUrl: bitnobBaseUrl, apiKey: bitnobApiKey }),
+    client: new BitnobClient({
+      baseUrl: bitnobBaseUrl,
+      apiKey: bitnobApiKeyResolver(config, credentials),
+    }),
     amountUnit: config.bitnobNgnAmountUnit,
   });
 }
 
 /** On-chain assets, or a stand-in that refuses. Same reasoning as the funding
  *  port: one rail, so "not configured" and "unavailable" are the same. */
-export function createCryptoPort(config: ApiConfig): CryptoPort {
-  const { bitnobBaseUrl, bitnobApiKey } = config;
+export function createCryptoPort(
+  config: ApiConfig,
+  credentials?: ProviderCredentialService,
+): CryptoPort {
+  // Only the address decides this — the key is resolved per request, so a
+  // deployment started without one is fixed by pasting a key rather than by
+  // a restart. See `bitnobApiKeyResolver`.
+  const { bitnobBaseUrl } = config;
 
-  if (bitnobBaseUrl === undefined || bitnobApiKey === undefined) {
+  if (bitnobBaseUrl === undefined) {
     new Logger('Crypto').warn(
-      'BITNOB_BASE_URL or BITNOB_API_KEY is not set: crypto deposits and withdrawals ' +
+      'BITNOB_BASE_URL is not set: crypto deposits and withdrawals ' +
         'will refuse.',
     );
     const refuse = async (): Promise<never> => {
@@ -349,16 +417,25 @@ export function createCryptoPort(config: ApiConfig): CryptoPort {
   }
 
   return new BitnobCryptoAdapter({
-    client: new BitnobClient({ baseUrl: bitnobBaseUrl, apiKey: bitnobApiKey }),
+    client: new BitnobClient({
+      baseUrl: bitnobBaseUrl,
+      apiKey: bitnobApiKeyResolver(config, credentials),
+    }),
   });
 }
 
 /** FX, or a stand-in that refuses. Same reasoning as the other single rails. */
-export function createFxPort(config: ApiConfig): FxPort {
-  const { bitnobBaseUrl, bitnobApiKey } = config;
+export function createFxPort(
+  config: ApiConfig,
+  credentials?: ProviderCredentialService,
+): FxPort {
+  // Only the address decides this — the key is resolved per request, so a
+  // deployment started without one is fixed by pasting a key rather than by
+  // a restart. See `bitnobApiKeyResolver`.
+  const { bitnobBaseUrl } = config;
 
-  if (bitnobBaseUrl === undefined || bitnobApiKey === undefined) {
-    new Logger('Fx').warn('BITNOB_BASE_URL or BITNOB_API_KEY is not set: FX routes will refuse.');
+  if (bitnobBaseUrl === undefined) {
+    new Logger('Fx').warn('BITNOB_BASE_URL is not set: FX routes will refuse.');
     const refuse = async (): Promise<never> => {
       throw new ServiceUnavailableException({ error: 'fx_provider_not_configured' });
     };
@@ -366,7 +443,10 @@ export function createFxPort(config: ApiConfig): FxPort {
   }
 
   return new BitnobFxAdapter({
-    client: new BitnobClient({ baseUrl: bitnobBaseUrl, apiKey: bitnobApiKey }),
+    client: new BitnobClient({
+      baseUrl: bitnobBaseUrl,
+      apiKey: bitnobApiKeyResolver(config, credentials),
+    }),
   });
 }
 
@@ -678,26 +758,28 @@ export class AppModule {
          */
         {
           provide: CARD_PORT,
-          useFactory: (health: ProviderHealthService) => {
-            const port = options.cardPort ?? createCardPort(options.config);
+          useFactory: (health: ProviderHealthService, credentials: ProviderCredentialService) => {
+            const port = options.cardPort ?? createCardPort(options.config, credentials);
             return watched(port, 'bitnob', health);
           },
-          inject: [ProviderHealthService],
+          inject: [ProviderHealthService, ProviderCredentialService],
         },
         {
           provide: PROVIDER_BALANCE_PORT,
-          useFactory: (health: ProviderHealthService) => {
-            const port = options.providerBalancePort ?? createProviderBalancePort(options.config);
+          useFactory: (health: ProviderHealthService, credentials: ProviderCredentialService) => {
+            const port =
+              options.providerBalancePort ??
+              createProviderBalancePort(options.config, credentials);
             // Optional: an instance with no Bitnob credentials has none, and
             // wrapping `undefined` would turn a deliberate absence into a
             // proxy that answers every call.
             return port === undefined ? undefined : watched(port, 'bitnob', health);
           },
-          inject: [ProviderHealthService],
+          inject: [ProviderHealthService, ProviderCredentialService],
         },
         {
           provide: FULFILMENT_PORTS,
-          useFactory: (health: ProviderHealthService) => {
+          useFactory: (health: ProviderHealthService, credentials: ProviderCredentialService) => {
             const ports = options.fulfilmentPorts ?? createFulfilmentPorts(options.config);
             // A MAP of three different providers behind one port, so each is
             // watched under its own name: VTpass being down is not Airalo
@@ -706,33 +788,45 @@ export class AppModule {
               [...ports].map(([kind, port]) => [kind, watched(port, port.provider, health)]),
             );
           },
-          inject: [ProviderHealthService],
+          inject: [ProviderHealthService, ProviderCredentialService],
         },
         {
           provide: FUNDING_PORT,
-          useFactory: (health: ProviderHealthService) =>
-            watched(options.fundingPort ?? createFundingPort(options.config), 'bitnob', health),
-          inject: [ProviderHealthService],
+          useFactory: (health: ProviderHealthService, credentials: ProviderCredentialService) =>
+            watched(
+              options.fundingPort ?? createFundingPort(options.config, credentials),
+              'bitnob',
+              health,
+            ),
+          inject: [ProviderHealthService, ProviderCredentialService],
         },
         {
           provide: CRYPTO_PORT,
-          useFactory: (health: ProviderHealthService) =>
-            watched(options.cryptoPort ?? createCryptoPort(options.config), 'bitnob', health),
-          inject: [ProviderHealthService],
+          useFactory: (health: ProviderHealthService, credentials: ProviderCredentialService) =>
+            watched(
+              options.cryptoPort ?? createCryptoPort(options.config, credentials),
+              'bitnob',
+              health,
+            ),
+          inject: [ProviderHealthService, ProviderCredentialService],
         },
         {
           provide: FX_PORT,
-          useFactory: (health: ProviderHealthService) =>
-            watched(options.fxPort ?? createFxPort(options.config), 'bitnob', health),
-          inject: [ProviderHealthService],
+          useFactory: (health: ProviderHealthService, credentials: ProviderCredentialService) =>
+            watched(
+              options.fxPort ?? createFxPort(options.config, credentials),
+              'bitnob',
+              health,
+            ),
+          inject: [ProviderHealthService, ProviderCredentialService],
         },
         {
           provide: NOTIFICATION_PORT,
-          useFactory: (health: ProviderHealthService) => {
+          useFactory: (health: ProviderHealthService, credentials: ProviderCredentialService) => {
             const port = options.notificationPort ?? createNotificationPort(options.config);
             return port === undefined ? undefined : watched(port, 'resend', health);
           },
-          inject: [ProviderHealthService],
+          inject: [ProviderHealthService, ProviderCredentialService],
         },
         AuthService,
         SignInEventService,

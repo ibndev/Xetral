@@ -178,6 +178,7 @@ export function Button({
   busy,
   disabled,
   quiet,
+  accent,
   icon,
 }: {
   readonly label: string;
@@ -185,6 +186,11 @@ export function Button({
   readonly busy?: boolean;
   readonly disabled?: boolean;
   readonly quiet?: boolean;
+  /** Filled and obvious, but not the primary. For a control that has to be
+   *  pressed before the primary one exists — "Get a quote" ahead of
+   *  "Convert". `quiet` there made the only live control the faintest thing
+   *  on the screen. */
+  readonly accent?: boolean;
   readonly icon?: IconName;
 }) {
   const styles = useStyles();
@@ -199,18 +205,39 @@ export function Button({
       style={[
         styles.button,
         quiet === true && styles.buttonQuiet,
+        accent === true && styles.buttonAccent,
         off && { opacity: 0.5 },
         { gap: 8 },
       ]}
     >
       {busy === true ? (
-        <ActivityIndicator color={quiet === true ? colors.text : colors.onBrand} />
+        <ActivityIndicator
+          color={
+            accent === true ? colors.accentButtonText : quiet === true ? colors.text : colors.onBrand
+          }
+        />
       ) : (
         <>
           {icon !== undefined && (
-            <Icon name={icon} size={17} color={quiet === true ? colors.text : colors.onBrand} />
+            <Icon
+              name={icon}
+              size={17}
+              color={
+                accent === true
+                  ? colors.accentButtonText
+                  : quiet === true
+                    ? colors.text
+                    : colors.onBrand
+              }
+            />
           )}
-          <Text style={[styles.buttonText, quiet === true && styles.buttonQuietText]}>
+          <Text
+            style={[
+              styles.buttonText,
+              quiet === true && styles.buttonQuietText,
+              accent === true && styles.buttonAccentText,
+            ]}
+          >
             {label}
           </Text>
         </>

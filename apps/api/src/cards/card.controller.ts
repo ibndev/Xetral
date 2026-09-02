@@ -15,15 +15,34 @@ import { CardService } from './card.service.js';
 import type { CardSecretsView, CardView } from './card.service.js';
 import { CardWebhookService } from './webhook.service.js';
 import type { WebhookOutcome } from './webhook.service.js';
-import { fundCardSchema, issueCardSchema, reissueCardSchema } from './dto.js';
+import {
+  fundCardSchema,
+  issueCardSchema,
+  nameCardSchema,
+  reissueCardSchema,
+} from './dto.js';
 
 @Controller('v1/cards')
 export class CardController {
   constructor(@Inject(CardService) private readonly cards: CardService) {}
 
+  /**
+   * The cards, AND what a new one costs.
+   *
+   * The price rides on this response so the onboarding screen has exactly one
+   * source for it. Carried in the screen instead, it would show the old figure
+   * from the moment an operator changed the setting — a price on a screen that
+   * disagrees with the price in the ledger is the failure 041 exists to close.
+   */
   @Get()
-  async list(@Req() request: AuthenticatedRequest): Promise<{ cards: readonly CardView[] }> {
-    return { cards: await this.cards.list(subjectOf(request)) };
+  async list(
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ cards: readonly CardView[]; issuance_fee: string }> {
+    const [cards, issuanceFee] = await Promise.all([
+      this.cards.list(subjectOf(request)),
+      this.cards.issuanceFee(),
+    ]);
+    return { cards, issuance_fee: issuanceFee };
   }
 
   @Get(':id')
@@ -41,10 +60,28 @@ export class CardController {
     if (!parsed.success) throw invalidRequest(parsed.error.issues);
 
     return this.cards.issue(subjectOf(request), {
-      nameOnCard: parsed.data.name_on_card,
-      initialFunding: parsed.data.initial_funding,
       idempotencyKey: parsed.data.idempotency_key,
     });
+  }
+
+  /**
+   * Naming a card. NOT the name on the card — see `nameCardSchema`.
+   *
+   * POST rather than PATCH because every other write on this controller is a
+   * POST and the route policy is declared per verb and path; a lone PATCH would
+   * be the one shape `route-coverage.test.ts` has no other example of.
+   */
+  @Post(':id/label')
+  @HttpCode(200)
+  async label(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ): Promise<CardView> {
+    const parsed = nameCardSchema.safeParse(body);
+    if (!parsed.success) throw invalidRequest(parsed.error.issues);
+
+    return this.cards.name(subjectOf(request), id, parsed.data.label);
   }
 
   @Post(':id/fund')

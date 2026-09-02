@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Text, View } from 'react-native';
 import { formatAmount } from '@xetral/client';
 import type { Card, CardSecrets } from '@xetral/client';
-import { LogoMark } from '@/logo';
+import { Logo } from '@/logo';
 import { Shell } from '@/shell';
 import { Icon } from '@/icon';
 import type { IconName } from '@/icon';
@@ -22,7 +22,11 @@ export default function Cards() {
   const client = useXetral();
   const styles = useStyles();
   const colors = useTheme();
-  const cards = useLoad(() => client.cards(), [client]);
+  /* The list AND the price, on one request — see the web's Cards screen: a
+     figure typed into this file would show the old price from the moment an
+     operator changed the setting. */
+  const cards = useLoad(() => client.cardList(), [client]);
+  const list = cards.data?.cards;
   const identity = useLoad(() => client.kyc().catch(() => null), [client]);
   const holder = identity.data?.full_name;
 
@@ -43,7 +47,7 @@ export default function Cards() {
    * customer with none saw an empty state and a three-field form; they now
    * see the card and what it does before anything is asked of them.
    */
-  const none = !cards.loading && (cards.data?.length ?? 0) === 0;
+  const none = !cards.loading && (list?.length ?? 0) === 0;
   const [adding, setAdding] = useState(false);
 
   return (
@@ -53,7 +57,7 @@ export default function Cards() {
           <Text style={styles.h1}>Your cards</Text>
           <Text style={styles.lead}>Manage your virtual dollar cards</Text>
         </View>
-        {(cards.data?.length ?? 0) > 0 && !adding && (
+        {(list?.length ?? 0) > 0 && !adding && (
           <Button label="Add a card" icon="plus" quiet onPress={() => setAdding(true)} />
         )}
       </View>
@@ -63,12 +67,12 @@ export default function Cards() {
         {/* The specimen: the SAME component with no card, so the preview and
             the product cannot drift apart. */}
         {none && <CardFace holder={holder} />}
-        {cards.data?.map((card, index) => (
+        {list?.map((card, index) => (
           <View key={card.id} style={{ gap: space.sm }}>
             <CardRow card={card} holder={holder} onChange={cards.reload} />
-            {(cards.data?.length ?? 0) > 1 && (
+            {(list?.length ?? 0) > 1 && (
               <View style={{ flexDirection: 'row', gap: 6, justifyContent: 'center' }}>
-                {cards.data?.map((c, i) => (
+                {list?.map((c, i) => (
                   <View
                     key={c.id}
                     style={{
@@ -88,6 +92,7 @@ export default function Cards() {
       <FormError error={cards.error} code={cards.code} />
       {(none || adding) && (
         <Issue
+          price={cards.data?.issuance_fee}
           onIssued={() => {
             setAdding(false);
             cards.reload();
@@ -175,7 +180,11 @@ function CardFace({
       />
 
       <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-        <LogoMark size={20} tone="inverse" />
+        {/* THE WHOLE WORD, not the mark alone.
+            This drew `LogoMark`, which is the X and nothing else — so the
+            phone's card said "X" where the web's says "Xetral". `Logo` is the
+            lockup: the mark AS the letter X, then "etral". */}
+        <Logo size={20} tone="inverse" />
         <View
           style={{
             paddingHorizontal: 10,
@@ -207,15 +216,27 @@ function CardFace({
           <FaceField label="Card holder" value={holder ?? '—'} />
         </View>
         <View style={{ alignItems: 'flex-end' }}>
-          {/* The scheme every Bitnob virtual card is issued on. Italic
-              because that is the mark's own form. */}
+          {/*
+            The scheme every Bitnob virtual card is issued on, in the mark's
+            own slanted form.
+
+            THE SLANT IS A TRANSFORM, NOT `fontStyle`. React Native matches a
+            custom `fontFamily` BY NAME, and there is no italic Bricolage file
+            registered — so `fontStyle: 'italic'` sent Android looking for a
+            face that does not exist and it fell back to the system font at
+            regular weight. That is the "VISA is too light" report: the same
+            class of bug as `fontWeight` beside a custom family, which
+            `fonts.test.ts` now also refuses. `skewX` is drawn by the view
+            layer and never touches font matching, so the ExtraBold face
+            survives.
+          */}
           <Text
             style={{
               color: '#fff',
               fontFamily: font.displayBold,
               fontSize: 26,
-              fontStyle: 'italic',
               letterSpacing: -1,
+              transform: [{ skewX: '-9deg' }],
             }}
           >
             VISA
@@ -285,8 +306,37 @@ function CardRow({
   const { busy, error, code, done, run } = useSubmit();
   const [pin, setPin] = useState('');
   const [amount, setAmount] = useState('');
-  const [open, setOpen] = useState(false);
   const funding = useIdempotencyKey();
+  /*
+   * WHICH ACTION THE PIN IS FOR.
+   *
+   * THIS SCREEN RENDERED THREE PIN FIELDS AT ONCE — one for unfreeze, one
+   * inside the top-up form and one under "Show card details" — all bound to
+   * the same `pin` state. A frozen card showed all three stacked, so the
+   * customer saw the same secret asked for three times with three different
+   * labels and no way to tell which one mattered. A secret asked for
+   * repeatedly with no stated purpose is the habit that makes somebody type it
+   * when a stranger asks.
+   *
+   * One action, then the PIN for that action, named — the same order the Send
+   * screen and the card purchase now follow, and the same fix as the web's.
+   */
+  const [pending, setPending] = useState<'fund' | 'unfreeze' | 'reveal' | undefined>(undefined);
+
+  /** Leaves the PIN nowhere. A cancelled action must not leave the secret in
+   *  state for the next one to reuse. */
+  function cancel(): void {
+    setPin('');
+    setPending(undefined);
+  }
+  /*
+   * NAMING THE CARD — the step that comes AFTER buying one, and the reason the
+   * onboarding form no longer asks. A second card is otherwise
+   * indistinguishable from the first: every face reads four digits and the
+   * same verified name. No PIN, because nothing moves.
+   */
+  const [naming, setNaming] = useState(false);
+  const [label, setLabel] = useState(card.label ?? '');
 
   /**
    * The revealed number, held ONLY while it is on screen.
@@ -307,7 +357,51 @@ function CardRow({
     <View style={[styles.card, { gap: space.md }]}>
       <CardFace card={card} holder={holder} />
 
-      {card.status !== 'terminated' && (
+      <View style={styles.row}>
+        <Text style={styles.muted}>Name</Text>
+        <Text style={styles.amount}>
+          {card.label ?? `Card ending ${card.last4 ?? '••••'}`}
+        </Text>
+      </View>
+
+      {naming ? (
+        <>
+          <Field
+            label="What do you call this card?"
+            placeholder="Subscriptions"
+            maxLength={40}
+            value={label}
+            onChangeText={setLabel}
+          />
+          <Button
+            label="Save name"
+            busy={busy}
+            onPress={() =>
+              void run(async () => {
+                // An empty box CLEARS the name rather than storing a blank one
+                // — the database refuses whitespace, so "" would be a 400 on
+                // the obvious way to undo this.
+                await client.nameCard(card.id, label.trim() === '' ? null : label.trim());
+                setNaming(false);
+                onChange();
+                return 'Card renamed.';
+              })
+            }
+          />
+          <Button label="Cancel" quiet onPress={() => setNaming(false)} />
+        </>
+      ) : (
+        <Button
+          label="Name this card"
+          quiet
+          onPress={() => {
+            setLabel(card.label ?? '');
+            setNaming(true);
+          }}
+        />
+      )}
+
+      {card.status !== 'terminated' && pending === undefined && (
         <View style={{ gap: space.sm }}>
           {/*
             Freezing asks for nothing, and the server does not require a PIN
@@ -330,108 +424,107 @@ function CardRow({
               }
             />
           ) : (
-            <>
-              <Field
-                label="Transaction PIN"
-                secureTextEntry
-                inputMode="numeric"
-                autoComplete="off"
-                value={pin}
-                onChangeText={setPin}
-              />
-              <Button
-                label="Unfreeze"
-                quiet
-                busy={busy}
-                disabled={pin === ''}
-                onPress={() =>
-                  void run(async () => {
-                    await client.unfreezeCard(card.id, pin);
-                    setPin('');
-                    onChange();
-                    return 'Card unfrozen.';
-                  })
-                }
-              />
-            </>
+            <Button label="Unfreeze" quiet onPress={() => setPending('unfreeze')} />
           )}
 
           <Button
-            label={open ? 'Cancel top-up' : 'Add money to card'}
+            label="Add money to card"
             quiet
             icon="plus"
-            onPress={() => setOpen((was) => !was)}
+            onPress={() => setPending('fund')}
           />
-
-          {open && (
-            <>
-              <Field
-                label="Amount (USD)"
-                inputMode="decimal"
-                placeholder="25.00"
-                value={amount}
-                onChangeText={setAmount}
-              />
-              <Field
-                label="Transaction PIN"
-                secureTextEntry
-                inputMode="numeric"
-                autoComplete="off"
-                value={pin}
-                onChangeText={setPin}
-              />
-              <Button
-                label="Fund the card"
-                busy={busy}
-                disabled={amount === '' || pin === ''}
-                onPress={() =>
-                  void run(async () => {
-                    await client.fundCard(card.id, {
-                      amount,
-                      pin,
-                      idempotencyKey: funding.key,
-                    });
-                    // A NEW key after a success: this form is now available
-                    // for a genuinely different top-up, and reusing the old
-                    // one would have the server replay the first and report
-                    // success for money that never moved.
-                    funding.next();
-                    setAmount('');
-                    setPin('');
-                    setOpen(false);
-                    onChange();
-                    return 'Card funded.';
-                  })
-                }
-              />
-            </>
-          )}
 
           {/* A frozen card can still be revealed; a terminated one cannot.
               Freezing stops spending, not looking — a customer disputing
               charges still needs to read the number. */}
-          <Field
-            label="Transaction PIN, to show the number"
-            secureTextEntry
-            inputMode="numeric"
-            autoComplete="off"
-            value={pin}
-            onChangeText={setPin}
-          />
           <Button
             label="Show card details"
             quiet
             icon="eye"
+            onPress={() => setPending('reveal')}
+          />
+        </View>
+      )}
+
+      {/*
+        ONE PANEL, NAMING WHAT IT IS ABOUT TO DO. The PIN never appears without
+        a line saying which action it authorises, and it is the same field for
+        all three — so there is no way for one of them to be reachable and
+        another not, which is exactly what went wrong on the web.
+      */}
+      {pending !== undefined && (
+        <View style={{ gap: space.sm }}>
+          <Text style={styles.h2}>
+            {pending === 'fund'
+              ? 'Add money to this card'
+              : pending === 'unfreeze'
+                ? 'Unfreeze this card'
+                : 'Show card details'}
+          </Text>
+
+          {pending === 'fund' && (
+            <Field
+              label="Amount (USD)"
+              inputMode="decimal"
+              placeholder="25.00"
+              value={amount}
+              onChangeText={setAmount}
+            />
+          )}
+
+          <Field
+            label="Transaction PIN"
+            secureTextEntry
+            inputMode="numeric"
+            autoComplete="off"
+            maxLength={6}
+            value={pin}
+            onChangeText={setPin}
+          />
+
+          <Button
+            label={
+              pending === 'fund'
+                ? 'Add money to card'
+                : pending === 'unfreeze'
+                  ? 'Unfreeze card'
+                  : 'Show details'
+            }
             busy={busy}
-            disabled={pin === ''}
+            disabled={pin === '' || (pending === 'fund' && amount === '')}
             onPress={() =>
               void run(async () => {
+                if (pending === 'fund') {
+                  await client.fundCard(card.id, {
+                    amount,
+                    pin,
+                    idempotencyKey: funding.key,
+                  });
+                  // A NEW key after a success: this form is now available for
+                  // a genuinely different top-up, and reusing the old one
+                  // would have the server replay the first and report success
+                  // for money that never moved.
+                  funding.next();
+                  setAmount('');
+                  cancel();
+                  onChange();
+                  return 'Card funded.';
+                }
+                if (pending === 'unfreeze') {
+                  await client.unfreezeCard(card.id, pin);
+                  cancel();
+                  onChange();
+                  return 'Card unfrozen.';
+                }
+                // The one action that returns something. `secrets` is separate
+                // state with a sixty-second life; the PIN is dropped either way.
                 setSecrets(await client.revealCard(card.id, pin));
-                setPin('');
+                cancel();
                 return undefined;
               })
             }
           />
+          <Button label="Cancel" quiet onPress={cancel} />
         </View>
       )}
 
@@ -485,15 +578,82 @@ function group(pan: string): string {
  * that takes no money from them. The figure is the STARTING BALANCE, which is
  * what really moves here: wallet -> card, still the customer's own money.
  */
-function Issue({ onIssued }: { readonly onIssued: () => void }) {
+function Issue({
+  price,
+  onIssued,
+}: {
+  /** From the server, never from this file — see the web's Issue. */
+  readonly price: string | undefined;
+  readonly onIssued: () => void;
+}) {
   const client = useXetral();
   const styles = useStyles();
   const colors = useTheme();
   const { busy, error, code, done, run } = useSubmit();
   const attempt = useIdempotencyKey();
-  const [name, setName] = useState('');
-  const [funding, setFunding] = useState('');
   const [pin, setPin] = useState('');
+  const [stage, setStage] = useState<'offer' | 'confirm'>('offer');
+
+  const free = price === '0.00';
+
+  /*
+   * THE CONFIRM STEP, inline. It reads the same state the offer writes, so
+   * there is nothing to pass and nothing that can be passed out of date — the
+   * shape the Send screen uses, for the same reason.
+   */
+  if (stage === 'confirm') {
+    return (
+      <Panel title="Confirm" subtitle="Check this before you approve it">
+        <View style={styles.row}>
+          <Text style={styles.muted}>A virtual USD card</Text>
+          <Text style={styles.amount}>{price === undefined ? '—' : `$${price}`}</Text>
+        </View>
+        <View style={styles.row}>
+          <Text style={styles.muted}>From</Text>
+          <Text style={styles.amount}>Your USD wallet</Text>
+        </View>
+
+        <Field
+          label="Transaction PIN"
+          secureTextEntry
+          inputMode="numeric"
+          autoComplete="off"
+          maxLength={6}
+          value={pin}
+          onChangeText={setPin}
+        />
+
+        <Button
+          label="Create my card"
+          busy={busy}
+          disabled={pin === ''}
+          onPress={() =>
+            void run(async () => {
+              await client.issueCard({ pin, idempotencyKey: attempt.key });
+              attempt.next();
+              // Cleared the moment the request returns. A PIN authorises one
+              // instruction; it is not a password to hold on to.
+              setPin('');
+              setStage('offer');
+              onIssued();
+              return 'Your card is on its way.';
+            })
+          }
+        />
+        <Button
+          label="Back"
+          quiet
+          onPress={() => {
+            setPin('');
+            setStage('offer');
+          }}
+        />
+
+        <FormError error={error} code={code} />
+        <Done message={done} />
+      </Panel>
+    );
+  }
 
   return (
     <Panel title="Get your Xetral card" subtitle="A virtual card for global payments">
@@ -510,56 +670,46 @@ function Issue({ onIssued }: { readonly onIssued: () => void }) {
         />
       </View>
 
-      <View style={{ marginTop: space.lg }}>
-        <Field label="Name on the card" value={name} onChangeText={setName} />
-        <Field
-          label="Transaction PIN"
-          secureTextEntry
-          inputMode="numeric"
-          autoComplete="off"
-          value={pin}
-          onChangeText={setPin}
-        />
-      </View>
+      {/*
+        THE PRICE AND THE BUTTON ON ONE ROW, matching the web.
 
+        NO NAME, NO PIN AND NO STARTING BALANCE HERE. The name on a card is the
+        customer's verified legal name and is not theirs to type; the starting
+        balance is a second decision, made on the card once it exists; and the
+        PIN authorises the purchase, so it is asked on the confirm step above.
+      */}
       <View
         style={{
           marginTop: space.lg,
           paddingTop: space.lg,
           borderTopWidth: 1,
           borderTopColor: colors.line,
+          flexDirection: 'row',
+          alignItems: 'flex-end',
+          justifyContent: 'space-between',
+          gap: space.md,
         }}
       >
-        <Field
-          label="Starting balance"
-          inputMode="decimal"
-          placeholder="$25.00"
-          value={funding}
-          onChangeText={setFunding}
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={styles.muted}>{free ? 'Your card' : 'Card price'}</Text>
+          <Text style={[styles.amount, { fontSize: 34 }]}>
+            {price === undefined ? '—' : free ? 'Free' : `$${price}`}
+          </Text>
+          <Text style={styles.hint}>
+            {free
+              ? 'No charge to open one.'
+              : 'One-time, from your USD wallet.'}
+          </Text>
+        </View>
+
+        <Button
+          label="Create card"
+          icon="arrowRight"
+          disabled={price === undefined}
+          onPress={() => setStage('confirm')}
         />
-        <Text style={styles.hint}>Moved from your USD wallet. Still your money.</Text>
       </View>
 
-      <Button
-        label="Create card"
-        icon="arrowRight"
-        busy={busy}
-        disabled={name.length < 2 || funding === '' || pin === ''}
-        onPress={() =>
-          void run(async () => {
-            await client.issueCard({
-              nameOnCard: name,
-              initialFunding: funding,
-              pin,
-              idempotencyKey: attempt.key,
-            });
-            attempt.next();
-            setPin('');
-            onIssued();
-            return 'Card requested.';
-          })
-        }
-      />
       <FormError error={error} code={code} />
       <Done message={done} />
     </Panel>
@@ -589,7 +739,7 @@ function Benefit({
           justifyContent: 'center',
           backgroundColor: colors.surface2,
           borderWidth: 1,
-          borderColor: colors.line,
+          borderColor: colors.edge,
         }}
       >
         <Icon name={icon} size={20} color={colors.text2} />

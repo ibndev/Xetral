@@ -1,7 +1,9 @@
+import { useId } from 'react';
 import { Text, View } from 'react-native';
 import { font } from '@/theme';
 import Svg, { Circle, ClipPath, Defs, G, Path, Rect } from 'react-native-svg';
-import { markFor } from '@xetral/client';
+import { countryMarkFor, markFor } from '@xetral/client';
+import type { CurrencyMark as Mark } from '@xetral/client';
 
 /**
  * The round mark beside a currency code, drawn from the SAME data the web
@@ -18,7 +20,36 @@ export function CurrencyMark({
   readonly currency: string;
   readonly size?: number;
 }) {
-  const mark = markFor(currency);
+  return <Drawn mark={markFor(currency)} size={size} />;
+}
+
+/**
+ * The same mark, for a COUNTRY. Keyed differently and only coinciding while
+ * every open country has its own currency — the United Kingdom names GBP,
+ * whose mark is a pound sign, which is the wrong thing beside a country name.
+ */
+export function CountryMark({
+  country,
+  size = 20,
+}: {
+  readonly country: string;
+  readonly size?: number;
+}) {
+  return <Drawn mark={countryMarkFor(country)} size={size} />;
+}
+
+function Drawn({ mark, size }: { readonly mark: Mark; readonly size: number }) {
+  /*
+   * ABOVE THE EARLY RETURN, and that is not style.
+   *
+   * A flag is drawn as SVG and needs a clip-path id; a symbol is a View and
+   * needs nothing. Calling `useId` only on the flag path means the hook count
+   * depends on the mark's kind — and the country picker changes exactly that,
+   * from Nigeria (a flag) to the United Kingdom (a code badge), on the same
+   * component instance. React would throw "rendered fewer hooks than
+   * expected" the first time somebody changed country.
+   */
+  const id = `ccy-${useId()}`;
   const r = size / 2;
 
   if (mark.kind === 'symbol') {
@@ -42,7 +73,6 @@ export function CurrencyMark({
 
   const band = mark.direction === 'vertical' ? size / mark.bands.length : size;
   const tall = mark.direction === 'vertical' ? size : size / mark.bands.length;
-  const id = `ccy-${currency}`;
 
   return (
     <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>

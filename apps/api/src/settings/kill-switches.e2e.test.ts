@@ -12,6 +12,7 @@ import { AppModule } from '../app.module.js';
 import { systemClock } from '../tokens.js';
 import { testApiConfig } from '../test-support/api-config.js';
 import { SettingsService } from './settings.service.js';
+import { approveKyc } from '../test-support/kyc-fixture.js';
 
 /**
  * The kill switches, against a real database.
@@ -84,19 +85,11 @@ beforeAll(async () => {
     userId,
     await hashPassword(PASSWORD),
   ]);
-  // Verified, so a refusal below is the switch and never the identity gate.
-  await pool.query(
-    `INSERT INTO provider_customers (user_id, provider, provider_customer_id)
-     VALUES ($1, 'bitnob', $2)`,
-    [userId, `cus_${randomUUID()}`],
-  );
-  // AND THE TIER, because KYC approval sets both in ONE transaction.
-  //
-  // This fixture stands in for that approval, and a fixture that performs
-  // half of an atomic operation is a fixture that tests a state production
-  // cannot reach — here, a customer whom every provider accepts and whose
-  // ceiling is still an unverified account's.
-  await pool.query(`UPDATE users SET kyc_tier = 1 WHERE id = $1::bigint`, [userId]);
+  // Verified, in the ONE place that knows what approval actually writes: an
+  // approved `kyc_submissions` row (which is where a card's embossed name is
+  // read from), the provider mapping, and the tier — all three, because
+  // approval writes all three in one transaction.
+  await approveKyc(pool, userId);
 
   const login = await request(app.getHttpServer())
     .post('/v1/auth/login')
@@ -156,12 +149,7 @@ describe('a switched-off service refuses', () => {
     const res = await request(app.getHttpServer())
       .post('/v1/cards')
       .set(auth())
-      .send({
-        name_on_card: 'A Customer',
-        initial_funding: '5.00',
-        transaction_pin: PIN,
-        idempotency_key: randomUUID(),
-      });
+      .send({ transaction_pin: PIN, idempotency_key: randomUUID() });
 
     expect(res.status).toBe(503);
     expect(res.body.error).toBe('cards_disabled');

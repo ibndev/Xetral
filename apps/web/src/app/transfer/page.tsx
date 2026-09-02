@@ -118,23 +118,43 @@ function Transfer() {
   const needsPin = session.data?.has_pin === false;
 
   /*
-   * WHO IS BEING PAID, asked first.
+   * ONE FIELD, NOT A CHOICE BETWEEN TWO SCREENS.
    *
-   * A transfer used to be "type an email address", which is the identifier
-   * people are most careful with and least willing to post — so the ordinary
-   * case, paying somebody whose payment link you were sent, had no shape at
-   * all. Both routes end at the same field because the API resolves all four
-   * forms; what differs is what the screen ASKS FOR, and asking for the wrong
-   * thing is what makes somebody paste an address into a box labelled link.
+   * This asked "a payment link, or a Xetral wallet?" first, and both answers
+   * led to THE SAME INPUT — because `#recipientByIdentifier` resolves a
+   * handle, an email, a phone number and a whole payment link from one
+   * string. The question was a step that changed nothing but the label, and
+   * getting it wrong meant pasting an address into a box that said link.
+   *
+   * It was also what broke the layout. `.choice` was a <button> holding a
+   * sentence, and the global button rule sets `white-space: nowrap` — so the
+   * sub-line could not wrap and forced the page 41px wider than a 360px
+   * handset, which is the sideways scroll on this screen. Measured before and
+   * after; one field cannot do that.
    */
-  // A link already answered "who are you paying?", so the chooser is skipped.
-  const [via, setVia] = useState<'link' | 'wallet' | undefined>(
-    arrivedWith === '' ? undefined : 'link',
-  );
+  const [stage, setStage] = useState<'details' | 'confirm'>('details');
 
   const amountValid = amount === '' || isValidAmount(amount, exponentFor(currency));
 
-  function submit(event: React.FormEvent) {
+  /*
+   * THE PIN IS NOT PART OF THE FORM.
+   *
+   * It used to sit under the amount, so a customer typed the secret that
+   * authorises the payment BEFORE they had seen what they were authorising —
+   * and a mistyped recipient was discovered after the PIN, or not at all. A
+   * PIN answers "yes, this one", which is a question that cannot be asked
+   * before the thing exists.
+   *
+   * So: details, then a review of what is about to happen, then the PIN. The
+   * PIN never enters this component's state until that last step and is
+   * cleared the moment the request returns.
+   */
+  function review(event: React.FormEvent) {
+    event.preventDefault();
+    setStage('confirm');
+  }
+
+  function confirm(event: React.FormEvent) {
     event.preventDefault();
     void run(async () => {
       const result = await client.transfer({
@@ -151,6 +171,12 @@ function Transfer() {
       // The PIN is cleared immediately and never kept in state between
       // actions. It is not a password: it authorises one instruction.
       setPin('');
+      // Back to an empty form: a success is the end of this transfer, and
+      // leaving the review on screen invites a second tap on money that has
+      // already moved.
+      setStage('details');
+      setAmount('');
+      setRecipient('');
       return `Sent ${formatAmount(result.amount, result.currency)}${
         result.fee === '0.00' ? '' : ` (fee ${formatAmount(result.fee, result.currency)})`
       }.`;
@@ -182,74 +208,90 @@ function Transfer() {
     );
   }
 
-  if (via === undefined) {
+  if (stage === 'confirm') {
     return (
       <Shell>
-        <div className="card">
-          <h1>Send money</h1>
-          <h2>Who are you paying?</h2>
-
-          <div className="choice-list">
-            <button type="button" className="choice" onClick={() => setVia('link')}>
-              <span className="choice-icon"><Icon name="globe" size={20} /></span>
-              <span className="choice-main">
-                <span className="choice-title">A payment link</span>
-                <span className="choice-sub">
-                  Somebody sent you their Xetral link or @handle
-                </span>
-              </span>
-              <Icon name="chevronRight" size={18} />
-            </button>
-
-            <button type="button" className="choice" onClick={() => setVia('wallet')}>
-              <span className="choice-icon"><Icon name="wallet" size={20} /></span>
-              <span className="choice-main">
-                <span className="choice-title">A Xetral wallet</span>
-                <span className="choice-sub">
-                  You know their email address or phone number
-                </span>
-              </span>
-              <Icon name="chevronRight" size={18} />
+        <form className="card" onSubmit={confirm}>
+          <div className="section-head">
+            <h1>Confirm</h1>
+            <button
+              type="button"
+              className="btn link"
+              onClick={() => {
+                setPin('');
+                setStage('details');
+              }}
+            >
+              Edit
             </button>
           </div>
+          <h2>Check this before you approve it</h2>
 
-          <p className="hint">
-            Both go to the same place. Your own link is on{' '}
-            <Link href="/settings">your settings page</Link> if somebody needs it.
-          </p>
-        </div>
+          {/* What is about to happen, in the words the customer typed. The
+              recipient is echoed exactly as entered rather than resolved to a
+              name: resolving would be a lookup that says which handles and
+              addresses exist, and this screen is reachable by anybody. */}
+          <div className="row">
+            <span className="muted">To</span>
+            <span className="mono">{recipient}</span>
+          </div>
+          <div className="row">
+            <span className="muted">Amount</span>
+            <span className="mono">{formatAmount(amount || '0', currency)}</span>
+          </div>
+
+          <label>
+            Transaction PIN
+            <input
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
+              value={pin}
+              maxLength={6}
+              onChange={(e) => setPin(e.target.value)}
+              // Focused here rather than on the details form, because this is
+              // the first moment the PIN is the thing being asked for.
+              autoFocus
+              required
+            />
+          </label>
+
+          <button type="submit" disabled={busy || pin === ''}>
+            {busy ? 'Sending…' : `Send ${formatAmount(amount || '0', currency)}`}
+          </button>
+
+          <FormError error={error} code={code} />
+          {done !== undefined && <p className="ok">{done}</p>}
+        </form>
       </Shell>
     );
   }
 
   return (
     <Shell>
-
-      <form className="card" onSubmit={submit}>
-        <div className="section-head">
-          <h1>Send money</h1>
-          <button type="button" className="btn link" onClick={() => setVia(undefined)}>
-            Change
-          </button>
-        </div>
-        <h2>{via === 'link' ? 'Using a payment link' : 'To a Xetral wallet'}</h2>
+      <form className="card" onSubmit={review}>
+        <h1>Send money</h1>
+        <h2>To anyone on Xetral</h2>
 
         <label>
-          {via === 'link' ? 'Their link or @handle' : 'Their email or phone number'}
+          Who are you paying?
           <input
-            // `text`, not `email`, on BOTH paths. The API resolves a link, an
-            // @handle, an address and a phone number from one field, and a
-            // browser refusing anything without an `@` in it would reject
-            // three of the four.
+            // `text`, never `email`. ONE FIELD TAKES ALL FOUR SHAPES — a
+            // handle, an email address, a phone number and a whole payment
+            // link — because the API resolves all four from one string. A
+            // browser refusing anything without an `@` would reject three.
             type="text"
-            inputMode={via === 'link' ? 'url' : 'email'}
+            inputMode="text"
             autoCapitalize="none"
             spellCheck={false}
-            placeholder={via === 'link' ? '@olawale' : 'you@example.com'}
+            placeholder="@handle, email, phone or payment link"
             value={recipient}
             onChange={(e) => setRecipient(e.target.value)}
             required
           />
+          <span className="hint">
+            Your own link is on <Link href="/settings">your settings page</Link>.
+          </span>
         </label>
 
         <label id="transfer-currency-label">
@@ -263,7 +305,7 @@ function Transfer() {
               label: code,
               // What is actually behind the choice, so a customer picking a
               // currency they hold none of learns it here rather than from
-              // `insufficient_funds` after typing an amount and a PIN.
+              // `insufficient_funds` after typing an amount.
               ...(held.has(code) ? { hint: formatAmount(held.get(code) ?? '0', code) } : {}),
             }))}
           />
@@ -289,21 +331,10 @@ function Transfer() {
           </p>
         )}
 
-        <label>
-          Transaction PIN
-          <input
-            type="password"
-            inputMode="numeric"
-            autoComplete="off"
-            value={pin}
-            maxLength={6}
-            onChange={(e) => setPin(e.target.value)}
-            required
-          />
-        </label>
-
-        <button type="submit" disabled={busy || !amountValid || amount === ''}>
-          {busy ? 'Sending…' : 'Send'}
+        {/* NO TRANSACTION PIN HERE. It is asked on the confirm step, once the
+            customer can see what they are approving. */}
+        <button type="submit" disabled={!amountValid || amount === '' || recipient === ''}>
+          Review
         </button>
 
         <FormError error={error} code={code} />

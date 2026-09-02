@@ -81,9 +81,14 @@ export default function Fx() {
           }}
         />
 
+        {/* ACCENT, NOT QUIET. This is the only control that does anything until
+            there is a quote, and `quiet` made it the faintest thing on the
+            screen — the same complaint the web's ghost-styled "Get a rate"
+            drew. `accent` is filled and obvious without spending the white the
+            primary Convert button owns on dark. */}
         <Button
           label="Get a quote"
-          quiet
+          accent
           busy={busy && quote === undefined}
           disabled={amount === '' || from === to}
           onPress={() =>

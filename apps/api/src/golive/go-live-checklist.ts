@@ -743,6 +743,18 @@ export const SETTINGS: readonly Item[] = [
       'from a customer because of a default. Capped at 500 by CHECK.',
   },
   {
+    name: 'card_issuance_fee_cents',
+    kind: 'setting',
+    failure: 'wrong-by-default',
+    ifMissed:
+      'WHAT A CARD COSTS, in US CENTS — 200 is $2.00, and it is the figure the ' +
+      'onboarding screen shows. It is charged as a card_creation entry against ' +
+      'the customer\'s USD wallet and split for VAT, so this is a price rather ' +
+      'than a label: setting it to 0 issues cards free and the screen says so. ' +
+      'Bounded 0..2000 by CHECK, which is what refuses a figure typed in ' +
+      'dollars.',
+  },
+  {
     name: 'transfer_daily_limit_kobo',
     kind: 'setting',
     failure: 'wrong-by-default',

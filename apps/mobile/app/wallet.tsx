@@ -184,7 +184,7 @@ export default function Home() {
                 minHeight: 76,
                 borderRadius: radius.md,
                 borderWidth: 1,
-                borderColor: colors.line,
+                borderColor: colors.edge,
                 backgroundColor: colors.surface,
               }}
             >

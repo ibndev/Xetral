@@ -29,6 +29,7 @@ import { systemClock } from '../tokens.js';
 import { testApiConfig } from '../test-support/api-config.js';
 import { CryptoDepositReconciliationService } from './crypto-deposit-reconciliation.service.js';
 import { SettingsService } from '../settings/settings.service.js';
+import { approveKyc } from '../test-support/kyc-fixture.js';
 
 /**
  * Crypto, end to end.
@@ -151,18 +152,11 @@ async function onboard(kyc = true): Promise<Customer> {
     await hashPassword(PASSWORD),
   ]);
   if (kyc) {
-    await pool.query(
-      `INSERT INTO provider_customers (user_id, provider, provider_customer_id)
-       VALUES ($1::bigint, 'bitnob', $2)`,
-      [userId, `cus_${userId}`],
-    );
-    // AND THE TIER, because KYC approval sets both in ONE transaction.
-    //
-    // This fixture stands in for that approval, and a fixture that performs
-    // half of an atomic operation is a fixture that tests a state production
-    // cannot reach — here, a customer whom every provider accepts and whose
-    // ceiling is still an unverified account's.
-    await pool.query(`UPDATE users SET kyc_tier = 1 WHERE id = $1::bigint`, [userId]);
+    // Verified, in the ONE place that knows what approval actually writes: an
+    // approved `kyc_submissions` row (which is where a card's embossed name is
+    // read from), the provider mapping, and the tier — all three, because
+    // approval writes all three in one transaction.
+    await approveKyc(pool, userId);
   }
 
   const login = await request(app.getHttpServer())

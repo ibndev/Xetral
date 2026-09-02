@@ -1,4 +1,6 @@
-import { markFor } from '@xetral/client';
+import { useId } from 'react';
+import { countryMarkFor, markFor } from '@xetral/client';
+import type { CurrencyMark as Mark } from '@xetral/client';
 
 /**
  * The round mark beside a currency code, drawn rather than typed.
@@ -15,7 +17,33 @@ export function CurrencyMark({
   readonly currency: string;
   readonly size?: number;
 }) {
-  const mark = markFor(currency);
+  return <Drawn mark={markFor(currency)} size={size} />;
+}
+
+/**
+ * The same mark, for a COUNTRY rather than a currency.
+ *
+ * A separate entry point because the two are keyed differently and only
+ * coincide while every open country has its own currency — the United Kingdom
+ * names GBP, whose mark is a pound sign, which is the wrong thing to draw
+ * beside "United Kingdom" in a list somebody is scanning for a flag.
+ */
+export function CountryMark({
+  country,
+  size = 20,
+}: {
+  readonly country: string;
+  readonly size?: number;
+}) {
+  return <Drawn mark={countryMarkFor(country)} size={size} />;
+}
+
+function Drawn({ mark, size }: { readonly mark: Mark; readonly size: number }) {
+  // `useId` rather than the code: the clip path is referenced by id, and two
+  // marks for the same thing on one page — a trigger and its selected row —
+  // would otherwise share one, which is a duplicate id and an ambiguous
+  // reference. React guarantees this is unique per instance.
+  const id = useId();
   const r = size / 2;
 
   if (mark.kind === 'symbol') {
@@ -41,7 +69,6 @@ export function CurrencyMark({
   // A circle clipped over bands. `clipPath` rather than a border-radius on the
   // rects, because three rounded rects side by side leave notches where they
   // meet and the notches are visible at this size.
-  const id = `ccy-${currency}`;
   const band = mark.direction === 'vertical' ? size / mark.bands.length : size;
   const tall = mark.direction === 'vertical' ? size : size / mark.bands.length;
 

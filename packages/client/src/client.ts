@@ -112,6 +112,10 @@ export interface Card {
   readonly expiry_month: number | null;
   readonly expiry_year: number | null;
   readonly balance: string;
+  /** What the CUSTOMER calls this card, or null. Not the name on the card,
+   *  which is their legal name and is not theirs to set. Null is the resting
+   *  state; render the last four digits instead of a blank. */
+  readonly label?: string | null;
 }
 
 /**
@@ -673,26 +677,46 @@ export class XetralClient {
   /* ----------------------------- cards -------------------------- */
 
   async cards(): Promise<readonly Card[]> {
-    const body = await this.#get<{ cards: Card[] }>('/v1/cards');
-    return body.cards;
+    return (await this.cardList()).cards;
+  }
+
+  /**
+   * The cards AND what a new one costs.
+   *
+   * The price is on this response rather than typed into the onboarding screen
+   * because it is a `platform_settings` row an operator can change, and a
+   * screen carrying its own copy is a screen that shows the old price the
+   * moment one does. It is a major-unit STRING, like every other amount here.
+   */
+  async cardList(): Promise<{ readonly cards: readonly Card[]; readonly issuance_fee: string }> {
+    const body = await this.#get<{ cards: Card[]; issuance_fee?: string }>('/v1/cards');
+    return { cards: body.cards, issuance_fee: body.issuance_fee ?? '0.00' };
   }
 
   async card(id: string): Promise<Card> {
     return this.#get(`/v1/cards/${encodeURIComponent(id)}`);
   }
 
-  async issueCard(input: {
-    nameOnCard: string;
-    initialFunding: string;
-    pin: string;
-    idempotencyKey: string;
-  }): Promise<Card> {
+  /**
+   * Buying a card. NO NAME and NO STARTING BALANCE.
+   *
+   * The name on a card is the customer's verified legal name and the server
+   * reads it from the approved KYC record — a field here could disagree with
+   * the identity the card was issued against. Money goes on afterwards through
+   * `fundCard`, because buying a card and loading it are two decisions.
+   *
+   * The PIN stays, because this MOVES MONEY: issuing charges the card price.
+   */
+  async issueCard(input: { pin: string; idempotencyKey: string }): Promise<Card> {
     return this.#post('/v1/cards', {
-      name_on_card: input.nameOnCard,
-      initial_funding: input.initialFunding,
       transaction_pin: input.pin,
       idempotency_key: input.idempotencyKey,
     });
+  }
+
+  /** Naming a card, or clearing the name with null. No PIN: nothing moves. */
+  async nameCard(id: string, label: string | null): Promise<Card> {
+    return this.#post(`/v1/cards/${encodeURIComponent(id)}/label`, { label });
   }
 
   async fundCard(

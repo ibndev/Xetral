@@ -1,7 +1,7 @@
 'use client';
 
 import { formatAmount } from '@xetral/client';
-import type { Deposit, KycLimits, VirtualAccount } from '@xetral/client';
+import type { Deposit, VirtualAccount } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { FormError } from '@/ui/form-error';
 import { Icon } from '@/ui/icon';
@@ -43,10 +43,8 @@ export default function AddMoney() {
    * rather than issuing another.
    */
   const account = useLoad<VirtualAccount>(() => client.fundingAccount(), [client]);
-  const limits = useLoad<KycLimits>(() => client.kycLimits(), [client]);
   const deposits = useLoad<readonly Deposit[]>(() => client.deposits(), [client]);
 
-  const ngn = limits.data?.limits.find((l) => l.currency === 'NGN');
   // `kyc_required` is the ONE code this screen answers itself. Anything else
   // is a real failure and goes to `FormError` with its own next step.
   const needsVerifying = account.code === 'kyc_required';
@@ -56,17 +54,6 @@ export default function AddMoney() {
       <div className="card">
         <h1>Add money</h1>
         <h2>Transfer from any Nigerian bank</h2>
-
-        {ngn !== undefined && (
-          <p className="notice">
-            <Icon name="info" size={16} />
-            <span>
-              Your account can receive and move up to{' '}
-              <strong>{formatAmount(ngn.daily_limit, 'NGN')}</strong> a day
-              {limits.data?.tier === 0 ? ' without verifying your identity' : ''}.
-            </span>
-          </p>
-        )}
 
         {account.loading && <p className="hint">Getting your account number…</p>}
 
@@ -92,21 +79,26 @@ export default function AddMoney() {
           </>
         )}
 
+        {/*
+          ONE LINE, NOT A WALL.
+
+          The daily-allowance notice and the verification block are gone: a
+          ceiling is not something to read before putting money in, and a
+          bordered box with its own button reads as a gate across the whole
+          screen rather than as a fact about one field.
+
+          What is NOT removed is the fact itself, because it is not ours to
+          remove. A dedicated account number is a bank account opened in a
+          person's name; the provider will not create one for somebody
+          unidentified, and no wording here changes that. Saying so quietly is
+          the difference between an answer and a wall — and it is the only
+          honest thing to put where the number would otherwise be.
+        */}
         {needsVerifying && (
-          <div className="notice">
-            <p>
-              <strong>Your own account number needs your identity.</strong>
-            </p>
-            <p>
-              A dedicated account number is a bank account in your name, so the bank
-              has to know whose it is.
-            </p>
-            <p>
-              <a className="btn" href="/kyc">
-                Verify my identity
-              </a>
-            </p>
-          </div>
+          <p className="hint">
+            Your account number is issued in your name, so it needs your identity
+            first. <a href="/kyc">Verify my identity</a>
+          </p>
         )}
 
         {/* Anything that is NOT the verification gate. A provider outage or a

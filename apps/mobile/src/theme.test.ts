@@ -71,3 +71,46 @@ describe('the stylesheet', () => {
     expect(stylesFor(dark)).toBe(stylesFor(dark));
   });
 });
+
+describe('the light theme draws no outlines', () => {
+  /*
+   * The phone's half of the same rule the web's `light-edges.test.ts` keeps.
+   *
+   * A light container is already a shade DARKER than the ground, which is what
+   * the eye reads as a recess; the hairline on top of it was a second cue for
+   * one fact, and two cues read as an outline. On black there is no darker fill
+   * to recess into, so dark keeps its border — which is why this cannot be
+   * done by deleting `borderWidth`.
+   *
+   * The failure is invisible in review and invisible in dark: a screen written
+   * with `colors.line` looks right on the theme most people build in and puts
+   * one outlined box among a screen of recessed ones on the other.
+   */
+  it('makes the container and field edges transparent in light and real in dark', () => {
+    expect(light.edge).toBe('transparent');
+    expect(light.edgeStrong).toBe('transparent');
+    // NOT transparent. A dark container that lost its border would be a shade
+    // of near-black on black with nothing marking where it ends.
+    expect(dark.edge).toBe(dark.line);
+    expect(dark.edgeStrong).toBe(dark.lineStrong);
+  });
+
+  it('leaves DIVIDERS alone, in both themes', () => {
+    // A divider separates things that would otherwise run together, which is
+    // true on white as well as on black. Only the box border changed.
+    expect(light.line).not.toBe('transparent');
+    expect(light.lineStrong).not.toBe('transparent');
+  });
+
+  it('draws the shared card and input from the edge, not from the line', () => {
+    const styles = stylesFor(light);
+    expect(styles.card.borderColor).toBe('transparent');
+    expect(styles.input.borderColor).toBe('transparent');
+    // And they still HAVE a border, so dark gets one from the same rule rather
+    // than needing a second copy of the component style.
+    expect(styles.card.borderWidth).toBe(1);
+    expect(styles.input.borderWidth).toBe(1);
+    expect(stylesFor(dark).card.borderColor).toBe(dark.line);
+    expect(stylesFor(dark).input.borderColor).toBe(dark.lineStrong);
+  });
+});

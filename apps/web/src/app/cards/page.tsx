@@ -20,7 +20,16 @@ import { VerifyPrompt } from '@/ui/verify-prompt';
  */
 export default function Cards() {
   const client = useXetral();
-  const { data, loading, error, code, reload } = useLoad(() => client.cards(), [client]);
+  /*
+   * THE LIST AND THE PRICE COME BACK TOGETHER.
+   *
+   * `card_issuance_fee_cents` is a `platform_settings` row an operator can
+   * change, so a figure typed into this file would show the old price from the
+   * moment one did — a price on a screen disagreeing with the price in the
+   * ledger. One request, one source.
+   */
+  const { data, loading, error, code, reload } = useLoad(() => client.cardList(), [client]);
+  const cards = data?.cards;
 
   // The name to print on the card face. A card cannot be issued without an
   // approved identity, so this is present whenever a card is — and it is the
@@ -38,7 +47,7 @@ export default function Cards() {
    * Somebody who already HAS a card is not being onboarded, so they get the
    * list and an "Add a card" button instead.
    */
-  const none = data !== undefined && data.length === 0;
+  const none = cards !== undefined && cards.length === 0;
   const [adding, setAdding] = useState(false);
   const issuing = none || adding;
 
@@ -49,7 +58,7 @@ export default function Cards() {
           <h1>Your cards</h1>
           <p className="lead">Manage your virtual dollar cards</p>
         </div>
-        {data !== undefined && data.length > 0 && !adding && (
+        {cards !== undefined && cards.length > 0 && !adding && (
           <button type="button" className="ghost" onClick={() => setAdding(true)}>
             <Icon name="plus" size={16} /> Add a card
           </button>
@@ -73,18 +82,19 @@ export default function Cards() {
       */}
       {none && <CardFace holder={holder} />}
 
-      {data?.map((card, index) => (
+      {cards?.map((card, index) => (
         <CardRow
           key={card.id}
           card={card}
           holder={holder}
           onChange={reload}
-          position={{ index, of: data.length }}
+          position={{ index, of: cards.length }}
         />
       ))}
 
       {issuing && (
         <Issue
+          price={data?.issuance_fee}
           onIssued={() => {
             setAdding(false);
             reload();
@@ -192,9 +202,46 @@ function CardRow({
   const client = useXetral();
   const { busy, error, code, run } = useSubmit();
   const [pin, setPin] = useState('');
-  const [open, setOpen] = useState(false);
   const funding = useIdempotencyKey();
   const [amount, setAmount] = useState('');
+  /*
+   * WHICH ACTION THE PIN IS FOR — and the reason this is one state rather than
+   * a bare `open` flag.
+   *
+   * THE PIN BOX WAS RENDERED ONLY WHEN THE TOP-UP FORM WAS OPEN OR THE CARD WAS
+   * FROZEN, and three actions read it. So on an ACTIVE card "Show details" was
+   * permanently disabled on `pin === ''` with no box on screen to fill: the
+   * only way to read your own card number was to open Add money, type a PIN
+   * into a form that says it is for adding money, and press a different button.
+   * That is Phase 13's "every card issued was unusable" finding, back in the
+   * UI — the reveal exists and cannot be reached.
+   *
+   * The other direction was wrong too: a frozen card showed a PIN box the
+   * moment it rendered, before the customer had said whether they wanted to
+   * unfreeze it or read it. A secret asked for with no stated purpose is the
+   * habit that makes somebody type it when a stranger asks.
+   *
+   * So: pick the action, THEN the PIN for that action, named. The same order
+   * the Send screen and the card purchase now follow.
+   */
+  const [pending, setPending] = useState<'fund' | 'unfreeze' | 'reveal' | undefined>(undefined);
+
+  /** Leaves the PIN nowhere. A cancelled action must not leave the secret in
+   *  state for the next one to reuse. */
+  function cancel(): void {
+    setPin('');
+    setPending(undefined);
+  }
+  /*
+   * NAMING THE CARD, which is the step that comes AFTER buying one.
+   *
+   * A second card is otherwise indistinguishable from the first: every face
+   * reads four digits and the same verified name. `label` is the customer's
+   * own note — not `name_on_card`, which is their legal name and is not theirs
+   * to set — so it takes no PIN and no confirmation.
+   */
+  const [naming, setNaming] = useState(false);
+  const [label, setLabel] = useState(card.label ?? '');
   /**
    * The revealed number, held ONLY while it is on screen.
    *
@@ -251,11 +298,67 @@ function CardRow({
         </div>
       )}
       <div className="row">
+        <span className="muted">Name</span>
+        {naming ? (
+          <span className="mono">{card.label ?? `Card ending ${card.last4 ?? '••••'}`}</span>
+        ) : (
+          <button
+            type="button"
+            className="btn link"
+            onClick={() => {
+              setLabel(card.label ?? '');
+              setNaming(true);
+            }}
+          >
+            {card.label ?? `Card ending ${card.last4 ?? '••••'}`}
+          </button>
+        )}
+      </div>
+
+      {naming && (
+        <div>
+          <label>
+            What do you call this card?
+            <input
+              value={label}
+              maxLength={40}
+              placeholder="Subscriptions"
+              onChange={(e) => setLabel(e.target.value)}
+              autoFocus
+            />
+          </label>
+          <div className="actions">
+            <button
+              type="button"
+              className="small"
+              disabled={busy}
+              onClick={() =>
+                void run(async () => {
+                  // An empty box CLEARS the name rather than storing a blank
+                  // one — the database refuses whitespace, and "" arriving as a
+                  // label would be a 400 on the obvious way to undo this.
+                  await client.nameCard(card.id, label.trim() === '' ? null : label.trim());
+                  setNaming(false);
+                  onChange();
+                  return 'Card renamed.';
+                })
+              }
+            >
+              Save
+            </button>
+            <button type="button" className="quiet small" onClick={() => setNaming(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="row">
         <span className="muted">Balance</span>
         <span className="mono">{formatAmount(card.balance, card.currency)}</span>
       </div>
 
-      {card.status !== 'terminated' && (
+      {card.status !== 'terminated' && pending === undefined && (
         <div className="actions">
           {/*
             Freezing asks for nothing. The server does not require a PIN either,
@@ -279,25 +382,13 @@ function CardRow({
               Freeze
             </button>
           ) : (
-            <button
-              type="button"
-              className="ghost small"
-              disabled={busy || pin === ''}
-              onClick={() =>
-                void run(async () => {
-                  await client.unfreezeCard(card.id, pin);
-                  setPin('');
-                  onChange();
-                  return 'Card unfrozen.';
-                })
-              }
-            >
+            <button type="button" className="ghost small" onClick={() => setPending('unfreeze')}>
               Unfreeze
             </button>
           )}
 
-          <button type="button" className="ghost small" onClick={() => setOpen(!open)}>
-            {open ? 'Cancel' : 'Add money'}
+          <button type="button" className="ghost small" onClick={() => setPending('fund')}>
+            Add money
           </button>
 
           {/*
@@ -306,26 +397,34 @@ function CardRow({
             online, and unlike a transfer there is no ledger entry afterwards
             for anyone to notice.
           */}
-          <button
-            type="button"
-            className="ghost small"
-            disabled={busy || pin === ''}
-            onClick={() =>
-              void run(async () => {
-                setSecrets(await client.revealCard(card.id, pin));
-                setPin('');
-                return 'Showing your card details for one minute.';
-              })
-            }
-          >
+          <button type="button" className="ghost small" onClick={() => setPending('reveal')}>
             Show details
           </button>
         </div>
       )}
 
-      {(open || card.status === 'frozen') && (
+      {/*
+        ONE PANEL, NAMING WHAT IT IS ABOUT TO DO. The PIN never appears without
+        a sentence saying which action it authorises — and it is the same box
+        for all three, so there is no way for one of them to be reachable and
+        another not.
+      */}
+      {pending !== undefined && (
         <div style={{ marginTop: 12 }}>
-          {open && (
+          <div className="section-head row-between">
+            <h2>
+              {pending === 'fund'
+                ? 'Add money to this card'
+                : pending === 'unfreeze'
+                  ? 'Unfreeze this card'
+                  : 'Show card details'}
+            </h2>
+            <button type="button" className="btn link" onClick={cancel}>
+              Cancel
+            </button>
+          </div>
+
+          {pending === 'fund' && (
             <label>
               Amount (USD)
               <input
@@ -333,9 +432,11 @@ function CardRow({
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 placeholder="25.00"
+                autoFocus
               />
             </label>
           )}
+
           <label>
             Transaction PIN
             <input
@@ -343,15 +444,20 @@ function CardRow({
               inputMode="numeric"
               autoComplete="off"
               value={pin}
+              maxLength={6}
               onChange={(e) => setPin(e.target.value)}
+              // Focused here for the two actions that have nothing above it, so
+              // the one field on screen is the one the cursor is in.
+              autoFocus={pending !== 'fund'}
             />
           </label>
-          {open && (
-            <button
-              type="button"
-              disabled={busy || amount === '' || pin === ''}
-              onClick={() =>
-                void run(async () => {
+
+          <button
+            type="button"
+            disabled={busy || pin === '' || (pending === 'fund' && amount === '')}
+            onClick={() =>
+              void run(async () => {
+                if (pending === 'fund') {
                   await client.fundCard(card.id, {
                     amount,
                     pin,
@@ -363,16 +469,32 @@ function CardRow({
                   // money that never moved.
                   funding.next();
                   setAmount('');
-                  setPin('');
-                  setOpen(false);
+                  cancel();
                   onChange();
                   return 'Card funded.';
-                })
-              }
-            >
-              {busy ? 'Working…' : 'Add money to card'}
-            </button>
-          )}
+                }
+                if (pending === 'unfreeze') {
+                  await client.unfreezeCard(card.id, pin);
+                  cancel();
+                  onChange();
+                  return 'Card unfrozen.';
+                }
+                // The one action that returns something. `secrets` is separate
+                // state with a sixty-second life; the PIN is dropped either way.
+                setSecrets(await client.revealCard(card.id, pin));
+                cancel();
+                return 'Showing your card details for one minute.';
+              })
+            }
+          >
+            {busy
+              ? 'Working…'
+              : pending === 'fund'
+                ? 'Add money to card'
+                : pending === 'unfreeze'
+                  ? 'Unfreeze card'
+                  : 'Show details'}
+          </button>
         </div>
       )}
 
@@ -417,47 +539,113 @@ function group(pan: string): string {
 /**
  * GET YOUR XETRAL CARD — the onboarding step.
  *
- * What it says before it asks: what the card is, where it works, and how much
- * money is about to move. The old form opened with "Name on the card", which
- * is the third question, not the first.
+ * IT ASKS FOR NOTHING BUT THE DECISION. It used to open with "Name on the
+ * card", "Transaction PIN" and "Starting balance" — three questions in front of
+ * a product the customer had not yet agreed to buy, and the first two were
+ * wrong on their own terms:
  *
- * THERE IS NO CARD CREATION FEE, and the figure here is not one. The reference
- * design puts "$5.00 · one-time payment" in this slot; nothing in this system
- * charges for issuance — `transfer_fee_basis_points` is the only fee that
- * exists — so printing $5.00 would tell a customer they are being charged for
- * something that takes no money from them. The figure in that slot is the
- * STARTING BALANCE instead, which is the amount that really moves at this
- * step: wallet -> card, the customer's own money, still theirs. If an issuance
- * fee is ever wanted it belongs in `platform_settings` with a bound and a
- * ledger leg, the way every other fee here does.
+ *  - THE NAME IS NOT THEIRS TO TYPE. A card is issued in a person's legal name,
+ *    which this system holds in `kyc_submissions.full_name` — read off a
+ *    document by a reviewer. A free-text box let the name embossed on the card
+ *    disagree with the identity it was issued against.
+ *  - THE STARTING BALANCE IS A SECOND DECISION. Somebody who wants a card had
+ *    to name an amount before they had a card to put it on. Loading one is
+ *    `Add money` on the card itself, the moment the card exists.
+ *  - THE PIN IS NOT A FORM FIELD. It authorises the purchase, so it is asked
+ *    on the confirm step — after the customer can see what they are approving.
+ *    The same order the Send screen now follows.
+ *
+ * AND THE PRICE IS REAL. It comes from `card_issuance_fee_cents`, is charged as
+ * a `card_creation` entry against the customer's USD wallet and is split for
+ * VAT. This slot used to hold the starting balance dressed as a price, because
+ * nothing in this system charged for issuance; 041 is what made the figure
+ * mean what the screen says it means.
  */
-function Issue({ onIssued, onCancel }: { onIssued: () => void; onCancel?: () => void }) {
+function Issue({
+  price,
+  onIssued,
+  onCancel,
+}: {
+  /** From the server, never from this file. Undefined while the list loads. */
+  price: string | undefined;
+  onIssued: () => void;
+  onCancel?: () => void;
+}) {
   const client = useXetral();
   const { busy, error, code, done, run } = useSubmit();
   const attempt = useIdempotencyKey();
-  const [name, setName] = useState('');
-  const [funding, setFunding] = useState('');
   const [pin, setPin] = useState('');
+  const [stage, setStage] = useState<'offer' | 'confirm'>('offer');
+
+  const free = price === '0.00';
+
+  function buy(event: React.FormEvent) {
+    event.preventDefault();
+    void run(async () => {
+      await client.issueCard({ pin, idempotencyKey: attempt.key });
+      attempt.next();
+      // Cleared the moment the request returns. A PIN authorises one
+      // instruction; it is not a password to hold on to.
+      setPin('');
+      setStage('offer');
+      onIssued();
+      return 'Your card is on its way.';
+    });
+  }
+
+  if (stage === 'confirm') {
+    return (
+      <form className="card" onSubmit={buy}>
+        <div className="section-head">
+          <h1>Confirm</h1>
+          <button
+            type="button"
+            className="btn link"
+            onClick={() => {
+              setPin('');
+              setStage('offer');
+            }}
+          >
+            Back
+          </button>
+        </div>
+        <h2>Check this before you approve it</h2>
+
+        <div className="row">
+          <span className="muted">A virtual USD card</span>
+          <span className="mono">{price === undefined ? '—' : `$${price}`}</span>
+        </div>
+        <div className="row">
+          <span className="muted">From</span>
+          <span className="mono">Your USD wallet</span>
+        </div>
+
+        <label>
+          Transaction PIN
+          <input
+            type="password"
+            inputMode="numeric"
+            autoComplete="off"
+            value={pin}
+            maxLength={6}
+            onChange={(e) => setPin(e.target.value)}
+            autoFocus
+            required
+          />
+        </label>
+
+        <button type="submit" disabled={busy || pin === ''}>
+          {busy ? 'Creating…' : 'Create my card'}
+        </button>
+
+        <FormError error={error} code={code} />
+        {done !== undefined && <p className="ok">{done}</p>}
+      </form>
+    );
+  }
 
   return (
-    <form
-      className="card"
-      onSubmit={(event) => {
-        event.preventDefault();
-        void run(async () => {
-          await client.issueCard({
-            nameOnCard: name,
-            initialFunding: funding,
-            pin,
-            idempotencyKey: attempt.key,
-          });
-          attempt.next();
-          setPin('');
-          onIssued();
-          return 'Card requested.';
-        });
-      }}
-    >
+    <div className="card">
       <h1>Get your Xetral card</h1>
       <h2>A virtual card for global payments</h2>
 
@@ -479,47 +667,24 @@ function Issue({ onIssued, onCancel }: { onIssued: () => void; onCancel?: () => 
         </div>
       </div>
 
-      <div className="field-row two" style={{ marginTop: 'var(--s-5)' }}>
-        <label>
-          Name on the card
-          <input value={name} onChange={(e) => setName(e.target.value)} required minLength={2} />
-        </label>
-
-        <label>
-          Transaction PIN
-          <input
-            type="password"
-            inputMode="numeric"
-            autoComplete="off"
-            value={pin}
-            onChange={(e) => setPin(e.target.value)}
-            required
-          />
-        </label>
-      </div>
-
-      {/*
-        The amount is typed into the figure's own slot. It is the number the
-        decision turns on, so it is set where the decision is being made rather
-        than in a field above the button.
-      */}
+      {/* THE PRICE AND THE BUTTON ON ONE ROW. `.price-row` is a flex row that
+          wraps, so on a handset the button drops under the figure rather than
+          squeezing it — beside it wherever there is room, which is the
+          reference design's arrangement and the reason the button is not
+          `block`. */}
       <div className="price-row">
         <div className="price-main">
-          <label htmlFor="card-funding" className="price-label">Starting balance</label>
-          <input
-            id="card-funding"
-            className="price-input mono"
-            inputMode="decimal"
-            value={funding}
-            onChange={(e) => setFunding(e.target.value)}
-            placeholder="$25.00"
-            required
-          />
-          <p className="price-sub">Moved from your USD wallet. Still your money.</p>
+          <p className="price-label">{free ? 'Your card' : 'Card price'}</p>
+          <p className="price">{price === undefined ? '—' : free ? 'Free' : `$${price}`}</p>
+          <p className="price-sub">
+            {free
+              ? 'No charge to open one. Add money to it once it is yours.'
+              : 'One-time, from your USD wallet. Add money to the card afterwards.'}
+          </p>
         </div>
 
-        <button type="submit" disabled={busy}>
-          {busy ? 'Creating…' : 'Create card'} <Icon name="arrowRight" size={18} />
+        <button type="button" onClick={() => setStage('confirm')} disabled={price === undefined}>
+          Create card <Icon name="arrowRight" size={18} />
         </button>
       </div>
 
@@ -533,6 +698,6 @@ function Issue({ onIssued, onCancel }: { onIssued: () => void; onCancel?: () => 
           </button>
         </div>
       )}
-    </form>
+    </div>
   );
 }

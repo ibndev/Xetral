@@ -152,6 +152,11 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // Issuing and funding move money onto a card.
       .authenticated('POST', '/v1/cards', { pin: true })
       .authenticated('POST', '/v1/cards/:id/fund', { pin: true })
+      // Naming a card takes NO PIN. Nothing moves, and it is the customer's
+      // own note on their own list — asking for the secret that authorises
+      // payments in order to write one trains people to type it for things
+      // that are not payments.
+      .authenticated('POST', '/v1/cards/:id/label', { pin: false })
       // Freezing is the PROTECTIVE action and takes no PIN: a customer watching
       // fraudulent charges land should not have to remember one first.
       // Unfreezing re-enables spending, so it does.

@@ -213,6 +213,23 @@ export class SettingsService implements OnApplicationBootstrap {
     return this.integer('transfer_fee_basis_points', this.config.transferFeeBasisPoints);
   }
 
+  /**
+   * What a virtual USD card costs to issue, in CENTS.
+   *
+   * CENTS, and the name says so, because the card is a dollar card and the fee
+   * comes out of a dollar wallet. Every other fee figure in this system is
+   * either basis points or kobo, and a kobo number applied to a card because
+   * both are integers is the mistake 032 records about the transfer levy.
+   *
+   * The fallback is the migration's own default rather than zero. Zero here
+   * would mean a database that had not been migrated issues cards free and
+   * says nothing — a price silently not charged, which is the failure mode the
+   * named accessors exist to avoid.
+   */
+  async cardIssuanceFeeCents(): Promise<number> {
+    return this.integer('card_issuance_fee_cents', 200);
+  }
+
   /* ---------------------------------- tax ------------------------------ */
 
   /**

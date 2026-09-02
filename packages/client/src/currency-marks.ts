@@ -86,3 +86,41 @@ export function markFor(currency: string): CurrencyMark {
     }
   );
 }
+
+/**
+ * A flag per COUNTRY, for the signup form's country picker.
+ *
+ * SEPARATE FROM `CURRENCY_MARKS` even though the first three are the same
+ * drawings, because the two are keyed on different things and only coincide
+ * while every open country happens to have its own currency. The United
+ * Kingdom and the United States name GBP and USD, whose marks are a POUND
+ * SIGN and a DOLLAR SIGN — correct beside a balance, and wrong beside a
+ * country, where what somebody is looking for is a flag.
+ *
+ * The union flag and the stars and stripes are not bands and are not drawn:
+ * they fall through to the code badge below, which is what `markFor` already
+ * does for a currency it does not know. A recognisable two-letter badge beats
+ * a bad drawing of a flag people know well.
+ */
+export const COUNTRY_MARKS: Readonly<Record<string, CurrencyMark>> = {
+  NG: { kind: 'flag', direction: 'vertical', bands: ['#008751', '#FFFFFF', '#008751'] },
+  GH: {
+    kind: 'flag',
+    direction: 'horizontal',
+    bands: ['#CE1126', '#FCD116', '#006B3F'],
+    star: '#000000',
+  },
+  KE: { kind: 'flag', direction: 'horizontal', bands: ['#000000', '#BB0000', '#006600'] },
+};
+
+/** The mark for a country, or its code on a neutral disc. */
+export function countryMarkFor(code: string): CurrencyMark {
+  return (
+    COUNTRY_MARKS[code] ?? {
+      kind: 'symbol',
+      symbol: code.slice(0, 2),
+      ink: '#4A5878',
+      ground: '#F6F7F9',
+    }
+  );
+}
