@@ -11,7 +11,7 @@ import { z } from 'zod';
  * offers and this refuses is a form that 400s on a field the customer filled
  * in correctly.
  */
-const TRANSFER_CURRENCIES = ['NGN', 'USD', 'USDT', 'USDC'] as const;
+const TRANSFER_CURRENCIES = ['NGN', 'GHS', 'KES', 'USD', 'USDT', 'USDC'] as const;
 
 /**
  * WHAT A CUSTOMER MAY READ THE HISTORY OF.
@@ -26,7 +26,7 @@ const TRANSFER_CURRENCIES = ['NGN', 'USD', 'USDT', 'USDC'] as const;
  * Wider than the transfer list, and that is right: money can ARRIVE in a
  * currency a customer cannot send from, and it must still be readable.
  */
-const HISTORY_CURRENCIES = ['NGN', 'USD', 'USDT', 'USDC', 'BTC'] as const;
+const HISTORY_CURRENCIES = ['NGN', 'GHS', 'KES', 'USD', 'USDT', 'USDC', 'BTC'] as const;
 
 /**
  * The entry kinds a customer can narrow their activity to.

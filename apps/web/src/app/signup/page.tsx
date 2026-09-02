@@ -2,20 +2,30 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import type { XetralCountry } from '@xetral/client';
 import { resetXetral, xetral } from '@/lib/session';
 import { deviceFingerprint } from '@/lib/device';
 import { useSubmit } from '@/lib/hooks';
 import { Logo } from '@/ui/logo';
 import { Icon } from '@/ui/icon';
+import { Select } from '@/ui/select';
 import { ThemeToggle } from '@/ui/theme-toggle';
 import { AuthAside } from '@/ui/auth-aside';
 
 /**
  * Opening an account.
  *
- * Email and a password, and nothing else — and then straight into the
- * product.
+ * A name, an email, a phone number and a password — and then straight into
+ * the product.
+ *
+ * The name and the phone are NOT an identity check and are not stored as one.
+ * `users.full_name` is what somebody typed about themselves, used to greet
+ * them; the verified name lives in `kyc_submissions` and is the only one any
+ * money decision reads. The phone is how they are reached and how another
+ * customer can pay them. Every service asks for both, and leaving them out
+ * meant the home screen could not greet anybody and could not know whether to
+ * lead with naira or cedis.
  *
  * Identity documents are a SEPARATE, reviewed step, asked for at the first
  * moment they are actually required rather than at the door. Folding a BVN
@@ -26,11 +36,50 @@ import { AuthAside } from '@/ui/auth-aside';
  */
 export default function SignUp() {
   const router = useRouter();
+  const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [country, setCountry] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const { busy, error, run } = useSubmit();
   const [mismatch, setMismatch] = useState(false);
+
+  /*
+   * THE COUNTRY LIST COMES FROM THE SERVER, not from a constant in this file.
+   *
+   * That is the whole point of 040: an operator opens a country from the
+   * dashboard and the signup form offers it on the next load, with no deploy.
+   * A hardcoded list here would make "add a country without coding" true of
+   * the database and false of the only screen that matters.
+   *
+   * `session.countries()` rather than a client method: the call happens
+   * before anybody is signed in, and `XetralClient` cannot be constructed
+   * without a session.
+   */
+  const [countries, setCountries] = useState<readonly XetralCountry[]>([]);
+  useEffect(() => {
+    let live = true;
+    void xetral()
+      .session.countries()
+      .then((list) => {
+        if (!live) return;
+        setCountries(list);
+        // The first is the default only when there is exactly one obvious
+        // answer to default to; otherwise the customer chooses, because a
+        // pre-selected country is one somebody signs up under by accident.
+        if (list.length === 1) setCountry(list[0]?.code ?? '');
+      })
+      // A list that will not load must not block the form: the field simply
+      // has nothing in it and the customer sees the refusal on submit, which
+      // is better than a page that never renders.
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const dial = countries.find((c) => c.code === country)?.dial_code;
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -50,6 +99,9 @@ export default function SignUp() {
       await session.register({
         email,
         password,
+        fullName,
+        country,
+        phone,
         device: { fingerprint: deviceFingerprint(), platform: 'web' },
       });
       // The WALLET, not the identity form.
@@ -87,6 +139,19 @@ export default function SignUp() {
 
       <form className="auth-card animate-in d2" onSubmit={submit}>
         <div className="field">
+          <label htmlFor="full-name">Full name</label>
+          <input
+            id="full-name"
+            placeholder="Olawale Okonkwo"
+            value={fullName}
+            autoComplete="name"
+            onChange={(e) => setFullName(e.target.value)}
+            required
+            minLength={2}
+          />
+        </div>
+
+        <div className="field">
           <label htmlFor="email">Email address</label>
           <input
             id="email"
@@ -98,6 +163,54 @@ export default function SignUp() {
             onChange={(e) => setEmail(e.target.value)}
             required
           />
+        </div>
+
+        <div className="field">
+          {/* `id`, not `htmlFor`: `Select` is a button-and-listbox rather than
+              a native control, so it is labelled BY this element rather than
+              pointing at one. */}
+          <label id="country-label">Country</label>
+          <Select
+            labelledBy="country-label"
+            value={country}
+            onChange={setCountry}
+            placeholder={countries.length === 0 ? 'Loading…' : 'Where do you live?'}
+            options={countries.map((c) => ({
+              value: c.code,
+              label: c.name,
+              // What their money will be in. Said here rather than discovered
+              // on the home screen, because it is the consequence of this
+              // field and the only one a customer can see from the form.
+              hint: c.currency,
+            }))}
+          />
+        </div>
+
+        {/*
+          THE DIALLING CODE IS NOT A FIELD. It is read from the country the
+          customer already chose and shown in front of the input, so there is
+          one place a country is stated and no way for the two to disagree.
+          A second picker would let somebody select Ghana and +234.
+        */}
+        <div className="field">
+          <label htmlFor="phone">Phone number</label>
+          <div className="input-affix dial">
+            <span className="affix dial-code">{dial === undefined ? '+—' : `+${dial}`}</span>
+            <input
+              id="phone"
+              type="tel"
+              inputMode="numeric"
+              placeholder="8031234567"
+              value={phone}
+              autoComplete="tel-national"
+              // National digits only. Anything else a customer pastes — a
+              // plus, a space, a bracket — is stripped rather than refused,
+              // because a number copied from a contact card is not a mistake.
+              onChange={(e) => setPhone(e.target.value.replace(/[^0-9]/g, ''))}
+              required
+              disabled={country === ''}
+            />
+          </div>
         </div>
 
         <div className="field">

@@ -108,6 +108,9 @@ describe('the public surface is small and justified', () => {
       // inside the handler and absent entirely when that is unset.
       'GET /metrics',
       'GET /ready',
+      // The signup form needs the country list and its dialling codes before
+      // anybody has an account. It carries no customer data.
+      'GET /v1/countries',
       'POST /v1/auth/login',
       // Account recovery. Public because a customer who has lost their
       // password has no session to present; both answer 204 and neither
@@ -170,6 +173,10 @@ describe('the privileged surface is declared as privileged', () => {
       // Who has not agreed to the words currently in force. `compliance`,
       // the same question as an outstanding KYC review.
       'GET /v1/admin/consents (compliance)',
+      // Where the platform operates, as data. `admin` rather than a narrower
+      // role because opening a country is a statement about where this
+      // business does business, not an operational adjustment.
+      'GET /v1/admin/countries (admin)',
       'GET /v1/admin/credentials (admin)',
       'GET /v1/admin/credentials/:provider/:name/rotations (admin)',
       // Data requests. `compliance`, and the acting routes take a PIN —
@@ -213,6 +220,8 @@ describe('the privileged surface is declared as privileged', () => {
       // Freezing only. There is deliberately no staff terminate: it moves the
       // customer's money and cannot be undone.
       'POST /v1/admin/cards/:id/freeze (compliance)',
+      'POST /v1/admin/countries (admin)',
+      'POST /v1/admin/countries/:code (admin)',
       'POST /v1/admin/credentials/:provider/:name (admin)',
       'POST /v1/admin/data-requests/:id/erase (compliance)',
       'POST /v1/admin/data-requests/:id/resolve (compliance)',

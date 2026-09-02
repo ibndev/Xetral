@@ -65,6 +65,9 @@ export const GROUPS: readonly Group[] = [
     items: [
       { href: '/admin/providers', label: 'Providers', icon: 'globe' },
       { href: '/admin/credentials', label: 'Provider keys', icon: 'lock' },
+      // Where the platform operates. Beside the other things an operator
+      // configures rather than works through.
+      { href: '/admin/countries', label: 'Countries', icon: 'globe' },
       { href: '/admin/settings', label: 'Settings', icon: 'settings' },
       { href: '/admin/staff', label: 'Staff', icon: 'user' },
       // Reachable from the sidebar deliberately, and it is the one operations

@@ -31,6 +31,7 @@ import { SignInEventService } from './sign-in-events.service.js';
 import { ConsentService } from '../consent/consent.service.js';
 import type { ConsentContext } from '../consent/consent.service.js';
 import type { SignInOrigin } from './sign-in-events.service.js';
+import { CountriesService } from '../countries/countries.service.js';
 
 export interface TokenPair {
   readonly access_token: string;
@@ -47,12 +48,11 @@ export interface SessionSummary {
   /**
    * What to call this customer, or null.
    *
-   * FROM THEIR KYC SUBMISSION, because that is the only place this system
-   * holds a name at all — `users` has an email, a phone and a status, and
-   * registration asks for nothing else deliberately. So a customer who has
-   * not submitted identity documents genuinely has no name here and the
-   * screens say so by falling back rather than by inventing one from an email
-   * address.
+   * FROM WHAT THEY TYPED AT SIGNUP, falling back to their KYC submission.
+   * The signup name exists from the first second of the account and the
+   * verified one arrives days later if at all, so for a GREETING the typed
+   * one is both earlier and likelier to be what somebody is called. Neither
+   * is read by anything that moves money — that reads `kyc_submissions`.
    *
    * THE FIRST NAME ONLY, and not because of screen width: a greeting is the
    * one place a product speaks to somebody the way a person would, and "Hello
@@ -86,6 +86,19 @@ export interface SessionSummary {
    * on.
    */
   readonly has_pin: boolean | null;
+  /**
+   * WHERE THEY ARE, and what their money is in.
+   *
+   * `home_currency` is what the home screen leads with and what the activity
+   * rail starts from. Both are null for an account opened before 040 — the
+   * clients fall back to naira for those, which is what they in fact are.
+   *
+   * The currency is sent rather than derived from the country on the client,
+   * so the mapping lives in one place: an operator who changes a country's
+   * currency changes it for both apps at once, with no release.
+   */
+  readonly country: string | null;
+  readonly home_currency: string | null;
   /** The customer's own payment handle, or null if they have not been given
    *  one yet. `GET /v1/profile` mints one on first ask. */
   readonly handle: string | null;
@@ -153,6 +166,7 @@ export class AuthService {
     @Inject(NotificationService) private readonly notifications: NotificationService,
     @Inject(SignInEventService) private readonly signIns: SignInEventService,
     @Inject(ConsentService) private readonly consents: ConsentService,
+    @Inject(CountriesService) private readonly countries: CountriesService,
   ) {}
 
   /**
@@ -186,6 +200,29 @@ export class AuthService {
       });
     }
 
+    /*
+     * THE COUNTRY IS RESOLVED BEFORE ANYTHING IS WRITTEN, and it decides the
+     * phone number's shape. A country that is not open refuses here — with
+     * the same answer for "no such country", because the two together would
+     * be a way to read the roadmap off a signup form.
+     */
+    const country = await this.countries.requireOpen(input.country);
+
+    /*
+     * ONE CANONICAL FORM FOR A PHONE NUMBER: E.164, built from the country's
+     * own dialling code and the national digits.
+     *
+     * `users_phone_unique` is a plain UNIQUE index on text, so it cannot see
+     * that `+2348031234567`, `2348031234567` and `08031234567` are one person
+     * — three accounts on one number, and every per-customer control in the
+     * system assumes that cannot happen. Normalising here rather than trusting
+     * the client is what makes the index mean what it says: the leading zero
+     * a Nigerian trunk prefix carries is dropped, because it is a domestic
+     * dialling convention rather than part of the number.
+     */
+    const national = input.phone.replace(/^0+/, '');
+    const phone = `+${country.dial_code}${national}`;
+
     const passwordHash = await hashPassword(input.password);
     const client = await this.pool.connect();
 
@@ -195,15 +232,24 @@ export class AuthService {
       let user: UserRow;
       try {
         const created = await client.query<UserRow>(
-          `INSERT INTO users (email, status) VALUES ($1, 'active')
+          `INSERT INTO users (email, status, full_name, country, phone)
+           VALUES ($1, 'active', $2, $3, $4)
            RETURNING id, uuid, status, NULL::text AS password_hash`,
-          [input.email],
+          [input.email, input.full_name, country.code, phone],
         );
         const row = created.rows[0];
         if (row === undefined) throw new Error('user insert returned no row');
         user = row;
       } catch (error) {
         if (isUniqueViolation(error)) {
+          // WHICH identifier collided, because the two need different words.
+          // "That email is taken" sends somebody to the reset flow; the same
+          // sentence about a phone number they typed correctly sends them
+          // nowhere, and it is the more likely mistake of the two.
+          const detail = error instanceof Error ? error.message : '';
+          if (detail.includes('users_phone_unique')) {
+            throw new ConflictException({ error: 'phone_taken' });
+          }
           // Deliberately the same shape as a successful response would NOT be:
           // this one tells the caller the address is taken. That is an
           // enumeration oracle, and it is the accepted trade — a signup form
@@ -564,7 +610,13 @@ export class AuthService {
    */
   async #profile(
     userUuid: string,
-  ): Promise<{ first_name: string | null; has_pin: boolean | null; handle: string | null }> {
+  ): Promise<{
+    first_name: string | null;
+    has_pin: boolean | null;
+    country: string | null;
+    home_currency: string | null;
+    handle: string | null;
+  }> {
     const [core, handle] = await Promise.all([this.#core(userUuid), this.#handle(userUuid)]);
     return { ...core, handle };
   }
@@ -579,21 +631,49 @@ export class AuthService {
    * dead end, while being allowed to try is at worst one extra refusal that
    * already carries a link to the right place.
    */
-  async #core(
-    userUuid: string,
-  ): Promise<{ first_name: string | null; has_pin: boolean | null }> {
+  async #core(userUuid: string): Promise<{
+    first_name: string | null;
+    has_pin: boolean | null;
+    country: string | null;
+    home_currency: string | null;
+  }> {
     try {
-      const result = await this.pool.query<{ full_name: string | null; has_pin: boolean }>(
-        `SELECT (SELECT k.full_name FROM kyc_submissions k
-                  WHERE k.user_id = u.id ORDER BY k.created_at DESC LIMIT 1) AS full_name,
-                (p.user_id IS NOT NULL) AS has_pin
+      const result = await this.pool.query<{
+        full_name: string | null;
+        has_pin: boolean;
+        country: string | null;
+        home_currency: string | null;
+      }>(
+        /*
+         * `users.full_name` FIRST, then the verified one.
+         *
+         * Both are here and the order is the decision. The signup name is what
+         * somebody typed about themselves and exists from the first second of
+         * the account; the KYC name is what a reviewer read off a document and
+         * arrives days later, if at all. For a GREETING the typed one is both
+         * earlier and more likely to be what they are actually called.
+         *
+         * No money decision reads either of these. Anything that turns on who
+         * somebody legally is reads `kyc_submissions` directly.
+         */
+        `SELECT COALESCE(
+                  u.full_name,
+                  (SELECT k.full_name FROM kyc_submissions k
+                    WHERE k.user_id = u.id ORDER BY k.created_at DESC LIMIT 1)
+                ) AS full_name,
+                (p.user_id IS NOT NULL) AS has_pin,
+                u.country,
+                c.currency AS home_currency
            FROM users u
            LEFT JOIN transaction_pins p ON p.user_id = u.id
+           LEFT JOIN countries c ON c.code = u.country
           WHERE u.uuid = $1`,
         [userUuid],
       );
       const row = result.rows[0];
-      if (row === undefined) return { first_name: null, has_pin: null };
+      if (row === undefined) {
+        return { first_name: null, has_pin: null, country: null, home_currency: null };
+      }
 
       const full = row.full_name?.trim();
       return {
@@ -601,6 +681,8 @@ export class AuthService {
         // first is the one somebody is called.
         first_name: full === undefined || full === '' ? null : (full.split(/\s+/)[0] ?? null),
         has_pin: row.has_pin,
+        country: row.country,
+        home_currency: row.home_currency,
       };
     } catch (error: unknown) {
       // LOUD. The previous version swallowed this and returned an answer, and
@@ -609,7 +691,7 @@ export class AuthService {
         `could not read the profile for ${userUuid}: ${describe(error)}. ` +
           `Reporting the PIN state as UNKNOWN rather than guessing.`,
       );
-      return { first_name: null, has_pin: null };
+      return { first_name: null, has_pin: null, country: null, home_currency: null };
     }
   }
 

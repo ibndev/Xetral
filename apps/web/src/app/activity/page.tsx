@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ACTIVITY_FILTERS, formatAmount } from '@xetral/client';
+import { activityFiltersFor, formatAmount } from '@xetral/client';
 import type { Transaction } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { Icon } from '@/ui/icon';
@@ -21,7 +21,9 @@ import { useLoad, useXetral } from '@/lib/hooks';
  * express it the same way, and the build checks each one against what the API
  * accepts.
  */
-const FILTERS = ACTIVITY_FILTERS;
+// The rail is per customer now — see `activityFiltersFor`. A Ghanaian was
+// shown NGN, USD, USDT, USDC and Gift, and no cedi tab at all, which is the
+// currency their balance is in.
 
 /**
  * Everything that has happened to this customer's money.
@@ -33,7 +35,26 @@ const FILTERS = ACTIVITY_FILTERS;
  */
 export default function Activity() {
   const client = useXetral();
-  const [filterId, setFilterId] = useState<string>('NGN');
+
+  /*
+   * THE RAIL IS THE CUSTOMER'S OWN, not a five-entry constant.
+   *
+   * It was `ACTIVITY_FILTERS` rendered literally, so somebody in Accra got
+   * NGN, USD, USDT, USDC and Gift — four currencies they may hold nothing in
+   * and not the one their salary is paid in. `activityFiltersFor` leads with
+   * their country's currency and keeps anything they actually hold a balance
+   * in, because money can arrive in a currency they cannot send from and it
+   * must still be readable.
+   */
+  const session = useLoad(() => client.currentSession(), [client]);
+  const balances = useLoad(() => client.balances(), [client]);
+  const held = (balances.data ?? []).map((b) => b.currency);
+  const home = session.data?.home_currency ?? 'NGN';
+  const FILTERS = activityFiltersFor(home, held);
+
+  const [filterId, setFilterId] = useState<string | undefined>();
+  // Their own currency until they pick something, and it follows the session
+  // arriving rather than being frozen at the first render.
   const filter = FILTERS.find((f) => f.id === filterId) ?? FILTERS[0];
   const currency = filter.currency;
   // `readonly string[] | undefined`, spread into the call rather than passed

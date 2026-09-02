@@ -1195,6 +1195,22 @@ select {
 /* An input with something inside it — a Paste link, an eye toggle. */
 .input-affix { position: relative; display: flex; align-items: center; }
 .input-affix input { padding-right: 56px; }
+
+/* A DIALLING CODE IN FRONT OF A PHONE FIELD, not a second picker.
+   The affix is on the LEFT here and the padding goes the other way — the
+   `.input-affix` above is built for a trailing control (the password reveal),
+   and reusing it unchanged would put "+234" on top of the digits. */
+.input-affix.dial input { padding-right: 15px; padding-left: 68px; }
+.dial-code {
+  position: absolute;
+  left: 15px;
+  z-index: 1;
+  font-family: var(--font-mono);
+  font-size: 15px;
+  color: var(--text-2);
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
 .input-affix .affix {
   position: absolute;
   right: 8px;

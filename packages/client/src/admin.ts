@@ -81,6 +81,15 @@ export interface AdminWebhookEndpoint {
   readonly absolute: boolean;
 }
 
+/** A country the platform may operate in. `enabled` is whether it does. */
+export interface AdminCountry {
+  readonly code: string;
+  readonly name: string;
+  readonly dial_code: string;
+  readonly currency: string;
+  readonly enabled: boolean;
+}
+
 export interface AdminCredential {
   readonly provider: string;
   readonly name: string;
@@ -805,6 +814,49 @@ export class AdminClient {
    * a key here and a URL into the provider's dashboard, and showing only the
    * first half is how the second gets guessed.
    */
+  /**
+   * Where the platform operates, and what a country may be given.
+   *
+   * `currencies` comes from the MONEY REGISTRY rather than from a list on
+   * this screen — an operator cannot type a currency the code does not know,
+   * because one invented at runtime would have no exponent and every amount
+   * in it would be wrong by a power of ten.
+   */
+  async countries(): Promise<{
+    countries: readonly AdminCountry[];
+    currencies: readonly { code: string; name: string }[];
+  }> {
+    return this.#get('/v1/admin/countries');
+  }
+
+  /** Added CLOSED, always. Opening it is a second, deliberate act. */
+  async addCountry(input: {
+    code: string;
+    name: string;
+    dialCode: string;
+    currency: string;
+  }): Promise<AdminCountry> {
+    return this.#post('/v1/admin/countries', {
+      code: input.code,
+      name: input.name,
+      dial_code: input.dialCode,
+      currency: input.currency,
+    });
+  }
+
+  /**
+   * Open or close a country.
+   *
+   * The DATABASE decides whether opening is allowed: a currency with no
+   * ceiling at every tier, or nothing monitoring it, is refused with a
+   * message naming which — and the screen shows that message rather than a
+   * generic one, because "add kyc_tier_limits rows for GHS" is the whole of
+   * what an operator needs to act.
+   */
+  async setCountryEnabled(code: string, enabled: boolean): Promise<AdminCountry> {
+    return this.#post(`/v1/admin/countries/${encodeURIComponent(code)}`, { enabled });
+  }
+
   async credentials(): Promise<{
     slots: readonly AdminCredential[];
     webhooks: readonly AdminWebhookEndpoint[];

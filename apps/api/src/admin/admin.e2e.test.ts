@@ -57,6 +57,11 @@ async function register(): Promise<Person> {
     .send({
       email,
       password: PASSWORD,
+      // 040 made these required. A registration is now a name, a place
+      // and a reachable number as well as an address.
+      full_name: 'E2E Test Person',
+      country: 'NG',
+      phone: String(8000000000 + Math.floor(Math.random() * 999999999)),
       device: { fingerprint: `fp-${randomUUID()}`, platform: 'web' },
     })
     .expect(201);
@@ -150,6 +155,11 @@ describe('opening an account', () => {
       .send({
         email,
         password: PASSWORD,
+        // 040 made these required. A registration is now a name, a place
+        // and a reachable number as well as an address.
+        full_name: 'E2E Test Person',
+        country: 'NG',
+        phone: String(8000000000 + Math.floor(Math.random() * 999999999)),
         device: { fingerprint: `fp-${randomUUID()}`, platform: 'web' },
       })
       .expect(201);
@@ -167,17 +177,76 @@ describe('opening an account', () => {
 
   it('refuses an address that is already taken, without saying more', async () => {
     const email = `dupe-${randomUUID()}@example.ng`;
-    const body = {
+    const base = {
       email,
       password: PASSWORD,
+      full_name: 'E2E Test Person',
+      country: 'NG',
       device: { fingerprint: `fp-${randomUUID()}`, platform: 'web' },
     };
 
-    await request(app.getHttpServer()).post('/v1/auth/register').send(body).expect(201);
+    await request(app.getHttpServer())
+      .post('/v1/auth/register')
+      .send({ ...base, phone: String(8100000000 + Math.floor(Math.random() * 99999999)) })
+      .expect(201);
 
-    const second = await request(app.getHttpServer()).post('/v1/auth/register').send(body);
+    /*
+     * A DIFFERENT PHONE, deliberately.
+     *
+     * This test used to resend one identical body, which since 040 would
+     * collide on `users_phone_unique` as well — and then it would be asserting
+     * that a duplicate PHONE answers `email_taken`, which is a different claim
+     * and one that happens to be true only because of index ordering. The
+     * subject here is the address.
+     */
+    const second = await request(app.getHttpServer())
+      .post('/v1/auth/register')
+      .send({ ...base, phone: String(8200000000 + Math.floor(Math.random() * 99999999)) });
     expect(second.status).toBe(409);
     expect(second.body.error).toBe('email_taken');
+  });
+
+  it('refuses a phone number that is already taken, and says which', async () => {
+    // The converse, and it needs its own words: "that email is taken" sends
+    // somebody to the reset flow, and the same sentence about a number they
+    // typed correctly sends them nowhere.
+    const phone = String(8300000000 + Math.floor(Math.random() * 99999999));
+    const base = {
+      password: PASSWORD,
+      full_name: 'E2E Test Person',
+      country: 'NG',
+      phone,
+      device: { fingerprint: `fp-${randomUUID()}`, platform: 'web' },
+    };
+
+    await request(app.getHttpServer())
+      .post('/v1/auth/register')
+      .send({ ...base, email: `phone-a-${randomUUID()}@example.ng` })
+      .expect(201);
+
+    const second = await request(app.getHttpServer())
+      .post('/v1/auth/register')
+      .send({ ...base, email: `phone-b-${randomUUID()}@example.ng` });
+    expect(second.status).toBe(409);
+    expect(second.body.error).toBe('phone_taken');
+  });
+
+  it('refuses a country the platform is not open in', async () => {
+    // ONE ANSWER for "no such country" and "not open there" — distinguishing
+    // them would publish the roadmap to anybody with a dropdown.
+    const res = await request(app.getHttpServer())
+      .post('/v1/auth/register')
+      .send({
+        email: `closed-${randomUUID()}@example.ng`,
+        password: PASSWORD,
+        full_name: 'E2E Test Person',
+        // Seeded, and deliberately closed.
+        country: 'GB',
+        phone: String(8400000000 + Math.floor(Math.random() * 99999999)),
+        device: { fingerprint: `fp-${randomUUID()}`, platform: 'web' },
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('country_not_supported');
   });
 
   it('refuses a password too short to be worth hashing', async () => {
@@ -186,6 +255,11 @@ describe('opening an account', () => {
       .send({
         email: `weak-${randomUUID()}@example.ng`,
         password: 'short',
+        // 040 made these required. A registration is now a name, a place
+        // and a reachable number as well as an address.
+        full_name: 'E2E Test Person',
+        country: 'NG',
+        phone: String(8000000000 + Math.floor(Math.random() * 999999999)),
         device: { fingerprint: `fp-${randomUUID()}`, platform: 'web' },
       });
 

@@ -25,14 +25,41 @@ export const loginSchema = z.object({
 /**
  * Opening an account.
  *
- * Deliberately minimal: an email, a password, and the device. Name, phone and
- * BVN belong to KYC, which is a separate, reviewed step — collecting identity
- * documents on a signup form means holding them for people who never finish
- * signing up.
+ * An email, a password, a name, a phone and where the customer is. It used to
+ * be the first two, and the comment here argued that a name and a phone
+ * "belong to KYC" — which conflated two different things and cost the product
+ * both of them.
+ *
+ * A BVN and a document scan do belong to KYC: holding those for somebody who
+ * never finishes signing up is a liability, and that argument still stands.
+ * A NAME AND A PHONE NUMBER ARE NOT THAT. They are how a customer is greeted
+ * and how they are reached, every service asks for them, and without a country
+ * the home screen cannot know whether to lead with naira or cedis.
+ *
+ * `full_name` here is NOT the verified name and no money decision may read it.
+ * The verified one is `kyc_submissions.full_name`, written by a reviewed step;
+ * this one is what somebody typed about themselves. Keeping them apart is what
+ * lets the greeting be personal on day one without implying a check that has
+ * not happened.
  */
 export const registerSchema = z.object({
   email: z.string().trim().toLowerCase().email().max(255),
   password: z.string().min(1).max(512),
+  full_name: z.string().trim().min(2).max(120),
+  /**
+   * ISO 3166-1 alpha-2. Validated against `countries` at registration, so a
+   * customer cannot be recorded somewhere the platform is not open — and the
+   * refusal is the same for "no such country" and "not open there", because a
+   * signup form that distinguished them would publish the roadmap.
+   */
+  country: z.string().trim().toUpperCase().length(2).regex(/^[A-Z]{2}$/),
+  /**
+   * NATIONAL digits only — no plus, no country code. The dialling code comes
+   * from the country the customer chose, and joining them server-side is what
+   * stops `+234` and `234` and `0803...` being three different customers in a
+   * column with a UNIQUE index on it.
+   */
+  phone: z.string().trim().regex(/^[0-9]{4,15}$/),
   device: z.object({
     fingerprint: z.string().min(8).max(512),
     platform: z.enum(['ios', 'android', 'web']),

@@ -65,7 +65,7 @@ async function newCustomer(): Promise<Customer> {
 
   const registered = await request(app.getHttpServer())
     .post('/v1/auth/register')
-    .send({ email, password: PASSWORD, device: { fingerprint, platform: 'ios' } })
+    .send({ email, password: PASSWORD, full_name: 'E2E Test Person', country: 'NG', phone: String(8000000000 + Math.floor(Math.random() * 999999999)), device: { fingerprint, platform: 'ios' } })
     .expect(201);
 
   const row = await pool.query<{ id: string }>(`SELECT id FROM users WHERE email = $1`, [email]);
@@ -184,6 +184,11 @@ describe('signing in from somewhere new', () => {
       .send({
         email,
         password: PASSWORD,
+        // 040 made these required. A registration is now a name, a place
+        // and a reachable number as well as an address.
+        full_name: 'E2E Test Person',
+        country: 'NG',
+        phone: String(8000000000 + Math.floor(Math.random() * 999999999)),
         device: { fingerprint: `fp-${randomUUID()}`, platform: 'web' },
       })
       .expect(201);

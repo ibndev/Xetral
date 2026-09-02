@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
+import type { XetralCountry } from '@xetral/client';
 import { Link, router } from 'expo-router';
 import { deviceDescriptor } from '@/device';
 import { resetXetral, xetral } from '@/session';
 import { messageFor } from '@/errors';
-import { useStyles } from '@/theme';
+import { radius, useStyles, useTheme } from '@/theme';
+import { Select } from '@/select';
 
 /**
  * Opening an account, on the phone.
@@ -29,10 +31,42 @@ import { useStyles } from '@/theme';
  */
 export default function SignUp() {
   const styles = useStyles();
+  const colors = useTheme();
+  const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [country, setCountry] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
+
+  /*
+   * THE COUNTRY LIST COMES FROM THE SERVER, the same as the web's.
+   *
+   * A constant in this file would make "an operator opens a country without a
+   * deploy" true of the database and false of the phone — and the phone is
+   * the harder half to fix, because its address is compiled in and a wrong
+   * list is a rebuild, a release and a reinstall.
+   */
+  const [countries, setCountries] = useState<readonly XetralCountry[]>([]);
+  useEffect(() => {
+    let live = true;
+    void xetral()
+      .session.countries()
+      .then((list) => {
+        if (!live) return;
+        setCountries(list);
+        if (list.length === 1) setCountry(list[0]?.code ?? '');
+      })
+      // A list that will not load leaves the picker empty rather than the
+      // screen blank; the refusal arrives on submit.
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const dial = countries.find((c) => c.code === country)?.dial_code;
 
   async function submit() {
     setBusy(true);
@@ -48,6 +82,9 @@ export default function SignUp() {
         // part of the address.
         email: email.trim(),
         password,
+        fullName: fullName.trim(),
+        country,
+        phone,
         device: await deviceDescriptor(),
       });
       // `replace`, not `push`: there is no back to a signup form once the
@@ -70,6 +107,15 @@ export default function SignUp() {
         <Text style={styles.h1}>Create your account</Text>
         <Text style={styles.h2}>A Xetral wallet takes a minute</Text>
 
+        <Text style={styles.label}>Full name</Text>
+        <TextInput
+          style={styles.input}
+          value={fullName}
+          onChangeText={setFullName}
+          autoCapitalize="words"
+          textContentType="name"
+        />
+
         <Text style={styles.label}>Email</Text>
         <TextInput
           style={styles.input}
@@ -82,6 +128,57 @@ export default function SignUp() {
           // offers to save the pair rather than autofilling an existing one.
           textContentType="username"
         />
+
+        <Text style={styles.label}>Country</Text>
+        <Select
+          label="Country"
+          value={country}
+          onChange={setCountry}
+          placeholder={countries.length === 0 ? 'Loading…' : 'Where do you live?'}
+          options={countries.map((c) => ({
+            value: c.code,
+            label: c.name,
+            // What their money will be in — the consequence of this field,
+            // and the only one visible from the form.
+            hint: c.currency,
+          }))}
+        />
+
+        {/*
+          THE DIALLING CODE IS READ FROM THE COUNTRY, never picked separately.
+          One place a country is stated means the two cannot disagree — a
+          second picker would let somebody choose Ghana and +234.
+        */}
+        <Text style={styles.label}>Phone number</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <View
+            style={{
+              paddingHorizontal: 14,
+              minHeight: 50,
+              justifyContent: 'center',
+              borderRadius: radius.md,
+              borderWidth: 1,
+              borderColor: colors.lineStrong,
+              backgroundColor: colors.surface2,
+            }}
+          >
+            <Text style={[styles.amount, { color: colors.text2 }]}>
+              {dial === undefined ? '+—' : `+${dial}`}
+            </Text>
+          </View>
+          <TextInput
+            style={[styles.input, { flex: 1 }]}
+            value={phone}
+            // National digits only. A number pasted from a contact card
+            // carries spaces and a plus; stripping is kinder than refusing.
+            onChangeText={(text) => setPhone(text.replace(/[^0-9]/g, ''))}
+            keyboardType="phone-pad"
+            editable={country !== ''}
+            textContentType="telephoneNumber"
+            placeholder="8031234567"
+            placeholderTextColor={colors.text3}
+          />
+        </View>
 
         <Text style={styles.label}>Password</Text>
         <TextInput
@@ -104,7 +201,14 @@ export default function SignUp() {
           onPress={submit}
           // Guarded on the fields as well as on `busy`: a double tap on an
           // empty form is a wasted round trip and a confusing error.
-          disabled={busy || email.trim() === '' || password === ''}
+          disabled={
+            busy ||
+            fullName.trim().length < 2 ||
+            email.trim() === '' ||
+            country === '' ||
+            phone === '' ||
+            password === ''
+          }
         >
           <Text style={styles.buttonText}>
             {busy ? 'Creating your account…' : 'Create account'}

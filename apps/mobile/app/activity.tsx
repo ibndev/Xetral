@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
-import { ACTIVITY_FILTERS, formatAmount } from '@xetral/client';
+import { activityFiltersFor, formatAmount } from '@xetral/client';
 import type { Transaction } from '@xetral/client';
 import { Icon } from '@/icon';
 import { Shell } from '@/shell';
@@ -33,11 +33,21 @@ export default function Activity() {
    *
    * Four of the five are currencies and one is not: gift cards settle in
    * NAIRA, so "Gift" is the naira history narrowed to the two entry kinds a
-   * gift card produces. `ACTIVITY_FILTERS` is shared with the web app so both
+   * gift card produces. `activityFiltersFor` is shared with the web app so both
    * express that the same way.
    */
-  const [filterId, setFilterId] = useState('NGN');
-  const filter = ACTIVITY_FILTERS.find((f) => f.id === filterId) ?? ACTIVITY_FILTERS[0];
+  /*
+   * THE RAIL IS THE CUSTOMER'S OWN, matching the web. It was the five-entry
+   * constant rendered literally, so somebody in Accra had no cedi tab at all
+   * — the currency their balance is in.
+   */
+  const session = useLoad(() => client.currentSession(), [client]);
+  const balances = useLoad(() => client.balances(), [client]);
+  const held = (balances.data ?? []).map((b) => b.currency);
+  const FILTERS = activityFiltersFor(session.data?.home_currency ?? 'NGN', held);
+
+  const [filterId, setFilterId] = useState<string | undefined>();
+  const filter = FILTERS.find((f) => f.id === filterId) ?? FILTERS[0];
   const currency = filter.currency;
   const kinds = 'kinds' in filter ? filter.kinds : undefined;
 
@@ -85,7 +95,7 @@ export default function Activity() {
         contentContainerStyle={{ flexDirection: 'row', gap: 6, paddingRight: space.md }}
         style={{ marginTop: space.md, flexGrow: 0 }}
       >
-        {ACTIVITY_FILTERS.map((f) => {
+        {FILTERS.map((f) => {
           const on = f.id === filterId;
           return (
             <Pressable

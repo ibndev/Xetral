@@ -643,6 +643,65 @@ Schema: `packages/ledger/sql/039_profile_handles.sql`.
   refusal — a customer filled in a recipient, an amount and a PIN box before
   being told the PIN box was never going to work.
 
+### Countries, and why a currency is not one — non-obvious rules
+
+Schema: `packages/ledger/sql/040_countries.sql`, seeded by `040_countries.seed.sql`.
+Service in `apps/api/src/countries/`, screen at `/admin/countries`.
+
+- **A COUNTRY IS DATA AND A CURRENCY IS NOT**, and the asymmetry is the whole
+  design. `Currency` is `keyof typeof CURRENCIES` — a compile-time union, and
+  that is what makes `add(ngn(100), usd(100))` fail to compile. A currency
+  invented from an admin form at runtime would have no EXPONENT, so every
+  amount in it is wrong by a power of ten; no row in `kyc_tier_limits`, so no
+  daily ceiling at any tier; and no row in `risk_thresholds`, so nothing
+  watching it. That is finding 72 exactly.
+- **So a country NAMES a currency and cannot invent one.** The admin picker is
+  built from the money registry, filtered to fiat — a country whose default is
+  Bitcoin is not a country this system understands.
+- **A COUNTRY CANNOT BE ENABLED FOR A CURRENCY NOTHING LIMITS OR WATCHES**, by
+  trigger. It raises a message naming which is missing, and the service relays
+  that message rather than replacing it: "GHS has a daily limit at 0 of 3
+  tiers" is the whole of what an operator needs, and a generic refusal would
+  send them to read the migration.
+- **Adding is free, opening is a decision.** A row goes in CLOSED whatever it
+  names, and `countries_awaiting_a_decision` is where it waits. Defaulting to
+  enabled would make an INSERT into a reference table a licensing decision.
+- **`countries_without_cover` watches the OTHER direction** — a ceiling removed
+  after a country was opened, which the enable trigger cannot see.
+- **`HOME_CURRENCY = 'NGN'` was read as a fact about the platform** rather than
+  about Nigeria, so a customer in Accra got a naira balance at the top of their
+  home screen, a naira-only activity rail and no cedi wallet at all. It is
+  `FALLBACK_HOME_CURRENCY` now and applies only to accounts opened before this
+  migration, where `users.country` is null.
+- **The naira wallet is still offered to everybody**, and that is the funding
+  rail rather than a Nigeria default left behind: `wallet_funding` deposits
+  arrive in naira, so a Ghanaian paid by a Nigerian holds naira and hiding that
+  wallet would hide their money.
+- **`TRANSFER_CURRENCIES` is what the API ACCEPTS; `sendableFor()` is what a
+  customer is OFFERED.** Showing every country's local currency to everybody
+  gives a Nigerian two options that answer `insufficient_funds` with nothing on
+  screen saying which. The dollar and the stablecoins are offered to all —
+  they belong to no country.
+- **`activityFiltersFor()` never returns empty**, and its return type is a
+  non-empty tuple so no caller has to write `?? FILTERS[0]`. An empty rail is a
+  screen with no history at all.
+- **`users.full_name` is NOT the verified name.** It is what somebody typed
+  about themselves, used to greet them; `kyc_submissions.full_name` is what a
+  reviewer read off a document, and it is the only one any money decision may
+  read. Keeping them apart is what lets the greeting be personal on day one.
+- **The dialling code is not a field.** It is read from the country already
+  chosen and drawn in front of the input, so there is one place a country is
+  stated — a second picker lets somebody select Ghana and +234.
+- **The phone is normalised to E.164 SERVER-SIDE**, from the country's own dial
+  code and the national digits, with the trunk zero stripped.
+  `users_phone_unique` is a plain unique index on text and cannot see that
+  `+2348031234567`, `2348031234567` and `08031234567` are one person — three
+  accounts on one number, and every per-customer control assumes that cannot
+  happen.
+- **`country_not_supported` is one answer to two questions** — no such country,
+  and not open there. A signup form that distinguished them would publish the
+  roadmap to anybody with a dropdown.
+
 ### Surfaces, weights and the tap circle — non-obvious rules
 
 - **THE GROUND IS OFF-WHITE AND EVERY CONTAINER ON IT IS PAPER WHITE**, which
@@ -1968,6 +2027,8 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/036_attention.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/037_provider_health.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/038_usdc.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/039_profile_handles.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/040_countries.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/040_countries.seed.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -2006,6 +2067,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/036_attention.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/037_provider_health.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/038_usdc.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/039_profile_handles.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/040_countries.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

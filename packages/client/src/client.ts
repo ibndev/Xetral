@@ -10,6 +10,22 @@ import { Session } from './session.js';
  * is the whole problem.
  */
 
+/**
+ * A country a customer may sign up from.
+ *
+ * `currency` is what their home screen leads with and what their activity
+ * rail starts from. It is one of the currencies the money registry holds —
+ * an operator cannot invent one, for the reasons in 040's header.
+ */
+export interface XetralCountry {
+  readonly code: string;
+  readonly name: string;
+  /** E.164 calling code WITHOUT the plus: '234', '233', '1'. */
+  readonly dial_code: string;
+  readonly currency: string;
+  readonly enabled: boolean;
+}
+
 export interface Balance {
   readonly currency: string;
   readonly spendable: string;
@@ -339,14 +355,30 @@ export class XetralClient {
     user_id: string;
     device_id: string;
     expires_at: string;
-    /** What to call this customer, or null when they have submitted no
-     *  identity documents — which is the only place this system holds a name.
-     *  A screen that greets them falls back rather than inventing one from an
-     *  email address. */
+    /** What to call this customer — what they typed at signup, falling back
+     *  to their verified name, and null when there is neither. A screen that
+     *  greets them falls back rather than inventing one from an email. */
     first_name: string | null;
-    /** Whether a transaction PIN exists, so a screen can send somebody to
-     *  create one BEFORE they fill in a form that will refuse without it. */
-    has_pin: boolean;
+    /**
+     * Whether a transaction PIN exists, or NULL when the server could not
+     * tell.
+     *
+     * `boolean | null`, matching the API — it was `boolean` here while the
+     * server had already widened it, so a null arrived as a value TypeScript
+     * insisted could not exist. Every caller must test `=== false` rather
+     * than `!has_pin`: "I do not know" and "there is none" are different
+     * claims, and only one of them is safe to send somebody to a PIN form on.
+     */
+    has_pin: boolean | null;
+    /**
+     * WHERE THEY ARE, and what their money is in.
+     *
+     * `home_currency` is what the home screen leads with and what the
+     * activity rail starts from. Both null for an account opened before 040;
+     * the apps fall back to naira there, which is what those accounts are.
+     */
+    country: string | null;
+    home_currency: string | null;
     /** Their own payment handle, or null until `profile()` mints one. */
     handle: string | null;
   }> {
@@ -730,6 +762,8 @@ export class XetralClient {
   async #get<T>(path: string): Promise<T> {
     return this.#request<T>('GET', path);
   }
+
+
 
   async #post<T>(path: string, body: unknown): Promise<T> {
     return this.#request<T>('POST', path, body);

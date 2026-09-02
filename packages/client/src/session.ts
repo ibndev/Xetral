@@ -1,4 +1,5 @@
 import { ApiError, SessionExpiredError, toApiError } from './errors.js';
+import type { XetralCountry } from './client.js';
 
 /**
  * Holding a session, and refreshing it exactly once.
@@ -83,9 +84,37 @@ export class Session {
    * separate, reviewed step, and folding it into registration would make a
    * regulatory decision a side effect of choosing a password.
    */
+  /**
+   * The countries a customer may sign up from.
+   *
+   * ON `Session` RATHER THAN `XetralClient`, because it is read BEFORE
+   * anybody has signed in and `XetralClient` requires a session to construct.
+   * It is also the only call here that carries no token: attaching one would
+   * make the signup form's first request trigger a refresh against an empty
+   * store, which on the web means exchanging a cookie that is not there.
+   *
+   * A hardcoded list in the two signup forms would have been less code and
+   * would have made "add a country without a deploy" true of the database and
+   * false of the only screen it matters on.
+   */
+  async countries(): Promise<readonly XetralCountry[]> {
+    const response = await this.#fetch(`${this.#baseUrl}/v1/countries`, {
+      headers: { accept: 'application/json' },
+    });
+    const body: unknown = await response.json().catch(() => undefined);
+    if (!response.ok) throw toApiError(response.status, body);
+    return (body as { countries: readonly XetralCountry[] }).countries;
+  }
+
   async register(input: {
     email: string;
     password: string;
+    fullName: string;
+    /** ISO 3166-1 alpha-2, from `countries()`. */
+    country: string;
+    /** NATIONAL digits only. The dialling code comes from the country, and
+     *  the two are joined server-side — see the register DTO for why. */
+    phone: string;
     device: { fingerprint: string; platform: string };
   }): Promise<void> {
     const response = await this.#fetch(`${this.#baseUrl}/v1/auth/register`, {
@@ -94,6 +123,9 @@ export class Session {
       body: JSON.stringify({
         email: input.email,
         password: input.password,
+        full_name: input.fullName,
+        country: input.country,
+        phone: input.phone,
         device: input.device,
       }),
     });

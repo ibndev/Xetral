@@ -48,6 +48,14 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       )
 
       .public(
+        'GET',
+        '/v1/countries',
+        'the signup form needs the list of countries and their dialling codes ' +
+          'BEFORE anybody has an account, the same reason the terms are ' +
+          'public; it carries no customer data',
+      )
+
+      .public(
         'POST',
         '/v1/auth/register',
         'opens the first account, so requiring an existing session would be ' +
@@ -219,6 +227,13 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // build if any /v1/admin/ route is declared any other way. Reading is
       // separated from acting by ROLE, so a support operator can look at a
       // customer without being able to freeze one.
+
+      // Adding a country is reference data, not money — no PIN. Opening one
+      // is a decision about where the platform operates, so it takes `admin`
+      // rather than a narrower role.
+      .staff('GET', '/v1/admin/countries', { pin: false, role: 'admin' })
+      .staff('POST', '/v1/admin/countries', { pin: false, role: 'admin' })
+      .staff('POST', '/v1/admin/countries/:code', { pin: false, role: 'admin' })
 
       .staff('GET', '/v1/admin/overview', { pin: false, role: 'support' })
       .staff('GET', '/v1/admin/drift', { pin: false, role: 'finance' })

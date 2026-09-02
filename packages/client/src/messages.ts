@@ -90,6 +90,26 @@ export function messageFor(error: unknown): string {
       // Names the product, not the schema. A customer cannot act on a missing
       // migration and should not be asked to try again at one.
       return 'That part of Xetral is not switched on yet. We are on it.';
+    case 'country_not_supported':
+      // One sentence for "no such country" and "not open there", because the
+      // API answers the same for both.
+      return 'Xetral is not open in that country yet.';
+    case 'phone_taken':
+      // NOT "that number is taken" alone: the likeliest reader typed their own
+      // number correctly, so the sentence has to offer the way forward rather
+      // than just refuse.
+      return 'That phone number already has an account. Sign in instead.';
+    case 'country_exists':
+      return 'That country is already on the list.';
+    case 'country_not_found':
+      return 'No country with that code.';
+    case 'country_not_covered':
+      // The detail carries which ceiling or threshold is missing, and the
+      // screen shows it — a generic refusal would send an operator to read
+      // the migration.
+      return 'That country cannot be opened until its currency has limits.';
+    case 'currency_not_supported':
+      return 'That currency needs a code change before a country can use it.';
     case 'gift_cards_disabled':
       return 'Gift cards are not available yet.';
     // Paused by an operator, usually because a provider is having an incident.

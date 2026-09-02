@@ -3,7 +3,7 @@
 import { Suspense, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { exponentFor, formatAmount, isValidAmount, TRANSFER_CURRENCIES } from '@xetral/client';
+import { exponentFor, formatAmount, isValidAmount, sendableFor } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { FormError } from '@/ui/form-error';
 import { Icon } from '@/ui/icon';
@@ -92,6 +92,19 @@ function Transfer() {
    * arrives as a step to take rather than as an error at the end.
    */
   const session = useLoad(() => client.currentSession(), [client]);
+
+  /*
+   * ANOTHER COUNTRY'S LOCAL CURRENCY IS NOISE IN THIS PICKER.
+   *
+   * `TRANSFER_CURRENCIES` is what the API ACCEPTS and now includes cedis and
+   * shillings, because a Ghanaian must be able to send them. Showing all of
+   * them to everybody would give a Nigerian two options that answer
+   * `insufficient_funds` and nothing on the screen saying which. So the local
+   * ones are filtered to their own, plus any they are actually holding —
+   * money can arrive in a currency somebody cannot normally send from, and
+   * once it is theirs they must be able to move it.
+   */
+  const offered = sendableFor(session.data?.home_currency, [...held.keys()]);
   /*
    * ONLY WHEN WE KNOW. `has_pin` is `boolean | null` and null means the server
    * could not tell — which must NOT route somebody into creating a PIN they
@@ -245,7 +258,7 @@ function Transfer() {
             labelledBy="transfer-currency-label"
             value={currency}
             onChange={setCurrency}
-            options={TRANSFER_CURRENCIES.map((code) => ({
+            options={offered.map((code) => ({
               value: code,
               label: code,
               // What is actually behind the choice, so a customer picking a
