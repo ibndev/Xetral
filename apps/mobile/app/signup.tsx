@@ -1,12 +1,22 @@
 import { useEffect, useState } from 'react';
-import { Pressable, Text, TextInput, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { XetralCountry } from '@xetral/client';
 import { Link, router } from 'expo-router';
 import { deviceDescriptor } from '@/device';
 import { resetXetral, xetral } from '@/session';
 import { messageFor } from '@/errors';
-import { radius, useStyles, useTheme } from '@/theme';
+import { radius, space, useStyles, useTheme } from '@/theme';
 import { Select } from '@/select';
+import { CountryMark } from '@/currency-mark';
 
 /**
  * Opening an account, on the phone.
@@ -32,10 +42,15 @@ import { Select } from '@/select';
 export default function SignUp() {
   const styles = useStyles();
   const colors = useTheme();
-  const [fullName, setFullName] = useState('');
+  const insets = useSafeAreaInsets();
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
-  const [country, setCountry] = useState('');
+  // Nigeria before the list arrives, so the flag and +234 are on screen from
+  // the first paint rather than a moment later. Corrected below only if this
+  // deployment is not open there.
+  const [country, setCountry] = useState('NG');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
@@ -56,7 +71,9 @@ export default function SignUp() {
       .then((list) => {
         if (!live) return;
         setCountries(list);
-        if (list.length === 1) setCountry(list[0]?.code ?? '');
+        setCountry((current) =>
+          list.some((c) => c.code === current) ? current : (list[0]?.code ?? ''),
+        );
       })
       // A list that will not load leaves the picker empty rather than the
       // screen blank; the refusal arrives on submit.
@@ -82,7 +99,7 @@ export default function SignUp() {
         // part of the address.
         email: email.trim(),
         password,
-        fullName: fullName.trim(),
+        fullName: `${firstName.trim()} ${lastName.trim()}`.trim(),
         country,
         phone,
         device: await deviceDescriptor(),
@@ -102,19 +119,59 @@ export default function SignUp() {
   }
 
   return (
-    <View style={styles.screen}>
+    /*
+     * THE CONTENT WAS UNDER THE STATUS BAR.
+     *
+     * This screen rendered straight into `styles.screen`, which is `flex: 1`
+     * and nothing else — so the card began at y=0, behind the clock and the
+     * notch, and the heading was clipped. Every signed-in screen gets its
+     * inset from `Shell`; the two auth screens are outside it and have to ask
+     * for their own, which `signin.tsx` already did and this did not.
+     *
+     * It also needs to SCROLL now. Six fields and a button do not fit on a
+     * short handset, and without a scroll view the button is simply
+     * unreachable rather than below the fold.
+     */
+    <KeyboardAvoidingView
+      style={{ flex: 1, backgroundColor: colors.bg }}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <ScrollView
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{
+          flexGrow: 1,
+          justifyContent: 'center',
+          padding: space.lg,
+          paddingTop: insets.top + space.xl,
+          paddingBottom: insets.bottom + space.xxl,
+        }}
+      >
       <View style={styles.card}>
         <Text style={styles.h1}>Create your account</Text>
         <Text style={styles.h2}>A Xetral wallet takes a minute</Text>
 
-        <Text style={styles.label}>Full name</Text>
-        <TextInput
-          style={styles.input}
-          value={fullName}
-          onChangeText={setFullName}
-          autoCapitalize="words"
-          textContentType="name"
-        />
+        <View style={{ flexDirection: 'row', gap: space.md }}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.label}>First name</Text>
+            <TextInput
+              style={styles.input}
+              value={firstName}
+              onChangeText={setFirstName}
+              autoCapitalize="words"
+              textContentType="givenName"
+            />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.label}>Last name</Text>
+            <TextInput
+              style={styles.input}
+              value={lastName}
+              onChangeText={setLastName}
+              autoCapitalize="words"
+              textContentType="familyName"
+            />
+          </View>
+        </View>
 
         <Text style={styles.label}>Email</Text>
         <TextInput
@@ -134,7 +191,8 @@ export default function SignUp() {
           label="Country"
           value={country}
           onChange={setCountry}
-          placeholder={countries.length === 0 ? 'Loading…' : 'Where do you live?'}
+          placeholder="Where do you live?"
+          renderMark={(code) => <CountryMark country={code} size={20} />}
           options={countries.map((c) => ({
             value: c.code,
             label: c.name,
@@ -151,20 +209,28 @@ export default function SignUp() {
         */}
         <Text style={styles.label}>Phone number</Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          {/*
+            THE FLAG AND THE CODE, never a placeholder. `+-` where a dialling
+            code goes reads as a broken control rather than a loading one, and
+            with Nigeria as the default there is nothing to stand in for.
+          */}
           <View
             style={{
-              paddingHorizontal: 14,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 7,
+              paddingHorizontal: 12,
               minHeight: 50,
-              justifyContent: 'center',
               borderRadius: radius.md,
               borderWidth: 1,
               borderColor: colors.lineStrong,
               backgroundColor: colors.surface2,
             }}
           >
-            <Text style={[styles.amount, { color: colors.text2 }]}>
-              {dial === undefined ? '+—' : `+${dial}`}
-            </Text>
+            <CountryMark country={country} size={18} />
+            {dial !== undefined && (
+              <Text style={[styles.amount, { color: colors.text2 }]}>+{dial}</Text>
+            )}
           </View>
           <TextInput
             style={[styles.input, { flex: 1 }]}
@@ -173,7 +239,6 @@ export default function SignUp() {
             // carries spaces and a plus; stripping is kinder than refusing.
             onChangeText={(text) => setPhone(text.replace(/[^0-9]/g, ''))}
             keyboardType="phone-pad"
-            editable={country !== ''}
             textContentType="telephoneNumber"
             placeholder="8031234567"
             placeholderTextColor={colors.text3}
@@ -203,7 +268,8 @@ export default function SignUp() {
           // empty form is a wasted round trip and a confusing error.
           disabled={
             busy ||
-            fullName.trim().length < 2 ||
+            firstName.trim() === '' ||
+            lastName.trim() === '' ||
             email.trim() === '' ||
             country === '' ||
             phone === '' ||
@@ -221,6 +287,7 @@ export default function SignUp() {
           Already have an account? Sign in
         </Link>
       </View>
-    </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }

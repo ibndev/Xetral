@@ -18,7 +18,25 @@ export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 
 export interface BitnobClientOptions {
   readonly baseUrl: string;
-  readonly apiKey: string;
+  /**
+   * The key, or a function that resolves one PER REQUEST.
+   *
+   * A FUNCTION IS THE POINT, and a plain string was the bug. Every Bitnob
+   * port was built once at module construction from an environment variable,
+   * so a key pasted into `/admin/credentials` — stored, hinted, audited and
+   * rotation-logged — was read by nothing at all. The dashboard said the
+   * credential was set and every card, quote and address still refused.
+   *
+   * `026_provider_credentials.sql` says the database is authoritative and the
+   * environment is the fallback, and the five-second cache on
+   * `ProviderCredentialsService` exists precisely so this can be asked on
+   * every call. It was true of the service and false of every caller.
+   *
+   * Resolving per request is also what makes a rotation take effect without a
+   * deploy: a key replaced during an incident is live within five seconds
+   * rather than at the next restart.
+   */
+  readonly apiKey: string | (() => Promise<string | undefined>);
   readonly fetch?: FetchLike;
   /**
    * A request that has not answered in this long is abandoned.
@@ -66,7 +84,7 @@ export const BITNOB_ENDPOINTS = {
 
 export class BitnobClient {
   readonly #baseUrl: string;
-  readonly #apiKey: string;
+  readonly #apiKey: string | (() => Promise<string | undefined>);
   readonly #fetch: FetchLike;
   readonly #timeoutMs: number;
 
@@ -83,6 +101,22 @@ export class BitnobClient {
     body?: unknown,
     idempotencyKey?: string,
   ): Promise<unknown> {
+    /*
+     * ASKED BEFORE THE TIMER STARTS, so a slow credential read cannot eat the
+     * provider's own budget — and refused HERE rather than sent as
+     * `Bearer undefined`, which Bitnob answers 401 to and which presents as
+     * "the key is wrong" when the truth is that there is no key.
+     */
+    const apiKey =
+      typeof this.#apiKey === 'string' ? this.#apiKey : await this.#apiKey();
+    if (apiKey === undefined || apiKey === '') {
+      throw new ProviderUnavailableError(
+        'bitnob',
+        'no API key is configured. Paste one on the Provider keys screen, or ' +
+          'set BITNOB_API_KEY.',
+      );
+    }
+
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.#timeoutMs);
 
@@ -92,7 +126,7 @@ export class BitnobClient {
         method,
         signal: controller.signal,
         headers: {
-          authorization: `Bearer ${this.#apiKey}`,
+          authorization: `Bearer ${apiKey}`,
           'content-type': 'application/json',
           // Sent so a retry of a money-moving call cannot be applied twice on
           // their side either. Ours is enforced by the ledger's UNIQUE

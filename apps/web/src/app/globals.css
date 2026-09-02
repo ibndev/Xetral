@@ -854,6 +854,11 @@ h3 { font-size: 16px; }
   /* A long verified name must not push the balance off the card. */
   overflow: hidden;
   text-overflow: ellipsis;
+  /* Right for a LABEL and wrong for anything longer. A <button> used as a
+     rich list row — an icon, a title and a sentence — cannot wrap under this,
+     so it grows past the viewport and the page scrolls sideways. That is what
+     the Send screen's two options did on a 360px handset: measured at 41px of
+     overflow. A component like that must say `white-space: normal` out loud. */
   white-space: nowrap;
 }
 
@@ -1200,15 +1205,20 @@ select {
    The affix is on the LEFT here and the padding goes the other way — the
    `.input-affix` above is built for a trailing control (the password reveal),
    and reusing it unchanged would put "+234" on top of the digits. */
-.input-affix.dial input { padding-right: 15px; padding-left: 68px; }
+.input-affix.dial input { padding-right: 15px; padding-left: 88px; }
 .dial-code {
   position: absolute;
-  left: 15px;
+  left: 14px;
   z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  pointer-events: none;
+}
+.dial-digits {
   font-family: var(--font-mono);
   font-size: 15px;
   color: var(--text-2);
-  pointer-events: none;
   font-variant-numeric: tabular-nums;
 }
 .input-affix .affix {
@@ -2341,43 +2351,4 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
    answer changes what the next screen asks for. A segmented control would
    imply the fields below it stay put.
    --------------------------------------------------------------------------- */
-.choice-list { display: grid; gap: 10px; margin-top: var(--s-4); }
 
-.choice {
-  display: flex;
-  align-items: center;
-  gap: 13px;
-  width: 100%;
-  padding: 15px 16px;
-  text-align: left;
-  /* Not the primary button. These are two equal options, and painting either
-     in the brand colour would say one of them is the expected answer. */
-  background: var(--surface);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r);
-  color: var(--text);
-  font-weight: 400;
-  min-height: 0;
-}
-@media (hover: hover) {
-  .choice:hover:where(:not(:disabled)) {
-    background: var(--surface);
-    border-color: var(--brand);
-  }
-}
-.choice:active:where(:not(:disabled)) { transform: scale(.995); }
-.choice > svg:last-child { flex: none; color: var(--text-3); }
-
-.choice-icon {
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: 42px;
-  height: 42px;
-  border-radius: var(--r);
-  background: var(--surface-2);
-  color: var(--text-2);
-}
-.choice-main { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-width: 0; }
-.choice-title { font-weight: 600; font-size: 15px; }
-.choice-sub { color: var(--text-3); font-size: 13px; line-height: 1.4; }

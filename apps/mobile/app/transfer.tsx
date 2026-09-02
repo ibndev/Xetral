@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { exponentFor, formatAmount, isValidAmount, sendableFor } from '@xetral/client';
 import { Shell } from '@/shell';
@@ -7,7 +7,7 @@ import { Button, Done, Field, FormError, Loading, Panel } from '@/ui';
 import { Select } from '@/select';
 import { Icon } from '@/icon';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/hooks';
-import { font, radius, space, useTheme, useStyles } from '@/theme';
+import { useStyles } from '@/theme';
 
 export default function Transfer() {
   const client = useXetral();
@@ -73,7 +73,14 @@ export default function Transfer() {
    * the right screen, so the worst case is one extra step rather than a loop.
    */
   const needsPin = session.data?.has_pin === false;
-  const [via, setVia] = useState<'link' | 'wallet' | undefined>();
+  /*
+   * ONE FIELD, THEN A CONFIRM. Matching the web, and for the same two
+   * reasons: the chooser's two answers led to the same input because the API
+   * resolves a handle, an email, a phone number and a payment link from one
+   * string; and a PIN answers "yes, this one", which cannot be asked before
+   * the customer has seen what "this one" is.
+   */
+  const [stage, setStage] = useState<'details' | 'confirm'>('details');
 
   if (session.loading) {
     return (
@@ -96,28 +103,81 @@ export default function Transfer() {
     );
   }
 
-  if (via === undefined) {
+  /*
+   * THE CONFIRM STEP, inline rather than a component with eleven props.
+   *
+   * It reads the same state the details form writes, so there is nothing to
+   * pass and nothing that can be passed out of date.
+   */
+  if (stage === 'confirm') {
     return (
-      <Shell back="/wallet" title="Send money">
-        <Panel title="Send money" subtitle="Who are you paying?">
-          <View style={{ gap: 10, marginTop: space.md }}>
-            <Choice
-              icon="globe"
-              title="A payment link"
-              sub="Somebody sent you their Xetral link or @handle"
-              onPress={() => setVia('link')}
-            />
-            <Choice
-              icon="wallet"
-              title="A Xetral wallet"
-              sub="You know their email address or phone number"
-              onPress={() => setVia('wallet')}
-            />
+      <Shell back="/wallet" title="Confirm">
+        <Panel title="Confirm" subtitle="Check this before you approve it">
+          {/* Echoed exactly as typed rather than resolved to a name:
+              resolving would be a lookup that says which handles and
+              addresses exist, and this screen is reachable by anybody. */}
+          <View style={styles.row}>
+            <Text style={styles.muted}>To</Text>
+            <Text style={styles.amount}>{recipient}</Text>
           </View>
-          <Text style={styles.hint}>
-            Both go to the same place. Your own link is on your settings screen if
-            somebody needs it.
-          </Text>
+          <View style={styles.row}>
+            <Text style={styles.muted}>Amount</Text>
+            <Text style={styles.amount}>{formatAmount(amount || '0', currency)}</Text>
+          </View>
+
+          <Field
+            label="Transaction PIN"
+            secureTextEntry
+            inputMode="numeric"
+            autoComplete="off"
+            maxLength={6}
+            value={pin}
+            onChangeText={setPin}
+          />
+
+          <Button
+            label={`Send ${formatAmount(amount || '0', currency)}`}
+            busy={busy}
+            disabled={pin === ''}
+            onPress={() =>
+              void run(async () => {
+                const result = await client.transfer({
+                  recipient,
+                  amount,
+                  currency,
+                  pin,
+                  idempotencyKey: attempt.key,
+                });
+                // The attempt is over, so the next Send is a new transfer and
+                // needs a new key — reusing this one would have the server
+                // replay this transfer and report success for money that
+                // never moved.
+                attempt.next();
+                // Cleared straight away. A PIN authorises one instruction; it
+                // is not a password to hold on to.
+                setPin('');
+                // Back to an empty form: leaving the review on screen invites
+                // a second tap on money that has already moved.
+                setStage('details');
+                setAmount('');
+                setRecipient('');
+                return `Sent ${formatAmount(result.amount, result.currency)}${
+                  result.fee === '0.00' ? '' : ` (fee ${formatAmount(result.fee, result.currency)})`
+                }.`;
+              })
+            }
+          />
+          <Button
+            label="Edit"
+            quiet
+            onPress={() => {
+              setPin('');
+              setStage('details');
+            }}
+          />
+
+          <FormError error={error} code={code} />
+          <Done message={done} />
         </Panel>
       </Shell>
     );
@@ -127,15 +187,15 @@ export default function Transfer() {
     <Shell back="/wallet" title="Send money">
       <Panel
         title="Send money"
-        subtitle={via === 'link' ? 'Using a payment link' : 'To a Xetral wallet'}
+        subtitle="To anyone on Xetral"
       >
         <Field
-          label={via === 'link' ? 'Their link or @handle' : 'Their email or phone number'}
+          label="Who are you paying?"
           // `url` on the link path so the keyboard offers a slash rather than
           // an @ — but the API resolves all four shapes from this one field
           // either way, so neither keyboard can produce something it refuses.
-          inputMode={via === 'link' ? 'url' : 'email'}
-          placeholder={via === 'link' ? '@olawale' : 'you@example.com'}
+          inputMode="text"
+          placeholder="@handle, email, phone or payment link"
           autoCapitalize="none"
           autoCorrect={false}
           value={recipient}
@@ -172,106 +232,17 @@ export default function Transfer() {
           </Text>
         )}
 
-        <Field
-          label="Transaction PIN"
-          secureTextEntry
-          inputMode="numeric"
-          autoComplete="off"
-          maxLength={6}
-          value={pin}
-          onChangeText={setPin}
-        />
-
+        {/* NO TRANSACTION PIN HERE. It is asked on the confirm step below,
+            once the customer can see what they are approving. */}
         <Button
-          label="Send"
-          busy={busy}
-          disabled={recipient === '' || amount === '' || pin === '' || !amountValid}
-          onPress={() =>
-            void run(async () => {
-              const result = await client.transfer({
-                recipient,
-                amount,
-                currency,
-                pin,
-                idempotencyKey: attempt.key,
-              });
-              // The attempt is over, so the next Send is a new transfer and
-              // needs a new key — reusing this one would have the server
-              // replay this transfer and report success for money that never
-              // moved.
-              attempt.next();
-              // Cleared straight away. A PIN authorises one instruction; it is
-              // not a password to hold on to.
-              setPin('');
-              return `Sent ${formatAmount(result.amount, result.currency)}${
-                result.fee === '0.00' ? '' : ` (fee ${formatAmount(result.fee, result.currency)})`
-              }.`;
-            })
-          }
+          label="Review"
+          disabled={recipient === '' || amount === '' || !amountValid}
+          onPress={() => setStage('confirm')}
         />
 
         <FormError error={error} code={code} />
         <Done message={done} />
       </Panel>
     </Shell>
-  );
-}
-
-/**
- * One of two ways to name a recipient.
- *
- * A row rather than a segmented control, because these are not two views of
- * one form: the answer changes what the next screen asks for, and a segment
- * would imply the fields below stay put.
- */
-function Choice({
-  icon,
-  title,
-  sub,
-  onPress,
-}: {
-  readonly icon: 'globe' | 'wallet';
-  readonly title: string;
-  readonly sub: string;
-  readonly onPress: () => void;
-}) {
-  const colors = useTheme();
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`${title}. ${sub}`}
-      onPress={onPress}
-      android_ripple={null}
-      style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 13,
-        padding: 15,
-        borderRadius: radius.md,
-        borderWidth: 1,
-        borderColor: colors.lineStrong,
-        backgroundColor: colors.surface,
-      }}
-    >
-      <View
-        style={{
-          width: 42,
-          height: 42,
-          borderRadius: radius.md,
-          backgroundColor: colors.surface2,
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <Icon name={icon} size={20} color={colors.text2} />
-      </View>
-      <View style={{ flex: 1, gap: 2 }}>
-        <Text style={{ color: colors.text, fontFamily: font.sansSemi, fontSize: 15 }}>{title}</Text>
-        <Text style={{ color: colors.text3, fontFamily: font.sans, fontSize: 13, lineHeight: 18 }}>
-          {sub}
-        </Text>
-      </View>
-      <Icon name="chevronRight" size={18} color={colors.text3} />
-    </Pressable>
   );
 }

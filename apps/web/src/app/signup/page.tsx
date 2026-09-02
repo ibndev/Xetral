@@ -10,6 +10,7 @@ import { useSubmit } from '@/lib/hooks';
 import { Logo } from '@/ui/logo';
 import { Icon } from '@/ui/icon';
 import { Select } from '@/ui/select';
+import { CountryMark } from '@/ui/currency-mark';
 import { ThemeToggle } from '@/ui/theme-toggle';
 import { AuthAside } from '@/ui/auth-aside';
 
@@ -36,10 +37,20 @@ import { AuthAside } from '@/ui/auth-aside';
  */
 export default function SignUp() {
   const router = useRouter();
-  const [fullName, setFullName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
-  const [country, setCountry] = useState('');
+  /*
+   * NIGERIA UNLESS THE LIST SAYS OTHERWISE.
+   *
+   * Set before the list arrives rather than after, so the flag and +234 are
+   * on screen from the first paint instead of appearing a moment later — and
+   * so the phone field is never disabled waiting for a fetch. It is corrected
+   * below if this deployment is not open in Nigeria, which is the only case
+   * where the guess is wrong.
+   */
+  const [country, setCountry] = useState('NG');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const { busy, error, run } = useSubmit();
@@ -65,10 +76,13 @@ export default function SignUp() {
       .then((list) => {
         if (!live) return;
         setCountries(list);
-        // The first is the default only when there is exactly one obvious
-        // answer to default to; otherwise the customer chooses, because a
-        // pre-selected country is one somebody signs up under by accident.
-        if (list.length === 1) setCountry(list[0]?.code ?? '');
+        // Only if Nigeria is not on it. Falling back to the first open
+        // country is better than leaving the field on a value the server
+        // will refuse, and it is the only case where the default above can
+        // be wrong.
+        setCountry((current) =>
+          list.some((c) => c.code === current) ? current : (list[0]?.code ?? ''),
+        );
       })
       // A list that will not load must not block the form: the field simply
       // has nothing in it and the customer sees the refusal on submit, which
@@ -99,7 +113,11 @@ export default function SignUp() {
       await session.register({
         email,
         password,
-        fullName,
+        // Joined here rather than kept apart on the server: `users.full_name`
+        // is one column, and what it is FOR is greeting somebody and printing
+        // on a card. Two columns would be two things to keep in step for no
+        // question either answers on its own.
+        fullName: `${firstName.trim()} ${lastName.trim()}`.trim(),
         country,
         phone,
         device: { fingerprint: deviceFingerprint(), platform: 'web' },
@@ -138,17 +156,27 @@ export default function SignUp() {
       </div>
 
       <form className="auth-card animate-in d2" onSubmit={submit}>
-        <div className="field">
-          <label htmlFor="full-name">Full name</label>
-          <input
-            id="full-name"
-            placeholder="Olawale Okonkwo"
-            value={fullName}
-            autoComplete="name"
-            onChange={(e) => setFullName(e.target.value)}
-            required
-            minLength={2}
-          />
+        <div className="field-row two">
+          <label>
+            First name
+            <input
+              value={firstName}
+              autoComplete="given-name"
+              onChange={(e) => setFirstName(e.target.value)}
+              required
+              minLength={1}
+            />
+          </label>
+          <label>
+            Last name
+            <input
+              value={lastName}
+              autoComplete="family-name"
+              onChange={(e) => setLastName(e.target.value)}
+              required
+              minLength={1}
+            />
+          </label>
         </div>
 
         <div className="field">
@@ -174,7 +202,8 @@ export default function SignUp() {
             labelledBy="country-label"
             value={country}
             onChange={setCountry}
-            placeholder={countries.length === 0 ? 'Loading…' : 'Where do you live?'}
+            placeholder="Where do you live?"
+            renderMark={(code) => <CountryMark country={code} size={20} />}
             options={countries.map((c) => ({
               value: c.code,
               label: c.name,
@@ -194,8 +223,21 @@ export default function SignUp() {
         */}
         <div className="field">
           <label htmlFor="phone">Phone number</label>
+          {/*
+            THE FLAG AND THE CODE, never a placeholder.
+
+            This used to render `+—` while the country list was in flight,
+            which reads as a broken control rather than as a loading one — an
+            em dash where a dialling code goes is not something a customer can
+            interpret. The country now defaults to Nigeria, so there is a real
+            flag and a real code on the first paint and nothing to stand in
+            for.
+          */}
           <div className="input-affix dial">
-            <span className="affix dial-code">{dial === undefined ? '+—' : `+${dial}`}</span>
+            <span className="affix dial-code" aria-hidden="true">
+              <CountryMark country={country} size={18} />
+              {dial !== undefined && <span className="dial-digits">+{dial}</span>}
+            </span>
             <input
               id="phone"
               type="tel"
@@ -208,7 +250,6 @@ export default function SignUp() {
               // because a number copied from a contact card is not a mistake.
               onChange={(e) => setPhone(e.target.value.replace(/[^0-9]/g, ''))}
               required
-              disabled={country === ''}
             />
           </div>
         </div>
@@ -272,19 +313,6 @@ export default function SignUp() {
         Already have an account? <Link href="/signin">Sign in</Link>
       </p>
 
-      {/*
-        Says what identity is for and WHEN, rather than implying it is a step
-        between here and using the product. Most of Xetral works the moment
-        this form is submitted.
-      */}
-      <div className="notice animate-in d3">
-        <span className="notice-icon"><Icon name="shield" size={19} /></span>
-        <p>
-          Your wallet, transfers, airtime, data and bills work straight away.
-          A card, crypto or a Nigerian account number needs identity
-          verification first — a legal requirement here, not a step we chose.
-        </p>
-      </div>
         </div>
       </div>
     </main>
