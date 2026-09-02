@@ -74,8 +74,7 @@ export function AdminGate({ children }: { readonly children: ReactNode }) {
           </span>
           <h1>This is the operations dashboard</h1>
           <p className="lead">
-            Your account does not have access to it. If that is wrong, ask
-            whoever administers this platform to grant you a role.
+            Ask whoever administers this platform to grant you a role.
           </p>
           <Link href="/wallet" className="btn">
             Back to my wallet

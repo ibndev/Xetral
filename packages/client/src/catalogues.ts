@@ -104,9 +104,89 @@ export const PURCHASE_SERVICES = [
  * `TRANSFER_CURRENCIES` disagree, in either direction — a currency here the
  * API refuses is a form that 400s on a field the customer filled in
  * correctly, which is the exact failure the `TRON` casing bug produced.
+ *
+ * EVERY COUNTRY'S CURRENCY IS IN IT, not just the sender's. The list is what
+ * the API ACCEPTS; what a particular customer is OFFERED is narrower and is
+ * decided by `sendableFor()` below, from their own country. A Ghanaian must
+ * be able to send cedis, and a Nigerian must be able to receive them — so
+ * both are here, and neither sees the other's local currency in their picker
+ * unless they hold a balance in it.
+ *
+ * A currency added here needs a country to name it (040) and a ceiling at
+ * every tier (029), or the enable trigger refuses the country and
+ * `kyc_tier_coverage` reports the gap.
  */
-export const TRANSFER_CURRENCIES = ['NGN', 'USD', 'USDT', 'USDC'] as const;
+export const TRANSFER_CURRENCIES = ['NGN', 'GHS', 'KES', 'USD', 'USDT', 'USDC'] as const;
 export type TransferCurrency = (typeof TRANSFER_CURRENCIES)[number];
+
+/**
+ * Which of those a particular customer is offered.
+ *
+ * ANOTHER COUNTRY'S LOCAL CURRENCY IS NOISE, and worse than noise: a Nigerian
+ * shown GHS and KES in a picker has two options that will answer
+ * `insufficient_funds` and one that will not, with nothing on the screen
+ * saying which is which. So the local currencies are filtered to the
+ * customer's own — plus any they actually hold, because money can arrive in a
+ * currency somebody cannot send from and it must still be sendable once it is
+ * theirs.
+ *
+ * The dollar and the stablecoins are offered to everybody: they are what
+ * cross-border payment on this platform is made of, and they belong to no
+ * country.
+ */
+const LOCAL_CURRENCIES: readonly string[] = ['NGN', 'GHS', 'KES'];
+
+export function sendableFor(
+  home: string | null | undefined,
+  held: readonly string[] = [],
+): readonly TransferCurrency[] {
+  const holds = new Set(held);
+  return TRANSFER_CURRENCIES.filter((code) => {
+    if (!LOCAL_CURRENCIES.includes(code)) return true;
+    // Their own country's, or one they are actually holding.
+    return code === home || holds.has(code);
+  });
+}
+
+/**
+ * The activity rail, for one customer.
+ *
+ * `ACTIVITY_FILTERS` below is the whole set and is what the two apps used to
+ * render literally — so a Ghanaian got NGN, USD, USDT, USDC and Gift, and no
+ * cedi tab at all, which is the currency their balance is in. The rail leads
+ * with their own.
+ *
+ * GIFT IS NAIRA-ONLY AND STAYS THAT WAY. Gift cards settle in naira because
+ * that is the market this platform buys them in; showing the tab to somebody
+ * whose money is in cedis would be offering a flow that quotes in a currency
+ * they do not hold.
+ */
+export function activityFiltersFor(
+  home: string | null | undefined,
+  held: readonly string[] = [],
+): readonly [ActivityFilter, ...ActivityFilter[]] {
+  const sendable = new Set<string>(sendableFor(home, held));
+  const kept = ACTIVITY_FILTERS.filter((filter) => {
+    if (filter.id === 'gift') return home === 'NGN' || held.includes('NGN');
+    return sendable.has(filter.currency) || held.includes(filter.currency);
+  });
+
+  /*
+   * NEVER EMPTY, and the return type says so.
+   *
+   * An empty rail is a screen with no tabs and therefore no history at all,
+   * which is a worse failure than showing one currency too many — and it is
+   * reachable, because `home` can be a currency that has been retired from
+   * every list this filters against. The naira tab is the floor: it is the
+   * currency the funding rail deposits into, so every account can hold it.
+   *
+   * The tuple type is what stops every caller writing `?? FILTERS[0]` and
+   * getting `ActivityFilter | undefined` back.
+   */
+  const first = kept[0];
+  if (first === undefined) return [ACTIVITY_FILTERS[0]];
+  return [first, ...kept.slice(1)];
+}
 
 /**
  * How a customer narrows their activity, as one horizontal rail.
@@ -138,6 +218,8 @@ export interface ActivityFilter {
 
 export const ACTIVITY_FILTERS = [
   { id: 'NGN', label: 'NGN', currency: 'NGN' },
+  { id: 'GHS', label: 'GHS', currency: 'GHS' },
+  { id: 'KES', label: 'KES', currency: 'KES' },
   { id: 'USD', label: 'USD', currency: 'USD' },
   { id: 'USDT', label: 'USDT', currency: 'USDT' },
   { id: 'USDC', label: 'USDC', currency: 'USDC' },

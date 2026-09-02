@@ -37,14 +37,20 @@ export interface BalanceView {
 }
 
 /**
- * The naira wallet is always offered.
+ * The wallet a customer is always offered when we do not know where they are.
  *
- * It is the currency the funding rail deposits into, so it is the one wallet
- * a customer can put money in without first holding money somewhere else —
- * which makes it the only one that is offered on the strength of the platform
- * existing rather than of something an operator has published.
+ * NOT "the home currency" any more, and the rename is the fix. This was
+ * `HOME_CURRENCY = 'NGN'` and it was read as a fact about the platform rather
+ * than about Nigeria — so a customer in Accra got a naira balance at the top
+ * of their home screen, a naira-only activity rail, and no cedi wallet at all,
+ * for the life of the account.
+ *
+ * The home currency is now the customer's COUNTRY's currency, from 040. This
+ * constant is what remains for an account opened before that column existed,
+ * where `users.country` is null: those are Nigerian accounts in fact, and
+ * guessing anything else about them would be worse than the guess this makes.
  */
-const HOME_CURRENCY = 'NGN' as const;
+const FALLBACK_HOME_CURRENCY = 'NGN' as const;
 
 /**
  * The crypto assets this platform settles in.
@@ -102,9 +108,10 @@ export class WalletService {
    */
   async balances(userUuid: string): Promise<readonly BalanceView[]> {
     const userId = await this.#userIdOf(userUuid);
+    const home = await this.#homeCurrencyOf(userUuid);
     const [held, offered] = await Promise.all([
       this.ledger.walletBalances(userId),
-      this.#offeredCurrencies(),
+      this.#offeredCurrencies(home),
     ]);
 
     const views = new Map<string, BalanceView>();
@@ -121,14 +128,37 @@ export class WalletService {
       });
     }
 
-    // Naira first — it is the currency almost every customer reads — then
-    // the rest alphabetically, so the order does not move under somebody as
-    // balances appear.
+    // THEIR OWN currency first — the one they are paid in and read every day
+    // — then the rest alphabetically, so the order does not move under
+    // somebody as balances appear.
     return [...views.values()].sort((a, b) =>
-      a.currency === HOME_CURRENCY ? -1
-      : b.currency === HOME_CURRENCY ? 1
+      a.currency === home ? -1
+      : b.currency === home ? 1
       : a.currency.localeCompare(b.currency),
     );
+  }
+
+  /**
+   * The currency this customer's country leads with.
+   *
+   * Read per request rather than cached: the reason to change somebody's
+   * country is usually that it was wrong, and a home screen that keeps
+   * showing the old one for thirty seconds has not been corrected. It is one
+   * indexed lookup on a column that is already being read.
+   */
+  async #homeCurrencyOf(userUuid: string): Promise<Currency> {
+    const result = await this.pool.query<{ currency: string | null }>(
+      `SELECT c.currency
+         FROM users u LEFT JOIN countries c ON c.code = u.country
+        WHERE u.uuid = $1`,
+      [userUuid],
+    );
+    const code = result.rows[0]?.currency;
+    // An account opened before 040, or a country row an operator has since
+    // removed. Neither is a reason to show a customer no wallet at all.
+    return code !== null && code !== undefined && isCurrency(code)
+      ? code
+      : FALLBACK_HOME_CURRENCY;
   }
 
   #zero(currency: Currency): BalanceView {
@@ -142,8 +172,21 @@ export class WalletService {
     };
   }
 
-  async #offeredCurrencies(): Promise<readonly Currency[]> {
-    const offered = new Set<Currency>([HOME_CURRENCY]);
+  async #offeredCurrencies(home: Currency): Promise<readonly Currency[]> {
+    const offered = new Set<Currency>([home]);
+
+    /*
+     * THE NAIRA WALLET IS OFFERED TO EVERYBODY, including customers whose own
+     * currency is something else — and that is not a Nigeria default left
+     * behind, it is the funding rail.
+     *
+     * `wallet_funding` deposits arrive in naira through Bitnob's dedicated
+     * account numbers, and that is the one way money enters this platform
+     * without already being on it. A Ghanaian customer paid in naira by a
+     * Nigerian one holds naira, and hiding the wallet it landed in would hide
+     * their money.
+     */
+    offered.add(FALLBACK_HOME_CURRENCY);
 
     if (await this.settings.fxEnabled()) {
       // Both sides of every live pair. A published NGN→USD is a statement

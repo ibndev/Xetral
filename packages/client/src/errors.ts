@@ -181,6 +181,31 @@ const API_ERROR_CODES = [
 
   /* gift cards */
   'gift_cards_disabled',
+  /*
+   * A part of the product this DEPLOYMENT does not have — a migration that has
+   * not been applied, rather than a switch somebody turned off. It exists
+   * because the alternative was an unhandled 500 rendering as "Something went
+   * wrong. Please try again.", which invites a customer to retry for ever at a
+   * schema that will not change on its own.
+   */
+  'feature_unavailable',
+
+  /*
+   * WHERE A CUSTOMER IS, AND WHAT THAT MEANS.
+   *
+   * `country_not_supported` is deliberately ONE answer for two questions —
+   * "no such country" and "we are not open there" — because a signup form
+   * that distinguished them would publish the roadmap to anybody with a
+   * dropdown.
+   *
+   * The other three reach an operator rather than a customer.
+   */
+  'country_not_supported',
+  'phone_taken',
+  'country_exists',
+  'country_not_found',
+  'country_not_covered',
+  'currency_not_supported',
   // The kill switches. Each names its service so a screen can say which part
   // of the product is paused rather than showing one generic message.
   'crypto_disabled',

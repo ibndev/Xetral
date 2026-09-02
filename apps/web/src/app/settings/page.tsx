@@ -37,9 +37,7 @@ export default function Settings() {
         <h1>Your payment link</h1>
         <h2>Share it and anyone can pay you</h2>
         <p className="lead">
-          It is safe to post publicly — it identifies you for receiving money and
-          reveals nothing else, which is the point of having one instead of giving
-          out your email address.
+          Safe to post publicly. It reveals nothing but the name on your account.
         </p>
 
         {profile.loading && <p className="spinner">Loading…</p>}
@@ -48,27 +46,37 @@ export default function Settings() {
             <div className="balance">
               <div>
                 <div className="amount mono">@{profile.data.handle}</div>
-                <div className="pending">{profile.data.link}</div>
+                {profile.data.link !== null && (
+                  <div className="pending">{profile.data.link}</div>
+                )}
               </div>
             </div>
+            {/*
+              COPY WHAT THERE IS. With no APP_BASE_URL the server sends no
+              link, and offering to copy one anyway would put a string in the
+              customer's clipboard that nobody they send it to can open. The
+              handle works on its own — it is typed into the Send screen — so
+              that is what the button copies.
+            */}
             <div className="actions">
               <button
                 type="button"
                 onClick={() => {
+                  const text = profile.data?.link ?? `@${profile.data?.handle ?? ''}`;
                   void navigator.clipboard
-                    ?.writeText(profile.data?.link ?? '')
+                    ?.writeText(text)
                     .then(() => setCopied(true))
                     // A clipboard a browser refused is not an error worth a
                     // banner — the link is on screen and can be selected.
                     .catch(() => undefined);
                 }}
               >
-                <Icon name="copy" size={16} /> {copied ? 'Copied' : 'Copy my link'}
+                <Icon name="copy" size={16} />{' '}
+                {copied ? 'Copied' : profile.data.link === null ? 'Copy my handle' : 'Copy my link'}
               </button>
             </div>
             <p className="hint">
-              A handle is yours permanently. It cannot be given up and reissued to
-              somebody else, so a link you shared last year still pays you.
+              Yours permanently. It is never reissued to anybody else.
             </p>
           </>
         )}
@@ -112,8 +120,7 @@ export default function Settings() {
         </div>
 
         <p className="hint">
-          Signing out ends this session immediately. It does not affect your
-          other devices — sign out on each one you no longer use.
+          Ends this session only. Sign out on each device you no longer use.
         </p>
       </div>
 
@@ -210,8 +217,7 @@ function SetPin() {
       {done !== undefined && <p className="ok">{done}</p>}
 
       <p className="hint">
-        Five wrong attempts locks it for fifteen minutes. That is what stops
-        somebody with your unlocked phone guessing it.
+        Five wrong attempts locks it for fifteen minutes.
       </p>
     </form>
   );
@@ -368,8 +374,7 @@ function YourData() {
             onChange={(e) => setPin(e.target.value)}
             required
           />
-          <span className="hint">          One file with every balance, transaction and sign-in. The PIN is asked
-          for because a stolen session would not have it.</span>
+          <span className="hint">          One file with every balance, transaction and sign-in.</span>
         </label>
         <button type="submit" disabled={busy}>
           {busy ? 'Preparing…' : 'Download my data'}
@@ -378,10 +383,8 @@ function YourData() {
 
       <h2 style={{ marginTop: 28 }}>Erasure</h2>
       <p className="lead">
-        Ask us to erase your data and a person will action it. Some of it we
-        are required by law to keep for a period after your account closes —
-        that is listed below, and it is deleted automatically when the period
-        ends.
+        A person reviews every request. What the law requires us to keep is listed
+        below, and is deleted when its period ends.
       </p>
 
       {retained.length > 0 && (

@@ -25,9 +25,7 @@ export default function Consents() {
       <div className="panel">
         <h1>Consent</h1>
         <p className="lead">
-          Every customer&rsquo;s agreement is recorded against a version, so it
-          can be shown later. This is who has not agreed to the version
-          currently published.
+          Who has not agreed to the version currently published.
         </p>
         <AdminError error={report.error} code={report.code} role="compliance" />
         {report.loading && <p className="spinner">Loading…</p>}
@@ -66,8 +64,7 @@ export default function Consents() {
         <div className="panel">
           <h2>Outstanding</h2>
           <p className="lead">
-            The first hundred. Asking them is a product decision — a banner, a
-            prompt at sign-in — not something this screen does on their behalf.
+            The first hundred. This screen does not contact them.
           </p>
           <table>
             <thead>

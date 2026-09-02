@@ -49,9 +49,8 @@ export default function Prices() {
       <div className="panel">
         <h1>Prices</h1>
         <p className="lead">
-          Every FX spread and gift card rate a customer can be quoted. Prices
-          are never edited — retire one and publish its replacement, so a quote
-          given last month can still be explained.
+          Every FX spread and gift card rate a customer can be quoted. Prices are
+          never edited — retire one and publish its replacement.
         </p>
         <AdminError error={prices.error} code={prices.code} role="finance" />
         {prices.loading && <p className="spinner">Loading…</p>}
@@ -69,9 +68,8 @@ export default function Prices() {
           <>
             <h2>Published without an author</h2>
             <p className="lead">
-              These were written at a database prompt rather than here, so
-              nobody is recorded as having set them. Retire and republish to
-              put a name on the price.
+              Written at a database prompt, so nobody is recorded as setting them.
+              Retire and republish to put a name on one.
             </p>
             <ul className="hint">
               {prices.data.unattributed.map((row) => (
@@ -93,8 +91,7 @@ export default function Prices() {
             onChange={(e) => setPin(e.target.value)}
           />
           <span className="hint">
-            Required for every publish and every retirement — both change what
-            customers are charged.
+            Required: both change what customers are charged.
           </span>
         </label>
         {error !== undefined && <p className="error">{error}</p>}
@@ -106,9 +103,8 @@ export default function Prices() {
       <div className="panel">
         <h2>FX spreads</h2>
         <p className="lead">
-          Each DIRECTION is priced separately: publishing NGN→USD does not
-          publish USD→NGN. A rate is a ratio, and one direction&rsquo;s units
-          collapse in the other.
+          Each direction is priced separately: publishing NGN→USD does not publish
+          USD→NGN.
         </p>
         <table>
           <thead>
@@ -145,9 +141,8 @@ export default function Prices() {
       <div className="panel">
         <h2>Gift card rates</h2>
         <p className="lead">
-          Rates are banded by face value, because a $500 card resells for
-          proportionally less than a $25 one. Two live bands for one card may
-          not overlap — an overlap would silently reprice the range they share.
+          Rates are banded by face value. Two live bands for one card may not
+          overlap.
         </p>
         <table>
           <thead>

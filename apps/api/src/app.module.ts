@@ -126,6 +126,8 @@ import {
   systemClock,
 } from './tokens.js';
 import type { Clock } from './tokens.js';
+import { AdminCountriesController, CountriesController } from './countries/countries.controller.js';
+import { CountriesService } from './countries/countries.service.js';
 
 export interface AppModuleOptions {
   readonly config: ApiConfig;
@@ -641,12 +643,15 @@ export class AppModule {
         AdminController,
         DisputeController,
         AdminDisputeController,
+        CountriesController,
+        AdminCountriesController,
       ],
       providers: [
         { provide: API_CONFIG, useValue: options.config },
         { provide: CLOCK, useValue: options.clock ?? systemClock },
         { provide: DATABASE, useValue: options.pool ?? createPool(options.config) },
         { provide: ROUTE_POLICY, useValue: buildRoutePolicy() },
+        CountriesService,
         {
           provide: RATE_LIMIT_STORE,
           useValue: options.rateLimitStore ?? createRateLimitStore(options.config),

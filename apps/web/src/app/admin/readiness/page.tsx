@@ -83,9 +83,8 @@ export default function Readiness() {
       <div className="panel">
         <h1>Readiness</h1>
         <p className="lead">
-          Every prerequisite this platform has, asked of the process that
-          answered this request. It reports and never refuses — what genuinely
-          cannot be missing already stops the API starting.
+          Every prerequisite this platform has, asked of the process that answered
+          this request.
         </p>
         <AdminError error={report.error} code={report.code} role="admin" />
         {report.loading && <p className="spinner">Loading…</p>}
@@ -124,8 +123,8 @@ export default function Readiness() {
         <div className="panel">
           <h2>Not set, and that is the intended state</h2>
           <p className="lead">
-            Each of these has a default that was chosen deliberately. Listed so
-            the picture is complete, not because anything is wrong.
+            Each has a deliberate default. Listed for completeness, not as a
+            problem.
           </p>
           <details>
             <summary>Show {fine.length}</summary>
@@ -138,11 +137,9 @@ export default function Readiness() {
         <div className="panel">
           <h2>Expected to be set on another instance</h2>
           <p className="lead">
-            Worker intervals go on <strong>exactly one</strong> instance, so
-            their absence here is correct if the worker has them.{' '}
-            <em>Open this screen on the worker to confirm.</em> Asking a
-            provider about the same purchase from four processes is
-            rate-limited at best.
+            Worker intervals go on <strong>exactly one</strong> instance, so their
+            absence here is correct if the worker has them.{' '}
+            <em>Open this screen on the worker to confirm.</em>
           </p>
           <Rows rows={elsewhere} />
         </div>
@@ -152,8 +149,7 @@ export default function Readiness() {
         <div className="panel">
           <h2>Nothing here can check these</h2>
           <p className="lead">
-            A role granted to a person, a page a lawyer read, a restore that was
-            rehearsed. Listed rather than guessed at — see{' '}
+            Things a person has to confirm — see{' '}
             <Link href="/admin/staff">Staff</Link> and{' '}
             <Link href="/admin/prices">Prices</Link>.
           </p>

@@ -28,9 +28,7 @@ export default function DataRequests() {
         <h1>Data requests</h1>
         <h2>{requests.data?.length ?? 0} open</h2>
         <p className="lead">
-          A copy of their data, or erasure. The deadline is the law&rsquo;s, not
-          ours — an overdue row is a regulatory finding rather than a slow
-          reply.
+          A copy of their data, or erasure. The deadline is the law&rsquo;s, not ours.
         </p>
         <AdminError error={requests.error} code={requests.code} role="compliance" />
         {requests.loading && <p className="spinner">Loading…</p>}
@@ -85,11 +83,8 @@ function Request({
 
       {isErasure && (
         <p className="lead">
-          Erasing removes their sign-in credentials, devices and email address,
-          and closes the account. It refuses while they hold a balance —
-          empty the account first, which is a payment. The transaction record
-          is kept and is deleted when its retention period ends; the outcome
-          recorded says so, and it is what the customer is told.
+          Erasing closes the account and removes their credentials, devices and
+          email. It refuses while they hold a balance.
         </p>
       )}
 

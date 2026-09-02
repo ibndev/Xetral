@@ -49,6 +49,11 @@ async function register(): Promise<Person> {
     .send({
       email,
       password: PASSWORD,
+      // 040 made these required. A registration is now a name, a place
+      // and a reachable number as well as an address.
+      full_name: 'E2E Test Person',
+      country: 'NG',
+      phone: String(8000000000 + Math.floor(Math.random() * 999999999)),
       device: { fingerprint: `fp-${randomUUID()}`, platform: 'web' },
     })
     .expect(201);

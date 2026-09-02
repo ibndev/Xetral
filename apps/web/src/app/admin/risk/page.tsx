@@ -65,10 +65,8 @@ export default function Risk() {
         <h1>Compliance queue</h1>
         <h2>What the monitoring rules thought worth a look</h2>
         <p className="lead">
-          Nothing here was blocked. These are observations made after the fact,
-          so every transaction below already happened — the controls that refuse
-          run before money moves and are elsewhere. Closing a row records that
-          you looked and what you decided.
+          Nothing here was blocked — every transaction below already happened.
+          Closing a row records what you decided.
         </p>
         <p className="hint">
           <Link href="/admin/risk/cases">
@@ -80,10 +78,9 @@ export default function Risk() {
         {signals.loading && <p className="spinner">Loading…</p>}
         {signals.data !== undefined && signals.data.length === 0 && (
           <p className="hint">
-            Nothing open. If this stays empty for days, check that
+            Nothing open. If it stays empty for days, check
             <span className="mono"> RISK_MONITOR_INTERVAL_SECONDS </span>
-            is set on one instance — an empty queue looks the same whether the
-            rules found nothing or never ran.
+            is set on one instance.
           </p>
         )}
       </div>

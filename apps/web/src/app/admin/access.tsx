@@ -48,10 +48,8 @@ export function AdminError({
           and your account has not set one up yet.
         </p>
         <p className="hint">
-          It takes a minute on{' '}
-          <Link href="/admin/security">Your authenticator</Link>, and every
-          screen here will answer afterwards. Read-only screens ask for it too:
-          a password alone in front of the customer database is not a control.
+          Set it up on <Link href="/admin/security">Your authenticator</Link>. Every
+          screen here asks for it, reads included.
         </p>
       </div>
     );
@@ -66,9 +64,8 @@ export function AdminError({
           have it.
         </p>
         <p className="hint">
-          Somebody with <span className="mono">admin</span> can grant it on the{' '}
-          <Link href="/admin/staff">Staff</Link> screen. Roles are read on every
-          request, so a grant takes effect on your next page load — no sign-out.
+          Somebody with <span className="mono">admin</span> can grant it on{' '}
+          <Link href="/admin/staff">Staff</Link>. It applies on your next page load.
         </p>
       </div>
     );

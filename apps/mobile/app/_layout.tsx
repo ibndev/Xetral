@@ -161,8 +161,22 @@ function Chrome() {
         }}
       >
         <Stack.Screen name="index" />
-        <Stack.Screen name="signin" options={{ headerShown: true, title: 'Sign in' }} />
-        <Stack.Screen name="signup" options={{ headerShown: true, title: 'Create account' }} />
+        {/*
+          NO NATIVE HEADER ON THE AUTH SCREENS, and this was the white bar.
+          `headerShown: true` with no `headerStyle` gets React Navigation's
+          DEFAULT header, which is white with dark text on both platforms —
+          so the two screens a customer sees before anything else had a white
+          strip above a black page, and only those two, because they are the
+          only ones that override the navigator's `headerShown: false`.
+
+          Styling the header would have been the smaller change and the wrong
+          one: both screens already draw the mark, the heading and a link to
+          the other, so the native bar was a second header with a duplicate
+          title in it. They are full-bleed designs that pad for `insets.top`
+          themselves.
+        */}
+        <Stack.Screen name="signin" />
+        <Stack.Screen name="signup" />
         <Stack.Screen name="wallet" />
         <Stack.Screen name="cards" />
         <Stack.Screen name="activity" />

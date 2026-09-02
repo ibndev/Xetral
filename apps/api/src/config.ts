@@ -365,6 +365,25 @@ export interface ApiConfig {
    */
   readonly adminBootstrapEmail: string | undefined;
 
+  /**
+   * The address a PROVIDER can reach this API on, for webhooks.
+   *
+   * Separate from `appBaseUrl`, which is where a customer's browser goes, and
+   * that separation is load-bearing rather than tidy. The web app proxies the
+   * API at `/api/x` and forwards only `authorization` and `x-forwarded-for` —
+   * so a webhook sent through it arrives with NO `x-bitnob-signature`, and
+   * signature verification runs before a single byte is parsed. Every event
+   * would answer 401 and every deposit would go unrecorded, which is the
+   * failure `006_funding.sql` describes as the one a bank rail cannot
+   * otherwise detect.
+   *
+   * So it is its own value, and it is OPTIONAL: an operator who has not
+   * decided how a provider reaches this API gets a dashboard that says so
+   * rather than one that shows a URL somebody guessed. The endpoint PATHS are
+   * facts about the backend and are shown either way.
+   */
+  readonly webhookBaseUrl: string | undefined;
+
   readonly appBaseUrl: string | undefined;
   /**
    * How long a password reset link is good for, in minutes.
@@ -807,6 +826,7 @@ export function loadConfig(env: Env): ApiConfig {
     notificationIntervalSeconds: optionalInteger(env, 'NOTIFICATION_INTERVAL_SECONDS'),
     appBaseUrl: appBaseUrl(env),
     adminBootstrapEmail: adminBootstrapEmail(env),
+    webhookBaseUrl: webhookBaseUrl(env),
     passwordResetTtlMinutes: integer(env, 'PASSWORD_RESET_TTL_MINUTES', 30),
     operationsEmail: optional(env, 'OPERATIONS_EMAIL'),
     errorAlertIntervalSeconds: optionalInteger(env, 'ERROR_ALERT_INTERVAL_SECONDS'),
@@ -953,4 +973,32 @@ function adminBootstrapEmail(env: Env): string | undefined {
     );
   }
   return email;
+}
+
+/**
+ * Where a provider can reach this API.
+ *
+ * Validated as an absolute https origin and normalised without a trailing
+ * slash, so building an endpoint is a concatenation rather than each caller
+ * guessing. `http://localhost` is allowed for development, where there is no
+ * certificate and no provider either.
+ */
+function webhookBaseUrl(env: Env): string | undefined {
+  const raw = optional(env, 'WEBHOOK_BASE_URL');
+  if (raw === undefined) return undefined;
+
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new ConfigError(`WEBHOOK_BASE_URL must be an absolute URL, got '${raw}'`);
+  }
+  const isLocal = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+  if (url.protocol !== 'https:' && !isLocal) {
+    throw new ConfigError(
+      `WEBHOOK_BASE_URL must be https (got '${url.protocol}'). A webhook carries a ` +
+        `signed statement that money arrived; it must not travel over plaintext.`,
+    );
+  }
+  return `${url.origin}${url.pathname.replace(/\/+$/, '')}`;
 }

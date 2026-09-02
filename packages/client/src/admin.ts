@@ -68,6 +68,28 @@ export interface AdminUserDetail {
  * carry one even if somebody added the field. `hint` is the last four
  * characters, which answers "is this the key I pasted?" and nothing else.
  */
+export interface AdminWebhookEndpoint {
+  /** The path this API serves, exactly as the controller declares it. */
+  readonly path: string;
+  /** What a provider is being asked to send there. */
+  readonly label: string;
+  /** Which stored secret verifies its signature. */
+  readonly secret: string;
+  /** The whole URL when `WEBHOOK_BASE_URL` is configured, the bare path when
+   *  it is not — never a hostname the server invented. */
+  readonly url: string;
+  readonly absolute: boolean;
+}
+
+/** A country the platform may operate in. `enabled` is whether it does. */
+export interface AdminCountry {
+  readonly code: string;
+  readonly name: string;
+  readonly dial_code: string;
+  readonly currency: string;
+  readonly enabled: boolean;
+}
+
 export interface AdminCredential {
   readonly provider: string;
   readonly name: string;
@@ -785,9 +807,65 @@ export class AdminClient {
 
   /* ------------------------ provider credentials ----------------------- */
 
-  async credentials(): Promise<readonly AdminCredential[]> {
-    const body = await this.#get<{ credentials: AdminCredential[] }>('/v1/admin/credentials');
-    return body.credentials;
+  /**
+   * The credential slots, and the webhook endpoints those secrets verify.
+   *
+   * One call, because it is one job: an operator configuring a provider pastes
+   * a key here and a URL into the provider's dashboard, and showing only the
+   * first half is how the second gets guessed.
+   */
+  /**
+   * Where the platform operates, and what a country may be given.
+   *
+   * `currencies` comes from the MONEY REGISTRY rather than from a list on
+   * this screen — an operator cannot type a currency the code does not know,
+   * because one invented at runtime would have no exponent and every amount
+   * in it would be wrong by a power of ten.
+   */
+  async countries(): Promise<{
+    countries: readonly AdminCountry[];
+    currencies: readonly { code: string; name: string }[];
+  }> {
+    return this.#get('/v1/admin/countries');
+  }
+
+  /** Added CLOSED, always. Opening it is a second, deliberate act. */
+  async addCountry(input: {
+    code: string;
+    name: string;
+    dialCode: string;
+    currency: string;
+  }): Promise<AdminCountry> {
+    return this.#post('/v1/admin/countries', {
+      code: input.code,
+      name: input.name,
+      dial_code: input.dialCode,
+      currency: input.currency,
+    });
+  }
+
+  /**
+   * Open or close a country.
+   *
+   * The DATABASE decides whether opening is allowed: a currency with no
+   * ceiling at every tier, or nothing monitoring it, is refused with a
+   * message naming which — and the screen shows that message rather than a
+   * generic one, because "add kyc_tier_limits rows for GHS" is the whole of
+   * what an operator needs to act.
+   */
+  async setCountryEnabled(code: string, enabled: boolean): Promise<AdminCountry> {
+    return this.#post(`/v1/admin/countries/${encodeURIComponent(code)}`, { enabled });
+  }
+
+  async credentials(): Promise<{
+    slots: readonly AdminCredential[];
+    webhooks: readonly AdminWebhookEndpoint[];
+  }> {
+    const body = await this.#get<{
+      credentials: AdminCredential[];
+      webhooks: AdminWebhookEndpoint[];
+    }>('/v1/admin/credentials');
+    return { slots: body.credentials, webhooks: body.webhooks ?? [] };
   }
 
   /** That a credential was replaced, by whom and when — never what it was. */
@@ -803,15 +881,19 @@ export class AdminClient {
 
   /** Returns the slot's new STATUS, which carries a hint and no secret. There
    *  is no response shape here that could echo the pasted value back. */
-  async setCredential(
-    provider: string,
-    name: string,
-    secret: string,
-    pin: string,
-  ): Promise<AdminCredential> {
+  /**
+   * Store a provider key.
+   *
+   * NO TRANSACTION PIN, and its removal is a correction rather than a
+   * loosening. A transaction PIN authorises money leaving a CUSTOMER'S OWN
+   * account; pasting a provider key moves nothing and is already gated by the
+   * `admin` role and by a session elevated with an authenticator code. Asking
+   * for it meant every operator had to hold a customer PIN to do their job.
+   */
+  async setCredential(provider: string, name: string, secret: string): Promise<AdminCredential> {
     return this.#post(
       `/v1/admin/credentials/${encodeURIComponent(provider)}/${encodeURIComponent(name)}`,
-      { secret, transaction_pin: pin },
+      { secret },
     );
   }
 

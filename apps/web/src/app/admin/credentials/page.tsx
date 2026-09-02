@@ -24,9 +24,10 @@ import { AdminError } from '../access';
 export default function Credentials() {
   const admin = useAdmin();
   const credentials = useLoad(() => admin.credentials(), [admin]);
+  const [copied, setCopied] = useState<string | undefined>();
 
   const byProvider = new Map<string, AdminCredential[]>();
-  for (const credential of credentials.data ?? []) {
+  for (const credential of credentials.data?.slots ?? []) {
     const list = byProvider.get(credential.provider) ?? [];
     list.push(credential);
     byProvider.set(credential.provider, list);
@@ -38,48 +39,72 @@ export default function Credentials() {
         <h1>Provider keys</h1>
         <h2>Stored encrypted. Never shown again.</h2>
         <p className="lead">
-          A key pasted here takes effect within seconds, on every instance, with
-          no deploy. It is sealed before it reaches the database and there is no
-          way to read one back — not from this page, not from the API. If you
-          lose one, issue a new one at the provider and paste that.
-        </p>
-        <p className="lead">
-          The last four characters are kept so you can tell which key is
-          installed. Replacing one records who did it and when, and never what
-          it was.
+          A key takes effect within seconds, with no deploy. Only its last four
+          characters are kept.
         </p>
         <AdminError error={credentials.error} code={credentials.code} role="admin" />
         {credentials.loading && <p className="spinner">Loading…</p>}
 
-        {/*
-          THE EMPTY CASE NAMES ITS CAUSE, because "no boxes to type in" is what
-          this page looks like when the catalogue has not been loaded — and an
-          operator reasonably reads that as "there is nowhere to put the Bitnob
-          key", which is the report that brought us here.
-
-          The slots are a CATALOGUE, seeded by a file that is separate from the
-          migration that creates the table. A deployment that applied the
-          migrations and not the seeds gets exactly this: a working page with
-          nothing to configure and no error, because the query succeeded and
-          returned no rows.
-        */}
-        {credentials.data !== undefined && credentials.data.length === 0 && (
+        {credentials.data !== undefined && credentials.data.slots.length === 0 && (
           <div className="notice warn">
-            <p>
-              No credential slots are defined, so there is nowhere to paste a key.
-            </p>
+            <p>No credential slots are defined, so there is nowhere to paste a key.</p>
             <p className="hint">
-              The catalogue is seeded separately from the schema. On the database,
-              apply{' '}
-              <span className="mono">
-                packages/ledger/sql/026_provider_credentials.seed.sql
-              </span>
-              , then reload. Until then every adapter falls back to its
-              environment variable.
+              Apply <span className="mono">packages/ledger/sql/026_provider_credentials.seed.sql</span>{' '}
+              and reload.
             </p>
           </div>
         )}
       </div>
+
+      {/*
+        THE OTHER HALF OF CONFIGURING A PROVIDER. A secret verifies a signature
+        on a request sent to a URL, and the dashboard used to show only the
+        secret — so the URL got guessed, and a guessed one answers 404 to a
+        provider that will keep POSTing to it while deposits go unrecorded here.
+        Neither side reports anything.
+      */}
+      {(credentials.data?.webhooks.length ?? 0) > 0 && (
+        <div className="panel">
+          <h2>Webhook URLs</h2>
+          <p className="lead">Paste these into the provider&rsquo;s dashboard.</p>
+
+          {credentials.data?.webhooks[0]?.absolute === false && (
+            <div className="notice warn">
+              <p>
+                <strong>Set <span className="mono">WEBHOOK_BASE_URL</span></strong> to the address a
+                provider can reach this API on, then reload for the full URLs.
+              </p>
+              <p className="hint">
+                Not the web app&rsquo;s address: its proxy drops the signature header, so every
+                event would answer 401.
+              </p>
+            </div>
+          )}
+
+          {credentials.data?.webhooks.map((hook) => (
+            <div className="webhook-row" key={hook.path}>
+              <div className="webhook-main">
+                <span className="webhook-label">{hook.label}</span>
+                <span className="mono webhook-url">{hook.url}</span>
+              </div>
+              <button
+                type="button"
+                className="ghost small"
+                onClick={() => {
+                  void navigator.clipboard?.writeText(hook.url).then(
+                    () => setCopied(hook.path),
+                    // A refused clipboard is not worth a banner: the URL is on
+                    // screen and can be selected.
+                    () => undefined,
+                  );
+                }}
+              >
+                {copied === hook.path ? 'Copied' : 'Copy'}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {[...byProvider.entries()].map(([provider, items]) => (
         <div className="panel" key={provider}>
@@ -93,9 +118,8 @@ export default function Credentials() {
           */}
           {items.every((item) => !item.in_use) && (
             <p className="hint">
-              <span className="badge warn">not yet connected</span> These keys
-              are stored safely and read by nothing. Pasting one changes no
-              behaviour until the integration ships.
+              <span className="badge warn">not yet connected</span> Stored safely and
+              read by nothing until the integration ships.
             </p>
           )}
           {items.map((credential) => (
@@ -122,13 +146,12 @@ function Credential({
   // Always empty. Pre-filling it with anything — even a mask — invites somebody
   // to save the mask as the key.
   const [secret, setSecret] = useState('');
-  const [pin, setPin] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
   const [done, setDone] = useState(false);
   const [rotations, setRotations] = useState<readonly Record<string, unknown>[] | undefined>();
 
-  const ready = secret.trim() !== '' && pin !== '';
+  const ready = secret.trim() !== '';
 
   return (
     <div style={{ borderBottom: '1px solid var(--line)', paddingBottom: 16, marginBottom: 16 }}>
@@ -171,30 +194,15 @@ function Credential({
             />
           </label>
 
-          {secret.trim() !== '' && (
-            <label>
-              Your transaction PIN
-              <input
-                type="password"
-                inputMode="numeric"
-                autoComplete="off"
-                value={pin}
-                onChange={(e) => setPin(e.target.value)}
-              />
-              {/*
-                NAMED, because this field and the authenticator code were
-                confused and the confusion was the product's fault. The
-                dashboard used to refuse this action with "enter the six-digit
-                code from your authenticator app" and offer nowhere to put
-                one — so the code went in here, the PIN check refused it, and
-                an operator holding both correct secrets was told they were
-                wrong. The code is now asked for in its own dialog.
-              */}
-              <span className="hint">
-                Your own PIN — not the six-digit code from your authenticator app.
-              </span>
-            </label>
-          )}
+          {/*
+            NO TRANSACTION PIN. It authorises money leaving a CUSTOMER'S OWN
+            account; pasting a provider key moves nothing and is already gated
+            by the `admin` role and by a session elevated with an authenticator
+            code. Asking for it meant every operator had to hold a customer PIN
+            to do their job — and the refusal read "enter the six-digit code
+            from your authenticator app" beside a field labelled PIN, so
+            somebody holding both correct secrets was told they were wrong.
+          */}
 
           <div className="actions">
             <button
@@ -207,17 +215,11 @@ function Credential({
                 setDone(false);
                 void (async () => {
                   try {
-                    await admin.setCredential(
-                      credential.provider,
-                      credential.name,
-                      secret,
-                      pin,
-                    );
-                    // Cleared on success AND left in place on failure, so a
-                    // typed key is not lost to a wrong PIN — but never left
-                    // sitting in a form field after it has been stored.
+                    await admin.setCredential(credential.provider, credential.name, secret);
+                    // Cleared on success and left in place on failure, so a
+                    // typed key survives a refusal but never sits in a form
+                    // field after it has been stored.
                     setSecret('');
-                    setPin('');
                     setDone(true);
                     onSaved();
                   } catch (cause) {

@@ -49,17 +49,12 @@ export default function Cases() {
         <h1>Compliance cases</h1>
         <h2>One investigation, one customer</h2>
         <p className="lead">
-          Closing a case decides every signal attached to it, so say once what
-          you found rather than typing it onto each transaction. New information
-          after a case is closed opens a new one — a closed file is a record of
-          what was decided on the facts at the time.
+          Closing a case decides every signal attached to it. New information after
+          that opens a new case.
         </p>
         <p className="lead">
-          <strong>Nothing here reaches the customer.</strong> There is no
-          message, status or screen that would tell somebody they are under
-          investigation, and there must not be: tipping off is an offence.
-          Freezing an account is a separate, visible action taken for its own
-          stated reason.
+          <strong>Nothing here reaches the customer.</strong> Tipping off is an
+          offence. Freezing an account is a separate, visible action.
         </p>
         <p className="hint">
           <Link href="/admin/risk">← the signal queue</Link>

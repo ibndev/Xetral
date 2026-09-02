@@ -166,7 +166,10 @@ export function Shell({
           flexDirection: 'row',
           borderTopWidth: 1,
           borderTopColor: colors.line,
-          backgroundColor: colors.surface,
+          // `bg`, not `surface`: the tab bar is chrome rather than a
+          // container, and a recessed strip along the bottom of a white page
+          // reads as a gap in it. Matches `.tabbar` on the web.
+          backgroundColor: colors.bg,
           paddingBottom: insets.bottom,
         }}
       >

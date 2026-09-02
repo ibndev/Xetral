@@ -96,8 +96,7 @@ export default function Staff() {
           </div>
         ))}
         <p className="hint">
-          Grant the narrowest role that does the job. Somebody answering the
-          phone does not need the ability to change the transfer fee.
+          Grant the narrowest role that does the job.
         </p>
       </div>
     </>
@@ -241,8 +240,7 @@ function Grant({ onGranted }: { onGranted: () => void }) {
       {done !== undefined && <p className="ok">{done}</p>}
 
       <p className="hint">
-        You cannot grant a role to yourself. That is refused by the database, so
-        the check does not depend on this page.
+        You cannot grant a role to yourself.
       </p>
     </form>
   );

@@ -43,6 +43,10 @@ async function register(): Promise<Customer> {
     .send({
       email: identifier,
       password: PASSWORD,
+      // 040 made these required: a name, a place and a reachable number.
+      full_name: 'E2E Test Person',
+      country: 'NG',
+      phone: String(8000000000 + Math.floor(Math.random() * 999999999)),
       device: { fingerprint: `fp-${randomUUID()}`, platform: 'ios' },
     })
     .expect(201);
@@ -125,6 +129,11 @@ describe('registering', () => {
       .send({
         email: identifier,
         password: 'short',
+        // 040 made these required. A registration is now a name, a place
+        // and a reachable number as well as an address.
+        full_name: 'E2E Test Person',
+        country: 'NG',
+        phone: String(8000000000 + Math.floor(Math.random() * 999999999)),
         device: { fingerprint: `fp-${randomUUID()}`, platform: 'ios' },
       })
       .expect(400);

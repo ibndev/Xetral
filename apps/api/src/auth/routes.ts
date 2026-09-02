@@ -48,6 +48,14 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       )
 
       .public(
+        'GET',
+        '/v1/countries',
+        'the signup form needs the list of countries and their dialling codes ' +
+          'BEFORE anybody has an account, the same reason the terms are ' +
+          'public; it carries no customer data',
+      )
+
+      .public(
         'POST',
         '/v1/auth/register',
         'opens the first account, so requiring an existing session would be ' +
@@ -220,6 +228,13 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // separated from acting by ROLE, so a support operator can look at a
       // customer without being able to freeze one.
 
+      // Adding a country is reference data, not money — no PIN. Opening one
+      // is a decision about where the platform operates, so it takes `admin`
+      // rather than a narrower role.
+      .staff('GET', '/v1/admin/countries', { pin: false, role: 'admin' })
+      .staff('POST', '/v1/admin/countries', { pin: false, role: 'admin' })
+      .staff('POST', '/v1/admin/countries/:code', { pin: false, role: 'admin' })
+
       .staff('GET', '/v1/admin/overview', { pin: false, role: 'support' })
       .staff('GET', '/v1/admin/drift', { pin: false, role: 'finance' })
       // What was collected on a revenue authority's behalf is a finance
@@ -292,7 +307,29 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
         pin: false,
         role: 'admin',
       })
-      .staff('POST', '/v1/admin/credentials/:provider/:name', { pin: true, role: 'admin' })
+      /*
+       * NO TRANSACTION PIN, and the reason is a category error rather than a
+       * relaxation.
+       *
+       * A transaction PIN is the factor that authorises MONEY LEAVING A
+       * CUSTOMER'S OWN ACCOUNT. Pasting a provider key moves nothing: it is an
+       * administrative act, already gated by the `admin` role read fresh from
+       * the database and by a session elevated with an authenticator code
+       * minutes earlier.
+       *
+       * Requiring it here also had a cost that pointed the wrong way. Every
+       * operator had to hold a customer transaction PIN to do their job, and
+       * the refusal said "enter the six-digit code from your authenticator
+       * app" beside a field labelled PIN — so an operator with two correct
+       * secrets was told they were wrong. Demanding a third factor for a
+       * non-money action is how a shared PIN ends up on a desk, which is the
+       * same argument 014 makes about codes.
+       *
+       * The PIN stays on everything that MOVES money, staff routes included:
+       * freezing an account, attributing a suspense deposit, resolving a
+       * dispute. `route-coverage.test.ts` keeps that list honest.
+       */
+      .staff('POST', '/v1/admin/credentials/:provider/:name', { pin: false, role: 'admin' })
 
       // THE COMPLIANCE QUEUE, on the `compliance` role — the same people who
       // review identity, because the two questions are the same one asked at

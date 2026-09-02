@@ -159,11 +159,12 @@ export const ENVIRONMENT: readonly Item[] = [
     kind: 'env',
     failure: 'silent',
     ifMissed:
-      'password reset emails have no link to put in them. It refuses a ' +
-      'non-https value rather than accepting one, because a reset link is a ' +
-      'bearer token — but it does not refuse ABSENCE, which is the state a ' +
-      'fresh deployment is in.',
-    flow: 'password reset',
+      'password reset emails have no link to put in them, and a customer is ' +
+      'shown their @handle with no payment link. It refuses a non-https ' +
+      'value rather than accepting one, because a reset link is a bearer ' +
+      'token — but it does not refuse ABSENCE, which is the state a fresh ' +
+      'deployment is in.',
+    flow: 'password reset, payment links',
   },
   {
     name: 'ADMIN_BOOTSTRAP_EMAIL',
@@ -355,6 +356,20 @@ export const PROVIDERS: readonly Item[] = [
     ifMissed:
       'every inbound webhook answers 401 — including the deposit webhook, ' +
       'which is the only event in the system that creates money.',
+  },
+  {
+    name: 'WEBHOOK_BASE_URL',
+    kind: 'env',
+    // Not `silent`: nothing here breaks if it is unset. The dashboard says so
+    // and shows the paths instead, so an operator sees a partial answer rather
+    // than a wrong one. What it costs is that somebody has to work the address
+    // out — which is how the wrong one gets pasted into Bitnob.
+    failure: 'refuses-the-first-request',
+    flow: 'cards, NGN funding, crypto',
+    ifMissed:
+      '`/admin/credentials` shows webhook PATHS without a host, so the URL ' +
+      'given to Bitnob is guessed. It must be the API origin: the web app ' +
+      'proxy drops `x-bitnob-signature`, so every event through it answers 401.',
   },
   {
     name: 'BITNOB_NGN_AMOUNT_UNIT',

@@ -38,9 +38,8 @@ export default function Settings() {
         <h1>Settings</h1>
         <h2>Changes take effect within thirty seconds, on every instance</h2>
         <p className="lead">
-          Every change is recorded with who made it and when. Bounds are
-          enforced by the database, so a value this page would accept and the
-          database would not is refused either way.
+          Every change is recorded with who made it and when. Bounds are enforced by
+          the database.
         </p>
         <AdminError error={settings.error} code={settings.code} role="finance" />
         {settings.loading && <p className="spinner">Loading…</p>}

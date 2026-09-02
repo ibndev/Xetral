@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { router } from 'expo-router';
-import { exponentFor, formatAmount, isValidAmount, TRANSFER_CURRENCIES } from '@xetral/client';
+import { exponentFor, formatAmount, isValidAmount, sendableFor } from '@xetral/client';
 import { Shell } from '@/shell';
 import { Button, Done, Field, FormError, Loading, Panel } from '@/ui';
 import { Select } from '@/select';
@@ -54,7 +54,25 @@ export default function Transfer() {
    * somebody, which is the identifier people are least willing to share.
    */
   const session = useLoad(() => client.currentSession(), [client]);
-  const needsPin = session.data !== undefined && !session.data.has_pin;
+
+  /*
+   * THEIR OWN LOCAL CURRENCY, not every country's. See the web's Send screen
+   * for the argument: `TRANSFER_CURRENCIES` is what the API accepts, and
+   * showing a Nigerian the cedi and shilling options gives them two choices
+   * that answer `insufficient_funds` with nothing on screen saying which.
+   */
+  const offered = sendableFor(session.data?.home_currency, [...held.keys()]);
+  /*
+   * ONLY WHEN WE KNOW. `has_pin` is `boolean | null` and null means the server
+   * could not tell — which must NOT route somebody into creating a PIN they
+   * already have. That is exactly what happened when a failed query answered
+   * `false`: a customer who had set one was sent back to set it again.
+   *
+   * Unknown falls through to the ordinary form, where the server's own
+   * `pin_not_set` refusal decides — and that refusal already carries a link to
+   * the right screen, so the worst case is one extra step rather than a loop.
+   */
+  const needsPin = session.data?.has_pin === false;
   const [via, setVia] = useState<'link' | 'wallet' | undefined>();
 
   if (session.loading) {
@@ -70,9 +88,7 @@ export default function Transfer() {
       <Shell back="/wallet" title="Send money">
         <Panel title="First, a transaction PIN" subtitle="It authorises every payment you make">
           <Text style={styles.lead}>
-            Your password signs you in. A separate PIN approves money leaving your
-            account, so somebody who reaches an unlocked phone still cannot spend
-            from it. You will only set it once.
+            A separate PIN approves money leaving your account. You set it once.
           </Text>
           <Button label="Set my transaction PIN" onPress={() => router.push('/settings')} />
         </Panel>
@@ -130,7 +146,7 @@ export default function Transfer() {
           label="Currency"
           value={currency}
           onChange={setCurrency}
-          options={TRANSFER_CURRENCIES.map((code) => ({
+          options={offered.map((code) => ({
             value: code,
             label: code,
             // What is actually behind the choice, so picking a currency they

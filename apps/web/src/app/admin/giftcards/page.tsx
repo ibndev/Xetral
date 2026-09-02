@@ -39,17 +39,14 @@ export default function GiftCards() {
           <div className="notice warn">
             <p>Gift card trading is switched off on this deployment.</p>
             <p className="hint">
-              It needs both the deployment&apos;s own flag and the stored
-              setting under Settings → Features. It is the one flow that pays
-              out against a bearer instrument nobody can verify at the moment of
-              payment, so turning it on takes two deliberate acts rather than
-              one.
+              It needs both the deployment&apos;s own flag and the stored setting
+              under Settings → Features.
             </p>
           </div>
         ) : (
           <p className="lead">
-            Approving pays the customer into a hold, not into their spendable
-            balance. You can claw a payout back while it is held and not after.
+            Approving pays into a hold, not a spendable balance. A payout can be
+            clawed back only while held.
           </p>
         )}
 

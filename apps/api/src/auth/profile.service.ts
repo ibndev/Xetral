@@ -1,13 +1,26 @@
 import { randomInt } from 'node:crypto';
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
+import type { OnApplicationBootstrap } from '@nestjs/common';
 import type { Pool } from 'pg';
 import type { ApiConfig } from '../config.js';
 import { API_CONFIG, DATABASE } from '../tokens.js';
 
 export interface ProfileView {
   readonly handle: string;
-  /** The whole thing, ready to paste into a message. */
-  readonly link: string;
+  /**
+   * The whole thing, ready to paste into a message — or NULL when this
+   * deployment has not been told its own address.
+   *
+   * Nullable rather than a relative path, which is what it used to be:
+   * `appBaseUrl ?? ''` produced `/pay/olawale`, and a screen offering to copy
+   * THAT hands the customer a string that cannot be opened by anybody they
+   * send it to. A link that looks real and does not work is worse than an
+   * absent one, because they find out from whoever failed to pay them.
+   *
+   * The handle is still returned and still usable — it can be typed into the
+   * Send screen — so the feature degrades to the half that works.
+   */
+  readonly link: string | null;
 }
 
 /**
@@ -27,17 +40,62 @@ export interface ProfileView {
  * shared.
  */
 @Injectable()
-export class ProfileService {
+export class ProfileService implements OnApplicationBootstrap {
+  readonly #logger = new Logger(ProfileService.name);
+
   constructor(
     @Inject(DATABASE) private readonly pool: Pool,
     @Inject(API_CONFIG) private readonly config: ApiConfig,
   ) {}
 
+  /**
+   * Say at BOOT if the column this feature needs is not there.
+   *
+   * Nothing in this deployment applies migrations, so a release can ship code
+   * for a schema the database has not got — and the first person to find out
+   * was a customer opening their settings page and reading "Something went
+   * wrong". A line in the startup log costs one query and puts the discovery
+   * where the person who can fix it is already looking.
+   */
+  async onApplicationBootstrap(): Promise<void> {
+    try {
+      await this.pool.query(`SELECT handle FROM users LIMIT 0`);
+    } catch {
+      this.#logger.warn(
+        'PAYMENT LINKS ARE OFF: users.handle does not exist on this database. ' +
+          'Apply packages/ledger/sql/039_profile_handles.sql. Until then the ' +
+          'payment link screen answers feature_unavailable and everything else ' +
+          'works normally.',
+      );
+    }
+  }
+
   async mine(userUuid: string): Promise<ProfileView> {
-    const existing = await this.pool.query<{ handle: string | null; email: string | null }>(
-      `SELECT handle, email FROM users WHERE uuid = $1`,
-      [userUuid],
-    );
+    let existing;
+    try {
+      existing = await this.pool.query<{ handle: string | null; email: string | null }>(
+        `SELECT handle, email FROM users WHERE uuid = $1`,
+        [userUuid],
+      );
+    } catch (error: unknown) {
+      /*
+       * A MISSING MIGRATION IS NOT "SOMETHING WENT WRONG".
+       *
+       * `users.handle` arrives in 039. On a deployment that has not applied it
+       * this query throws, the error reached the client as an unhandled 500,
+       * and the payment link screen rendered "Something went wrong. Please try
+       * again." — which invites a customer to try again for ever at a schema
+       * that is not going to change on its own.
+       *
+       * `feature_unavailable` says the truth: this part of the product is not
+       * switched on here. The server log names the file to apply.
+       */
+      this.#logger.error(
+        `payment handles are unavailable: ${describe(error)}. ` +
+          `Apply packages/ledger/sql/039_profile_handles.sql to this database.`,
+      );
+      throw new ServiceUnavailableException({ error: 'feature_unavailable' });
+    }
     const row = existing.rows[0];
     if (row === undefined) throw new Error('profile requested for a user that does not exist');
     if (row.handle !== null) return this.#view(row.handle);
@@ -125,7 +183,19 @@ export class ProfileService {
     // from a `Host` an attacker controls is a payment link pointing at their
     // site, which is worse here than in an email because it is meant to be
     // forwarded.
-    const origin = this.config.appBaseUrl ?? '';
+    const origin = this.config.appBaseUrl;
+    if (origin === undefined) {
+      this.#logger.warn(
+        'PAYMENT LINKS HAVE NO ADDRESS: APP_BASE_URL is not set, so customers ' +
+          'are shown their @handle and no link. Set it to the origin their ' +
+          'browser reaches.',
+      );
+      return { handle, link: null };
+    }
     return { handle, link: `${origin}/pay/${handle}` };
   }
+}
+
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

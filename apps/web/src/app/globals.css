@@ -49,28 +49,36 @@
 
   /* Surfaces.
 
-     THE PAGE IS OFF-WHITE AND EVERY CONTAINER ON IT IS PAPER WHITE, and that
-     is a reversal of what this file used to argue. It read: the page is pure
-     white, a card is the same white, and a hairline separates them — because
-     tinting the ground grey costs a little contrast on body text and gives
-     screenshots a grey cast.
+     THE PAGE IS PURE WHITE AND EVERY CONTAINER ON IT IS RECESSED INTO IT.
 
-     Both halves of that were true and the conclusion was still wrong. With
-     one white everywhere, a card is only a border, so a screen of stacked
-     cards reads as a single sheet with lines ruled across it and the eye has
-     nothing to group by. The sign-in page had already solved it locally — its
-     fields sit on a light ground and are obviously fields — and the fix is to
-     make that relationship the app's rather than one page's.
+     This file has now argued both directions, so the reasoning is worth
+     keeping. The first version made page and card the same white and let a
+     hairline separate them — which gives the eye nothing to group by, so a
+     screen of stacked cards reads as one sheet with lines ruled across it.
+     The second inverted it: off-white ground, paper-white containers. That
+     grouped correctly and it made every container read as a piece of paper
+     LYING ON the page, which with a shadow under it is a floating card.
 
-     So: the GROUND is `--bg`, and anything a customer reads a number or types
-     into is `--surface`, which is pure white. The contrast cost is paid by the
-     ground, where there is no text, instead of by the card, where all of it
-     is. */
-  --bg:           #F4F6F9;   /* the page, behind everything */
-  --surface:      #FFFFFF;   /* cards, inputs, every container */
-  --surface-2:    #F6F7F9;   /* wells and hovers INSIDE a white container */
-  --line:         #E5E7EB;
-  --line-strong:  #D0D4DB;
+     The third, and the one here, keeps the grouping and drops the lift. The
+     ground is white; a container is a shade DARKER than the ground and has
+     no shadow at all. Darker-than-its-surroundings is what the eye reads as
+     a recess — the same cue an input has always used — so a card, a panel
+     and a text field are all obviously the same kind of thing: somewhere to
+     put something, cut into the page rather than resting on it.
+
+     A shadow is therefore reserved for what genuinely floats above the page
+     and would otherwise be unreadable against it: a dropdown, a sheet, a
+     modal. Those use `--surface-raised`, which goes the other way — LIGHTER
+     than the ground — because that is the honest cue for something in front.
+
+     Dark keeps its own logic: on black, a container lifts by a few points of
+     lightness because black swallows both a shadow and a darker fill. */
+  --bg:           #FFFFFF;   /* the page, behind everything */
+  --surface:      #F7F8FB;   /* cards, inputs, panels — recessed */
+  --surface-2:    #EFF1F6;   /* a well INSIDE a container, one step deeper */
+  --surface-raised: #FFFFFF; /* only what floats: menus, sheets, modals */
+  --line:         #E7EAF0;
+  --line-strong:  #D5D9E2;
 
   /* Text */
   --text:         #0D1B3E;
@@ -181,6 +189,9 @@
   --bg:           #000000;
   --surface:      #0C0D10;
   --surface-2:    #141519;
+  /* Lighter than a container, not darker. On black there is nothing below to
+     recess into, so the only cue left for "in front" is more light. */
+  --surface-raised: #1B1D23;
   --line:         #212227;
   --line-strong:  #303237;
 
@@ -500,7 +511,9 @@ h3 { font-size: 16px; }
   height: var(--tabbar-h);
   /* The home indicator on a modern iPhone sits inside the viewport. */
   padding-bottom: env(safe-area-inset-bottom, 0);
-  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  /* `--bg`, not `--surface`: the tab bar is chrome, not a container, and a
+     recessed strip along the bottom of the page reads as a gap in it. */
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
   backdrop-filter: saturate(180%) blur(20px);
   -webkit-backdrop-filter: saturate(180%) blur(20px);
   border-top: 1px solid var(--line);
@@ -542,21 +555,27 @@ h3 { font-size: 16px; }
 
 /* ═══════════════════════════ cards ═══════════════════════════ */
 
+/* NO SHADOW, and the fill is what makes it a card. `--surface` is a shade
+   below the page, so the container is read as cut into the page — and a
+   shadow under something recessed is the one combination that reads as
+   neither, which is why it is not merely omitted here but wrong. The border
+   is a hairline that defines the edge; anything heavier turns the recess back
+   into an outlined box sitting on top. */
 .card {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   padding: 18px;
-  box-shadow: var(--shadow-sm);
-  transition: box-shadow var(--t) var(--ease), border-color var(--t) var(--ease),
-              transform var(--t) var(--ease);
+  transition: background var(--t) var(--ease), border-color var(--t) var(--ease);
 }
 @media (min-width: 720px) { .card { padding: 22px; } }
 
-.card.raised { box-shadow: var(--shadow); }
+/* Kept as a name so the pages that ask for it still parse, and deliberately
+   the same as an ordinary card: there is no raised state in this design. */
+.card.raised { border-color: var(--line-strong); }
 .card.interactive { cursor: pointer; }
-.card.interactive:hover { box-shadow: var(--shadow-md); border-color: var(--line-strong); }
-.card.interactive:active { transform: translateY(1px); }
+.card.interactive:hover { border-color: var(--line-strong); background: var(--surface-2); }
+.card.interactive:active { background: var(--surface-2); }
 
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: var(--s-3); }
 
@@ -597,7 +616,6 @@ h3 { font-size: 16px; }
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
   padding: 22px;
-  box-shadow: var(--shadow);
 }
 .balance-label { font-size: 13.5px; color: var(--text-2); font-weight: 500; }
 .balance-value {
@@ -663,13 +681,17 @@ h3 { font-size: 16px; }
      three lines breaks the row's rhythm, so it is allowed two and no more. */
   overflow: hidden;
   cursor: pointer;
-  transition: transform var(--t) var(--ease-out), box-shadow var(--t) var(--ease),
-              border-color var(--t) var(--ease);
+  /* No lift on hover. A tile that rises off the page and casts a shadow is
+     the floating-card effect in miniature, and there are eight of them in a
+     grid — so the whole row lifts as the pointer crosses it. The feedback is
+     the fill going one step deeper, which is what a recess does when pressed. */
+  transition: background var(--t-fast) var(--ease), border-color var(--t) var(--ease),
+              transform var(--t) var(--ease-out);
 }
 @media (hover: hover) {
-  .tile:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); border-color: var(--line-strong); }
+  .tile:hover { background: var(--surface-2); border-color: var(--line-strong); }
 }
-.tile:active { transform: translateY(0) scale(.98); }
+.tile:active { transform: scale(.98); background: var(--surface-2); }
 .tile .tile-icon {
   display: grid;
   place-items: center;
@@ -703,16 +725,30 @@ h3 { font-size: 16px; }
   flex-direction: column;
   justify-content: space-between;
   width: 100%;
-  max-width: 380px;
+  /* Wider than the 380px it was. At that size it read as a thumbnail beside a
+     full-width panel; this is the screen where the card is the SUBJECT, so it
+     is the largest thing on it. Still capped, because a credit card drawn at
+     700px on a desktop stops looking like a card. */
+  max-width: 520px;
   /* The real proportion, so it reads as a card at any width rather than as a
      panel that happens to be dark. */
   aspect-ratio: 1.586;
   padding: 18px;
   border-radius: var(--r-md);
+  /* The glow is BLUE, not amber. Amber is the accent on a promo tile; on a
+     card face it reads as gold and says "premium tier", which is a product
+     claim this card does not make. Blue is the brand's own light and is what
+     the reference draws. */
   background:
-    radial-gradient(120% 140% at 85% 0%, rgba(245, 166, 35, .28) 0%, transparent 55%),
-    linear-gradient(150deg, var(--ink-700) 0%, var(--ink) 62%, #060B1C 100%);
+    radial-gradient(circle at 88% 6%, rgba(104, 137, 255, .34) 0%, transparent 30%),
+    radial-gradient(circle at 55% 105%, rgba(58, 95, 210, .22) 0%, transparent 40%),
+    linear-gradient(145deg, #0B1428 0%, #08101F 55%, #050912 100%);
+  border: 1px solid #344B85;
   color: #fff;
+  /* THE ONE SURFACE THAT KEEPS A SHADOW, and it is not an exception to the
+     flat rule — it is a picture of a physical object, not a section of the
+     page. A plastic card lying on a table casts a shadow; drawing it without
+     one is what would look wrong. Every actual container is flat. */
   box-shadow: var(--shadow-md);
   overflow: hidden;
 }
@@ -730,7 +766,56 @@ h3 { font-size: 16px; }
   background: radial-gradient(circle, rgba(255, 255, 255, .10) 0%, transparent 68%);
   pointer-events: none;
 }
+/* The diagonal sheen and the fine ruling, which is what makes the face read
+   as a manufactured object rather than a gradient. Both are drawn; a card
+   covered in imported flourishes reads as a toy, and this one has money on
+   it. */
+.virtual-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(160deg, transparent 30%, rgba(96, 133, 255, .16) 43%, transparent 49%),
+    repeating-linear-gradient(170deg, transparent 0 7px, rgba(130, 160, 255, .025) 8px 9px);
+  pointer-events: none;
+}
 @media (min-width: 420px) { .virtual-card { padding: 22px; } }
+
+/* The scheme mark and the currency, bottom right. `VISA` is set in italic
+   because that is the mark's own form — it is a wordmark being reproduced,
+   not a label being styled. */
+.vc-scheme {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 800;
+  font-style: italic;
+  letter-spacing: -.04em;
+  line-height: 1;
+}
+.vc-currency { font-size: 11px; letter-spacing: .08em; text-align: right; margin-top: 3px; }
+
+/* The contactless mark, drawn as three arcs rather than shipped as an icon
+   font — it sits on a dark face at a size where a glyph substitution would
+   be obvious. */
+.vc-wave { position: absolute; right: 18px; top: 62px; opacity: .82; }
+@media (min-width: 420px) { .vc-wave { right: 22px; top: 74px; } }
+
+/* Stacked label/value pairs on the left of the footer, as embossed on a real
+   card: the expiry above the holder. */
+.vc-stack { display: flex; flex-direction: column; gap: 9px; min-width: 0; }
+
+/* THE SPECIMEN, shown to a customer who has no card yet.
+   Deliberately the SAME element with the same masked number — a preview drawn
+   from different markup is a preview that stops matching the product the
+   first time either changes. It is inert, so it takes no status class and no
+   pointer. */
+.virtual-card.is-specimen { opacity: .96; }
+
+/* Pager dots under the card stack. Presentational only — the cards are all
+   rendered and this says how many there are. */
+.vc-dots { display: flex; gap: 6px; justify-content: center; margin-top: 2px; }
+.vc-dot { width: 22px; height: 3px; border-radius: 2px; background: var(--line-strong); }
+.vc-dot.on { background: var(--link); }
 
 .vc-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 /* The status pill sits on a dark face, so it cannot use the light-theme
@@ -745,8 +830,8 @@ h3 { font-size: 16px; }
 .virtual-card .badge.danger { background: rgba(248, 113, 113, .20); color: #F87171; border-color: transparent; }
 
 .vc-number {
-  font-size: clamp(15px, 4.6vw, 20px);
-  letter-spacing: .12em;
+  font-size: clamp(16px, 4.2vw, 23px);
+  letter-spacing: .14em;
   /* Optically centred in the space between the mark and the footer, which is
      where the embossed number sits on a physical card. */
   margin: auto 0;
@@ -771,6 +856,74 @@ h3 { font-size: 16px; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ─────────────── the card onboarding panel ───────────────
+   The screen a customer sees BEFORE they have a card, and the one place in
+   the product that has to sell something rather than report it. Two benefits
+   and a price, which is the whole of what somebody needs to decide. */
+
+.benefits { display: grid; grid-template-columns: 1fr; gap: var(--s-4); margin-top: var(--s-5); }
+@media (min-width: 720px) { .benefits { grid-template-columns: 1fr 1fr; gap: var(--s-5); } }
+
+.benefit { display: flex; gap: 14px; align-items: flex-start; }
+.benefit-icon {
+  flex: 0 0 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  color: var(--text-2);
+}
+.benefit h3 { font-size: 15.5px; margin: 0; letter-spacing: -.01em; }
+.benefit p { margin: 4px 0 0; color: var(--text-2); font-size: 14px; line-height: 1.45; }
+
+/* The money and the action, on one line, divided from the benefits above.
+   The figure is large because it is the number the decision turns on. */
+.price-row {
+  margin-top: var(--s-5);
+  padding-top: var(--s-5);
+  border-top: 1px solid var(--line);
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--s-4);
+  flex-wrap: wrap;
+}
+.price-main { min-width: 0; }
+.price-label { color: var(--text-2); font-size: 13.5px; }
+.price {
+  font-family: var(--font-display);
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: -.03em;
+  font-variant-numeric: tabular-nums;
+  margin: 2px 0 0;
+  line-height: 1.05;
+}
+@media (min-width: 720px) { .price { font-size: 42px; } }
+.price-sub { color: var(--text-3); font-size: 13px; margin-top: 3px; }
+/* The amount is typed into the figure's own slot rather than into a field
+   below it, so the number the customer is deciding about is the number they
+   are editing. */
+.price-input {
+  font-family: var(--font-display);
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: -.03em;
+  font-variant-numeric: tabular-nums;
+  padding: 0;
+  min-height: 0;
+  width: 100%;
+  max-width: 220px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line-strong);
+  border-radius: 0;
+}
+@media (min-width: 720px) { .price-input { font-size: 42px; } }
+.price-input:focus { outline: none; border-bottom-color: var(--link); box-shadow: none; }
 
 /* A frozen card is still the customer's, so it dims rather than greys out —
    and a terminated one reads as finished without being unreadable, because a
@@ -814,7 +967,6 @@ h3 { font-size: 16px; }
   padding: 20px;
   color: #fff;
   background: linear-gradient(135deg, var(--accent), var(--accent-600));
-  box-shadow: var(--shadow);
 }
 .promo.navy { background: linear-gradient(135deg, var(--ink-700), var(--ink)); }
 /* Its link has to lift off navy in both themes, so it does not inherit the
@@ -950,7 +1102,7 @@ label {
 /* The control does not inherit the label's voice. Without this the value a
    customer types is rendered at 600 in the secondary colour, which reads as
    placeholder text in their own input. */
-label > input,
+label > input:where(:not([type='checkbox'], [type='radio'])),
 label > select,
 label > textarea,
 label > .input-affix {
@@ -962,7 +1114,25 @@ label > .input-affix {
    separation between a two-up row and whatever follows it comes from the
    labels' own margin, which is now the same step as everywhere else. */
 
-input, select, textarea {
+/*
+ * A CHECKBOX IS NOT A TEXT FIELD, and this rule used to say it was.
+ *
+ * `input` unqualified gave the one checkbox in the app `width: 100%` and
+ * `min-height: 50px` — so it rendered 318px wide and 50px tall inside a
+ * `.row`, whose `flex-shrink: 0` on the first child then refused to let it
+ * give any of that back. The label beside it was pushed off the right of the
+ * viewport, which is the settings page's "What you have agreed to" bug.
+ *
+ * Measured in Chromium before the fix: 318px. The type selector is what made
+ * it invisible in review — the stylesheet plainly had rules for inputs.
+ *
+ * `:where(:not(…))` and not a bare `:not(…)`: an attribute selector inside
+ * `:not()` COUNTS, so the bare spelling would have raised this rule to (0,2,1)
+ * and let it outrank a component rule like `.auth-card input`. `:where()`
+ * contributes nothing, so the rule stays exactly as specific as `input` alone.
+ * `button-specificity.test.ts` fails on the bare spelling.
+ */
+input:where(:not([type='checkbox'], [type='radio'])), select, textarea {
   width: 100%;
   padding: 13px 15px;
   background: var(--surface);
@@ -977,16 +1147,35 @@ input, select, textarea {
   transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease),
               background var(--t-fast) var(--ease);
 }
-@media (min-width: 720px) { input, select, textarea { font-size: 15px; } }
+@media (min-width: 720px) {
+  input:where(:not([type='checkbox'], [type='radio'])), select, textarea { font-size: 15px; }
+}
+
+/* Sized by the platform, and big enough to hit with a thumb. `accent-color`
+   is what tints the checked state to the brand without replacing the native
+   control — a hand-built one loses the keyboard and screen-reader behaviour
+   the real element already has. */
+input[type='checkbox'], input[type='radio'] {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  margin: 2px 0 0;
+  accent-color: var(--brand);
+  cursor: pointer;
+}
+input[type='checkbox']:disabled, input[type='radio']:disabled { cursor: not-allowed; opacity: .5; }
 
 input::placeholder, textarea::placeholder { color: var(--text-3); }
-input:hover, select:hover, textarea:hover { border-color: var(--text-3); }
-input:focus, select:focus, textarea:focus {
+input:where(:not([type='checkbox'], [type='radio'])):hover, select:hover, textarea:hover {
+  border-color: var(--text-3);
+}
+input:where(:not([type='checkbox'], [type='radio'])):focus, select:focus, textarea:focus {
   outline: none;
   border-color: var(--link);
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--link) 14%, transparent);
 }
-input:disabled, select:disabled, textarea:disabled { background: var(--surface-2); opacity: .7; }
+input:where(:not([type='checkbox'], [type='radio'])):disabled,
+select:disabled, textarea:disabled { background: var(--surface-2); opacity: .7; }
 input[aria-invalid='true'] { border-color: var(--danger); }
 
 textarea { min-height: 96px; resize: vertical; line-height: 1.5; }
@@ -1006,6 +1195,22 @@ select {
 /* An input with something inside it — a Paste link, an eye toggle. */
 .input-affix { position: relative; display: flex; align-items: center; }
 .input-affix input { padding-right: 56px; }
+
+/* A DIALLING CODE IN FRONT OF A PHONE FIELD, not a second picker.
+   The affix is on the LEFT here and the padding goes the other way — the
+   `.input-affix` above is built for a trailing control (the password reveal),
+   and reusing it unchanged would put "+234" on top of the digits. */
+.input-affix.dial input { padding-right: 15px; padding-left: 68px; }
+.dial-code {
+  position: absolute;
+  left: 15px;
+  z-index: 1;
+  font-family: var(--font-mono);
+  font-size: 15px;
+  color: var(--text-2);
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
 .input-affix .affix {
   position: absolute;
   right: 8px;
@@ -1336,7 +1541,10 @@ td.right, th.right { text-align: right; padding-right: 0; }
   font-size: 13.5px;
   font-weight: 600;
 }
-.segmented button.active { background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm); }
+/* The rail is a well and the selected pill comes back UP out of it, to the
+   page's own white — the one place inside a container where lighter is the
+   right direction, because the pill is the thing in front. */
+.segmented button.active { background: var(--surface-raised); color: var(--text); }
 .segmented button:hover:not(.active) { background: transparent; color: var(--text); }
 
 /* ONE LINE, AND IT SCROLLS RATHER THAN WRAPPING OR PUSHING THE PAGE.
@@ -1542,10 +1750,10 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
    a border means something. */
 .auth-card .field input,
 .auth-card .input-affix input {
-  /* PAPER WHITE, like every other field in the product. These were the one
-     place a field sat on the tinted grey — which is where the ground colour
-     came from in the first place — and now that the tint is the PAGE, a grey
-     field on a white card is the odd one out rather than the pattern. */
+  /* `--surface`, like every other field in the product. This page is where
+     the pattern started — a tinted field, borderless, on a white ground — and
+     it is now what the whole app does, so this rule exists only to give the
+     field a taller target and a softer edge than a form field elsewhere. */
   background: var(--surface);
   border: 1px solid transparent;
   border-radius: var(--r);
@@ -1609,13 +1817,14 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
 */
 
 /* A section of the operations dashboard: the same card the customer app uses,
-   with the vertical rhythm a page of stacked sections needs. */
+   with the vertical rhythm a page of stacked sections needs — and the same
+   recessed fill and no shadow, so the dashboard and the app are one design
+   rather than two that happen to share a colour. */
 .panel {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   padding: 18px;
-  box-shadow: var(--shadow-sm);
   margin-bottom: var(--s-5);
 }
 @media (min-width: 720px) { .panel { padding: 22px; } }
@@ -1652,6 +1861,30 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
      enough to scroll the page sideways. */
   overflow-wrap: anywhere;
 }
+
+/* A webhook URL and its Copy button. The URL wraps rather than truncating: an
+   operator pasting it into a provider's dashboard has to be able to read the
+   whole thing to know it is the right one, and an ellipsis hides exactly the
+   path that distinguishes deposits from cards from crypto. */
+.webhook-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+.webhook-row:last-child { border-bottom: 0; }
+.webhook-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.webhook-label { font-size: 13px; color: var(--text-2); }
+.webhook-url {
+  font-size: 13px;
+  color: var(--text);
+  /* A URL has no spaces, so only `anywhere` will break it — and without a break
+     it is what scrolls the page sideways on a handset. */
+  overflow-wrap: anywhere;
+}
+.webhook-row > button { flex: 0 0 auto; }
 
 /* The headline block of a record: the figure on the left, its status on the
    right. Wraps rather than crushes on a narrow screen. */
@@ -1941,12 +2174,11 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
   margin: 0;
   padding: 6px;
   list-style: none;
-  /* `--surface`, and the SHADOW is what lifts it. This was `--surface-2` when
-     the page was pure white and a tinted list read as clearly on top; now
-     that `--surface-2` is within a couple of points of the page ground, a
-     list painted in it looks like a hole rather than a panel. Every real
-     dropdown solves this the same way: same plane, raised by light. */
-  background: var(--surface);
+  /* `--surface-raised` and a shadow. A dropdown is one of the three things in
+     this design that genuinely floats, so it goes LIGHTER than the ground
+     while every container goes darker — painting it in `--surface` would open
+     a hole in the page exactly where the choices are. */
+  background: var(--surface-raised);
   border: 1px solid var(--line-strong);
   border-radius: var(--r);
   box-shadow: var(--shadow-lg, 0 18px 40px rgb(0 0 0 / 28%));
@@ -2030,9 +2262,10 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
 .elevate-card {
   width: 100%;
   max-width: 380px;
-  /* `--surface`, so it reads as a card lifted off the page rather than as
-     part of it — the same relationship every other card has to the ground. */
-  background: var(--surface);
+  /* `--surface-raised` and a shadow, because this one really is in front of
+     the page — a modal over a scrim. Recessing it would put it visually
+     BEHIND the content it is covering. */
+  background: var(--surface-raised);
   box-shadow: var(--shadow-lg);
 }
 .elevate-card .actions { display: flex; gap: 10px; margin-top: var(--s-4); }
