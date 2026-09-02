@@ -74,8 +74,20 @@
      Dark keeps its own logic: on black, a container lifts by a few points of
      lightness because black swallows both a shadow and a darker fill. */
   --bg:           #FFFFFF;   /* the page, behind everything */
-  --surface:      #F7F8FB;   /* cards, inputs, panels — recessed */
-  --surface-2:    #EFF1F6;   /* a well INSIDE a container, one step deeper */
+  --surface:      #F1F3F9;   /* cards, inputs, panels — recessed */
+  --surface-2:    #E4E8F0;   /* a well INSIDE a container, one step deeper */
+  /*
+   * A FIELD IS DEEPER THAN A CARD, and that separation is what took the place
+   * of the border.
+   *
+   * When the outline came off, a field and the card it sits in were the SAME
+   * fill, so the only thing marking where you could type was a hairline that
+   * was no longer drawn — reported as "the input fields are not visible on the
+   * white theme". A card is one step down from the page; a field is one step
+   * down from the card, which is the ordinary recess cue doing the work the
+   * border used to, rather than a second border in disguise.
+   */
+  --field:        #E4E8F0;   /* a text input, deeper than the card holding it */
   --surface-raised: #FFFFFF; /* only what floats: menus, sheets, modals */
   --line:         #E7EAF0;
   --line-strong:  #D5D9E2;
@@ -214,6 +226,9 @@
   --bg:           #000000;
   --surface:      #0C0D10;
   --surface-2:    #141519;
+  /* On black a field lifts rather than recesses, for the reason every other
+     container does: black swallows a darker fill. It keeps its border too. */
+  --field:        #141519;
   /* Lighter than a container, not darker. On black there is nothing below to
      recess into, so the only cue left for "in front" is more light. */
   --surface-raised: #1B1D23;
@@ -765,15 +780,22 @@ h3 { font-size: 16px; }
   aspect-ratio: 1.586;
   padding: 18px;
   border-radius: var(--r-md);
-  /* The glow is BLUE, not amber. Amber is the accent on a promo tile; on a
-     card face it reads as gold and says "premium tier", which is a product
-     claim this card does not make. Blue is the brand's own light and is what
-     the reference draws. */
+  /*
+   * BLACK, and the light on it is a SHEEN rather than a colour.
+   *
+   * It was navy with a blue glow, which reads as a themed panel — the card
+   * took the brand's hue and became another surface in the palette. A premium
+   * card is black: the material is the statement, and what moves on it is
+   * light rather than colour. So the gradient runs near-black to black off a
+   * single warm-neutral highlight in the top corner, the way light falls on a
+   * matte card held at an angle, and the edge is a hairline of that same
+   * light rather than a blue rule.
+   */
   background:
-    radial-gradient(circle at 88% 6%, rgba(104, 137, 255, .34) 0%, transparent 30%),
-    radial-gradient(circle at 55% 105%, rgba(58, 95, 210, .22) 0%, transparent 40%),
-    linear-gradient(145deg, #0B1428 0%, #08101F 55%, #050912 100%);
-  border: 1px solid #344B85;
+    radial-gradient(circle at 84% 4%, rgba(255, 255, 255, .16) 0%, transparent 34%),
+    radial-gradient(circle at 12% 96%, rgba(255, 255, 255, .05) 0%, transparent 42%),
+    linear-gradient(150deg, #23262C 0%, #131519 42%, #050506 100%);
+  border: 1px solid rgba(255, 255, 255, .14);
   color: #fff;
   /* THE ONE SURFACE THAT KEEPS A SHADOW, and it is not an exception to the
      flat rule — it is a picture of a physical object, not a section of the
@@ -805,8 +827,8 @@ h3 { font-size: 16px; }
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(160deg, transparent 30%, rgba(96, 133, 255, .16) 43%, transparent 49%),
-    repeating-linear-gradient(170deg, transparent 0 7px, rgba(130, 160, 255, .025) 8px 9px);
+    linear-gradient(160deg, transparent 30%, rgba(255, 255, 255, .10) 43%, transparent 49%),
+    repeating-linear-gradient(170deg, transparent 0 7px, rgba(255, 255, 255, .022) 8px 9px);
   pointer-events: none;
 }
 @media (min-width: 420px) { .virtual-card { padding: 22px; } }
@@ -916,16 +938,32 @@ h3 { font-size: 16px; }
 
 /* The money and the action, on one line, divided from the benefits above.
    The figure is large because it is the number the decision turns on. */
+/*
+ * THE PRICE AND THE BUTTON ON ONE LINE, and the button does not drop under it.
+ *
+ * `flex-wrap: wrap` plus a sub-line long enough to fill the row meant the
+ * button wrapped onto its own line at every width a laptop actually uses — so
+ * "beside the price" was true only on a wide monitor. The row no longer wraps,
+ * the button cannot shrink, and the explanatory line moved OUT of the flex
+ * item and under the whole row, where its length stops deciding the layout.
+ *
+ * Below 380px it wraps after all: at that width a 34px figure and a button
+ * genuinely do not fit, and squeezing them is worse than stacking them.
+ */
 .price-row {
   margin-top: var(--s-5);
   padding-top: var(--s-5);
   border-top: 1px solid var(--line);
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
   gap: var(--s-4);
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
+@media (max-width: 379px) { .price-row { flex-wrap: wrap; } }
+/* Sized by its label, never squeezed by the figure beside it. */
+.price-row > button { flex: 0 0 auto; }
+.price-foot { margin-top: 10px; color: var(--text-3); font-size: 13px; }
 .price-main { min-width: 0; }
 .price-label { color: var(--text-2); font-size: 13.5px; }
 .price {
@@ -1219,7 +1257,7 @@ label > .input-affix {
 input:where(:not([type='checkbox'], [type='radio'])), select, textarea {
   width: 100%;
   padding: 13px 15px;
-  background: var(--surface);
+  background: var(--field);
   /* NO VISIBLE BORDER AT REST IN LIGHT. The fill is already a shade darker
      than the ground, which is the cue that says "somewhere to put
      something"; the hairline on top of it made every field a ruled
@@ -1282,7 +1320,8 @@ select {
   padding-right: 42px;
 }
 
-.field-row { display: grid; gap: 0 12px; grid-template-columns: 1fr; }
+.field-row { display: grid; gap: 13px 12px; grid-template-columns: 1fr; }
+@media (min-width: 560px) { .field-row { row-gap: 0; } }
 @media (min-width: 560px) { .field-row.two { grid-template-columns: 1fr 1fr; } }
 
 /* An input with something inside it — a Paste link, an eye toggle. */
@@ -1293,7 +1332,43 @@ select {
    The affix is on the LEFT here and the padding goes the other way — the
    `.input-affix` above is built for a trailing control (the password reveal),
    and reusing it unchanged would put "+234" on top of the digits. */
-.input-affix.dial input { padding-right: 15px; padding-left: 88px; }
+.input-affix.dial input { padding-right: 15px; padding-left: 104px; }
+
+/*
+ * THE DIALLING CODE IS THE COUNTRY PICKER, and there is no longer a second
+ * one above it.
+ *
+ * The form used to carry a full-width Country select AND a flag-plus-code
+ * affix that only DISPLAYED the country — so there were two controls for one
+ * fact, and the one sitting where a customer expects to change it could not
+ * be changed at all. The affix is the picker now: it opens the same list, and
+ * the list still says "Nigeria" while the trigger says "+234", because a
+ * country's name in front of a phone number pushes the digits off a handset.
+ */
+.dial-select {
+  position: absolute;
+  left: 6px;
+  z-index: 2;
+}
+.dial-select .xselect-trigger {
+  width: auto;
+  min-height: 42px;
+  padding: 0 6px 0 10px;
+  gap: 5px;
+  background: transparent;
+  border-color: transparent;
+}
+/* A hairline BETWEEN the picker and the digits, so the two read as one field
+   with two parts rather than as a control floating over an input. */
+.dial-select::after {
+  content: '';
+  position: absolute;
+  right: -1px;
+  top: 9px;
+  bottom: 9px;
+  width: 1px;
+  background: var(--line-strong);
+}
 .dial-code {
   position: absolute;
   left: 14px;
@@ -1840,7 +1915,16 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
  * own fill, not a container drawn around all of them, which is both quieter
  * and one less edge for the eye to cross on the way to the button.
  */
-.auth-card { display: grid; gap: 18px; }
+/*
+ * THE GAP AND THE MARGIN WERE BOTH APPLYING, which is what made these forms
+ * feel like a wall of white space. `.auth-card` is a grid with a gap, and
+ * every `.field` inside it ALSO carried `margin-bottom: var(--s-4)` from the
+ * generic rule — 18px of gap plus 18px of margin between every pair of fields.
+ * The grid owns the spacing here; the margin is switched off so there is one
+ * rule deciding it rather than two adding up.
+ */
+.auth-card { display: grid; gap: 13px; }
+.auth-card .field { margin-bottom: 0; }
 
 /* Filled, borderless inputs. A 1px outline around every field is a lot of
    lines for a form with two of them; the fill does the same work and leaves
@@ -1859,7 +1943,7 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
      the pattern started — a tinted field, borderless, on a white ground — and
      it is now what the whole app does, so this rule exists only to give the
      field a taller target and a softer edge than a form field elsewhere. */
-  background: var(--surface);
+  background: var(--field);
   border: 1px solid transparent;
   border-radius: var(--r);
   min-height: 54px;
@@ -1871,7 +1955,7 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
 }
 .auth-card .field input:focus,
 .auth-card .input-affix input:focus {
-  background: var(--surface);
+  background: var(--field);
   border-color: var(--link);
   outline: none;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--link) 18%, transparent);
@@ -2236,7 +2320,7 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
   gap: 10px;
   width: 100%;
   padding: 13px 15px;
-  background: var(--surface);
+  background: var(--field);
   /* Field-shaped, so it follows the fields: borderless at rest in light. */
   border: 1px solid var(--edge-strong);
   border-radius: var(--r);
@@ -2255,7 +2339,7 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
    under a cursor — the same cascade collision the icon buttons had. */
 @media (hover: hover) {
   .xselect-trigger:hover:where(:not(:disabled)) {
-    background: var(--surface);
+    background: var(--field);
     border-color: var(--edge-hover);
   }
 }

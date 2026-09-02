@@ -83,8 +83,6 @@ export default function SignUp() {
     };
   }, []);
 
-  const dial = countries.find((c) => c.code === country)?.dial_code;
-
   async function submit() {
     setBusy(true);
     setError(undefined);
@@ -157,6 +155,8 @@ export default function SignUp() {
               style={styles.input}
               value={firstName}
               onChangeText={setFirstName}
+              placeholder="John"
+              placeholderTextColor={colors.text3}
               autoCapitalize="words"
               textContentType="givenName"
             />
@@ -167,6 +167,8 @@ export default function SignUp() {
               style={styles.input}
               value={lastName}
               onChangeText={setLastName}
+              placeholder="Doe"
+              placeholderTextColor={colors.text3}
               autoCapitalize="words"
               textContentType="familyName"
             />
@@ -186,52 +188,48 @@ export default function SignUp() {
           textContentType="username"
         />
 
-        <Text style={styles.label}>Country</Text>
-        <Select
-          label="Country"
-          value={country}
-          onChange={setCountry}
-          placeholder="Where do you live?"
-          renderMark={(code) => <CountryMark country={code} size={20} />}
-          options={countries.map((c) => ({
-            value: c.code,
-            label: c.name,
-            // What their money will be in — the consequence of this field,
-            // and the only one visible from the form.
-            hint: c.currency,
-          }))}
-        />
-
         {/*
-          THE DIALLING CODE IS READ FROM THE COUNTRY, never picked separately.
-          One place a country is stated means the two cannot disagree — a
-          second picker would let somebody choose Ghana and +234.
+          ONE COUNTRY CONTROL, AND IT IS THE ONE IN FRONT OF THE PHONE NUMBER.
+
+          There used to be two: a full-width Country picker, and a flag-plus-code
+          block that only DISPLAYED what it had chosen. So the control sitting
+          exactly where a customer reaches to change their dialling code could
+          not be changed at all. This one opens the same sheet — which still
+          says "Nigeria", because a bare code is not something you can find a
+          country by, while the trigger says "+234", because a country's name
+          in front of a phone number pushes the digits off the screen.
         */}
         <Text style={styles.label}>Phone number</Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          {/*
-            THE FLAG AND THE CODE, never a placeholder. `+-` where a dialling
-            code goes reads as a broken control rather than a loading one, and
-            with Nigeria as the default there is nothing to stand in for.
-          */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <View
             style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 7,
-              paddingHorizontal: 12,
+              justifyContent: 'center',
               minHeight: 50,
+              paddingHorizontal: 4,
               borderRadius: radius.md,
-              borderWidth: 1,
-              // Field-shaped, so it follows the fields: no border in light.
-              borderColor: colors.edgeStrong,
-              backgroundColor: colors.surface2,
+              backgroundColor: colors.field,
             }}
           >
-            <CountryMark country={country} size={18} />
-            {dial !== undefined && (
-              <Text style={[styles.amount, { color: colors.text2 }]}>+{dial}</Text>
-            )}
+            <Select
+              label="Country"
+              variant="pill"
+              value={country}
+              onChange={setCountry}
+              placeholder="+—"
+              renderMark={(code) => <CountryMark country={code} size={18} />}
+              renderTrigger={(code) => (
+                <Text style={[styles.amount, { color: colors.text }]}>
+                  +{countries.find((c) => c.code === code)?.dial_code ?? ''}
+                </Text>
+              )}
+              options={countries.map((c) => ({
+                value: c.code,
+                label: c.name,
+                // What their money will be in — the consequence of this
+                // choice, and the only one visible from the form.
+                hint: c.currency,
+              }))}
+            />
           </View>
           <TextInput
             style={[styles.input, { flex: 1 }]}

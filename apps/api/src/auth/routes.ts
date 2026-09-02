@@ -469,7 +469,22 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // and remitting sends it to somebody else — both move money.
       .authenticated('GET', '/v1/fx/quote', { pin: false })
       .authenticated('GET', '/v1/fx/trades', { pin: false })
-      .authenticated('POST', '/v1/fx/convert', { pin: true })
+      /*
+       * CONVERTING TAKES NO PIN; REMITTING DOES.
+       *
+       * A PIN is the second factor for money LEAVING the account. Converting
+       * moves a customer's own money between their own wallets — nothing
+       * leaves and nobody else can receive it — so demanding it there teaches
+       * people to type the secret that authorises payments for something that
+       * is not one. Remitting lands the converted money in somebody else's
+       * wallet, which is a payment.
+       *
+       * Two routes rather than one branch, because the policy is per route and
+       * `convertSchema` deliberately has no recipient field: the PIN-free path
+       * cannot be handed somebody to pay.
+       */
+      .authenticated('POST', '/v1/fx/convert', { pin: false })
+      .authenticated('POST', '/v1/fx/remit', { pin: true })
 
       .public(
         'POST',

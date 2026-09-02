@@ -30,6 +30,18 @@ export interface SelectProps {
    * cannot build from an API response.
    */
   readonly renderMark?: (value: string) => React.ReactNode;
+  /**
+   * What the TRIGGER shows, when that is not the option's label.
+   *
+   * The dialling-code picker is the case this exists for: the list has to say
+   * "Nigeria" so somebody can find it, and the trigger has to say "+234"
+   * because it sits in front of a phone number and the country's name there
+   * would push the field off a handset. One control, two readings.
+   */
+  readonly renderTrigger?: (value: string) => React.ReactNode;
+  /** Sized to its content rather than to the row — for a picker sitting inside
+   *  another field rather than filling one. */
+  readonly compact?: boolean;
 }
 
 /**
@@ -71,6 +83,8 @@ export function Select({
   labelledBy,
   id,
   renderMark,
+  renderTrigger,
+  compact,
 }: SelectProps): React.JSX.Element {
   const generatedId = useId();
   const listId = `${id ?? generatedId}-list`;
@@ -213,7 +227,11 @@ export function Select({
   }
 
   return (
-    <div className="xselect" ref={root} data-open={open || undefined}>
+    <div
+      className={`xselect${compact === true ? ' is-compact' : ''}`}
+      ref={root}
+      data-open={open || undefined}
+    >
       <button
         type="button"
         ref={trigger}
@@ -232,9 +250,13 @@ export function Select({
       >
         <span className="xselect-chosen">
           {renderMark !== undefined && selected !== undefined && renderMark(selected.value)}
-          <span className={selected === undefined ? 'xselect-placeholder' : undefined}>
-            {selected?.label ?? placeholder}
-          </span>
+          {renderTrigger !== undefined && selected !== undefined ? (
+            renderTrigger(selected.value)
+          ) : (
+            <span className={selected === undefined ? 'xselect-placeholder' : undefined}>
+              {selected?.label ?? placeholder}
+            </span>
+          )}
         </span>
         <Icon name="chevronDown" size={18} />
       </button>

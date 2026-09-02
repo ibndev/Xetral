@@ -33,6 +33,16 @@ export interface Palette {
    * otherwise run together, in either theme.
    */
   readonly edge: string; readonly edgeStrong: string;
+  /**
+   * A TEXT INPUT'S FILL — one step deeper than the card holding it.
+   *
+   * When the outline came off, a field and its card were the SAME fill, so
+   * nothing marked where you could type: "the input fields are not visible on
+   * the white theme". A card is one step down from the page and a field is one
+   * step down from the card, which is the ordinary recess cue doing the work
+   * the border used to.
+   */
+  readonly field: string;
   /** The "get a rate" button: filled and obvious in both themes, and NOT the
    *  inverted brand — see `buttonAccent`. Navy on light, navy with a
    *  light-blue rim on dark, matching the web's `.btn.accent`. */
@@ -65,9 +75,10 @@ export const light: Palette = {
    * `globals.css` for why this file has now argued the question twice.
    */
   bg: '#FFFFFF',
-  surface: '#F7F8FB',
-  surface2: '#EFF1F6',
+  surface: '#F1F3F9',
+  surface2: '#E4E8F0',
   surfaceRaised: '#FFFFFF',
+  field: '#E4E8F0',
   line: '#E7EAF0',
   lineStrong: '#D5D9E2',
   edge: 'transparent',
@@ -102,6 +113,8 @@ export const dark: Palette = {
   surface: '#0C0D10',
   surface2: '#141519',
   surfaceRaised: '#1B1D23',
+  // On black a field lifts rather than recesses, and keeps its border.
+  field: '#141519',
   line: '#212227',
   lineStrong: '#303237',
   edge: '#212227',
@@ -390,12 +403,19 @@ function buildSheet(colors: Palette) {
   lead: { color: colors.text2, fontFamily: font.sans, fontSize: 15, marginTop: 6, lineHeight: 22 },
   hint: { color: colors.text3, fontFamily: font.sans, fontSize: 13, marginTop: 6, lineHeight: 19 },
 
+  /*
+   * `marginTop` here is what separates one field from the next, and it was
+   * `space.md` — which, stacked over six fields, is the wall of white space
+   * the signup form was reported for. It matches the web's 13px auth-card gap
+   * now, so the two forms are the same shape on both platforms rather than
+   * merely the same fields.
+   */
   label: {
     color: colors.text2,
     fontFamily: font.sansSemi,
     fontSize: 13.5,
-    marginBottom: 7,
-    marginTop: space.md,
+    marginBottom: 6,
+    marginTop: 13,
   },
 
   /**
@@ -411,7 +431,7 @@ function buildSheet(colors: Palette) {
     marginBottom: 7,
   },
   input: {
-    backgroundColor: colors.surface,
+    backgroundColor: colors.field,
     // No visible border at rest in light. A field is recognised by its fill,
     // and a ruled rectangle at rest is an outline rather than an affordance.
     borderColor: colors.edgeStrong,

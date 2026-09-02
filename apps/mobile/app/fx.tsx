@@ -135,22 +135,31 @@ export default function Fx() {
           hint="Leave empty to convert into your own wallet."
         />
 
-        <Field
-          label="Transaction PIN"
-          secureTextEntry
-          inputMode="numeric"
-          autoComplete="off"
-          value={pin}
-          onChangeText={setPin}
-        />
+        {/* ONLY WHEN IT IS GOING TO SOMEBODY. Converting your own balance is
+            not a payment, and asking for the PIN there teaches people to type
+            it for things that are not payments. */}
+        {recipient !== '' && (
+          <Field
+            label="Transaction PIN"
+            secureTextEntry
+            inputMode="numeric"
+            autoComplete="off"
+            maxLength={6}
+            value={pin}
+            onChangeText={setPin}
+          />
+        )}
 
         <Button
           label={recipient === '' ? 'Convert' : 'Convert and send'}
           busy={busy}
-          disabled={amount === '' || pin === '' || from === to}
+          disabled={amount === '' || from === to || (recipient !== '' && pin === '')}
           onPress={() =>
             void run(async () => {
-              const trade = await client.convert({
+              /* Two calls, matching the API's two routes: converting your own
+                 balance takes no PIN, sending it to somebody does. See the
+                 web's Convert screen and `fx/dto.ts`. */
+              const movement = {
                 from,
                 to,
                 amount,
@@ -158,10 +167,12 @@ export default function Fx() {
                 // below it, so a rate that moves between the quote and the
                 // tap costs a refusal instead of money.
                 ...(quote === undefined ? {} : { minReceived: quote.receives }),
-                ...(recipient === '' ? {} : { recipient }),
-                pin,
                 idempotencyKey: attempt.key,
-              });
+              };
+              const trade =
+                recipient === ''
+                  ? await client.convert(movement)
+                  : await client.remit({ ...movement, recipient, pin });
               attempt.next();
               setPin('');
               setQuote(undefined);

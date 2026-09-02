@@ -93,8 +93,6 @@ export default function SignUp() {
     };
   }, []);
 
-  const dial = countries.find((c) => c.code === country)?.dial_code;
-
   async function submit(event: React.FormEvent) {
     event.preventDefault();
 
@@ -161,6 +159,7 @@ export default function SignUp() {
             First name
             <input
               value={firstName}
+              placeholder="John"
               autoComplete="given-name"
               onChange={(e) => setFirstName(e.target.value)}
               required
@@ -171,6 +170,7 @@ export default function SignUp() {
             Last name
             <input
               value={lastName}
+              placeholder="Doe"
               autoComplete="family-name"
               onChange={(e) => setLastName(e.target.value)}
               required
@@ -193,51 +193,46 @@ export default function SignUp() {
           />
         </div>
 
-        <div className="field">
-          {/* `id`, not `htmlFor`: `Select` is a button-and-listbox rather than
-              a native control, so it is labelled BY this element rather than
-              pointing at one. */}
-          <label id="country-label">Country</label>
-          <Select
-            labelledBy="country-label"
-            value={country}
-            onChange={setCountry}
-            placeholder="Where do you live?"
-            renderMark={(code) => <CountryMark country={code} size={20} />}
-            options={countries.map((c) => ({
-              value: c.code,
-              label: c.name,
-              // What their money will be in. Said here rather than discovered
-              // on the home screen, because it is the consequence of this
-              // field and the only one a customer can see from the form.
-              hint: c.currency,
-            }))}
-          />
-        </div>
-
         {/*
-          THE DIALLING CODE IS NOT A FIELD. It is read from the country the
-          customer already chose and shown in front of the input, so there is
-          one place a country is stated and no way for the two to disagree.
-          A second picker would let somebody select Ghana and +234.
+          ONE COUNTRY CONTROL, AND IT IS THE ONE IN FRONT OF THE PHONE NUMBER.
+
+          There used to be two: a full-width Country select, and a flag-plus-code
+          affix that only DISPLAYED what the select had chosen. So the control
+          sitting exactly where a customer reaches to change their dialling code
+          could not be changed at all, and the one that could was a separate row
+          asking the same question. The affix is the picker now — it opens the
+          same list, and the country is still stated in exactly one place, which
+          is what stops somebody selecting Ghana and +234.
+
+          The LIST says "Nigeria" and the TRIGGER says "+234": a country's name
+          in front of a phone number pushes the digits off a handset, and a bare
+          code in a list is not something you can find a country by.
         */}
         <div className="field">
-          <label htmlFor="phone">Phone number</label>
-          {/*
-            THE FLAG AND THE CODE, never a placeholder.
-
-            This used to render `+—` while the country list was in flight,
-            which reads as a broken control rather than as a loading one — an
-            em dash where a dialling code goes is not something a customer can
-            interpret. The country now defaults to Nigeria, so there is a real
-            flag and a real code on the first paint and nothing to stand in
-            for.
-          */}
+          <label htmlFor="phone" id="country-label">Phone number</label>
           <div className="input-affix dial">
-            <span className="affix dial-code" aria-hidden="true">
-              <CountryMark country={country} size={18} />
-              {dial !== undefined && <span className="dial-digits">+{dial}</span>}
-            </span>
+            <div className="dial-select">
+              <Select
+                compact
+                labelledBy="country-label"
+                value={country}
+                onChange={setCountry}
+                placeholder="+—"
+                renderMark={(code) => <CountryMark country={code} size={18} />}
+                renderTrigger={(code) => (
+                  <span className="dial-digits">
+                    +{countries.find((c) => c.code === code)?.dial_code ?? ''}
+                  </span>
+                )}
+                options={countries.map((c) => ({
+                  value: c.code,
+                  label: c.name,
+                  // What their money will be in — the consequence of this
+                  // choice, and the only one visible from the form.
+                  hint: c.currency,
+                }))}
+              />
+            </div>
             <input
               id="phone"
               type="tel"

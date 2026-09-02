@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { FlatList, Modal, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '@/icon';
-import { radius, space, useStyles, useTheme } from '@/theme';
+import { font, radius, space, useStyles, useTheme } from '@/theme';
 
 export interface SelectOption {
   readonly value: string;
@@ -39,6 +39,7 @@ export function Select({
   disabled = false,
   variant = 'field',
   renderMark,
+  renderTrigger,
 }: {
   readonly label: string;
   readonly value: string;
@@ -55,6 +56,9 @@ export function Select({
   readonly variant?: 'field' | 'pill';
   /** An optional badge before the label, on the trigger and in the sheet. */
   readonly renderMark?: (value: string) => React.ReactNode;
+  /** What the TRIGGER shows, when that is not the option's label. The dialling
+   *  picker needs the sheet to say "Nigeria" and the trigger to say "+234". */
+  readonly renderTrigger?: (value: string) => React.ReactNode;
 }) {
   const styles = useStyles();
   const colors = useTheme();
@@ -100,16 +104,20 @@ export function Select({
         ]}
       >
         {renderMark !== undefined && selected !== undefined && renderMark(selected.value)}
+        {renderTrigger !== undefined && selected !== undefined ? (
+          renderTrigger(selected.value)
+        ) : (
         <Text
           style={{
             color: selected === undefined ? colors.text3 : colors.text,
             fontSize: pill ? 15 : 16,
-            fontWeight: pill ? '700' : '400',
+            fontFamily: pill ? font.sansBold : font.sans,
             flex: pill ? 0 : 1,
           }}
         >
           {selected?.label ?? placeholder}
         </Text>
+        )}
         <Icon name="chevronDown" size={18} color={colors.text3} />
       </Pressable>
 

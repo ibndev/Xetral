@@ -6,6 +6,7 @@ import { Shell } from '@/shell';
 import { Button, Done, Field, FormError, Loading, Panel } from '@/ui';
 import { useLoad, useSubmit, useXetral } from '@/hooks';
 import { resetXetral, xetral } from '@/session';
+import { forget } from '@/biometrics';
 import { font, space, useStyles, useTheme, useThemeChoice } from '@/theme';
 
 /**
@@ -20,11 +21,23 @@ export default function Settings() {
   const { choice, set } = useThemeChoice();
 
   async function signOut() {
-    // Cleared LOCALLY FIRST. If the network call fails the customer must still
-    // end up signed out on this device — the opposite order leaves them
-    // holding live tokens because a request timed out. It also forgets the
-    // PIN behind the biometric gate: a face on this phone must not unlock the
-    // PIN of an account nobody is signed in to.
+    /*
+     * FORGETTING THE PIN IS PART OF SIGNING OUT, and it was a comment rather
+     * than a line of code.
+     *
+     * This function's own comment said it forgot the PIN behind the biometric
+     * gate. It did not: `session.signOut()` clears the tokens and
+     * `resetXetral()` resets the singleton, and neither touches SecureStore.
+     * So a face on this phone still unlocked the transaction PIN of an account
+     * nobody was signed in to — exactly the case a customer handing over their
+     * device is guarding against, and exactly what the comment claimed was
+     * covered.
+     *
+     * FIRST, and not awaited alongside the network call: if the request to
+     * revoke the session fails, the customer must still end up signed out on
+     * this device, and the secret must still be gone.
+     */
+    await forget();
     await xetral().session.signOut();
     resetXetral();
     router.replace('/signin');
@@ -145,6 +158,24 @@ function SetPin() {
         onPress={() =>
           void run(async () => {
             await client.setPin(pin, current === '' ? undefined : current);
+            /*
+             * THE STORED PIN IS NOW WRONG, and this is the bug that presents
+             * as "it says my PIN is incorrect when I entered the correct one".
+             *
+             * Biometric unlock keeps the REAL PIN in the Keychain and sends it
+             * as if typed. Change the PIN and that copy is stale — so every
+             * biometric-authorised action afterwards sends the OLD PIN and the
+             * server correctly refuses it, while the customer used Face ID and
+             * has no way to know what is being sent on their behalf.
+             *
+             * Forgetting it is the right answer rather than re-storing the new
+             * one: enrolment exists to confirm the PIN against the server
+             * before it is kept, and quietly re-enrolling here would skip that
+             * check. The customer re-enrols from the security screen, which is
+             * one deliberate step and cannot store a PIN the server has not
+             * agreed to.
+             */
+            await forget();
             // Cleared immediately. A PIN sitting in component state outlives
             // the request that needed it, and there is nothing further to do
             // with it here.

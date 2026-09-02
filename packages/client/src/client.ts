@@ -521,13 +521,17 @@ export class XetralClient {
     return this.#get(`/v1/fx/quote?${query.toString()}`);
   }
 
+  /**
+   * BETWEEN YOUR OWN WALLETS. No PIN, and no recipient — the API's schema for
+   * this route has no such field, because the PIN-free path must not be able
+   * to reach somebody else. To send converted money to another customer, call
+   * `remit`.
+   */
   async convert(input: {
     from: string;
     to: string;
     amount: string;
     minReceived?: string;
-    recipient?: string;
-    pin: string;
     idempotencyKey: string;
   }): Promise<FxTrade> {
     return this.#post('/v1/fx/convert', {
@@ -535,7 +539,27 @@ export class XetralClient {
       to: input.to,
       amount: input.amount,
       ...(input.minReceived === undefined ? {} : { min_received: input.minReceived }),
-      ...(input.recipient === undefined ? {} : { recipient: input.recipient }),
+      idempotency_key: input.idempotencyKey,
+    });
+  }
+
+  /** Converting AND sending it to somebody else. A payment, so it takes the
+   *  PIN. Same entry as `convert` with one leg pointed elsewhere. */
+  async remit(input: {
+    from: string;
+    to: string;
+    amount: string;
+    minReceived?: string;
+    recipient: string;
+    pin: string;
+    idempotencyKey: string;
+  }): Promise<FxTrade> {
+    return this.#post('/v1/fx/remit', {
+      from: input.from,
+      to: input.to,
+      amount: input.amount,
+      ...(input.minReceived === undefined ? {} : { min_received: input.minReceived }),
+      recipient: input.recipient,
       transaction_pin: input.pin,
       idempotency_key: input.idempotencyKey,
     });

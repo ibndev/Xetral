@@ -40,6 +40,7 @@ const TOKENS: Record<string, string> = {
   surfaceRaised: '--surface-raised',
   line: '--line',
   lineStrong: '--line-strong',
+  field: '--field',
   text: '--text',
   text2: '--text-2',
   text3: '--text-3',

@@ -50,7 +50,18 @@ export default function Fx() {
         onSubmit={(event) => {
           event.preventDefault();
           void run(async () => {
-            const trade = await client.convert({
+            /*
+             * CONVERTING TAKES NO PIN; SENDING IT TO SOMEBODY DOES.
+             *
+             * A PIN is the second factor for money LEAVING the account, and
+             * converting moves a customer's own money between their own
+             * wallets — the balance afterwards is the same balance in another
+             * denomination. Two calls rather than one with an optional
+             * recipient, because the API split them for the same reason: the
+             * PIN-free route's schema has no recipient field, so the path that
+             * skips the PIN cannot be handed somebody to pay.
+             */
+            const movement = {
               from,
               to,
               amount,
@@ -59,10 +70,12 @@ export default function Fx() {
               // simply absorbed by whoever is not looking — which is the
               // customer.
               ...(quote === undefined ? {} : { minReceived: quote.receives }),
-              ...(recipient === '' ? {} : { recipient }),
-              pin,
               idempotencyKey: attempt.key,
-            });
+            };
+            const trade =
+              recipient === ''
+                ? await client.convert(movement)
+                : await client.remit({ ...movement, recipient, pin });
             attempt.next();
             setPin('');
             setQuote(undefined);
@@ -160,19 +173,28 @@ export default function Fx() {
           />
         </label>
 
-        <label>
-          Transaction PIN
-          <input
-            type="password"
-            inputMode="numeric"
-            autoComplete="off"
-            value={pin}
-            onChange={(e) => setPin(e.target.value)}
-            required
-          />
-        </label>
+        {/* ONLY WHEN IT IS GOING TO SOMEBODY. Converting your own balance is
+            not a payment and asking for the PIN there teaches people to type
+            it for things that are not payments. */}
+        {recipient !== '' && (
+          <label>
+            Transaction PIN
+            <input
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
+              maxLength={6}
+              value={pin}
+              onChange={(e) => setPin(e.target.value)}
+              required
+            />
+          </label>
+        )}
 
-        <button type="submit" disabled={busy || from === to || amount === ''}>
+        <button
+          type="submit"
+          disabled={busy || from === to || amount === '' || (recipient !== '' && pin === '')}
+        >
           {busy ? 'Converting…' : recipient === '' ? 'Convert' : 'Convert and send'}
         </button>
 

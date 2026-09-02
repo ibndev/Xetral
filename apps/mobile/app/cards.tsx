@@ -90,7 +90,15 @@ export default function Cards() {
       </View>
 
       <FormError error={cards.error} code={cards.code} />
+      {/*
+        SPACE UNDER THE CARD. The specimen sits in a stack with its own gap and
+        the panel below is that stack's SIBLING, so nothing separated them —
+        the card looked like it was resting on the box rather than above it.
+        `styles.card` carries a bottom margin and no top one, which is right
+        everywhere else and wrong at exactly this seam.
+      */}
       {(none || adding) && (
+        <View style={{ marginTop: space.lg }}>
         <Issue
           price={cards.data?.issuance_fee}
           onIssued={() => {
@@ -98,6 +106,7 @@ export default function Cards() {
             cards.reload();
           }}
         />
+        </View>
       )}
     </Shell>
   );
@@ -130,7 +139,11 @@ function CardFace({
   const status = card?.status;
   const pill =
     status === undefined
-      ? { bg: 'rgba(255,255,255,.14)', fg: '#FFFFFF' }
+      ? // THE BADGE HAS TO SIT ON THE FACE, NOT OVER IT. A 14%-white fill on a
+        // near-black card is lighter than anything around it, so the chip read
+        // as a separate object stuck onto the card rather than printed on it.
+        // A dark fill with a hairline is the same cue every other status uses.
+        { bg: 'rgba(255,255,255,.07)', fg: 'rgba(255,255,255,.82)' }
       : status === 'active'
         ? { bg: 'rgba(74,222,128,.20)', fg: '#4ADE80' }
         : status === 'frozen'
@@ -153,12 +166,22 @@ function CardFace({
         padding: space.lg,
         justifyContent: 'space-between',
         overflow: 'hidden',
-        // Written out, not `colors.brand`: brand INVERTS for the dark theme,
-        // so a navy surface built from it turns near-white with white text on
-        // it. This face is dark in both themes, like the web's.
-        backgroundColor: '#0B1428',
+        /*
+         * BLACK, in both themes, and written out rather than taken from the
+         * palette: `colors.brand` INVERTS for dark, so a face built from it
+         * turns near-white with white text on it.
+         *
+         * It was navy, which reads as another themed panel — the card took the
+         * brand's hue and became a surface. A premium card is black: the
+         * material is the statement and what moves on it is light, not colour.
+         * React Native has no gradient primitive and this app ships no gradient
+         * library, so the near-black base is flat and the highlight below is
+         * one translucent disc — the same light from the same corner as the
+         * web's, at the fidelity a View can give.
+         */
+        backgroundColor: '#0B0B0D',
         borderWidth: 1,
-        borderColor: '#344B85',
+        borderColor: 'rgba(255,255,255,.14)',
         opacity: status === 'terminated' ? 0.55 : status === 'frozen' ? 0.8 : 1,
       }}
     >
@@ -175,7 +198,9 @@ function CardFace({
           width: 220,
           height: 220,
           borderRadius: 110,
-          backgroundColor: 'rgba(104,137,255,.20)',
+          // WHITE, not blue. On a black face a blue disc is a colour cast; a
+          // white one is light falling on the material.
+          backgroundColor: 'rgba(255,255,255,.10)',
         }}
       />
 
@@ -685,20 +710,15 @@ function Issue({
           borderTopWidth: 1,
           borderTopColor: colors.line,
           flexDirection: 'row',
-          alignItems: 'flex-end',
+          alignItems: 'center',
           justifyContent: 'space-between',
           gap: space.md,
         }}
       >
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={styles.muted}>{free ? 'Your card' : 'Card price'}</Text>
-          <Text style={[styles.amount, { fontSize: 34 }]}>
+          <Text style={[styles.balance, { fontSize: 34 }]}>
             {price === undefined ? '—' : free ? 'Free' : `$${price}`}
-          </Text>
-          <Text style={styles.hint}>
-            {free
-              ? 'No charge to open one.'
-              : 'One-time, from your USD wallet.'}
           </Text>
         </View>
 
@@ -709,6 +729,14 @@ function Issue({
           onPress={() => setStage('confirm')}
         />
       </View>
+
+      {/* UNDER THE ROW, not inside the price column. As a third line in that
+          column it made the column taller than the button, so `flex-end` put
+          the button level with the HINT rather than with the figure — "beside
+          the price but lower". */}
+      <Text style={styles.hint}>
+        {free ? 'No charge to open one.' : 'One-time, from your USD wallet.'}
+      </Text>
 
       <FormError error={error} code={code} />
       <Done message={done} />

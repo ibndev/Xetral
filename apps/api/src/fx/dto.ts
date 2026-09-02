@@ -11,7 +11,7 @@ export const fxQuoteSchema = z.object({
   amount: z.string().trim().min(1).max(32),
 });
 
-export const convertSchema = z.object({
+const movement = {
   from: z.enum(CONVERTIBLE),
   to: z.enum(CONVERTIBLE),
   amount: z.string().trim().min(1).max(32),
@@ -23,12 +23,40 @@ export const convertSchema = z.object({
    * the crypto withdrawal's fee ceiling, and the same reasoning.
    */
   min_received: z.string().trim().min(1).max(32).optional(),
-  /** Present makes this a REMITTANCE: the converted money lands in somebody
-   *  else's wallet. */
-  recipient: z.string().trim().min(3).max(320).optional(),
-  transaction_pin: z.string().min(1).max(32),
   idempotency_key: z.string().trim().min(8).max(128),
+};
+
+/**
+ * CONVERTING TAKES NO PIN, AND REMITTING DOES — which is why these are two
+ * schemas on two routes rather than one with an optional recipient.
+ *
+ * A PIN is the second factor for money LEAVING the account. Converting naira
+ * to dollars moves a customer's own money between their own wallets: nothing
+ * leaves, nobody else can receive it, and the balance afterwards is the same
+ * balance in another denomination. Demanding the secret that authorises
+ * payments in order to do that teaches people to type it for things that are
+ * not payments, which is the habit an attacker asking for it relies on.
+ *
+ * Remitting is a different act with the same arithmetic in front of it: the
+ * converted money lands in SOMEBODY ELSE'S wallet, and that is a payment.
+ *
+ * The split is structural rather than a branch inside the service. One route
+ * declares `pin: false` and its schema HAS NO RECIPIENT FIELD, so the path
+ * that skips the PIN cannot grow the ability to reach a stranger — not by a
+ * later edit, and not by a caller sending a field the handler happens to
+ * forward. `route-coverage.test.ts` audits the policy; this makes the policy
+ * and the payload agree.
+ */
+export const convertSchema = z.object(movement);
+
+export const remitSchema = z.object({
+  ...movement,
+  /** Whose wallet the converted money lands in. A handle, an email address, a
+   *  phone number or a payment link — the same resolver a transfer uses. */
+  recipient: z.string().trim().min(3).max(320),
+  transaction_pin: z.string().min(1).max(32),
 });
 
 export type FxQuoteBody = z.infer<typeof fxQuoteSchema>;
 export type ConvertBody = z.infer<typeof convertSchema>;
+export type RemitBody = z.infer<typeof remitSchema>;

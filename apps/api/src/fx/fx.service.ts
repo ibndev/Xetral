@@ -148,7 +148,21 @@ export class FxService {
    * sender never meant to hold it in, and a crash in that window strands it
    * there.
    */
-  async convert(userUuid: string, body: ConvertBody): Promise<FxTradeView> {
+  /**
+   * ONE implementation for converting and remitting, because they are the same
+   * entry with one leg pointed elsewhere. Two copies of these postings would be
+   * two sets of assumptions about the ledger, and a remittance is ONE entry
+   * precisely so a crash cannot strand money in a wallet the sender never meant
+   * to hold.
+   *
+   * What differs is the ROUTE, not the arithmetic: converting declares
+   * `pin: false` and its schema has no recipient, remitting declares
+   * `pin: true` and requires one. See `dto.ts`.
+   */
+  async convert(
+    userUuid: string,
+    body: ConvertBody & { readonly recipient?: string },
+  ): Promise<FxTradeView> {
     await this.settings.assertServiceEnabled('fx');
     const userId = await this.#activeUserId(userUuid);
     const from = body.from as Currency;

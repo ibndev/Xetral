@@ -676,17 +676,20 @@ function Issue({
         <div className="price-main">
           <p className="price-label">{free ? 'Your card' : 'Card price'}</p>
           <p className="price">{price === undefined ? '—' : free ? 'Free' : `$${price}`}</p>
-          <p className="price-sub">
-            {free
-              ? 'No charge to open one. Add money to it once it is yours.'
-              : 'One-time, from your USD wallet. Add money to the card afterwards.'}
-          </p>
         </div>
 
         <button type="button" onClick={() => setStage('confirm')} disabled={price === undefined}>
           Create card <Icon name="arrowRight" size={18} />
         </button>
       </div>
+      {/* UNDER THE ROW, not inside the price. As a third line in the flex item
+          its length decided whether the button fitted beside the figure, which
+          is how "beside the price" became "under it" on every ordinary width. */}
+      <p className="price-foot">
+        {free
+          ? 'No charge to open one. Add money to it once it is yours.'
+          : 'One-time, from your USD wallet. Add money to the card afterwards.'}
+      </p>
 
       <FormError error={error} code={code} />
       {done !== undefined && <p className="ok">{done}</p>}
