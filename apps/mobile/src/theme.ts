@@ -21,6 +21,23 @@ export interface Palette {
   readonly link: string; readonly bg: string; readonly surface: string;
   readonly surface2: string; readonly surfaceRaised: string;
   readonly line: string; readonly lineStrong: string;
+  /**
+   * THE OUTLINE ROUND A CONTAINER OR A FIELD — transparent in light, the line
+   * in dark. `--edge` on the web, and here for the same reason: a light
+   * container is already a shade DARKER than the ground, which is what the eye
+   * reads as a recess, so the hairline on top was a second cue for one fact
+   * and made every card an outlined box. On black there is no darker fill to
+   * recess into, so dark keeps its border.
+   *
+   * `line` is deliberately unchanged: a divider separates things that would
+   * otherwise run together, in either theme.
+   */
+  readonly edge: string; readonly edgeStrong: string;
+  /** The "get a rate" button: filled and obvious in both themes, and NOT the
+   *  inverted brand — see `buttonAccent`. Navy on light, navy with a
+   *  light-blue rim on dark, matching the web's `.btn.accent`. */
+  readonly accentButton: string; readonly accentButtonEdge: string;
+  readonly accentButtonText: string;
   readonly text: string; readonly text2: string; readonly text3: string;
   readonly onBrand: string;
   readonly ok: string; readonly okBg: string;
@@ -53,6 +70,12 @@ export const light: Palette = {
   surfaceRaised: '#FFFFFF',
   line: '#E7EAF0',
   lineStrong: '#D5D9E2',
+  edge: 'transparent',
+  edgeStrong: 'transparent',
+  // `--ink`, the same near-black navy the primary button uses on light.
+  accentButton: '#0D1B3E',
+  accentButtonEdge: 'transparent',
+  accentButtonText: '#FFFFFF',
 
   text: '#0D1B3E',
   text2: '#4A5878',
@@ -81,6 +104,14 @@ export const dark: Palette = {
   surfaceRaised: '#1B1D23',
   line: '#212227',
   lineStrong: '#303237',
+  edge: '#212227',
+  edgeStrong: '#303237',
+  // `--ink-700` with a `--link` rim: navy that reads as a control on black,
+  // with the light blue saying it is pressable without spending the white the
+  // primary button owns.
+  accentButton: '#16295A',
+  accentButtonEdge: '#6E9BFF',
+  accentButtonText: '#FFFFFF',
 
   text: '#EEF2FA',
   text2: '#A3B0CC',
@@ -332,7 +363,9 @@ function buildSheet(colors: Palette) {
      container, which is the raised look the design does not want. */
   card: {
     backgroundColor: colors.surface,
-    borderColor: colors.line,
+    // Transparent in light — see `edge` on the palette. The fill is what makes
+    // this a card; the border only has work to do on black.
+    borderColor: colors.edge,
     borderWidth: 1,
     borderRadius: radius.lg,
     padding: space.lg,
@@ -379,7 +412,9 @@ function buildSheet(colors: Palette) {
   },
   input: {
     backgroundColor: colors.surface,
-    borderColor: colors.lineStrong,
+    // No visible border at rest in light. A field is recognised by its fill,
+    // and a ruled rectangle at rest is an outline rather than an affordance.
+    borderColor: colors.edgeStrong,
     borderWidth: 1,
     borderRadius: radius.md,
     color: colors.text,
@@ -407,6 +442,25 @@ function buildSheet(colors: Palette) {
   },
   buttonQuiet: { backgroundColor: colors.surface2 },
   buttonQuietText: { color: colors.text },
+
+  /*
+   * THE BUTTON THAT HAS TO BE SEEN — the web's `.btn.accent`.
+   *
+   * "Get a quote" was `quiet`, which is a `surface2` fill: correct for a
+   * secondary action beside a primary one, and wrong when it is the ONLY thing
+   * on the screen that does anything. It was the least visible control on the
+   * Convert screen while being the one that has to be pressed first.
+   *
+   * In DARK it is navy with a light-blue rim rather than the inverted white
+   * brand: a white button on black reads as the primary action of the whole
+   * screen, and this one is a step on the way to `Convert`.
+   */
+  buttonAccent: {
+    backgroundColor: colors.accentButton,
+    borderColor: colors.accentButtonEdge,
+    borderWidth: 1,
+  },
+  buttonAccentText: { color: colors.accentButtonText },
 
   /* Tabular figures, so a column of balances lines up and a digit changing
      does not shift the ones beside it. */

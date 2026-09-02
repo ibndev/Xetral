@@ -719,7 +719,7 @@ function Benefit({
           justifyContent: 'center',
           backgroundColor: colors.surface2,
           borderWidth: 1,
-          borderColor: colors.line,
+          borderColor: colors.edge,
         }}
       >
         <Icon name={icon} size={20} color={colors.text2} />

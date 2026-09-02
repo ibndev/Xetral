@@ -223,7 +223,8 @@ export default function SignUp() {
               minHeight: 50,
               borderRadius: radius.md,
               borderWidth: 1,
-              borderColor: colors.lineStrong,
+              // Field-shaped, so it follows the fields: no border in light.
+              borderColor: colors.edgeStrong,
               backgroundColor: colors.surface2,
             }}
           >

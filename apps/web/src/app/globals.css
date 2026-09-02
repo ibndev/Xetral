@@ -80,6 +80,31 @@
   --line:         #E7EAF0;
   --line-strong:  #D5D9E2;
 
+  /* THE OUTLINE ROUND A CONTAINER OR A FIELD — TRANSPARENT IN LIGHT, and that
+     is the whole of this token's reason to exist.
+
+     A container here is already a shade DARKER than the ground, and that is
+     what the eye reads as a recess. The hairline on top of it was a second
+     cue saying the same thing, and two cues for one fact read as an outline:
+     a screen of stacked cards looked like boxes drawn on a page rather than
+     wells cut into it, and a text field at rest was a ruled rectangle waiting
+     for input it had not been given.
+
+     DARK KEEPS ITS BORDERS, because on black there is no darker fill to use:
+     a container lifts by a few points of lightness and the line is what
+     finishes the edge.
+
+     `--line` is deliberately NOT what changed. Dividers — a table's rules, a
+     section head, an `hr` — are structure rather than outline, and they
+     separate things that would otherwise run together in either theme.
+
+     `--edge-hover` exists so a field at rest and a field under the pointer
+     are the same in light. Hover is not focus; a border appearing under the
+     mouse is the outline coming back on the one screen somebody is reading. */
+  --edge:         transparent;
+  --edge-strong:  transparent;
+  --edge-hover:   transparent;
+
   /* Text */
   --text:         #0D1B3E;
   --text-2:       #4A5878;   /* labels, secondary */
@@ -194,6 +219,11 @@
   --surface-raised: #1B1D23;
   --line:         #212227;
   --line-strong:  #303237;
+  /* On black there is no darker fill to recess into, so the edge IS the
+     border. Unchanged from what dark has always drawn. */
+  --edge:         var(--line);
+  --edge-strong:  var(--line-strong);
+  --edge-hover:   var(--text-3);
 
   --text:         #EEF2FA;
   --text-2:       #A3B0CC;
@@ -563,7 +593,7 @@ h3 { font-size: 16px; }
    into an outlined box sitting on top. */
 .card {
   background: var(--surface);
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: var(--r-md);
   padding: 18px;
   transition: background var(--t) var(--ease), border-color var(--t) var(--ease);
@@ -572,9 +602,9 @@ h3 { font-size: 16px; }
 
 /* Kept as a name so the pages that ask for it still parse, and deliberately
    the same as an ordinary card: there is no raised state in this design. */
-.card.raised { border-color: var(--line-strong); }
+.card.raised { border-color: var(--edge-strong); }
 .card.interactive { cursor: pointer; }
-.card.interactive:hover { border-color: var(--line-strong); background: var(--surface-2); }
+.card.interactive:hover { border-color: var(--edge-hover); background: var(--surface-2); }
 .card.interactive:active { background: var(--surface-2); }
 
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: var(--s-3); }
@@ -613,7 +643,7 @@ h3 { font-size: 16px; }
 /* The balance card — the one piece of chrome a customer looks at daily. */
 .balance-card {
   background: var(--surface);
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: var(--r-lg);
   padding: 22px;
 }
@@ -670,7 +700,7 @@ h3 { font-size: 16px; }
   padding: 10px 6px;
   min-height: 76px;
   background: var(--surface);
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: var(--r);
   color: var(--text);
   font-size: 11.5px;
@@ -689,7 +719,7 @@ h3 { font-size: 16px; }
               transform var(--t) var(--ease-out);
 }
 @media (hover: hover) {
-  .tile:hover { background: var(--surface-2); border-color: var(--line-strong); }
+  .tile:hover { background: var(--surface-2); border-color: var(--edge-hover); }
 }
 .tile:active { transform: scale(.98); background: var(--surface-2); }
 .tile .tile-icon {
@@ -878,7 +908,7 @@ h3 { font-size: 16px; }
   display: grid;
   place-items: center;
   background: var(--surface-2);
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   color: var(--text-2);
 }
 .benefit h3 { font-size: 15.5px; margin: 0; letter-spacing: -.01em; }
@@ -1190,7 +1220,12 @@ input:where(:not([type='checkbox'], [type='radio'])), select, textarea {
   width: 100%;
   padding: 13px 15px;
   background: var(--surface);
-  border: 1px solid var(--line-strong);
+  /* NO VISIBLE BORDER AT REST IN LIGHT. The fill is already a shade darker
+     than the ground, which is the cue that says "somewhere to put
+     something"; the hairline on top of it made every field a ruled
+     rectangle. The FOCUS border below is untouched, because it answers a
+     different question — which field is taking what you type. */
+  border: 1px solid var(--edge-strong);
   border-radius: var(--r);
   color: var(--text);
   font-family: var(--font-sans);
@@ -1221,7 +1256,11 @@ input[type='checkbox']:disabled, input[type='radio']:disabled { cursor: not-allo
 
 input::placeholder, textarea::placeholder { color: var(--text-3); }
 input:where(:not([type='checkbox'], [type='radio'])):hover, select:hover, textarea:hover {
-  border-color: var(--text-3);
+  /* HOVER IS NOT FOCUS. In light this resolves to transparent, so a field
+     under the pointer looks exactly like a field at rest — a border appearing
+     under the mouse is the outline coming back on the one screen somebody is
+     reading. The focus border below is a different question and still shows. */
+  border-color: var(--edge-hover);
 }
 input:where(:not([type='checkbox'], [type='radio'])):focus, select:focus, textarea:focus {
   outline: none;
@@ -1533,7 +1572,7 @@ td.right, th.right { text-align: right; padding-right: 0; }
 
 .stat {
   background: var(--surface);
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: var(--r);
   padding: 15px 16px;
 }
@@ -1806,7 +1845,14 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
 /* Filled, borderless inputs. A 1px outline around every field is a lot of
    lines for a form with two of them; the fill does the same work and leaves
    the focus ring as the only thing that draws a border, which is exactly when
-   a border means something. */
+   a border means something.
+
+   THIS PAGE IS WHERE THE PATTERN STARTED and `--edge` is that argument applied
+   to the rest of the light theme: every container and every field is already a
+   shade darker than the ground, so the hairline was a second cue for a fact
+   the fill had already stated. These rules survive because an auth field is
+   taller and softer than a form field elsewhere, not because it is the only
+   borderless one any more. */
 .auth-card .field input,
 .auth-card .input-affix input {
   /* `--surface`, like every other field in the product. This page is where
@@ -1821,7 +1867,7 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
   transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
 }
 @media (hover: hover) {
-  .auth-card .field input:hover:where(:not(:focus)) { border-color: var(--line); }
+  .auth-card .field input:hover:where(:not(:focus)) { border-color: var(--edge-hover); }
 }
 .auth-card .field input:focus,
 .auth-card .input-affix input:focus {
@@ -1881,7 +1927,7 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
    rather than two that happen to share a colour. */
 .panel {
   background: var(--surface);
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: var(--r-md);
   padding: 18px;
   margin-bottom: var(--s-5);
@@ -2056,7 +2102,7 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
   display: flex;
   gap: 14px;
   align-items: flex-start;
-  border-color: var(--line-strong);
+  border-color: var(--edge-strong);
 }
 .verify-icon {
   display: grid;
@@ -2124,7 +2170,7 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
 .legal-table-wrap {
   overflow-x: auto;
   margin: 0 0 18px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: var(--r-md);
 }
 
@@ -2191,7 +2237,8 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
   width: 100%;
   padding: 13px 15px;
   background: var(--surface);
-  border: 1px solid var(--line-strong);
+  /* Field-shaped, so it follows the fields: borderless at rest in light. */
+  border: 1px solid var(--edge-strong);
   border-radius: var(--r);
   color: var(--text);
   font-family: var(--font-sans);
@@ -2209,7 +2256,7 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
 @media (hover: hover) {
   .xselect-trigger:hover:where(:not(:disabled)) {
     background: var(--surface);
-    border-color: var(--text-3);
+    border-color: var(--edge-hover);
   }
 }
 .xselect-trigger:active:where(:not(:disabled)) { transform: none; }
@@ -2385,7 +2432,7 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
 @media (hover: hover) {
   .ccy-select .xselect-trigger:hover:where(:not(:disabled)) {
     background: var(--surface-2);
-    border-color: var(--line-strong);
+    border-color: var(--edge-hover);
   }
 }
 /* Right-aligned to its trigger and wide enough for a figure, rather than
