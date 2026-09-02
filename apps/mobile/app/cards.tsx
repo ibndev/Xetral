@@ -306,8 +306,29 @@ function CardRow({
   const { busy, error, code, done, run } = useSubmit();
   const [pin, setPin] = useState('');
   const [amount, setAmount] = useState('');
-  const [open, setOpen] = useState(false);
   const funding = useIdempotencyKey();
+  /*
+   * WHICH ACTION THE PIN IS FOR.
+   *
+   * THIS SCREEN RENDERED THREE PIN FIELDS AT ONCE — one for unfreeze, one
+   * inside the top-up form and one under "Show card details" — all bound to
+   * the same `pin` state. A frozen card showed all three stacked, so the
+   * customer saw the same secret asked for three times with three different
+   * labels and no way to tell which one mattered. A secret asked for
+   * repeatedly with no stated purpose is the habit that makes somebody type it
+   * when a stranger asks.
+   *
+   * One action, then the PIN for that action, named — the same order the Send
+   * screen and the card purchase now follow, and the same fix as the web's.
+   */
+  const [pending, setPending] = useState<'fund' | 'unfreeze' | 'reveal' | undefined>(undefined);
+
+  /** Leaves the PIN nowhere. A cancelled action must not leave the secret in
+   *  state for the next one to reuse. */
+  function cancel(): void {
+    setPin('');
+    setPending(undefined);
+  }
   /*
    * NAMING THE CARD — the step that comes AFTER buying one, and the reason the
    * onboarding form no longer asks. A second card is otherwise
@@ -380,7 +401,7 @@ function CardRow({
         />
       )}
 
-      {card.status !== 'terminated' && (
+      {card.status !== 'terminated' && pending === undefined && (
         <View style={{ gap: space.sm }}>
           {/*
             Freezing asks for nothing, and the server does not require a PIN
@@ -403,108 +424,107 @@ function CardRow({
               }
             />
           ) : (
-            <>
-              <Field
-                label="Transaction PIN"
-                secureTextEntry
-                inputMode="numeric"
-                autoComplete="off"
-                value={pin}
-                onChangeText={setPin}
-              />
-              <Button
-                label="Unfreeze"
-                quiet
-                busy={busy}
-                disabled={pin === ''}
-                onPress={() =>
-                  void run(async () => {
-                    await client.unfreezeCard(card.id, pin);
-                    setPin('');
-                    onChange();
-                    return 'Card unfrozen.';
-                  })
-                }
-              />
-            </>
+            <Button label="Unfreeze" quiet onPress={() => setPending('unfreeze')} />
           )}
 
           <Button
-            label={open ? 'Cancel top-up' : 'Add money to card'}
+            label="Add money to card"
             quiet
             icon="plus"
-            onPress={() => setOpen((was) => !was)}
+            onPress={() => setPending('fund')}
           />
-
-          {open && (
-            <>
-              <Field
-                label="Amount (USD)"
-                inputMode="decimal"
-                placeholder="25.00"
-                value={amount}
-                onChangeText={setAmount}
-              />
-              <Field
-                label="Transaction PIN"
-                secureTextEntry
-                inputMode="numeric"
-                autoComplete="off"
-                value={pin}
-                onChangeText={setPin}
-              />
-              <Button
-                label="Fund the card"
-                busy={busy}
-                disabled={amount === '' || pin === ''}
-                onPress={() =>
-                  void run(async () => {
-                    await client.fundCard(card.id, {
-                      amount,
-                      pin,
-                      idempotencyKey: funding.key,
-                    });
-                    // A NEW key after a success: this form is now available
-                    // for a genuinely different top-up, and reusing the old
-                    // one would have the server replay the first and report
-                    // success for money that never moved.
-                    funding.next();
-                    setAmount('');
-                    setPin('');
-                    setOpen(false);
-                    onChange();
-                    return 'Card funded.';
-                  })
-                }
-              />
-            </>
-          )}
 
           {/* A frozen card can still be revealed; a terminated one cannot.
               Freezing stops spending, not looking — a customer disputing
               charges still needs to read the number. */}
-          <Field
-            label="Transaction PIN, to show the number"
-            secureTextEntry
-            inputMode="numeric"
-            autoComplete="off"
-            value={pin}
-            onChangeText={setPin}
-          />
           <Button
             label="Show card details"
             quiet
             icon="eye"
+            onPress={() => setPending('reveal')}
+          />
+        </View>
+      )}
+
+      {/*
+        ONE PANEL, NAMING WHAT IT IS ABOUT TO DO. The PIN never appears without
+        a line saying which action it authorises, and it is the same field for
+        all three — so there is no way for one of them to be reachable and
+        another not, which is exactly what went wrong on the web.
+      */}
+      {pending !== undefined && (
+        <View style={{ gap: space.sm }}>
+          <Text style={styles.h2}>
+            {pending === 'fund'
+              ? 'Add money to this card'
+              : pending === 'unfreeze'
+                ? 'Unfreeze this card'
+                : 'Show card details'}
+          </Text>
+
+          {pending === 'fund' && (
+            <Field
+              label="Amount (USD)"
+              inputMode="decimal"
+              placeholder="25.00"
+              value={amount}
+              onChangeText={setAmount}
+            />
+          )}
+
+          <Field
+            label="Transaction PIN"
+            secureTextEntry
+            inputMode="numeric"
+            autoComplete="off"
+            maxLength={6}
+            value={pin}
+            onChangeText={setPin}
+          />
+
+          <Button
+            label={
+              pending === 'fund'
+                ? 'Add money to card'
+                : pending === 'unfreeze'
+                  ? 'Unfreeze card'
+                  : 'Show details'
+            }
             busy={busy}
-            disabled={pin === ''}
+            disabled={pin === '' || (pending === 'fund' && amount === '')}
             onPress={() =>
               void run(async () => {
+                if (pending === 'fund') {
+                  await client.fundCard(card.id, {
+                    amount,
+                    pin,
+                    idempotencyKey: funding.key,
+                  });
+                  // A NEW key after a success: this form is now available for
+                  // a genuinely different top-up, and reusing the old one
+                  // would have the server replay the first and report success
+                  // for money that never moved.
+                  funding.next();
+                  setAmount('');
+                  cancel();
+                  onChange();
+                  return 'Card funded.';
+                }
+                if (pending === 'unfreeze') {
+                  await client.unfreezeCard(card.id, pin);
+                  cancel();
+                  onChange();
+                  return 'Card unfrozen.';
+                }
+                // The one action that returns something. `secrets` is separate
+                // state with a sixty-second life; the PIN is dropped either way.
                 setSecrets(await client.revealCard(card.id, pin));
-                setPin('');
+                cancel();
                 return undefined;
               })
             }
           />
+          <Button label="Cancel" quiet onPress={cancel} />
         </View>
       )}
 

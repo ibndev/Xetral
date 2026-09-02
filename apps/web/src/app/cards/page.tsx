@@ -202,9 +202,36 @@ function CardRow({
   const client = useXetral();
   const { busy, error, code, run } = useSubmit();
   const [pin, setPin] = useState('');
-  const [open, setOpen] = useState(false);
   const funding = useIdempotencyKey();
   const [amount, setAmount] = useState('');
+  /*
+   * WHICH ACTION THE PIN IS FOR — and the reason this is one state rather than
+   * a bare `open` flag.
+   *
+   * THE PIN BOX WAS RENDERED ONLY WHEN THE TOP-UP FORM WAS OPEN OR THE CARD WAS
+   * FROZEN, and three actions read it. So on an ACTIVE card "Show details" was
+   * permanently disabled on `pin === ''` with no box on screen to fill: the
+   * only way to read your own card number was to open Add money, type a PIN
+   * into a form that says it is for adding money, and press a different button.
+   * That is Phase 13's "every card issued was unusable" finding, back in the
+   * UI — the reveal exists and cannot be reached.
+   *
+   * The other direction was wrong too: a frozen card showed a PIN box the
+   * moment it rendered, before the customer had said whether they wanted to
+   * unfreeze it or read it. A secret asked for with no stated purpose is the
+   * habit that makes somebody type it when a stranger asks.
+   *
+   * So: pick the action, THEN the PIN for that action, named. The same order
+   * the Send screen and the card purchase now follow.
+   */
+  const [pending, setPending] = useState<'fund' | 'unfreeze' | 'reveal' | undefined>(undefined);
+
+  /** Leaves the PIN nowhere. A cancelled action must not leave the secret in
+   *  state for the next one to reuse. */
+  function cancel(): void {
+    setPin('');
+    setPending(undefined);
+  }
   /*
    * NAMING THE CARD, which is the step that comes AFTER buying one.
    *
@@ -331,7 +358,7 @@ function CardRow({
         <span className="mono">{formatAmount(card.balance, card.currency)}</span>
       </div>
 
-      {card.status !== 'terminated' && (
+      {card.status !== 'terminated' && pending === undefined && (
         <div className="actions">
           {/*
             Freezing asks for nothing. The server does not require a PIN either,
@@ -355,25 +382,13 @@ function CardRow({
               Freeze
             </button>
           ) : (
-            <button
-              type="button"
-              className="ghost small"
-              disabled={busy || pin === ''}
-              onClick={() =>
-                void run(async () => {
-                  await client.unfreezeCard(card.id, pin);
-                  setPin('');
-                  onChange();
-                  return 'Card unfrozen.';
-                })
-              }
-            >
+            <button type="button" className="ghost small" onClick={() => setPending('unfreeze')}>
               Unfreeze
             </button>
           )}
 
-          <button type="button" className="ghost small" onClick={() => setOpen(!open)}>
-            {open ? 'Cancel' : 'Add money'}
+          <button type="button" className="ghost small" onClick={() => setPending('fund')}>
+            Add money
           </button>
 
           {/*
@@ -382,26 +397,34 @@ function CardRow({
             online, and unlike a transfer there is no ledger entry afterwards
             for anyone to notice.
           */}
-          <button
-            type="button"
-            className="ghost small"
-            disabled={busy || pin === ''}
-            onClick={() =>
-              void run(async () => {
-                setSecrets(await client.revealCard(card.id, pin));
-                setPin('');
-                return 'Showing your card details for one minute.';
-              })
-            }
-          >
+          <button type="button" className="ghost small" onClick={() => setPending('reveal')}>
             Show details
           </button>
         </div>
       )}
 
-      {(open || card.status === 'frozen') && (
+      {/*
+        ONE PANEL, NAMING WHAT IT IS ABOUT TO DO. The PIN never appears without
+        a sentence saying which action it authorises — and it is the same box
+        for all three, so there is no way for one of them to be reachable and
+        another not.
+      */}
+      {pending !== undefined && (
         <div style={{ marginTop: 12 }}>
-          {open && (
+          <div className="section-head row-between">
+            <h2>
+              {pending === 'fund'
+                ? 'Add money to this card'
+                : pending === 'unfreeze'
+                  ? 'Unfreeze this card'
+                  : 'Show card details'}
+            </h2>
+            <button type="button" className="btn link" onClick={cancel}>
+              Cancel
+            </button>
+          </div>
+
+          {pending === 'fund' && (
             <label>
               Amount (USD)
               <input
@@ -409,9 +432,11 @@ function CardRow({
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 placeholder="25.00"
+                autoFocus
               />
             </label>
           )}
+
           <label>
             Transaction PIN
             <input
@@ -419,15 +444,20 @@ function CardRow({
               inputMode="numeric"
               autoComplete="off"
               value={pin}
+              maxLength={6}
               onChange={(e) => setPin(e.target.value)}
+              // Focused here for the two actions that have nothing above it, so
+              // the one field on screen is the one the cursor is in.
+              autoFocus={pending !== 'fund'}
             />
           </label>
-          {open && (
-            <button
-              type="button"
-              disabled={busy || amount === '' || pin === ''}
-              onClick={() =>
-                void run(async () => {
+
+          <button
+            type="button"
+            disabled={busy || pin === '' || (pending === 'fund' && amount === '')}
+            onClick={() =>
+              void run(async () => {
+                if (pending === 'fund') {
                   await client.fundCard(card.id, {
                     amount,
                     pin,
@@ -439,16 +469,32 @@ function CardRow({
                   // money that never moved.
                   funding.next();
                   setAmount('');
-                  setPin('');
-                  setOpen(false);
+                  cancel();
                   onChange();
                   return 'Card funded.';
-                })
-              }
-            >
-              {busy ? 'Working…' : 'Add money to card'}
-            </button>
-          )}
+                }
+                if (pending === 'unfreeze') {
+                  await client.unfreezeCard(card.id, pin);
+                  cancel();
+                  onChange();
+                  return 'Card unfrozen.';
+                }
+                // The one action that returns something. `secrets` is separate
+                // state with a sixty-second life; the PIN is dropped either way.
+                setSecrets(await client.revealCard(card.id, pin));
+                cancel();
+                return 'Showing your card details for one minute.';
+              })
+            }
+          >
+            {busy
+              ? 'Working…'
+              : pending === 'fund'
+                ? 'Add money to card'
+                : pending === 'unfreeze'
+                  ? 'Unfreeze card'
+                  : 'Show details'}
+          </button>
         </div>
       )}
 
