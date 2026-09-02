@@ -725,15 +725,25 @@ h3 { font-size: 16px; }
   flex-direction: column;
   justify-content: space-between;
   width: 100%;
-  max-width: 380px;
+  /* Wider than the 380px it was. At that size it read as a thumbnail beside a
+     full-width panel; this is the screen where the card is the SUBJECT, so it
+     is the largest thing on it. Still capped, because a credit card drawn at
+     700px on a desktop stops looking like a card. */
+  max-width: 520px;
   /* The real proportion, so it reads as a card at any width rather than as a
      panel that happens to be dark. */
   aspect-ratio: 1.586;
   padding: 18px;
   border-radius: var(--r-md);
+  /* The glow is BLUE, not amber. Amber is the accent on a promo tile; on a
+     card face it reads as gold and says "premium tier", which is a product
+     claim this card does not make. Blue is the brand's own light and is what
+     the reference draws. */
   background:
-    radial-gradient(120% 140% at 85% 0%, rgba(245, 166, 35, .28) 0%, transparent 55%),
-    linear-gradient(150deg, var(--ink-700) 0%, var(--ink) 62%, #060B1C 100%);
+    radial-gradient(circle at 88% 6%, rgba(104, 137, 255, .34) 0%, transparent 30%),
+    radial-gradient(circle at 55% 105%, rgba(58, 95, 210, .22) 0%, transparent 40%),
+    linear-gradient(145deg, #0B1428 0%, #08101F 55%, #050912 100%);
+  border: 1px solid #344B85;
   color: #fff;
   /* THE ONE SURFACE THAT KEEPS A SHADOW, and it is not an exception to the
      flat rule — it is a picture of a physical object, not a section of the
@@ -756,7 +766,56 @@ h3 { font-size: 16px; }
   background: radial-gradient(circle, rgba(255, 255, 255, .10) 0%, transparent 68%);
   pointer-events: none;
 }
+/* The diagonal sheen and the fine ruling, which is what makes the face read
+   as a manufactured object rather than a gradient. Both are drawn; a card
+   covered in imported flourishes reads as a toy, and this one has money on
+   it. */
+.virtual-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(160deg, transparent 30%, rgba(96, 133, 255, .16) 43%, transparent 49%),
+    repeating-linear-gradient(170deg, transparent 0 7px, rgba(130, 160, 255, .025) 8px 9px);
+  pointer-events: none;
+}
 @media (min-width: 420px) { .virtual-card { padding: 22px; } }
+
+/* The scheme mark and the currency, bottom right. `VISA` is set in italic
+   because that is the mark's own form — it is a wordmark being reproduced,
+   not a label being styled. */
+.vc-scheme {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 800;
+  font-style: italic;
+  letter-spacing: -.04em;
+  line-height: 1;
+}
+.vc-currency { font-size: 11px; letter-spacing: .08em; text-align: right; margin-top: 3px; }
+
+/* The contactless mark, drawn as three arcs rather than shipped as an icon
+   font — it sits on a dark face at a size where a glyph substitution would
+   be obvious. */
+.vc-wave { position: absolute; right: 18px; top: 62px; opacity: .82; }
+@media (min-width: 420px) { .vc-wave { right: 22px; top: 74px; } }
+
+/* Stacked label/value pairs on the left of the footer, as embossed on a real
+   card: the expiry above the holder. */
+.vc-stack { display: flex; flex-direction: column; gap: 9px; min-width: 0; }
+
+/* THE SPECIMEN, shown to a customer who has no card yet.
+   Deliberately the SAME element with the same masked number — a preview drawn
+   from different markup is a preview that stops matching the product the
+   first time either changes. It is inert, so it takes no status class and no
+   pointer. */
+.virtual-card.is-specimen { opacity: .96; }
+
+/* Pager dots under the card stack. Presentational only — the cards are all
+   rendered and this says how many there are. */
+.vc-dots { display: flex; gap: 6px; justify-content: center; margin-top: 2px; }
+.vc-dot { width: 22px; height: 3px; border-radius: 2px; background: var(--line-strong); }
+.vc-dot.on { background: var(--link); }
 
 .vc-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 /* The status pill sits on a dark face, so it cannot use the light-theme
@@ -771,8 +830,8 @@ h3 { font-size: 16px; }
 .virtual-card .badge.danger { background: rgba(248, 113, 113, .20); color: #F87171; border-color: transparent; }
 
 .vc-number {
-  font-size: clamp(15px, 4.6vw, 20px);
-  letter-spacing: .12em;
+  font-size: clamp(16px, 4.2vw, 23px);
+  letter-spacing: .14em;
   /* Optically centred in the space between the mark and the footer, which is
      where the embossed number sits on a physical card. */
   margin: auto 0;
@@ -797,6 +856,74 @@ h3 { font-size: 16px; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ─────────────── the card onboarding panel ───────────────
+   The screen a customer sees BEFORE they have a card, and the one place in
+   the product that has to sell something rather than report it. Two benefits
+   and a price, which is the whole of what somebody needs to decide. */
+
+.benefits { display: grid; grid-template-columns: 1fr; gap: var(--s-4); margin-top: var(--s-5); }
+@media (min-width: 720px) { .benefits { grid-template-columns: 1fr 1fr; gap: var(--s-5); } }
+
+.benefit { display: flex; gap: 14px; align-items: flex-start; }
+.benefit-icon {
+  flex: 0 0 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  color: var(--text-2);
+}
+.benefit h3 { font-size: 15.5px; margin: 0; letter-spacing: -.01em; }
+.benefit p { margin: 4px 0 0; color: var(--text-2); font-size: 14px; line-height: 1.45; }
+
+/* The money and the action, on one line, divided from the benefits above.
+   The figure is large because it is the number the decision turns on. */
+.price-row {
+  margin-top: var(--s-5);
+  padding-top: var(--s-5);
+  border-top: 1px solid var(--line);
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--s-4);
+  flex-wrap: wrap;
+}
+.price-main { min-width: 0; }
+.price-label { color: var(--text-2); font-size: 13.5px; }
+.price {
+  font-family: var(--font-display);
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: -.03em;
+  font-variant-numeric: tabular-nums;
+  margin: 2px 0 0;
+  line-height: 1.05;
+}
+@media (min-width: 720px) { .price { font-size: 42px; } }
+.price-sub { color: var(--text-3); font-size: 13px; margin-top: 3px; }
+/* The amount is typed into the figure's own slot rather than into a field
+   below it, so the number the customer is deciding about is the number they
+   are editing. */
+.price-input {
+  font-family: var(--font-display);
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: -.03em;
+  font-variant-numeric: tabular-nums;
+  padding: 0;
+  min-height: 0;
+  width: 100%;
+  max-width: 220px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line-strong);
+  border-radius: 0;
+}
+@media (min-width: 720px) { .price-input { font-size: 42px; } }
+.price-input:focus { outline: none; border-bottom-color: var(--link); box-shadow: none; }
 
 /* A frozen card is still the customer's, so it dims rather than greys out —
    and a terminated one reads as finished without being unreadable, because a

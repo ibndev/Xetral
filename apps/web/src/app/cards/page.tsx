@@ -28,32 +28,151 @@ export default function Cards() {
   const identity = useLoad(() => client.kyc().catch(() => null), [client]);
   const holder = identity.data?.full_name;
 
+  /*
+   * GETTING A FIRST CARD IS AN ONBOARDING STEP, not a form at the bottom of a
+   * list. A customer with no card was shown an empty list and then asked for a
+   * name, an amount and a PIN — three fields answering a question they had not
+   * been given a reason to answer. The panel below says what the card is and
+   * what it costs before it asks for anything.
+   *
+   * Somebody who already HAS a card is not being onboarded, so they get the
+   * list and an "Add a card" button instead.
+   */
+  const none = data !== undefined && data.length === 0;
+  const [adding, setAdding] = useState(false);
+  const issuing = none || adding;
+
   return (
     <Shell>
-
-      <div className="card">
-        <h1>Cards</h1>
-        <h2>Virtual dollar cards, funded from your wallet</h2>
-
-        {loading && <p className="spinner">Loading…</p>}
-        {error !== undefined &&
-          (code === 'kyc_required' ? (
-            <VerifyPrompt what="a USD card" detail={error} />
-          ) : (
-            <p className="error">{error}</p>
-          ))}
-
-        {data !== undefined && data.length === 0 && (
-          <p className="empty">No cards yet.</p>
+      <div className="section-head row-between">
+        <div>
+          <h1>Your cards</h1>
+          <p className="lead">Manage your virtual dollar cards</p>
+        </div>
+        {data !== undefined && data.length > 0 && !adding && (
+          <button type="button" className="ghost" onClick={() => setAdding(true)}>
+            <Icon name="plus" size={16} /> Add a card
+          </button>
         )}
-
-        {data?.map((card) => (
-          <CardRow key={card.id} card={card} holder={holder} onChange={reload} />
-        ))}
       </div>
 
-      <Issue onIssued={reload} />
+      {loading && <p className="spinner">Loading…</p>}
+      {error !== undefined &&
+        (code === 'kyc_required' ? (
+          <VerifyPrompt what="a USD card" detail={error} />
+        ) : (
+          <p className="error">{error}</p>
+        ))}
+
+      {/*
+        THE SPECIMEN IS THE SAME ELEMENT AS A REAL CARD, deliberately. A
+        preview built from its own markup is one that stops matching the
+        product the first time either changes — and this is the picture a
+        customer decides on. It carries the masked number every card face
+        carries, because there is nothing else it could honestly show.
+      */}
+      {none && <CardFace holder={holder} />}
+
+      {data?.map((card, index) => (
+        <CardRow
+          key={card.id}
+          card={card}
+          holder={holder}
+          onChange={reload}
+          position={{ index, of: data.length }}
+        />
+      ))}
+
+      {issuing && (
+        <Issue
+          onIssued={() => {
+            setAdding(false);
+            reload();
+          }}
+          {...(adding ? { onCancel: () => setAdding(false) } : {})}
+        />
+      )}
     </Shell>
+  );
+}
+
+/**
+ * THE CARD FACE, and the specimen, as one component.
+ *
+ * With no `card` it draws the specimen a customer sees before they have one:
+ * the same element, the same masked number, no status and no balance. Two
+ * pieces of markup would drift, and the one that drifts is the preview — the
+ * picture somebody decided to get a card from.
+ *
+ * NO PAN IS EVER HERE. The number is the masked `last4` the list has always
+ * carried, and the specimen has no digits at all; a full number arrives only
+ * from a reveal, into separate state with a sixty-second life. The reference
+ * design prints a plausible sixteen-digit number on the preview, which would
+ * be a fake card number on the screen where a customer is deciding whether
+ * this product is real.
+ */
+function CardFace({
+  card,
+  holder,
+  badge,
+  expiry,
+}: {
+  card?: Card;
+  holder: string | undefined;
+  badge?: string;
+  expiry?: string;
+}) {
+  return (
+    <article
+      className={`virtual-card ${card === undefined ? 'is-specimen' : `is-${card.status}`}`}
+      aria-label={
+        card === undefined
+          ? 'What a Xetral card looks like'
+          : `Card ending ${card.last4 ?? 'unknown'}`
+      }
+    >
+      <div className="vc-head">
+        <Logo size={20} tone="metal" />
+        {card === undefined ? (
+          <span className="badge">Virtual</span>
+        ) : (
+          <span className={`badge ${badge ?? ''}`}>{card.status}</span>
+        )}
+      </div>
+
+      {/* Three arcs, drawn. At this size on a dark face a font glyph would
+          substitute visibly on a platform that lacks it. */}
+      <svg className="vc-wave" width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path
+          d="M8.5 8.5a5 5 0 0 1 0 7M12 6a9 9 0 0 1 0 12M15.5 3.5a13 13 0 0 1 0 17"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+        />
+      </svg>
+
+      <div className="vc-number mono">
+        {card?.last4 == null ? '•••• •••• •••• ••••' : `•••• •••• •••• ${card.last4}`}
+      </div>
+
+      <div className="vc-foot">
+        <div className="vc-stack">
+          <div className="vc-field">
+            <span className="vc-label">Valid thru</span>
+            <span className="vc-value mono">{expiry ?? '••/••'}</span>
+          </div>
+          <div className="vc-field">
+            <span className="vc-label">Card holder</span>
+            <span className="vc-value">{holder ?? '—'}</span>
+          </div>
+        </div>
+        <div className="vc-field vc-right">
+          {/* The scheme every Bitnob virtual card is issued on. */}
+          <span className="vc-scheme">VISA</span>
+          <span className="vc-currency">{card?.currency ?? 'USD'}</span>
+        </div>
+      </div>
+    </article>
   );
 }
 
@@ -61,11 +180,14 @@ function CardRow({
   card,
   holder,
   onChange,
+  position,
 }: {
   card: Card;
   /** The verified name, from KYC. See the card face below. */
   holder: string | undefined;
   onChange: () => void;
+  /** Which of how many, for the pager dots. Absent when there is only one. */
+  position?: { index: number; of: number };
 }) {
   const client = useXetral();
   const { busy, error, code, run } = useSubmit();
@@ -120,31 +242,18 @@ function CardRow({
         here, and a card cannot exist without an approved KYC record, so the
         name is always available and is the customer's own.
       */}
-      <article className={`virtual-card is-${card.status}`} aria-label={`Card ending ${card.last4 ?? 'unknown'}`}>
-        <div className="vc-head">
-          <Logo size={20} tone="metal" />
-          <span className={`badge ${badge}`}>{card.status}</span>
+      <CardFace card={card} holder={holder} badge={badge} expiry={expiry} />
+      {position !== undefined && position.of > 1 && (
+        <div className="vc-dots" aria-hidden="true">
+          {Array.from({ length: position.of }, (_, i) => (
+            <span key={i} className={`vc-dot${i === position.index ? ' on' : ''}`} />
+          ))}
         </div>
-
-        <div className="vc-number mono">
-          {card.last4 === null ? '•••• •••• •••• ••••' : `•••• •••• •••• ${card.last4}`}
-        </div>
-
-        <div className="vc-foot">
-          <div className="vc-field">
-            <span className="vc-label">Cardholder</span>
-            <span className="vc-value">{holder ?? '—'}</span>
-          </div>
-          <div className="vc-field">
-            <span className="vc-label">Expires</span>
-            <span className="vc-value mono">{expiry}</span>
-          </div>
-          <div className="vc-field vc-right">
-            <span className="vc-label">Balance</span>
-            <span className="vc-value mono">{formatAmount(card.balance, card.currency)}</span>
-          </div>
-        </div>
-      </article>
+      )}
+      <div className="row">
+        <span className="muted">Balance</span>
+        <span className="mono">{formatAmount(card.balance, card.currency)}</span>
+      </div>
 
       {card.status !== 'terminated' && (
         <div className="actions">
@@ -305,7 +414,24 @@ function group(pan: string): string {
   return pan.replace(/(.{4})/g, '$1 ').trim();
 }
 
-function Issue({ onIssued }: { onIssued: () => void }) {
+/**
+ * GET YOUR XETRAL CARD — the onboarding step.
+ *
+ * What it says before it asks: what the card is, where it works, and how much
+ * money is about to move. The old form opened with "Name on the card", which
+ * is the third question, not the first.
+ *
+ * THERE IS NO CARD CREATION FEE, and the figure here is not one. The reference
+ * design puts "$5.00 · one-time payment" in this slot; nothing in this system
+ * charges for issuance — `transfer_fee_basis_points` is the only fee that
+ * exists — so printing $5.00 would tell a customer they are being charged for
+ * something that takes no money from them. The figure in that slot is the
+ * STARTING BALANCE instead, which is the amount that really moves at this
+ * step: wallet -> card, the customer's own money, still theirs. If an issuance
+ * fee is ever wanted it belongs in `platform_settings` with a bound and a
+ * ledger leg, the way every other fee here does.
+ */
+function Issue({ onIssued, onCancel }: { onIssued: () => void; onCancel?: () => void }) {
   const client = useXetral();
   const { busy, error, code, done, run } = useSubmit();
   const attempt = useIdempotencyKey();
@@ -332,23 +458,31 @@ function Issue({ onIssued }: { onIssued: () => void }) {
         });
       }}
     >
-      <h2>Get a new card</h2>
+      <h1>Get your Xetral card</h1>
+      <h2>A virtual card for global payments</h2>
 
-      <label>
-        Name on the card
-        <input value={name} onChange={(e) => setName(e.target.value)} required minLength={2} />
-      </label>
+      <div className="benefits">
+        <div className="benefit">
+          <span className="benefit-icon"><Icon name="globe" size={20} /></span>
+          <div>
+            <h3>Spend anywhere</h3>
+            <p>Use your card online and in-store where Visa is accepted.</p>
+          </div>
+        </div>
 
-      <div className="field-row two">
+        <div className="benefit">
+          <span className="benefit-icon"><Icon name="zap" size={20} /></span>
+          <div>
+            <h3>Instant issuance</h3>
+            <p>Get your card and start spending.</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="field-row two" style={{ marginTop: 'var(--s-5)' }}>
         <label>
-          Starting balance (USD)
-          <input
-            inputMode="decimal"
-            value={funding}
-            onChange={(e) => setFunding(e.target.value)}
-            placeholder="25.00"
-            required
-          />
+          Name on the card
+          <input value={name} onChange={(e) => setName(e.target.value)} required minLength={2} />
         </label>
 
         <label>
@@ -364,16 +498,41 @@ function Issue({ onIssued }: { onIssued: () => void }) {
         </label>
       </div>
 
-      <button type="submit" disabled={busy}>
-        {busy ? 'Requesting…' : 'Get a card'}
-      </button>
+      {/*
+        The amount is typed into the figure's own slot. It is the number the
+        decision turns on, so it is set where the decision is being made rather
+        than in a field above the button.
+      */}
+      <div className="price-row">
+        <div className="price-main">
+          <label htmlFor="card-funding" className="price-label">Starting balance</label>
+          <input
+            id="card-funding"
+            className="price-input mono"
+            inputMode="decimal"
+            value={funding}
+            onChange={(e) => setFunding(e.target.value)}
+            placeholder="$25.00"
+            required
+          />
+          <p className="price-sub">Moved from your USD wallet. Still your money.</p>
+        </div>
+
+        <button type="submit" disabled={busy}>
+          {busy ? 'Creating…' : 'Create card'} <Icon name="arrowRight" size={18} />
+        </button>
+      </div>
 
       <FormError error={error} code={code} />
       {done !== undefined && <p className="ok">{done}</p>}
 
-      <p className="hint">
-        You need a verified identity before a card can be issued.
-      </p>
+      {onCancel !== undefined && (
+        <div className="actions">
+          <button type="button" className="quiet small" onClick={onCancel}>
+            Cancel
+          </button>
+        </div>
+      )}
     </form>
   );
 }

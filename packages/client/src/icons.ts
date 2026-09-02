@@ -19,7 +19,7 @@
 export type IconName =
   | 'home' | 'card' | 'activity' | 'grid' | 'menu' | 'bell' | 'search'
   | 'send' | 'plus' | 'minus' | 'swap' | 'download'
-  | 'wallet' | 'bitcoin' | 'sim' | 'receipt' | 'gift' | 'globe'
+  | 'wallet' | 'bitcoin' | 'sim' | 'receipt' | 'gift' | 'globe' | 'zap'
   | 'shield' | 'lock' | 'user' | 'settings' | 'logout'
   | 'chevronRight' | 'chevronDown' | 'chevronLeft' | 'arrowRight' | 'arrowUpRight'
   | 'check' | 'close' | 'eye' | 'eyeOff' | 'copy' | 'info' | 'alert'
@@ -44,6 +44,10 @@ export const ICON_PATHS: Readonly<Record<IconName, string>> = {
   receipt:     'M6 2.5h12v19l-2.5-1.8-2.5 1.8-2.5-1.8L8 21.5 6 19.7V2.5ZM9.5 8h5M9.5 12h5',
   gift:        'M3.5 11.5h17v9a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1v-9ZM2.5 7.5h19v4h-19zM12 7.5v14M12 7.5S10.5 3 8 3a2.2 2.2 0 0 0 0 4.5M12 7.5S13.5 3 16 3a2.2 2.2 0 0 1 0 4.5',
   globe:       'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM3.5 12h17M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18Z',
+  // "Issued instantly". Drawn as an open stroke rather than a filled bolt so
+  // it matches the weight of every other icon in the set — a filled glyph
+  // beside outlined ones reads as a different family.
+  zap:         'M13 2.5 4.5 13.5h6L11 21.5 19.5 10.5h-6L13 2.5Z',
   shield:      'M12 2.5 20 6v6c0 5-3.4 8.2-8 9.5-4.6-1.3-8-4.5-8-9.5V6l8-3.5ZM9 12l2 2 4-4',
   lock:        'M5.5 10.5h13v10h-13zM8.5 10.5V7a3.5 3.5 0 0 1 7 0v3.5M12 14.5v2.5',
   user:        'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4.5 20.5a7.5 7.5 0 0 1 15 0',
