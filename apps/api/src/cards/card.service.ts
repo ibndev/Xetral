@@ -12,13 +12,19 @@ import {
 } from '@nestjs/common';
 import type { Pool, PoolClient } from 'pg';
 import { InsufficientFundsError, LedgerService, posting } from '@xetral/ledger';
-import type { AccountRef } from '@xetral/ledger';
+import type { AccountRef, WrittenEntry } from '@xetral/ledger';
+import {
+  ProviderRejectedError,
+  ProviderTimeoutError,
+  ProviderUnavailableError,
+} from '@xetral/providers';
 import type { CardPort, VirtualCard } from '@xetral/providers';
 import { fromMajor, subtract, toMajor } from '@xetral/shared';
 import type { Money } from '@xetral/shared';
 import { CARD_PORT, DATABASE, LEDGER } from '../tokens.js';
 import { CardProtectionService } from './card-protection.service.js';
 import { SettingsService } from '../settings/settings.service.js';
+import { TaxService } from '../tax/tax.service.js';
 
 const PROVIDER = 'bitnob';
 
@@ -62,6 +68,14 @@ export interface CardView {
   readonly expiry_year: number | null;
   readonly balance: string;
   /**
+   * What the CUSTOMER calls this card, or null.
+   *
+   * Not `name_on_card`, which is their legal name and is not theirs to set.
+   * Null is the resting state and the client falls back to the last four
+   * digits — a card nobody has named is not a card with a blank name.
+   */
+  readonly label: string | null;
+  /**
    * Why the card is frozen, when it is. Absent on a live card.
    *
    * `status: 'frozen'` alone cannot be turned into a sentence: one case is
@@ -87,6 +101,7 @@ interface CardRow {
   last4: string | null;
   expiry_month: number | null;
   expiry_year: number | null;
+  label: string | null;
 }
 
 /**
@@ -109,17 +124,30 @@ export class CardService {
     @Inject(CARD_PORT) private readonly cards: CardPort,
     @Inject(CardProtectionService) private readonly protection: CardProtectionService,
     @Inject(SettingsService) private readonly settings: SettingsService,
+    @Inject(TaxService) private readonly tax: TaxService,
   ) {}
 
   async list(userUuid: string): Promise<readonly CardView[]> {
     const userId = await this.#activeUserId(userUuid);
     const rows = await this.pool.query<CardRow>(
       `SELECT id, uuid, user_id, provider_card_id, status, currency,
-              last4, expiry_month, expiry_year
+              last4, expiry_month, expiry_year, label
          FROM cards WHERE user_id = $1::bigint ORDER BY id DESC`,
       [userId],
     );
     return Promise.all(rows.rows.map(async (row) => this.#toView(row)));
+  }
+
+  /**
+   * What a new card costs, as a major-unit string.
+   *
+   * Read from `platform_settings` on every call rather than cached here: the
+   * settings service already caches for thirty seconds, and a second cache in
+   * front of it would mean a price change took two windows to reach a screen.
+   */
+  async issuanceFee(): Promise<string> {
+    const cents = await this.settings.cardIssuanceFeeCents();
+    return toMajor({ amount: BigInt(cents), currency: 'USD' });
   }
 
   async get(userUuid: string, cardUuid: string): Promise<CardView> {
@@ -138,20 +166,59 @@ export class CardService {
    */
   async issue(
     userUuid: string,
-    input: { nameOnCard: string; initialFunding: string; idempotencyKey: string },
+    input: { idempotencyKey: string },
   ): Promise<CardView> {
     await this.settings.assertServiceEnabled('cards');
     const userId = await this.#activeUserId(userUuid);
-    const amount = this.#parseAmount(input.initialFunding);
 
     const providerCustomerId = await this.#providerCustomerId(userId);
 
-    const issued = await this.cards.issue({
-      ownerId: userId,
-      providerCustomerId,
-      nameOnCard: input.nameOnCard,
-      initialFunding: amount,
-    });
+    /*
+     * THE NAME ON THE CARD IS THE VERIFIED ONE, and is not a field.
+     *
+     * A card is a payment instrument issued in a person's legal name, and the
+     * only place this system holds one is `kyc_submissions.full_name` — what a
+     * reviewer read off a document. `users.full_name` is what somebody typed
+     * about themselves, which is right for a greeting and wrong here; the rule
+     * 040 records about which of the two a money decision may read is exactly
+     * this case.
+     *
+     * A free-text box was worse than either: it let the name embossed on the
+     * card disagree with the identity it was issued against, which is the one
+     * mismatch a merchant checks.
+     */
+    const nameOnCard = await this.#verifiedName(userId);
+
+    /*
+     * THE PRICE IS CHARGED BEFORE BITNOB IS ASKED FOR ANYTHING, and the order
+     * is the same argument `fund()` makes: what decides whether a customer can
+     * afford this is the OVERDRAFT GUARD, and a card must not be requested from
+     * a provider on money that turns out not to be there.
+     *
+     * The other order was tempting, because issuing already calls Bitnob first
+     * — but that rule is about the FUNDING leg, which puts a customer's money
+     * onto a card that might not exist. A fee is the opposite shape: charged
+     * first and refused by them, it is recoverable by appending a reversal;
+     * charged after, a customer who cannot pay is already holding a live card.
+     */
+    const fee = await this.#chargeIssuanceFee(userId, input.idempotencyKey);
+
+    let issued;
+    try {
+      issued = await this.cards.issue({
+        ownerId: userId,
+        providerCustomerId,
+        nameOnCard,
+        // ZERO. Buying a card and putting money on it are two decisions, and
+        // asking them as one meant somebody who wanted a card had to name an
+        // amount before they had a card to name it for. `fund()` is the second
+        // step and the card screen offers it the moment the card is there.
+        initialFunding: { amount: 0n, currency: 'USD' },
+      });
+    } catch (error) {
+      await this.#refundIssuanceFee(userId, input.idempotencyKey, fee, error);
+      throw error;
+    }
 
     const client = await this.pool.connect();
     let row: CardRow;
@@ -172,10 +239,36 @@ export class CardService {
       client.release();
     }
 
-    if (amount.amount > 0n) {
-      await this.#postCardFunding(userId, amount, `card-issue:${input.idempotencyKey}`, row.uuid);
-    }
     return this.#toView(row);
+  }
+
+  /**
+   * What the customer calls this card.
+   *
+   * NO PIN, because nothing moves. A label is the customer's own note on their
+   * own list, and demanding the secret that authorises payments in order to
+   * write one would train people to type it for things that are not payments.
+   *
+   * A terminated card can still be renamed: it stays in the list, and being
+   * able to write "old one, compromised" beside it is most of why somebody
+   * would want to.
+   */
+  async name(userUuid: string, cardUuid: string, label: string | null): Promise<CardView> {
+    const { row } = await this.#ownedCard(userUuid, cardUuid);
+
+    const updated = await this.pool.query<CardRow>(
+      `UPDATE cards SET label = $2 WHERE id = $1::bigint
+       RETURNING id, uuid, user_id, provider_card_id, status, currency,
+                 last4, expiry_month, expiry_year, label`,
+      [row.id, label],
+    );
+
+    const next = updated.rows[0];
+    // The row was read under the same request a moment ago, so this is a card
+    // deleted between the two — which nothing in this system does. Falling back
+    // to the row we have would report the OLD label as the new one.
+    if (next === undefined) throw new NotFoundException({ error: 'card_not_found' });
+    return this.#toView(next);
   }
 
   async fund(
@@ -390,7 +483,7 @@ export class CardService {
   async freezeAsStaff(cardUuid: string, staffUuid: string, reason: string): Promise<void> {
     const found = await this.pool.query<CardRow>(
       `SELECT id, uuid, user_id, provider_card_id, status, currency,
-              last4, expiry_month, expiry_year
+              last4, expiry_month, expiry_year, label
          FROM cards WHERE uuid = $1::uuid`,
       [cardUuid],
     );
@@ -521,6 +614,175 @@ export class CardService {
 
   /* ---------------------------------------------------------------- */
 
+  /**
+   * The name a card is issued in, read from the APPROVED identity.
+   *
+   * `kyc_submissions.full_name` and not `users.full_name`: one was read off a
+   * document by a reviewer and the other is what somebody typed about
+   * themselves. Only the first may drive a money decision, and a card is one.
+   *
+   * A card cannot be issued at all without `provider_customers`, which
+   * approval writes in the same transaction as the tier — so by the time this
+   * runs there is always an approved submission. It is still checked, because
+   * "there is always one" is the kind of claim that stops being true in a
+   * migration nobody connected to this file.
+   */
+  async #verifiedName(userId: string): Promise<string> {
+    const found = await this.pool.query<{ full_name: string }>(
+      `SELECT full_name FROM kyc_submissions
+        WHERE user_id = $1::bigint AND status = 'approved'
+        ORDER BY id DESC LIMIT 1`,
+      [userId],
+    );
+    const name = found.rows[0]?.full_name;
+    if (name === undefined || name.trim() === '') {
+      throw new ConflictException({ error: 'kyc_required', product: 'card' });
+    }
+    return name;
+  }
+
+  /**
+   * What a card costs, taken from the customer's USD wallet.
+   *
+   * TAX IS A LIABILITY, so the fee splits the way a transfer fee does: what we
+   * keep goes to `revenue_fees` and what we owe onward goes to
+   * `liability_tax_payable`. Booking the whole thing as revenue overstates what
+   * the business earned and understates what it owes.
+   *
+   * `card_creation` has been in `entry_kind` since 001 and nothing had ever
+   * posted one. This is what it was for.
+   *
+   * A ZERO PRICE POSTS NOTHING. The ledger refuses a zero-amount posting, and
+   * an entry saying "we charged nothing" is indistinguishable from one somebody
+   * forgot to write — the rule 032 records about `tax_collections`.
+   */
+  async #chargeIssuanceFee(userId: string, idempotencyKey: string): Promise<Money<'USD'>> {
+    const cents = await this.settings.cardIssuanceFeeCents();
+    const fee: Money<'USD'> = { amount: BigInt(cents), currency: 'USD' };
+    if (fee.amount <= 0n) return fee;
+
+    const split = await this.tax.splitFee(fee);
+
+    // The fee, the tax and the wallet leg are three CONDITIONAL legs for the
+    // same reason a transfer's are: a zero-rate VAT on a real fee must still
+    // post the fee, and a zero leg is not a leg.
+    const onEntry = async (client: PoolClient, entry: WrittenEntry): Promise<void> => {
+      if (split.tax.amount <= 0n) return;
+      await this.tax.record(client, {
+        kind: 'vat',
+        entryId: entry.entryId,
+        userId,
+        amount: split.tax,
+        // The fee is what VAT was charged on. There is nothing else it could
+        // be here — unlike a transfer, where the amount moving is the tempting
+        // and wrong answer.
+        baseMinor: split.gross.amount,
+        rateApplied: String(await this.settings.vatBasisPoints()),
+        occurredAt: new Date(),
+      });
+    };
+
+    try {
+      await this.ledger.post(
+        {
+          idempotencyKey: `card-issue-fee:${idempotencyKey}`,
+          kind: 'card_creation',
+          occurredAt: new Date(),
+          description: 'card issuance fee',
+          metadata: {},
+          postings: [
+            posting(walletAccount(userId), negate(split.gross)),
+            ...(split.net.amount > 0n
+              ? [posting({ kind: 'revenue_fees', currency: 'USD' }, split.net)]
+              : []),
+            ...(split.tax.amount > 0n
+              ? [posting({ kind: 'liability_tax_payable', currency: 'USD' }, split.tax)]
+              : []),
+          ],
+        },
+        { onEntry },
+      );
+    } catch (error) {
+      if (error instanceof InsufficientFundsError) {
+        // 422 and no figure. Telling a caller how short they are turns this
+        // into a balance oracle for a stolen session — the rule the transfer
+        // endpoint follows, applied to the one other place a customer can be
+        // refused for money.
+        throw new UnprocessableEntityException({ error: 'insufficient_funds' });
+      }
+      throw error;
+    }
+
+    return split.gross;
+  }
+
+  /**
+   * Giving the price back when the card never existed.
+   *
+   * ONLY ON A DEFINITE ANSWER. Bitnob refusing, or being unreachable, both mean
+   * no card was created — so holding the money would be charging for nothing.
+   * A TIMEOUT means we do not know: the card may exist, and reversing would
+   * hand back the price of a card the customer is holding. That one is left
+   * posted and escalated, which is the rule the purchase flow follows for
+   * exactly the same reason.
+   *
+   * A reversal, never an edit. The original entry was a true statement — the
+   * customer did pay — and the correction is a second entry naming the first.
+   */
+  async #refundIssuanceFee(
+    userId: string,
+    idempotencyKey: string,
+    fee: Money<'USD'>,
+    cause: unknown,
+  ): Promise<void> {
+    if (fee.amount <= 0n) return;
+
+    if (cause instanceof ProviderTimeoutError) {
+      this.#logger.error(
+        `card issuance timed out after the fee was charged (key ${idempotencyKey}). ` +
+          `The card may exist at the provider; the fee is NOT reversed and needs a person.`,
+      );
+      return;
+    }
+    if (!(cause instanceof ProviderRejectedError) && !(cause instanceof ProviderUnavailableError)) {
+      // Anything else is a fault on our side of the port, and we cannot say
+      // whether a card was created either. Same treatment as a timeout.
+      this.#logger.error(
+        `card issuance failed after the fee was charged (key ${idempotencyKey}); ` +
+          `the fee is NOT reversed and needs a person.`,
+      );
+      return;
+    }
+
+    const charged = await this.pool.query<{ id: string }>(
+      `SELECT id FROM journal_entries WHERE idempotency_key = $1`,
+      [`card-issue-fee:${idempotencyKey}`],
+    );
+    const entryId = charged.rows[0]?.id;
+    // Nothing to reverse. The fee was refused before it posted, and the error
+    // the caller is about to see is the real one.
+    if (entryId === undefined) return;
+
+    const split = await this.tax.splitFee(fee);
+    await this.ledger.post({
+      idempotencyKey: `card-issue-fee-reversal:${idempotencyKey}`,
+      kind: 'reversal',
+      reversesEntryId: entryId,
+      occurredAt: new Date(),
+      description: 'card issuance fee returned — the card was never created',
+      metadata: {},
+      postings: [
+        posting(walletAccount(userId), split.gross),
+        ...(split.net.amount > 0n
+          ? [posting({ kind: 'revenue_fees', currency: 'USD' }, negate(split.net))]
+          : []),
+        ...(split.tax.amount > 0n
+          ? [posting({ kind: 'liability_tax_payable', currency: 'USD' }, negate(split.tax))]
+          : []),
+      ],
+    });
+  }
+
   async #postCardFunding(
     userId: string,
     amount: Money<'USD'>,
@@ -559,7 +821,7 @@ export class CardService {
                           replaces_card_id)
        VALUES ($1::bigint, $2, $3, 'USD', $4, $5, $6, $7::card_status, $8::bigint)
        RETURNING id, uuid, user_id, provider_card_id, status, currency,
-                 last4, expiry_month, expiry_year`,
+                 last4, expiry_month, expiry_year, label`,
       [
         userId,
         PROVIDER,
@@ -696,6 +958,7 @@ export class CardService {
       last4: row.last4,
       expiry_month: row.expiry_month,
       expiry_year: row.expiry_year,
+      label: row.label,
       balance: toMajor({ amount: balance, currency: 'USD' }),
       ...(await this.#freezeContext(row)),
     };
@@ -758,7 +1021,7 @@ export class CardService {
     const userId = await this.#activeUserId(userUuid);
     const result = await this.pool.query<CardRow>(
       `SELECT id, uuid, user_id, provider_card_id, status, currency,
-              last4, expiry_month, expiry_year
+              last4, expiry_month, expiry_year, label
          FROM cards WHERE uuid = $1 AND user_id = $2::bigint`,
       [cardUuid, userId],
     );
@@ -770,7 +1033,7 @@ export class CardService {
   async #cardByProviderId(providerCardId: string): Promise<CardRow | undefined> {
     const result = await this.pool.query<CardRow>(
       `SELECT id, uuid, user_id, provider_card_id, status, currency,
-              last4, expiry_month, expiry_year
+              last4, expiry_month, expiry_year, label
          FROM cards WHERE provider = $1 AND provider_card_id = $2`,
       [PROVIDER, providerCardId],
     );

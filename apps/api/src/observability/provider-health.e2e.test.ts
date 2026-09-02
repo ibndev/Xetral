@@ -15,6 +15,7 @@ import { AppModule } from '../app.module.js';
 import { systemClock } from '../tokens.js';
 import { testApiConfig } from '../test-support/api-config.js';
 import { enrolAndElevate } from '../test-support/staff-totp.js';
+import { approveKyc } from '../test-support/kyc-fixture.js';
 
 /**
  * Provider health, through the real injection boundary.
@@ -135,12 +136,11 @@ async function register(): Promise<Customer> {
  *  a customer every provider accepts whose ceiling is an unverified
  *  account's. */
 async function verify(person: Customer): Promise<void> {
-  await pool.query(
-    `INSERT INTO provider_customers (user_id, provider, provider_customer_id)
-     VALUES ($1::bigint, 'bitnob', $2) ON CONFLICT DO NOTHING`,
-    [person.userId, `bnc-${randomUUID()}`],
-  );
-  await pool.query(`UPDATE users SET kyc_tier = 1 WHERE id = $1::bigint`, [person.userId]);
+  // Verified, in the ONE place that knows what approval actually writes: an
+  // approved `kyc_submissions` row (which is where a card's embossed name is
+  // read from), the provider mapping, and the tier — all three, because
+  // approval writes all three in one transaction.
+  await approveKyc(pool, person.userId);
 
   // Dollars to fund the card with. Through the ledger, never by writing
   // `account_balances`: a materialised balance no posting explains is exactly
@@ -162,12 +162,7 @@ const issueCard = (person: Customer) =>
   request(app.getHttpServer())
     .post('/v1/cards')
     .set('Authorization', `Bearer ${person.token}`)
-    .send({
-      name_on_card: 'Ada Obi',
-      initial_funding: '5.00',
-      transaction_pin: PIN,
-      idempotency_key: randomUUID(),
-    });
+    .send({ transaction_pin: PIN, idempotency_key: randomUUID() });
 
 async function healthFor(operation: string): Promise<
   { attempts: string; failures: string; rejected: string } | undefined

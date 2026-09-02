@@ -106,7 +106,7 @@ describe('the brand typefaces', () => {
       .toEqual([]);
   });
 
-  it('NO STYLE SETS fontWeight BESIDE A CUSTOM FAMILY', () => {
+  it('NO STYLE SETS fontWeight OR fontStyle BESIDE A CUSTOM FAMILY', () => {
     /*
      * The bug this whole arrangement exists for. `fontFamily` plus
      * `fontWeight` reads as obviously correct — it is what the web does — and
@@ -134,16 +134,34 @@ describe('the brand typefaces', () => {
       // nothing but other properties between them.
       for (const m of source.matchAll(/\{[^{}]*\}/g)) {
         const block = m[0];
-        if (/fontFamily:/.test(block) && /fontWeight:/.test(block)) {
-          offenders.push(`${file.slice(HERE.length)}: ${block.replace(/\s+/g, ' ').slice(0, 90)}`);
+        if (!/fontFamily:/.test(block)) continue;
+        // `fontStyle` is the SAME BUG in a second property, and it cost a
+        // round of its own: the card face set `fontStyle: 'italic'` beside
+        // `font.displayBold`, no italic Bricolage file is registered, and
+        // Android fell back to the system face at regular weight. Reported as
+        // "the VISA on the card is too light" — a WEIGHT symptom from a SLANT
+        // property, which is why nobody looked here. A slant that must survive
+        // belongs in `transform: [{ skewX }]`, which the view layer draws and
+        // font matching never sees.
+        const property = /fontWeight:/.test(block)
+          ? 'fontWeight'
+          : /fontStyle:/.test(block)
+            ? 'fontStyle'
+            : undefined;
+        if (property !== undefined) {
+          offenders.push(
+            `${file.slice(HERE.length)} (${property}): ${block.replace(/\s+/g, ' ').slice(0, 90)}`,
+          );
         }
       }
     }
 
     expect(
       offenders,
-      'these set a weight beside a custom family, which Android ignores — use ' +
-        `the face that IS the weight (font.sansSemi, font.displayBold, …):\n${offenders.join('\n')}`,
+      'these set a weight or a slant beside a custom family, which Android ' +
+        'resolves by looking for a face that is not registered and falling ' +
+        'back — use the face that IS the weight (font.sansSemi, ' +
+        `font.displayBold, …), and skewX for a slant:\n${offenders.join('\n')}`,
     ).toEqual([]);
   });
 });

@@ -1,6 +1,6 @@
 import { Text, View } from 'react-native';
 import { formatAmount } from '@xetral/client';
-import type { Deposit, KycLimits, VirtualAccount } from '@xetral/client';
+import type { Deposit, VirtualAccount } from '@xetral/client';
 import { Icon } from '@/icon';
 import { Shell } from '@/shell';
 import { Empty, FormError, Loading, Panel } from '@/ui';
@@ -42,10 +42,8 @@ export default function AddMoney() {
   const colors = useTheme();
 
   const account = useLoad<VirtualAccount>(() => client.fundingAccount(), [client]);
-  const limits = useLoad<KycLimits>(() => client.kycLimits(), [client]);
   const deposits = useLoad<readonly Deposit[]>(() => client.deposits(), [client]);
 
-  const ngn = limits.data?.limits.find((l) => l.currency === 'NGN');
   // The ONE code this screen answers itself. Anything else is a real failure
   // and goes to `FormError`, which carries its own next step.
   const needsVerifying = account.code === 'kyc_required';
@@ -53,27 +51,6 @@ export default function AddMoney() {
   return (
     <Shell back="/wallet" title="Add money">
       <Panel title="Add money" subtitle="Transfer from any Nigerian bank">
-        {ngn !== undefined && (
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: space.sm,
-              marginTop: space.sm,
-              padding: space.md,
-              borderRadius: radius.md,
-              backgroundColor: colors.infoBg,
-            }}
-          >
-            <Icon name="info" size={18} color={colors.info} />
-            <Text style={[styles.hint, { flex: 1, marginTop: 0 }]}>
-              Your account can receive and move up to{' '}
-              <Text style={{ fontFamily: font.sansBold }}>{formatAmount(ngn.daily_limit, 'NGN')}</Text>{' '}
-              a day{limits.data?.tier === 0 ? ' without verifying your identity' : ''}.
-            </Text>
-          </View>
-        )}
-
         {account.loading && <Loading />}
 
         {account.data !== undefined && (
@@ -108,14 +85,18 @@ export default function AddMoney() {
           </>
         )}
 
+        {/*
+          ONE LINE, NOT A WALL — matching the web. The allowance notice and
+          the verification block are gone; the FACT is not, because it is not
+          ours to remove. A dedicated account number is a bank account opened
+          in a person's name and the provider will not issue one to somebody
+          unidentified, whatever this screen says.
+        */}
         {needsVerifying && (
-          <View style={{ marginTop: space.md, gap: space.xs }}>
-            <Text style={styles.h2}>Your own account number needs your identity</Text>
-            <Text style={styles.lead}>
-              A dedicated account number is a bank account in your name, so the bank
-              has to know whose it is.
-            </Text>
-          </View>
+          <Text style={styles.hint}>
+            Your account number is issued in your name, so it needs your identity
+            first.
+          </Text>
         )}
 
         {!needsVerifying && <FormError error={account.error} code={account.code} />}

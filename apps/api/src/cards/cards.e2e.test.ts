@@ -10,7 +10,13 @@ import { hashPassword } from '@xetral/identity';
 import { LedgerService, posting } from '@xetral/ledger';
 import type { AccountRef } from '@xetral/ledger';
 import { BITNOB_EVENTS } from '@xetral/providers';
-import type { CardPort, CardSecrets, OperationOutcome, VirtualCard } from '@xetral/providers';
+import type {
+  CardPort,
+  CardSecrets,
+  IssueCardRequest,
+  OperationOutcome,
+  VirtualCard,
+} from '@xetral/providers';
 import { usd } from '@xetral/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { AppModule } from '../app.module.js';
@@ -18,6 +24,7 @@ import type { ApiConfig } from '../config.js';
 import { systemClock } from '../tokens.js';
 import { testApiConfig } from '../test-support/api-config.js';
 import { enrolAndElevate } from '../test-support/staff-totp.js';
+import { approveKyc } from '../test-support/kyc-fixture.js';
 
 /**
  * Virtual USD cards end to end: issue, fund, freeze, terminate, and the
@@ -65,9 +72,14 @@ class FakeCardPort implements CardPort {
   }
 
   lastIssued: VirtualCard | undefined;
+  /** WHAT WAS ASKED FOR, not just what came back. The name on a card is not in
+   *  the response — it is in the request — so a test asserting the customer's
+   *  verified name reached Bitnob has to read this side. */
+  lastIssueRequest: IssueCardRequest | undefined;
 
-  async issue(): Promise<VirtualCard> {
+  async issue(request: IssueCardRequest): Promise<VirtualCard> {
     this.calls.push('issue');
+    this.lastIssueRequest = request;
     this.#maybeFail();
     this.lastIssued = this.#card();
     return this.lastIssued;
@@ -138,20 +150,11 @@ async function onboard(): Promise<Customer> {
     userId,
     await hashPassword(PASSWORD),
   ]);
-  // The Bitnob customer mapping is a KYC step, so the service refuses to
-  // create it silently. Seeded here as onboarding would.
-  await pool.query(
-    `INSERT INTO provider_customers (user_id, provider, provider_customer_id)
-     VALUES ($1, 'bitnob', $2)`,
-    [userId, `cus_${randomUUID()}`],
-  );
-  // AND THE TIER, because KYC approval sets both in ONE transaction.
-  //
-  // This fixture stands in for that approval, and a fixture that performs
-  // half of an atomic operation is a fixture that tests a state production
-  // cannot reach — here, a customer whom every provider accepts and whose
-  // ceiling is still an unverified account's.
-  await pool.query(`UPDATE users SET kyc_tier = 1 WHERE id = $1::bigint`, [userId]);
+  // Verified, in the ONE place that knows what approval actually writes: an
+  // approved `kyc_submissions` row (which is where a card's embossed name is
+  // read from), the provider mapping, and the tier — all three, because
+  // approval writes all three in one transaction.
+  await approveKyc(pool, userId);
 
   const login = await request(app.getHttpServer())
     .post('/v1/auth/login')
@@ -205,6 +208,15 @@ async function fundWallet(userId: string, minor: number): Promise<void> {
 const balance = async (ref: AccountRef): Promise<bigint> =>
   (await ledger.balanceOf(ref))?.balanceMinor ?? 0n;
 
+/**
+ * Buying a card, then loading it — TWO REQUESTS, because they are two
+ * decisions.
+ *
+ * Issuing used to take a starting balance and this helper passed one. It does
+ * not any more: `POST /v1/cards` buys the card (and charges the issuance fee),
+ * and `POST /v1/cards/:id/fund` puts money on it, which is what the customer
+ * does from the card screen the moment the card exists.
+ */
 async function issueCard(
   customer: Customer,
   initial = '25.00',
@@ -212,17 +224,22 @@ async function issueCard(
   const res = await request(app.getHttpServer())
     .post('/v1/cards')
     .set('Authorization', `Bearer ${customer.token}`)
-    .send({
-      name_on_card: 'Ada Obi',
-      initial_funding: initial,
-      transaction_pin: PIN,
-      idempotency_key: randomUUID(),
-    })
+    .send({ transaction_pin: PIN, idempotency_key: randomUUID() })
     .expect(201);
 
   const providerCardId = cardPort.lastIssued?.providerCardId;
   if (providerCardId === undefined) throw new Error('fake port did not record a card');
-  return { id: res.body.id as string, providerCardId };
+  const id = res.body.id as string;
+
+  if (initial !== '0.00') {
+    await request(app.getHttpServer())
+      .post(`/v1/cards/${id}/fund`)
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send({ amount: initial, transaction_pin: PIN, idempotency_key: randomUUID() })
+      .expect(200);
+  }
+
+  return { id, providerCardId };
 }
 
 /** Signs and posts a Bitnob webhook exactly as the provider would. */
@@ -291,33 +308,125 @@ afterAll(async () => {
 });
 
 describe('issuing', () => {
-  it('moves the initial funding from the wallet onto the card', async () => {
+  it('charges the price, then moves what the customer loads onto the card', async () => {
     const customer = await onboard();
     await fundWallet(customer.userId, 100_00);
 
     const card = await issueCard(customer, '25.00');
 
     expect(card.id).toMatch(/^[0-9a-f-]{36}$/);
-    expect(await balance(wallet(customer.userId))).toBe(7500n);
+    // $100 − $2.00 price − $25.00 loaded. The price is the new figure here: it
+    // used to be $100 − $25.00, because nothing charged for issuance and the
+    // screen's "$5.00 one-time payment" was a starting balance in a price's
+    // clothes.
+    expect(await balance(wallet(customer.userId))).toBe(7300n);
     expect(await balance(cardAccount(customer.userId))).toBe(2500n);
   });
 
-  it('refuses to fund a card the wallet cannot cover', async () => {
+  it('books the price as a card_creation entry, and the tax as a LIABILITY', async () => {
+    /*
+     * TAX IS NOT REVENUE. Part of a fee charged by a Nigerian company is VAT,
+     * which is owed onward — booking all of it as revenue overstates what the
+     * business earned and understates what it owes, both errors pointing the
+     * flattering way. The split is INCLUSIVE, so the customer pays exactly the
+     * advertised $2.00 either way.
+     */
     const customer = await onboard();
-    await fundWallet(customer.userId, 10_00);
+    await fundWallet(customer.userId, 100_00);
+
+    const before = {
+      fees: await balance({ kind: 'revenue_fees', currency: 'USD' }),
+      tax: await balance({ kind: 'liability_tax_payable', currency: 'USD' }),
+    };
+
+    await issueCard(customer, '0.00');
+
+    const legs = await pool.query<{ kind: string; amount: string; currency: string }>(
+      `SELECT a.kind::text AS kind, p.amount_minor::text AS amount, p.currency
+         FROM postings p
+         JOIN journal_entries e ON e.id = p.journal_entry_id
+         JOIN accounts a        ON a.id = p.account_id
+        WHERE e.kind = 'card_creation'
+          AND e.idempotency_key LIKE 'card-issue-fee:%'
+          AND (a.owner_id = $1::bigint OR a.owner_id IS NULL)
+        ORDER BY p.amount_minor`,
+      [customer.userId],
+    );
+    // Three legs in one currency: the customer pays 200, we keep part and owe
+    // the rest. `card_creation` has been in `entry_kind` since 001 and this is
+    // the first thing ever to post one.
+    expect(legs.rows.map((r) => r.kind)).toContain('customer_wallet');
+    expect(legs.rows.every((r) => r.currency === 'USD')).toBe(true);
+    expect(legs.rows.find((r) => r.kind === 'customer_wallet')?.amount).toBe('-200');
+
+    const after = {
+      fees: await balance({ kind: 'revenue_fees', currency: 'USD' }),
+      tax: await balance({ kind: 'liability_tax_payable', currency: 'USD' }),
+    };
+    // What we KEEP and what we OWE, together, are exactly what the customer
+    // paid. Netting them into one number would hide both.
+    expect(after.fees - before.fees + (after.tax - before.tax)).toBe(200n);
+    expect(after.tax).toBeGreaterThan(before.tax);
+  });
+
+  it('tells the customer the price on the same request as the list', async () => {
+    // One source. A figure carried in the screen would show the old price from
+    // the moment an operator changed the setting.
+    const customer = await onboard();
+    const res = await request(app.getHttpServer())
+      .get('/v1/cards')
+      .set('Authorization', `Bearer ${customer.token}`)
+      .expect(200);
+
+    expect(res.body.issuance_fee).toBe('2.00');
+  });
+
+  it('asks Bitnob for a card in the customer VERIFIED name, never one they typed', async () => {
+    /*
+     * A card is issued in a person's legal name, which lives in
+     * `kyc_submissions.full_name` — read off a document by a reviewer.
+     * `users.full_name` is what somebody typed about themselves, and a
+     * free-text box on the form let the two disagree on the one screen where
+     * they must match.
+     */
+    const customer = await onboard();
+    await fundWallet(customer.userId, 100_00);
+    await pool.query(`UPDATE users SET full_name = 'Not This Name' WHERE id = $1::bigint`, [
+      customer.userId,
+    ]);
+
+    await issueCard(customer, '0.00');
+
+    expect(cardPort.lastIssueRequest?.nameOnCard).toBe('Ada Obi');
+    // AND NOTHING GOES ON IT AT ISSUE. Loading is the second decision.
+    expect(cardPort.lastIssueRequest?.initialFunding.amount).toBe(0n);
+  });
+
+  it('refuses to sell a card to a wallet that cannot pay for it', async () => {
+    /*
+     * THE PRICE IS CHARGED BEFORE BITNOB IS ASKED FOR ANYTHING, so the
+     * overdraft guard is what decides — not a pre-check, which is a second,
+     * weaker copy of the rule plus a race.
+     *
+     * This suite used to prove the same thing about the STARTING BALANCE,
+     * which issuing no longer takes. The claim worth keeping is that a
+     * customer who cannot afford the transaction does not get a card, and it
+     * is now the fee that says so.
+     */
+    const customer = await onboard();
+    // Nothing at all. Every other customer here is funded first.
 
     const res = await request(app.getHttpServer())
       .post('/v1/cards')
       .set('Authorization', `Bearer ${customer.token}`)
-      .send({
-        name_on_card: 'Ada Obi',
-        initial_funding: '500.00',
-        transaction_pin: PIN,
-        idempotency_key: randomUUID(),
-      });
+      .send({ transaction_pin: PIN, idempotency_key: randomUUID() });
 
     expect(res.status).toBe(422);
     expect(res.body.error).toBe('insufficient_funds');
+    // AND NOTHING WAS SENT. A card requested from the provider on money that
+    // turns out not to be there is a card the customer holds and has not paid
+    // for.
+    expect(cardPort.calls).toEqual([]);
   });
 
   it('requires a transaction PIN', async () => {
@@ -327,7 +436,7 @@ describe('issuing', () => {
     const res = await request(app.getHttpServer())
       .post('/v1/cards')
       .set('Authorization', `Bearer ${customer.token}`)
-      .send({ name_on_card: 'Ada Obi', initial_funding: '10.00', idempotency_key: randomUUID() });
+      .send({ idempotency_key: randomUUID() });
 
     expect(res.status).toBe(400);
     expect(cardPort.calls).toEqual([]);
@@ -364,12 +473,7 @@ describe('issuing', () => {
     const res = await request(app.getHttpServer())
       .post('/v1/cards')
       .set('Authorization', `Bearer ${login.body.access_token}`)
-      .send({
-        name_on_card: 'No KYC',
-        initial_funding: '1.00',
-        transaction_pin: PIN,
-        idempotency_key: randomUUID(),
-      });
+      .send({ transaction_pin: PIN, idempotency_key: randomUUID() });
 
     expect(res.status).toBe(409);
     expect(res.body.error).toBe('kyc_required');
@@ -392,7 +496,9 @@ describe('funding an existing card', () => {
       .expect(200);
 
     expect(await balance(cardAccount(customer.userId))).toBe(2500n);
-    expect(await balance(wallet(customer.userId))).toBe(7500n);
+    // $100 − $2.00 price − $10.00 − $15.00. The price is the term that is new:
+    // issuing a card now charges one.
+    expect(await balance(wallet(customer.userId))).toBe(7300n);
   });
 
   it('does not treat a pending provider response as a failure', async () => {
@@ -495,7 +601,8 @@ describe('freeze, unfreeze and terminate', () => {
     await fundWallet(customer.userId, 100_00);
     const card = await issueCard(customer, '25.00');
 
-    expect(await balance(wallet(customer.userId))).toBe(7500n);
+    // $100 − $2.00 price − $25.00 loaded.
+    expect(await balance(wallet(customer.userId))).toBe(7300n);
 
     const res = await request(app.getHttpServer())
       .post(`/v1/cards/${card.id}/terminate`)
@@ -505,7 +612,10 @@ describe('freeze, unfreeze and terminate', () => {
 
     expect(res.body.status).toBe('terminated');
     expect(await balance(cardAccount(customer.userId))).toBe(0n);
-    expect(await balance(wallet(customer.userId))).toBe(10000n);
+    // What was ON the card comes back. THE PRICE DOES NOT — it was paid for a
+    // card that was issued and used, and refunding it on termination would
+    // make the card free to anybody who opened and closed one.
+    expect(await balance(wallet(customer.userId))).toBe(9800n);
   });
 
   it('refuses to fund a terminated card', async () => {
@@ -894,6 +1004,63 @@ describe('a card history', () => {
     // The issue event is still `system`: nothing yet attributes it, and the
     // honest answer is that something created this card and did not say who.
     expect(events[0]).toMatchObject({ actor: 'system', actor_id: null });
+  });
+});
+
+describe('naming a card', () => {
+  it('takes NO transaction PIN, because nothing moves', async () => {
+    /*
+     * A label is the customer's own note on their own list. Demanding the
+     * secret that authorises payments in order to write one trains people to
+     * type it for things that are not payments — which is the habit an
+     * attacker asking for it relies on.
+     */
+    const customer = await onboard();
+    await fundWallet(customer.userId, 100_00);
+    const card = await issueCard(customer, '0.00');
+
+    const res = await request(app.getHttpServer())
+      .post(`/v1/cards/${card.id}/label`)
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send({ label: 'Subscriptions' })
+      .expect(200);
+
+    expect(res.body.label).toBe('Subscriptions');
+  });
+
+  it('clears the name with null rather than with a blank', async () => {
+    // The database refuses whitespace, so "" arriving as a label would be a
+    // 400 on the obvious way to undo this. Both clients send null.
+    const customer = await onboard();
+    await fundWallet(customer.userId, 100_00);
+    const card = await issueCard(customer, '0.00');
+
+    await request(app.getHttpServer())
+      .post(`/v1/cards/${card.id}/label`)
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send({ label: 'Work travel' })
+      .expect(200);
+
+    const res = await request(app.getHttpServer())
+      .post(`/v1/cards/${card.id}/label`)
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send({ label: null })
+      .expect(200);
+
+    expect(res.body.label).toBeNull();
+  });
+
+  it('refuses to name somebody else card, with the same 404 as a card that does not exist', async () => {
+    const owner = await onboard();
+    const stranger = await onboard();
+    await fundWallet(owner.userId, 100_00);
+    const card = await issueCard(owner, '0.00');
+
+    await request(app.getHttpServer())
+      .post(`/v1/cards/${card.id}/label`)
+      .set('Authorization', `Bearer ${stranger.token}`)
+      .send({ label: 'Mine now' })
+      .expect(404);
   });
 });
 
