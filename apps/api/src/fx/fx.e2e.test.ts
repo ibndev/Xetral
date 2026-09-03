@@ -161,6 +161,11 @@ async function fund(userId: string, minor: number): Promise<void> {
   });
 }
 
+/**
+ * CONVERTING between your own wallets. NO transaction PIN and no recipient —
+ * `convertSchema` is strict and has neither field, because a PIN is the second
+ * factor for money LEAVING the account and nothing leaves here.
+ */
 const convert = (customer: Customer, overrides: Record<string, unknown> = {}) =>
   request(app.getHttpServer())
     .post('/v1/fx/convert')
@@ -169,6 +174,24 @@ const convert = (customer: Customer, overrides: Record<string, unknown> = {}) =>
       from: 'NGN',
       to: 'USD',
       amount: '1650250.00',
+      idempotency_key: randomUUID(),
+      ...overrides,
+    });
+
+/** CONVERTING AND SENDING IT. A payment, so it takes the PIN. */
+const remit = (
+  customer: Customer,
+  recipient: string,
+  overrides: Record<string, unknown> = {},
+) =>
+  request(app.getHttpServer())
+    .post('/v1/fx/remit')
+    .set('Authorization', `Bearer ${customer.token}`)
+    .send({
+      from: 'NGN',
+      to: 'USD',
+      amount: '1650250.00',
+      recipient,
       transaction_pin: PIN,
       idempotency_key: randomUUID(),
       ...overrides,
@@ -302,18 +325,52 @@ describe('converting', () => {
     expect(BigInt(revenue.rows[0]?.balance_minor ?? '0')).toBeGreaterThanOrEqual(2_475_375n);
   });
 
-  it('needs a transaction PIN, and refuses a wrong one', async () => {
+  it('takes NO transaction PIN, and REFUSES a recipient', async () => {
+    /*
+     * A PIN is the second factor for money LEAVING the account, and converting
+     * moves a customer's own money between their own wallets — the balance
+     * afterwards is the same balance in another denomination. Asking for it
+     * here teaches people to type the secret that authorises payments for
+     * something that is not one.
+     *
+     * THE RECIPIENT IS REFUSED RATHER THAN IGNORED, and that is the half worth
+     * a test. Zod strips unknown keys by default, so without `.strict()` a
+     * recipient sent here would be silently dropped: the customer converts
+     * into their own wallet believing they paid somebody, the response is 200,
+     * and the person who was supposed to receive it never hears. Refusing is
+     * the difference between "we ignored what you asked for" and "that is not
+     * what this endpoint does".
+     */
     const customer = await onboard();
     await fund(customer.userId, 2_000_000_00);
 
-    const missing = await convert(customer, { transaction_pin: undefined });
+    const noPin = await convert(customer);
+    expect(noPin.status).toBe(200);
+
+    const withRecipient = await convert(customer, { recipient: 'somebody@example.ng' });
+    expect(withRecipient.status).toBe(400);
+    expect(withRecipient.body.error).toBe('invalid_request');
+  });
+
+  it('refuses a wrong PIN when the money is going to somebody else', async () => {
+    // The other half of the split: remitting IS a payment, so it is authorised
+    // like every other payment.
+    const sender = await onboard();
+    const recipient = await onboard();
+    await fund(sender.userId, 2_000_000_00);
+
+    const before = port.conversions.length;
+
+    const missing = await remit(sender, recipient.identifier, {
+      transaction_pin: undefined,
+    });
     expect(missing.status).toBe(400);
 
-    const wrong = await convert(customer, { transaction_pin: '999119' });
+    const wrong = await remit(sender, recipient.identifier, { transaction_pin: '999119' });
     expect(wrong.status).toBe(401);
 
-    expect(port.conversions).toHaveLength(0);
-    expect((await balances(customer))['NGN']).toBe('2000000.00');
+    expect(port.conversions).toHaveLength(before);
+    expect((await balances(sender))['NGN']).toBe('2000000.00');
   });
 
   it('refuses more than the wallet holds', async () => {
@@ -415,7 +472,7 @@ describe('remittance', () => {
     const recipient = await onboard();
     await fund(sender.userId, 2_000_000_00);
 
-    const res = await convert(sender, { recipient: recipient.identifier }).expect(200);
+    const res = await remit(sender, recipient.identifier).expect(200);
     expect(res.body.recipient).toBe(recipient.identifier);
 
     // The sender paid naira and holds no dollars — zero of them, which is the
@@ -432,7 +489,7 @@ describe('remittance', () => {
   it('refuses a recipient who does not exist', async () => {
     const sender = await onboard();
     await fund(sender.userId, 2_000_000_00);
-    const res = await convert(sender, { recipient: 'nobody@example.ng' });
+    const res = await remit(sender, 'nobody@example.ng');
     expect(res.status).toBe(404);
     expect(res.body.error).toBe('recipient_not_found');
   });
@@ -442,7 +499,7 @@ describe('remittance', () => {
     // make the two indistinguishable in reporting.
     const sender = await onboard();
     await fund(sender.userId, 2_000_000_00);
-    const res = await convert(sender, { recipient: sender.identifier });
+    const res = await remit(sender, sender.identifier);
     expect(res.status).toBe(400);
     expect(res.body.error).toBe('recipient_is_sender');
   });

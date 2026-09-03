@@ -1,10 +1,10 @@
 import { Text, View } from 'react-native';
+import { router } from 'expo-router';
 import { formatAmount } from '@xetral/client';
-import type { Deposit, VirtualAccount } from '@xetral/client';
-import { Icon } from '@/icon';
+import type { Deposit } from '@xetral/client';
 import { Shell } from '@/shell';
-import { Empty, FormError, Loading, Panel } from '@/ui';
-import { useLoad, useXetral } from '@/hooks';
+import { Button, FormError, Loading, Panel } from '@/ui';
+import { useLoad, useSubmit, useXetral } from '@/hooks';
 import { font, radius, space, useStyles, useTheme } from '@/theme';
 
 /**
@@ -40,20 +40,28 @@ export default function AddMoney() {
   const client = useXetral();
   const styles = useStyles();
   const colors = useTheme();
+  const { busy, error: issueError, code: issueCode, run } = useSubmit();
 
-  const account = useLoad<VirtualAccount>(() => client.fundingAccount(), [client]);
+  /*
+   * READ, don't issue — the same correction as the web's. This called
+   * `fundingAccount()`, which asks Bitnob and opens a bank account, merely to
+   * display a number: every visit to this screen opened an account as a side
+   * effect of being looked at, and it was survivable only because issuing is
+   * idempotent. Opening one is a BUTTON now, which is what it is.
+   */
+  const account = useLoad(() => client.existingFundingAccount(), [client]);
   const deposits = useLoad<readonly Deposit[]>(() => client.deposits(), [client]);
+  const verified = useLoad(() => client.kyc().catch(() => null), [client]);
 
-  // The ONE code this screen answers itself. Anything else is a real failure
-  // and goes to `FormError`, which carries its own next step.
-  const needsVerifying = account.code === 'kyc_required';
+  const isVerified = verified.data?.status === 'approved';
+  const has = account.data != null;
 
   return (
     <Shell back="/wallet" title="Add money">
       <Panel title="Add money" subtitle="Transfer from any Nigerian bank">
         {account.loading && <Loading />}
 
-        {account.data !== undefined && (
+        {account.data != null && (
           <>
             <View
               style={{
@@ -86,55 +94,87 @@ export default function AddMoney() {
         )}
 
         {/*
-          ONE LINE, NOT A WALL — matching the web. The allowance notice and
-          the verification block are gone; the FACT is not, because it is not
-          ours to remove. A dedicated account number is a bank account opened
-          in a person's name and the provider will not issue one to somebody
-          unidentified, whatever this screen says.
+          NO ACCOUNT YET — one button, and where it goes depends on whether the
+          customer may have one. A dedicated Nigerian account number is a BANK
+          ACCOUNT ISSUED IN A PERSON'S NAME: the provider will not create one
+          for somebody unidentified and regulation does not permit it, so
+          verification is a fact about the rail rather than a policy this screen
+          chose. All this screen decides is whether to send them to prove who
+          they are first, or to open it now.
         */}
-        {needsVerifying && (
-          <Text style={styles.hint}>
-            Your account number is issued in your name, so it needs your identity
-            first.
-          </Text>
+        {!account.loading && !has && (
+          <>
+            {isVerified ? (
+              <>
+                <Text style={styles.hint}>
+                  Open your Xetral account number and any Nigerian bank can pay into it.
+                </Text>
+                <Button
+                  label={busy ? 'Opening…' : 'Create account'}
+                  icon="arrowRight"
+                  busy={busy}
+                  onPress={() =>
+                    void run(async () => {
+                      await client.fundingAccount();
+                      account.reload();
+                      return 'Your account is open.';
+                    })
+                  }
+                />
+                <FormError error={issueError} code={issueCode} />
+              </>
+            ) : (
+              <>
+                <Text style={styles.hint}>
+                  Your account number is issued in your name, so we need your identity
+                  first. It takes a minute.
+                </Text>
+                <Button
+                  label="Verify my identity"
+                  icon="arrowRight"
+                  onPress={() => router.push('/kyc')}
+                />
+              </>
+            )}
+          </>
         )}
 
-        {!needsVerifying && <FormError error={account.error} code={account.code} />}
+        <FormError error={account.error} code={account.code} />
       </Panel>
 
-      <Panel title="Money received">
-        {deposits.loading && <Loading />}
-        {!deposits.loading && (deposits.data?.length ?? 0) === 0 && (
-          <Empty
-            icon="download"
-            title="Nothing received yet"
-            hint="Transfers into the account above show up here."
-          />
-        )}
-
-        {(deposits.data ?? []).map((d) => (
-          <View
-            key={d.id}
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: space.sm,
-              paddingVertical: space.sm,
-            }}
-          >
-            <View style={{ flex: 1 }}>
-              <Text style={{ color: colors.text, fontFamily: font.sansSemi }}>
-                {d.sender_name ?? 'Bank transfer'}
-              </Text>
-              <Text style={styles.muted}>{new Date(d.created_at).toLocaleString()}</Text>
+      {/*
+        MONEY RECEIVED, ONLY WHEN THERE IS SOME. It was a second panel with an
+        empty state on a screen whose job is to get money IN, so the commonest
+        view was two boxes with one of them saying nothing. The history is not
+        clutter — a customer whose transfer has not arrived needs it more than
+        anybody — so it is removed exactly when it has nothing to say.
+      */}
+      {(deposits.data?.length ?? 0) > 0 && (
+        <Panel title="Money received">
+          {(deposits.data ?? []).map((d) => (
+            <View
+              key={d.id}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: space.sm,
+                paddingVertical: space.sm,
+              }}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: colors.text, fontFamily: font.sansSemi }}>
+                  {d.sender_name ?? 'Bank transfer'}
+                </Text>
+                <Text style={styles.muted}>{new Date(d.created_at).toLocaleString()}</Text>
+              </View>
+              <Text style={styles.amount}>{formatAmount(d.amount, d.currency)}</Text>
             </View>
-            <Text style={styles.amount}>{formatAmount(d.amount, d.currency)}</Text>
-          </View>
-        ))}
+          ))}
 
-        <FormError error={deposits.error} code={deposits.code} />
-      </Panel>
+          <FormError error={deposits.error} code={deposits.code} />
+        </Panel>
+      )}
     </Shell>
   );
 }

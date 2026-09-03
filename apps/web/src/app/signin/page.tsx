@@ -94,6 +94,13 @@ export default function SignIn() {
           </div>
         </div>
 
+        {/* ABOVE the button, not under it. A customer who cannot get in is
+            looking at the password field, and a link below the control they
+            have already failed to use is a link they scroll past. */}
+        <p className="auth-forgot">
+          <Link href="/forgot">Forgot your password?</Link>
+        </p>
+
         <button type="submit" className="block" disabled={busy}>
           {busy ? 'Signing in…' : 'Sign in'}
         </button>

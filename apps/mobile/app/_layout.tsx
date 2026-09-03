@@ -177,6 +177,7 @@ function Chrome() {
         */}
         <Stack.Screen name="signin" />
         <Stack.Screen name="signup" />
+        <Stack.Screen name="forgot" />
         <Stack.Screen name="wallet" />
         <Stack.Screen name="cards" />
         <Stack.Screen name="activity" />

@@ -73,6 +73,26 @@ export class FundingService {
    * beneficiary will keep paying into it, and a second account would receive
    * money nobody is watching.
    */
+  /**
+   * The account this customer already has, or nothing.
+   *
+   * READING IS NOT ISSUING, and the screen needs both as separate questions.
+   * `accountFor` below CREATES one — it asks Bitnob, writes a row, and refuses
+   * an unverified customer — so a page that called it merely to display a
+   * number was opening a bank account as a side effect of being looked at.
+   * That was survivable because issuing is idempotent, and it still meant the
+   * only way to find out whether somebody had an account was to make sure they
+   * did.
+   *
+   * `undefined` rather than a refusal: not having one is the resting state of
+   * every new customer, not an error about them.
+   */
+  async existingAccount(userUuid: string): Promise<VirtualAccountView | undefined> {
+    const userId = await this.#activeUserId(userUuid);
+    const existing = await this.#accountOf(userId);
+    return existing === undefined ? undefined : toAccountView(existing);
+  }
+
   async accountFor(userUuid: string): Promise<VirtualAccountView> {
     const userId = await this.#activeUserId(userUuid);
 

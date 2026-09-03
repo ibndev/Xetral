@@ -140,6 +140,15 @@ export default function SignIn() {
           </Pressable>
 
           {error !== undefined && <Text style={styles.error}>{error}</Text>}
+
+          {/* Inside the card and under the password, because that is the field
+              a customer who cannot get in is looking at. */}
+          <Link
+            href="/forgot"
+            style={[styles.link, { marginTop: space.md, textAlign: 'right' }]}
+          >
+            Forgot your password?
+          </Link>
         </View>
 
         <Text

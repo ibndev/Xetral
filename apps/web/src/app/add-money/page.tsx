@@ -1,11 +1,12 @@
 'use client';
 
+import Link from 'next/link';
 import { formatAmount } from '@xetral/client';
-import type { Deposit, VirtualAccount } from '@xetral/client';
+import type { Deposit } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { FormError } from '@/ui/form-error';
 import { Icon } from '@/ui/icon';
-import { useLoad, useXetral } from '@/lib/hooks';
+import { useLoad, useSubmit, useXetral } from '@/lib/hooks';
 
 /**
  * Adding money, and WHAT IS AND IS NOT GATED ON VERIFICATION.
@@ -36,18 +37,28 @@ import { useLoad, useXetral } from '@/lib/hooks';
  */
 export default function AddMoney() {
   const client = useXetral();
+  const { busy, error: issueError, code: issueCode, run } = useSubmit();
 
   /*
-   * Idempotent by construction on the server: one live account per customer
-   * per currency, so calling this on every visit returns the same number
-   * rather than issuing another.
+   * READ, don't issue. This called `fundingAccount()` — which asks Bitnob and
+   * opens a bank account — merely to display a number, so every visit to this
+   * page opened an account as a side effect of being looked at. It was
+   * survivable only because issuing is idempotent.
+   *
+   * Opening one is now a BUTTON, which is also what it is: a dedicated
+   * Nigerian account number is a bank account in the customer's own name, and
+   * that is a thing somebody decides to do rather than a thing that happens
+   * while they are reading.
    */
-  const account = useLoad<VirtualAccount>(() => client.fundingAccount(), [client]);
+  const account = useLoad(() => client.existingFundingAccount(), [client]);
   const deposits = useLoad<readonly Deposit[]>(() => client.deposits(), [client]);
 
-  // `kyc_required` is the ONE code this screen answers itself. Anything else
-  // is a real failure and goes to `FormError` with its own next step.
-  const needsVerifying = account.code === 'kyc_required';
+  // Whether they may HAVE one. `kyc_required` is what issuing answers for an
+  // unverified customer, and it is the one refusal this screen owns.
+  const verified = useLoad(() => client.kyc().catch(() => null), [client]);
+  const isVerified = verified.data?.status === 'approved';
+
+  const has = account.data != null;
 
   return (
     <Shell>
@@ -55,9 +66,9 @@ export default function AddMoney() {
         <h1>Add money</h1>
         <h2>Transfer from any Nigerian bank</h2>
 
-        {account.loading && <p className="hint">Getting your account number…</p>}
+        {account.loading && <p className="hint">Checking your account…</p>}
 
-        {account.data !== undefined && (
+        {account.data != null && (
           <>
             <div className="balance">
               <div>
@@ -80,62 +91,88 @@ export default function AddMoney() {
         )}
 
         {/*
-          ONE LINE, NOT A WALL.
+          NO ACCOUNT YET — one button, and where it goes depends on whether the
+          customer can have one.
 
-          The daily-allowance notice and the verification block are gone: a
-          ceiling is not something to read before putting money in, and a
-          bordered box with its own button reads as a gate across the whole
-          screen rather than as a fact about one field.
-
-          What is NOT removed is the fact itself, because it is not ours to
-          remove. A dedicated account number is a bank account opened in a
-          person's name; the provider will not create one for somebody
-          unidentified, and no wording here changes that. Saying so quietly is
-          the difference between an answer and a wall — and it is the only
-          honest thing to put where the number would otherwise be.
+          A dedicated Nigerian account number is a BANK ACCOUNT ISSUED IN A
+          PERSON'S NAME. Bitnob will not create one without a registered
+          customer and Nigerian regulation does not permit an unidentified one,
+          so verification is a fact about the rail rather than a policy this
+          screen chose. What this screen decides is only whether to send
+          somebody to prove who they are first, or to open the account now.
         */}
-        {needsVerifying && (
-          <p className="hint">
-            Your account number is issued in your name, so it needs your identity
-            first. <a href="/kyc">Verify my identity</a>
-          </p>
+        {!account.loading && !has && (
+          <>
+            {isVerified ? (
+              <>
+                <p className="hint">
+                  Open your Xetral account number and any Nigerian bank can pay into it.
+                </p>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() =>
+                    void run(async () => {
+                      await client.fundingAccount();
+                      account.reload();
+                      return 'Your account is open.';
+                    })
+                  }
+                >
+                  {busy ? 'Opening…' : 'Create account'}{' '}
+                  <Icon name="arrowRight" size={18} />
+                </button>
+                <FormError error={issueError} code={issueCode} />
+              </>
+            ) : (
+              <>
+                <p className="hint">
+                  Your account number is issued in your name, so we need your identity
+                  first. It takes a minute.
+                </p>
+                <Link className="btn" href="/kyc">
+                  Verify my identity <Icon name="arrowRight" size={18} />
+                </Link>
+              </>
+            )}
+          </>
         )}
 
         {/* Anything that is NOT the verification gate. A provider outage or a
             signed-out session is a different problem and needs its own words. */}
-        {!needsVerifying && <FormError error={account.error} code={account.code} />}
+        <FormError error={account.error} code={account.code} />
       </div>
 
-      <div className="card">
-        <div className="section-head">
-          <h2>Money received</h2>
-        </div>
-
-        {deposits.loading && <p className="spinner">Loading…</p>}
-
-        {!deposits.loading && (deposits.data?.length ?? 0) === 0 && (
-          <div className="empty">
-            <span className="empty-icon">
-              <Icon name="download" size={24} />
-            </span>
-            <span>Nothing received yet</span>
+      {/*
+        MONEY RECEIVED, ONLY WHEN THERE IS SOME.
+        
+        It was a second card with an empty state, on a screen whose job is to
+        get money in — so the commonest view of this page was two boxes, one of
+        them saying nothing. The history itself is not clutter: a customer
+        whose transfer has not arrived needs it more than anybody. So it is
+        removed exactly when it has nothing to say.
+      */}
+      {(deposits.data?.length ?? 0) > 0 && (
+        <div className="card">
+          <div className="section-head">
+            <h2>Money received</h2>
           </div>
-        )}
 
-        <div className="list">
-          {(deposits.data ?? []).map((d) => (
-            <div className="row" key={d.id}>
-              <div>
-                <div className="row-title">{d.sender_name ?? 'Bank transfer'}</div>
-                <div className="row-sub">{new Date(d.created_at).toLocaleString()}</div>
+          <div className="list">
+            {(deposits.data ?? []).map((d) => (
+              <div className="row" key={d.id}>
+                <div>
+                  <div className="row-title">{d.sender_name ?? 'Bank transfer'}</div>
+                  <div className="row-sub">{new Date(d.created_at).toLocaleString()}</div>
+                </div>
+                <div className="amount mono">{formatAmount(d.amount, d.currency)}</div>
               </div>
-              <div className="amount mono">{formatAmount(d.amount, d.currency)}</div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
 
-        <FormError error={deposits.error} code={deposits.code} />
-      </div>
+          <FormError error={deposits.error} code={deposits.code} />
+        </div>
+      )}
     </Shell>
   );
 }

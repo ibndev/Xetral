@@ -1,5 +1,6 @@
+import { useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Animated, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Link, router, usePathname } from 'expo-router';
 import { Icon } from '@/icon';
@@ -96,8 +97,52 @@ export function Shell({
   const isActive = (href: string) =>
     href === '/wallet' ? pathname === href : pathname.startsWith(href);
 
+  /*
+   * EVERY SCREEN ARRIVES, rather than appearing.
+   *
+   * The phone had no entrance at all — reported alongside the web's, which had
+   * one that ten screens forgot to apply. This is `Shell`'s, so it cannot be
+   * forgotten, and it is keyed on the PATH so navigating replays it instead of
+   * playing once per launch.
+   *
+   * `useNativeDriver`, because opacity and transform are the two things the
+   * native driver can animate off the JS thread — an entrance that stutters
+   * while the screen is also fetching is worse than none.
+   *
+   * The spring OVERSHOOTS slightly, which is what makes it read as motion
+   * rather than a fade. `friction`/`tension` rather than a duration: a spring
+   * that is interrupted by a fast tap settles instead of jumping, which a
+   * timing curve does not.
+   */
+  const entrance = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    entrance.setValue(0);
+    Animated.spring(entrance, {
+      toValue: 1,
+      friction: 9,
+      tension: 70,
+      useNativeDriver: true,
+    }).start();
+  }, [entrance, pathname]);
+
   const body = (
-    <View style={{ padding: space.lg, paddingBottom: space.xxl }}>{children}</View>
+    <Animated.View
+      style={{
+        padding: space.lg,
+        paddingBottom: space.xxl,
+        opacity: entrance,
+        transform: [
+          {
+            translateY: entrance.interpolate({
+              inputRange: [0, 1],
+              outputRange: [12, 0],
+            }),
+          },
+        ],
+      }}
+    >
+      {children}
+    </Animated.View>
   );
 
   return (

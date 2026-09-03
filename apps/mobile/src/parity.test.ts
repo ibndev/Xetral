@@ -59,6 +59,17 @@ const WEB_ONLY: Readonly<Record<string, string>> = {
   // different filename.
   '/signin': 'present as signin.tsx',
   '/signup': 'present as signup.tsx',
+  /*
+   * FINISHING A RESET IS A WEB PAGE, deliberately, and the phone has the ASKING
+   * half (`forgot.tsx`) rather than none of it.
+   *
+   * The reset link is a bearer credential in an email. It opens in a browser,
+   * where the token travels in the URL and the customer never handles it — a
+   * phone screen for this would have to ask somebody to copy that token out of
+   * an email by hand, which is both unusable and a habit worth not teaching.
+   * `reset-link.test.ts` is what keeps the emailed path and the page in step.
+   */
+  '/reset-password': 'the reset is finished in a browser from the email link',
 };
 
 describe('web and mobile reach the same places', () => {

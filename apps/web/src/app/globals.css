@@ -1783,6 +1783,27 @@ td.right, th.right { text-align: right; padding-right: 0; }
   to   { opacity: 1; transform: none; }
 }
 .animate-in { animation: rise var(--t-slow) var(--ease-out) both; }
+
+/*
+ * THE WHOLE-SCREEN ENTRANCE, applied by `Shell` rather than by hand.
+ *
+ * `animate-in` was real and was applied one screen at a time, so ten of the
+ * fifteen customer screens appeared instantly — reported, correctly, as the
+ * app having no transitions. Motion that has to be remembered per screen is
+ * motion that is missing from most of them.
+ *
+ * The curve OVERSHOOTS slightly, which is the difference between "it faded in"
+ * and the app feeling like it moved. A cubic-bezier whose third control point
+ * goes past 1 lands, gives back a couple of pixels and settles; more than this
+ * reads as a toy, and this screen has a balance on it.
+ */
+@keyframes screen-rise {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: none; }
+}
+.screen-in {
+  animation: screen-rise 420ms cubic-bezier(.22, 1.12, .36, 1) both;
+}
 .animate-in.d1 { animation-delay: 50ms; }
 .animate-in.d2 { animation-delay: 100ms; }
 .animate-in.d3 { animation-delay: 150ms; }
@@ -1924,6 +1945,9 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
  * rule deciding it rather than two adding up.
  */
 .auth-card { display: grid; gap: 13px; }
+/* Right-aligned under the password field: it belongs to that field rather than
+   to the form, and left-aligned it reads as another label. */
+.auth-forgot { margin: -2px 0 4px; text-align: right; font-size: 13.5px; }
 .auth-card .field { margin-bottom: 0; }
 
 /* Filled, borderless inputs. A 1px outline around every field is a lot of

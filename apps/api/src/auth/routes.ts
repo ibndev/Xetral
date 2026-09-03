@@ -456,6 +456,9 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // POST — but it takes no PIN: receiving money is not spending it, and a
       // customer should never be blocked from being paid.
       .authenticated('POST', '/v1/funding/account', { pin: false })
+      // Reading whether one exists, which is a different question from
+      // issuing one — see the controller.
+      .authenticated('GET', '/v1/funding/account', { pin: false })
       .authenticated('GET', '/v1/funding/deposits', { pin: false })
 
       // Crypto. Receiving an address takes no PIN; sending takes one, because

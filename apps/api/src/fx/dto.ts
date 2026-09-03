@@ -47,7 +47,17 @@ const movement = {
  * forward. `route-coverage.test.ts` audits the policy; this makes the policy
  * and the payload agree.
  */
-export const convertSchema = z.object(movement);
+/*
+ * STRICT, and that is not tidiness.
+ *
+ * Zod STRIPS unknown keys by default, so a `recipient` sent to this route
+ * would be silently dropped and the customer would convert into their own
+ * wallet believing they had paid somebody. Nothing would fail: the money is
+ * safe, the response is a 200, and the person who was supposed to receive it
+ * never hears. Refusing the field is the difference between "we ignored what
+ * you asked for" and "that is not what this endpoint does".
+ */
+export const convertSchema = z.object(movement).strict();
 
 export const remitSchema = z.object({
   ...movement,

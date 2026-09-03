@@ -124,7 +124,17 @@ export function Shell({
           </Link>
         </header>
 
-        <main className="shell">{children}</main>
+        {/*
+          EVERY SCREEN ARRIVES, not just the five that remembered the class.
+          `animate-in` existed and was applied by hand, so ten of fifteen
+          screens appeared instantly — which is the "no transitions" report.
+          Keying the wrapper on the PATH restarts the animation on navigation;
+          without the key React reuses the element and the entrance plays once
+          per session.
+        */}
+        <main className="shell screen-in" key={pathname}>
+          {children}
+        </main>
       </div>
 
       <nav className="tabbar" aria-label="Primary">

@@ -106,6 +106,50 @@ export class Session {
     return (body as { countries: readonly XetralCountry[] }).countries;
   }
 
+  /**
+   * ASK FOR A RESET LINK. Answers nothing about the address.
+   *
+   * The API returns 204 for every well-formed identifier, real or not, and
+   * mints and hashes a token either way so the two paths do not differ in
+   * timing. This method therefore resolves on success and CANNOT tell a caller
+   * whether an account exists — a screen that branched on that would turn any
+   * address list into a customer list, which is the whole point of the
+   * server's behaviour.
+   *
+   * Unauthenticated, so it lives here rather than on `XetralClient`: a
+   * customer who has forgotten their password has no session to build one
+   * with.
+   */
+  async forgotPassword(identifier: string): Promise<void> {
+    const response = await this.#fetch(`${this.#baseUrl}/v1/auth/password/forgot`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ identifier }),
+    });
+    if (!response.ok) {
+      throw toApiError(response.status, await response.json().catch(() => undefined));
+    }
+  }
+
+  /**
+   * Finish a reset with the token from the email.
+   *
+   * ISSUES NO SESSION, deliberately, and this method returns nothing for that
+   * reason: a leaked link grants a password that can be used, not an
+   * immediately live session. The customer signs in afterwards, which is also
+   * what proves the reset worked.
+   */
+  async resetPassword(token: string, newPassword: string): Promise<void> {
+    const response = await this.#fetch(`${this.#baseUrl}/v1/auth/password/reset`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token, new_password: newPassword }),
+    });
+    if (!response.ok) {
+      throw toApiError(response.status, await response.json().catch(() => undefined));
+    }
+  }
+
   async register(input: {
     email: string;
     password: string;

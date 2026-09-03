@@ -464,8 +464,16 @@ export class XetralClient {
   /* --------------------------- funding -------------------------- */
 
   /** The customer's dedicated NGN account. Creates it on the first call. */
+  /** ISSUES one, asking Bitnob and refusing an unverified customer. Not a
+   *  read — see `existingFundingAccount`. */
   async fundingAccount(): Promise<VirtualAccount> {
     return this.#post('/v1/funding/account', {});
+  }
+
+  /** The account this customer already has, or null. Opens nothing. */
+  async existingFundingAccount(): Promise<VirtualAccount | null> {
+    const body = await this.#get<{ account: VirtualAccount | null }>('/v1/funding/account');
+    return body.account;
   }
 
   /* -------------------------- purchases ------------------------- */

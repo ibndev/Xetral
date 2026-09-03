@@ -140,8 +140,17 @@ export function xetral(onSignedOut?: () => void): { session: Session; client: Xe
  * remove a real guarantee from the other. The value is never sent anywhere:
  * `/api/auth/refresh` reads the cookie and ignores its body.
  */
+/**
+ * The FOUR auth calls this app answers itself, because they touch the cookie.
+ *
+ * Everything else the session makes goes to the ordinary proxy. That
+ * distinction was implicit — the rewrite matched the whole `/v1/auth/` prefix
+ * — and being implicit is what broke two things silently.
+ */
+const COOKIE_ROUTES: readonly string[] = ['login', 'register', 'refresh', 'logout'];
+
 async function browserAuthFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const path = String(input).replace('/api/x-auth/v1/auth/', '/api/auth/');
+  const path = rewrite(String(input));
   const response = await fetch(path, init);
 
   if (!response.ok || !path.includes('/api/auth/')) return response;
@@ -155,6 +164,41 @@ async function browserAuthFetch(input: RequestInfo | URL, init?: RequestInit): P
     status: response.status,
     headers: { 'content-type': 'application/json' },
   });
+}
+
+/**
+ * WHERE A SESSION CALL ACTUALLY GOES — and the bug this exists to close.
+ *
+ * `/api/x-auth` is a SENTINEL, not a route: nothing serves it, and this
+ * function is the only reason any request to it succeeds. The old rewrite
+ * replaced `/api/x-auth/v1/auth/` with `/api/auth/` and left everything else
+ * alone — so any session call that was not under `/v1/auth/` went out to a
+ * prefix no route handler answers and got a 404.
+ *
+ * `Session.countries()` is exactly that. It requests `/v1/countries`, which
+ * never matched, so THE COUNTRY LIST HAS NEVER LOADED ON THE WEB: the signup
+ * form's country picker was permanently empty and the dialling code
+ * permanently rendered its placeholder. Reported as the picker not responding
+ * and the code not appearing, which reads as a styling fault and is a 404.
+ *
+ * The `/v1/auth/` prefix was not safe either. Only FOUR auth routes are
+ * answered by this app — the ones that must handle the refresh cookie — and
+ * the rewrite sent every other one to `/api/auth/...`, where nothing serves
+ * it. Password reset is under `/v1/auth/` and would have 404'd the same way.
+ *
+ * So the rule is stated the other way round: the four cookie routes go to this
+ * app's handlers, and EVERYTHING ELSE goes to the proxy, which is where the
+ * API is. A session call added later is served by default rather than lost by
+ * default. `session-routing.test.ts` keeps the four in step with the route
+ * handlers that exist.
+ */
+function rewrite(url: string): string {
+  const auth = /\/api\/x-auth\/v1\/auth\/([a-z-]+)/.exec(url);
+  if (auth !== null && COOKIE_ROUTES.includes(auth[1] ?? '')) {
+    return url.replace('/api/x-auth/v1/auth/', '/api/auth/');
+  }
+  // The ordinary same-origin proxy. Same shape as `XetralClient`'s base.
+  return url.replace('/api/x-auth/', '/api/x/');
 }
 
 /** Forgets the cached client, so the next sign-in starts clean rather than

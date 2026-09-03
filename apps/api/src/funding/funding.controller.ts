@@ -32,6 +32,26 @@ export class FundingController {
     return this.funding.accountFor(claimsOf(request).sub);
   }
 
+  /**
+   * The account this customer already has, if any. A READ.
+   *
+   * The comment above says modelling issuing as a read "would invite a client
+   * to call it on every screen render" — which is exactly what the Add money
+   * screen did, because there was nothing else to call. So every visit to that
+   * page opened a bank account as a side effect of being looked at. This is
+   * the question that page was actually asking.
+   *
+   * `{ account: null }` rather than a 404: not having one is the resting state
+   * of every new customer, and a client that has to catch an error to render
+   * its ordinary case will eventually catch a real one with it.
+   */
+  @Get('account')
+  async existingAccount(
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ account: VirtualAccountView | null }> {
+    return { account: (await this.funding.existingAccount(claimsOf(request).sub)) ?? null };
+  }
+
   /** What has landed. Reading this moves nothing, so no PIN. */
   @Get('deposits')
   async deposits(
