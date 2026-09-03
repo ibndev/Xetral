@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { FlatList, Modal, Pressable, Text, View } from 'react-native';
+import { FlatList, Modal, Pressable, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '@/icon';
 import { font, radius, space, useStyles, useTheme } from '@/theme';
@@ -40,6 +40,8 @@ export function Select({
   variant = 'field',
   renderMark,
   renderTrigger,
+  searchable = false,
+  searchPlaceholder = 'Search…',
 }: {
   readonly label: string;
   readonly value: string;
@@ -59,13 +61,41 @@ export function Select({
   /** What the TRIGGER shows, when that is not the option's label. The dialling
    *  picker needs the sheet to say "Nigeria" and the trigger to say "+234". */
   readonly renderTrigger?: (value: string) => React.ReactNode;
+  /**
+   * A FILTER AT THE TOP OF THE SHEET, for a list nobody can scan.
+   *
+   * Off by default: a currency picker has five rows and a keyboard opening
+   * over them is worse than the list. The Nigerian bank list is the opposite
+   * case — Paystack returns upwards of a hundred, alphabetical, and finding
+   * one by flicking is the customer doing the computer's work.
+   */
+  readonly searchable?: boolean;
+  readonly searchPlaceholder?: string;
 }) {
   const styles = useStyles();
   const colors = useTheme();
   const insets = useSafeAreaInsets();
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
 
   const selected = options.find((o) => o.value === value);
+
+  /*
+   * Matched ANYWHERE in the label, not at the start. Somebody looking for
+   * "GTBank" in a list that calls it "Guaranty Trust Bank" is exactly the
+   * case a prefix match fails, and it is the commonest bank in the country.
+   */
+  const needle = query.trim().toLowerCase();
+  const shown =
+    searchable && needle !== ''
+      ? options.filter((o) => o.label.toLowerCase().includes(needle))
+      : options;
+
+  /** The filter belongs to one opening of the sheet. */
+  function dismiss(): void {
+    setQuery('');
+    setOpen(false);
+  }
 
   const pill = variant === 'pill';
 
@@ -129,12 +159,12 @@ export function Select({
         // Android's hardware back must close the sheet rather than leave the
         // screen — otherwise opening a picker and pressing back signs a
         // customer out of the flow they were halfway through.
-        onRequestClose={() => setOpen(false)}
+        onRequestClose={dismiss}
       >
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Close"
-          onPress={() => setOpen(false)}
+          onPress={dismiss}
           style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' }}
         >
           {/* Its own Pressable with no handler, so a tap on the sheet does not
@@ -173,8 +203,55 @@ export function Select({
               {label}
             </Text>
 
+            {searchable && (
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: space.sm,
+                  marginHorizontal: space.lg,
+                  marginBottom: space.sm,
+                  paddingHorizontal: space.md,
+                  height: 44,
+                  borderRadius: radius.md,
+                  backgroundColor: colors.surface,
+                }}
+              >
+                <Icon name="search" size={16} color={colors.text3} />
+                <TextInput
+                  style={{ flex: 1, color: colors.text, fontSize: 16, fontFamily: font.sans }}
+                  placeholder={searchPlaceholder}
+                  placeholderTextColor={colors.text3}
+                  value={query}
+                  onChangeText={setQuery}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  // A bank's name is not a word, so neither correction nor
+                  // capitalisation helps, and both get in the way.
+                  autoFocus
+                  returnKeyType="search"
+                />
+              </View>
+            )}
+
+            {searchable && shown.length === 0 && (
+              // SAYS SO rather than showing an empty sheet, which is
+              // indistinguishable from a list that failed to load.
+              <Text
+                style={{
+                  color: colors.text3,
+                  fontSize: 14,
+                  paddingHorizontal: space.lg,
+                  paddingVertical: space.lg,
+                }}
+              >
+                No match for “{query.trim()}”.
+              </Text>
+            )}
+
             <FlatList
-              data={[...options]}
+              data={[...shown]}
+              keyboardShouldPersistTaps="handled"
               keyExtractor={(o) => o.value}
               renderItem={({ item }) => {
                 const on = item.value === value;
@@ -184,7 +261,7 @@ export function Select({
                     accessibilityState={{ selected: on }}
                     onPress={() => {
                       onChange(item.value);
-                      setOpen(false);
+                      dismiss();
                     }}
                     style={{
                       flexDirection: 'row',

@@ -102,14 +102,30 @@ export interface PaystackFundingOptions {
    * Hardcoding either would make a correct configuration fail with a message
    * about a bank nobody chose.
    */
-  readonly preferredBank: string | undefined;
+  /**
+   * WHICH BANK PAYSTACK ISSUES THE NUBAN AT, as a value or a resolver.
+   *
+   * A RESOLVER, because this used to be read ONCE at construction from the
+   * environment — while `044_paystack_funding.sql` seeds a
+   * `paystack_preferred_bank` SETTING, the dashboard offers a box for it, and
+   * GO-LIVE tells an operator to decide it. Nothing read that setting. An
+   * operator who filled the box changed nothing, and on a live integration
+   * with more than one NUBAN provider Paystack refuses a create that names no
+   * preferred bank — so "we configured everything" and "Activate Account
+   * fails" were both true at once.
+   *
+   * That is the failure `kill-switches.test.ts` exists to prevent, in a
+   * different table: a filled box on an operations screen reads as a thing
+   * that is running.
+   */
+  readonly preferredBank: string | undefined | (() => Promise<string | undefined>);
 }
 
 export class PaystackFundingAdapter implements FundingPort {
   readonly provider = PROVIDER;
 
   readonly #client: PaystackClient;
-  readonly #preferredBank: string | undefined;
+  readonly #preferredBank: string | undefined | (() => Promise<string | undefined>);
 
   constructor(options: PaystackFundingOptions) {
     this.#client = options.client;
@@ -141,12 +157,22 @@ export class PaystackFundingAdapter implements FundingPort {
     const existing = await this.#existingAccount(customerCode);
     if (existing !== undefined) return existing;
 
+    // Resolved PER CALL, so an operator who changes it during an incident is
+    // not waiting on a deploy — the rule 009 states, and the reason the
+    // credential resolver has the same shape.
+    const preferredBank =
+      typeof this.#preferredBank === 'function'
+        ? await this.#preferredBank()
+        : this.#preferredBank;
+
     const payload = await this.#client.request(
       'POST',
       PAYSTACK_ENDPOINTS.createDedicatedAccount,
       {
         customer: customerCode,
-        ...(this.#preferredBank === undefined ? {} : { preferred_bank: this.#preferredBank }),
+        ...(preferredBank === undefined || preferredBank === ''
+          ? {}
+          : { preferred_bank: preferredBank }),
       },
     );
 

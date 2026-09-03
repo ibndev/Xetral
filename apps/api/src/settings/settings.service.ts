@@ -247,6 +247,27 @@ export class SettingsService implements OnApplicationBootstrap {
     return this.integer('card_issuance_provider_cost_cents', 100);
   }
 
+  /**
+   * WHICH BANK PAYSTACK ISSUES A NUBAN AT — `wema-bank` live, `titan-bank` in
+   * test, blank to let Paystack choose.
+   *
+   * A NAMED ACCESSOR because for a while there was none, and the value was
+   * read from the environment at construction while 044 seeded this row, the
+   * dashboard offered a box for it and GO-LIVE told an operator to decide it.
+   * Filling the box changed nothing — and on a live integration carrying more
+   * than one NUBAN provider, Paystack refuses a create that names no
+   * preferred bank. "Everything is configured" and "Activate Account fails"
+   * were both true.
+   *
+   * The environment stays the fallback, which is the precedence rule this
+   * table follows everywhere: the database is authoritative and bootstrap
+   * warns about anything it is overriding.
+   */
+  async paystackPreferredBank(fallback: string | undefined): Promise<string | undefined> {
+    const value = (await this.text('paystack_preferred_bank', fallback ?? '')).trim();
+    return value === '' ? undefined : value;
+  }
+
   /* ---------------------------------- tax ------------------------------ */
 
   /**

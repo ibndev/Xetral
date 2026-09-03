@@ -39,8 +39,14 @@ const CSS = readFileSync(
  * FLOATS above the page, painted lighter than the ground rather than darker,
  * so it has no recess cue to lean on and its edge is what separates it from
  * what it covers.
+ *
+ * All three entries are ONE sheet. The filter box and the empty state are the
+ * open dropdown's own header and body — they sit in the same floating layer
+ * over the same content and share its outline. Exempting them is not widening
+ * the rule; drawing them without an edge would leave the sheet's top or its
+ * whole box unbounded against whatever it covers.
  */
-const FLOATS = ['.xselect-list'];
+const FLOATS = ['.xselect-list', '.xselect-search', '.xselect-empty'];
 
 /** Rule blocks, as `{ selector, body }`, with comments stripped first. */
 function rules(): readonly { selector: string; body: string }[] {

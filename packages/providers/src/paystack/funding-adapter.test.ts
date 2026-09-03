@@ -14,7 +14,7 @@ interface Call {
 
 function adapterWith(
   responses: readonly unknown[],
-  options: { preferredBank?: string } = {},
+  options: { preferredBank?: string | (() => Promise<string | undefined>) } = {},
 ): { adapter: PaystackFundingAdapter; calls: Call[] } {
   const calls: Call[] = [];
   let i = 0;
@@ -113,9 +113,46 @@ describe('opening an account for somebody who has not been verified', () => {
       customer: { ...NEW_CUSTOMER.customer, providerCustomerId: 'CUS_existing' },
     });
     expect(calls.map((c) => c.path)).toEqual([
-      '/dedicated_account?customer=CUS_existing',
+      // `active` AND `currency` are REQUIRED on this endpoint — Paystack's own
+      // SDK marks both with a `*` — and omitting them made the list refuse.
+      // The refusal is swallowed by the caller, so the cost was quiet: the
+      // look-before-create guard never found an existing account, and every
+      // retry after a timeout went on to CREATE a second live account number
+      // against a row nobody is watching.
+      '/dedicated_account?active=true&currency=NGN&customer=CUS_existing',
       '/dedicated_account',
     ]);
+  });
+
+  it('SENDS THE PREFERRED BANK FROM A RESOLVER, so a setting reaches Paystack', async () => {
+    /*
+     * THE BUG THIS IS FOR. `preferred_bank` was read once at construction
+     * from the environment, while 044 seeds a `paystack_preferred_bank`
+     * SETTING, the dashboard offers a box for it and GO-LIVE names it. An
+     * operator who filled that box changed nothing — and a live integration
+     * carrying more than one NUBAN provider refuses a create that names no
+     * preferred bank, so "everything is configured" and "Activate Account
+     * throws" were both true at once.
+     *
+     * Resolved per call, so changing it during an incident is not a deploy.
+     */
+    const { adapter, calls } = adapterWith([CUSTOMER_CREATED, NO_ACCOUNTS, ACCOUNT_CREATED], {
+      preferredBank: async () => 'wema-bank',
+    });
+    await adapter.createVirtualAccount(NEW_CUSTOMER);
+    const create = calls.find((c) => c.path === '/dedicated_account' && c.method === 'POST');
+    expect((create?.body as { preferred_bank?: string }).preferred_bank).toBe('wema-bank');
+  });
+
+  it('sends no preferred bank when the resolver answers blank', async () => {
+    // Blank is a real answer — "let Paystack choose" — and must not become
+    // the string "" on the wire, which their API reads as a bank name.
+    const { adapter, calls } = adapterWith([CUSTOMER_CREATED, NO_ACCOUNTS, ACCOUNT_CREATED], {
+      preferredBank: async () => '',
+    });
+    await adapter.createVirtualAccount(NEW_CUSTOMER);
+    const create = calls.find((c) => c.path === '/dedicated_account' && c.method === 'POST');
+    expect(create?.body).not.toHaveProperty('preferred_bank');
   });
 
   it('names the preferred bank only when one is configured', async () => {

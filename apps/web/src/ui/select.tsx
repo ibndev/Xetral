@@ -42,6 +42,19 @@ export interface SelectProps {
   /** Sized to its content rather than to the row — for a picker sitting inside
    *  another field rather than filling one. */
   readonly compact?: boolean;
+  /**
+   * A FILTER BOX ABOVE THE LIST, for a list nobody can scan.
+   *
+   * Off by default and deliberately so: a currency picker has five rows and a
+   * text field in front of one invites somebody to type a currency that does
+   * not exist. The Nigerian bank list is the opposite case — Paystack returns
+   * upwards of a hundred, alphabetical, and finding "Kuda" by scrolling is
+   * the customer doing the computer's work. Typeahead is not enough at that
+   * length: it matches a PREFIX and jumps, so a customer who thinks of their
+   * bank as "GTBank" never reaches "Guaranty Trust".
+   */
+  readonly searchable?: boolean;
+  readonly searchPlaceholder?: string;
 }
 
 /**
@@ -85,6 +98,8 @@ export function Select({
   renderMark,
   renderTrigger,
   compact,
+  searchable = false,
+  searchPlaceholder = 'Search…',
 }: SelectProps): React.JSX.Element {
   const generatedId = useId();
   const listId = `${id ?? generatedId}-list`;
@@ -93,14 +108,38 @@ export function Select({
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLUListElement>(null);
+  const search = useRef<HTMLInputElement>(null);
+  const [query, setQuery] = useState('');
   /** Typeahead buffer, cleared by a pause rather than by a keystroke count. */
   const typed = useRef<{ text: string; at: number }>({ text: '', at: 0 });
 
-  const selectedIndex = options.findIndex((o) => o.value === value);
-  const selected = selectedIndex === -1 ? undefined : options[selectedIndex];
+  /*
+   * WHAT THE LIST IS SHOWING, which is not always every option.
+   *
+   * Every index below — the active row, the arrow keys, Home and End, what
+   * Enter commits — is an index into THIS array rather than into `options`.
+   * Mixing the two is how a filtered list commits the wrong row, which is a
+   * bug that only appears once somebody types.
+   *
+   * Matched anywhere in the label rather than at the start: a customer looking
+   * for "GTBank" in a list that calls it "Guaranty Trust Bank" is exactly the
+   * case a prefix match fails.
+   */
+  const needle = query.trim().toLowerCase();
+  const shown =
+    searchable && needle !== ''
+      ? options.filter((o) => o.label.toLowerCase().includes(needle))
+      : options;
+
+  const selectedIndex = shown.findIndex((o) => o.value === value);
+  const selected = options.find((o) => o.value === value);
 
   const close = useCallback((focusTrigger: boolean) => {
     setOpen(false);
+    // The filter belongs to one opening of the list. Leaving it behind means
+    // the next open shows a list already narrowed by a search nobody
+    // remembers making.
+    setQuery('');
     // Returning focus is what makes Escape and a committed choice feel like
     // the same control rather than like the page moving underneath.
     if (focusTrigger) trigger.current?.focus();
@@ -114,10 +153,18 @@ export function Select({
 
   useEffect(() => {
     if (!open) return;
-    // Focus goes to the LIST, so the browser's own focus ring lands on the
-    // thing that is now taking keys.
-    list.current?.focus();
-  }, [open]);
+    // Focus goes to whatever is taking keys: the filter box when there is
+    // one, the list otherwise. Both carry the same key handler, so the arrow
+    // keys and Enter behave identically either way.
+    if (searchable) search.current?.focus();
+    else list.current?.focus();
+  }, [open, searchable]);
+
+  // Typing narrows the list, so the highlighted row has to come back to the
+  // top — otherwise Enter commits a row scrolled out of sight.
+  useEffect(() => {
+    if (open) setActive(0);
+  }, [query, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -145,7 +192,7 @@ export function Select({
   }, [open, active]);
 
   function commit(index: number): void {
-    const option = options[index];
+    const option = shown[index];
     if (option === undefined || option.disabled === true) return;
     onChange(option.value);
     close(true);
@@ -153,19 +200,19 @@ export function Select({
 
   /** The next selectable row in a direction, skipping disabled ones. */
   function step(from: number, delta: number): number {
-    for (let i = from + delta; i >= 0 && i < options.length; i += delta) {
-      if (options[i]?.disabled !== true) return i;
+    for (let i = from + delta; i >= 0 && i < shown.length; i += delta) {
+      if (shown[i]?.disabled !== true) return i;
     }
     return from;
   }
 
   function firstEnabled(): number {
-    const i = options.findIndex((o) => o.disabled !== true);
+    const i = shown.findIndex((o) => o.disabled !== true);
     return i === -1 ? 0 : i;
   }
 
   function lastEnabled(): number {
-    for (let i = options.length - 1; i >= 0; i--) if (options[i]?.disabled !== true) return i;
+    for (let i = shown.length - 1; i >= 0; i--) if (shown[i]?.disabled !== true) return i;
     return 0;
   }
 
@@ -212,14 +259,21 @@ export function Select({
         break;
     }
 
-    // Typeahead. One printable character at a time, accumulated while the
-    // customer keeps typing — so "us" reaches USD rather than cycling U.
-    if (event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey) {
+    // Typeahead, and ONLY where there is no filter box. With one, every
+    // printable key belongs to the input — stealing it would move the
+    // highlight while the customer is still typing the bank's name.
+    if (
+      !searchable &&
+      event.key.length === 1 &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.altKey
+    ) {
       const now = Date.now();
       const text = (now - typed.current.at < 700 ? typed.current.text : '') + event.key.toLowerCase();
       typed.current = { text, at: now };
 
-      const found = options.findIndex(
+      const found = shown.findIndex(
         (o) => o.disabled !== true && o.label.toLowerCase().startsWith(text),
       );
       if (found !== -1) setActive(found);
@@ -261,18 +315,61 @@ export function Select({
         <Icon name="chevronDown" size={18} />
       </button>
 
-      {open && (
+      {open && searchable && (
+        /*
+          THE FILTER SITS INSIDE THE OPEN LIST, not above the trigger.
+
+          Above the trigger it would be a second permanent control on a form
+          that already has enough of them, and it would be visible while the
+          list is closed — a text box next to a chosen bank reads as somewhere
+          to type a different one. Inside, it exists exactly while it is
+          useful.
+        */
+        <div className="xselect-search">
+          <Icon name="search" size={16} />
+          <input
+            ref={search}
+            type="text"
+            role="combobox"
+            aria-expanded
+            aria-controls={listId}
+            aria-activedescendant={`${listId}-${active}`}
+            aria-autocomplete="list"
+            {...(labelledBy === undefined ? {} : { 'aria-labelledby': labelledBy })}
+            placeholder={searchPlaceholder}
+            value={query}
+            autoComplete="off"
+            // Never offered back by the browser on another form, and never
+            // corrected: a bank's name is not a word.
+            autoCorrect="off"
+            spellCheck={false}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={onKeyDown}
+          />
+        </div>
+      )}
+
+      {open && shown.length === 0 && (
+        // SAYS SO, rather than showing an empty box. A list that renders to
+        // nothing is indistinguishable from one that failed to load, which is
+        // the confusion this screen has already had once.
+        <p className="xselect-empty">No match for “{query.trim()}”.</p>
+      )}
+
+      {open && shown.length > 0 && (
         <ul
           id={listId}
           ref={list}
           className="xselect-list"
           role="listbox"
-          tabIndex={-1}
+          // With a filter box the input owns focus and the keys; the list is
+          // then a passive surface and must not be a tab stop of its own.
+          tabIndex={searchable ? undefined : -1}
           {...(labelledBy === undefined ? {} : { 'aria-labelledby': labelledBy })}
-          aria-activedescendant={`${listId}-${active}`}
+          {...(searchable ? {} : { 'aria-activedescendant': `${listId}-${active}` })}
           onKeyDown={onKeyDown}
         >
-          {options.map((option, index) => (
+          {shown.map((option, index) => (
             <li
               key={option.value}
               id={`${listId}-${index}`}

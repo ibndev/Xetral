@@ -63,8 +63,20 @@ export const PAYSTACK_ENDPOINTS = {
 
   createDedicatedAccount: '/dedicated_account',
   getDedicatedAccount: (id: string) => `/dedicated_account/${id}`,
+  /*
+   * `active` AND `currency` ARE REQUIRED, and omitting them is not a lenient
+   * default — it is a refusal.
+   *
+   * Paystack's own SDK marks both with a `*` (`args: ["active*", "currency*",
+   * …]`), and this sent only `customer`. The refusal is swallowed by the
+   * caller, which is why it did not surface as an outage; the cost was
+   * quieter and worse. The look-before-create guard silently never found an
+   * existing account, so every retry after a timeout went on to CREATE — and
+   * `POST /dedicated_account` has no idempotency key, so the second live
+   * account number is one nobody is watching.
+   */
   listDedicatedAccounts: (customerCode: string) =>
-    `/dedicated_account?customer=${encodeURIComponent(customerCode)}`,
+    `/dedicated_account?active=true&currency=NGN&customer=${encodeURIComponent(customerCode)}`,
 
   /** Reconciliation: what Paystack recorded that no webhook told us about. */
   transactions: (customerCode: string) =>

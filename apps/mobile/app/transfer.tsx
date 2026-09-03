@@ -345,6 +345,11 @@ export default function Transfer() {
           <>
             <Select
               label={mobileMoney ? 'Mobile money provider' : 'Bank'}
+              // Paystack returns upwards of a hundred Nigerian banks; finding
+              // one by flicking through an alphabetical sheet is the customer
+              // doing the computer's work.
+              searchable
+              searchPlaceholder={mobileMoney ? 'Search providers…' : 'Search banks…'}
               value={bankCode}
               onChange={(code) => {
                 setBankCode(code);

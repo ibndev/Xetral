@@ -845,6 +845,14 @@ h3 { font-size: 16px; }
   pointer-events: none;
 }
 @media (min-width: 420px) { .virtual-card { padding: 22px; } }
+/* THE ONE SHADOWED THING ON THE PAGE NEEDS A LITTLE MORE ROOM UNDER IT.
+   `.shell > * + *` spaces every sibling identically, which is right for flat
+   containers and reads short here: the card's shadow occupies part of that
+   gap, so the panel beneath it looks closer than the equal gap above. */
+.shell > .virtual-card + * { margin-top: calc(var(--s-5) + 6px); }
+@media (min-width: 720px) {
+  .shell > .virtual-card + * { margin-top: calc(var(--s-6) + 6px); }
+}
 
 /* The scheme mark and the currency, bottom right. `VISA` is set in italic
    because that is the mark's own form — it is a wordmark being reproduced,
@@ -1010,17 +1018,36 @@ h3 { font-size: 16px; }
  * Below 380px it wraps after all: at that width a 34px figure and a button
  * genuinely do not fit, and squeezing them is worse than stacking them.
  */
+/*
+ * THE BUTTON SITS ON THE FIGURE'S BASELINE, not in the middle of its column.
+ *
+ * `align-items: center` centred the button against the WHOLE left column —
+ * the small "Card price" label plus the big figure — so its midpoint landed
+ * between the two and the button read as floating above the $2.00 it belongs
+ * to. The column's meaningful edge is the bottom of the figure, because that
+ * is the last line in it, so `flex-end` is what puts the two on one line.
+ *
+ * This is why the foot note was moved OUT of the column earlier: as a third
+ * line it became the bottom edge, and the button aligned to the hint instead.
+ * Keep it out.
+ */
 .price-row {
   margin-top: var(--s-5);
   padding-top: var(--s-5);
   border-top: 1px solid var(--line);
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
   gap: var(--s-4);
   flex-wrap: nowrap;
 }
-@media (max-width: 379px) { .price-row { flex-wrap: wrap; } }
+/* The display face carries descender space the digits do not use, so a bottom
+   edge flush with the box reads a couple of pixels low against the numerals.
+   This is optical, and measured against the 34px/42px figure rather than
+   guessed. */
+.price-row > button { margin-bottom: 3px; }
+@media (max-width: 379px) { .price-row > button { margin-bottom: 0; } }
+@media (max-width: 379px) { .price-row { flex-wrap: wrap; align-items: stretch; } }
 /* Sized by its label, never squeezed by the figure beside it. */
 .price-row > button { flex: 0 0 auto; }
 .price-foot { margin-top: 10px; color: var(--text-3); font-size: 13px; }
@@ -2659,3 +2686,68 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
   font-weight: 600;
 }
 .activate .hint { margin: 0; }
+
+/*
+ * THE FILTER BOX INSIDE AN OPEN LIST.
+ *
+ * Only the bank picker turns this on: Paystack returns upwards of a hundred
+ * Nigerian banks and scrolling one alphabetically is the customer doing the
+ * computer's work. Every other picker here has five rows, where a text field
+ * only invites somebody to type something that does not exist.
+ *
+ * It is drawn as part of the list rather than as a field, so it reads as a
+ * header on the sheet rather than as another control on the form — hence no
+ * border of its own and a rule underneath it instead.
+ */
+.xselect-search {
+  position: absolute;
+  z-index: 41;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--surface-raised);
+  /* THE SAME EDGE THE LIST USES. `--line` is the rule between rows inside a
+     container and is invisible on a floating sheet in dark; the sheet's own
+     outline is `--line-strong`, which is what `.xselect-list` draws and what
+     `light-edges.test.ts` holds every full box border to. */
+  border: 1px solid var(--line-strong);
+  border-bottom: 0;
+  border-radius: var(--r-sm) var(--r-sm) 0 0;
+  color: var(--text-3);
+}
+.xselect-search input {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 15px;
+}
+.xselect-search input:focus { outline: none; }
+/* The list drops below the filter rather than under the trigger, and loses
+   the corners the filter now owns. */
+.xselect[data-open] .xselect-search ~ .xselect-list,
+.xselect[data-open] .xselect-search ~ .xselect-empty {
+  top: calc(100% + 6px + 43px);
+  border-radius: 0 0 var(--r-sm) var(--r-sm);
+}
+.xselect-empty {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 14px 12px;
+  background: var(--surface-raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  color: var(--text-3);
+  font-size: 14px;
+}

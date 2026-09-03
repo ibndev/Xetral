@@ -450,6 +450,14 @@ function Transfer() {
               {mobileMoney ? 'Mobile money provider' : 'Bank'}
               <Select
                 labelledBy="transfer-bank-label"
+                /* PASTE-OR-TYPE, because the list is long. Paystack returns
+                   upwards of a hundred Nigerian banks; scrolling one
+                   alphabetically to reach Kuda is the customer doing the
+                   computer's work. */
+                searchable
+                searchPlaceholder={
+                  mobileMoney ? 'Search providers…' : 'Search banks…'
+                }
                 value={bankCode}
                 onChange={(code) => {
                   setBankCode(code);

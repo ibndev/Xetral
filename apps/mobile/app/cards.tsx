@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
-import { CARD_COLOURS, formatAmount } from '@xetral/client';
-import type { Card, CardColour, CardSecrets } from '@xetral/client';
+import { Text, View } from 'react-native';
+import { formatAmount } from '@xetral/client';
+import type { Card, CardSecrets } from '@xetral/client';
 import { Logo } from '@/logo';
 import { Shell } from '@/shell';
 import { Icon } from '@/icon';
@@ -50,13 +50,6 @@ export default function Cards() {
   const none = !cards.loading && (list?.length ?? 0) === 0;
   const [adding, setAdding] = useState(false);
 
-  /*
-   * THE CHOSEN FINISH LIVES HERE, not inside the form, because the thing it
-   * changes is the specimen ABOVE the form — the same arrangement as the web.
-   * State held in `Issue` could style the swatch and nothing else.
-   */
-  const [colour, setColour] = useState<CardColour>('graphite');
-
   /** Set by tapping Create card without a verified identity. */
   const [askingToVerify, setAskingToVerify] = useState(false);
 
@@ -76,7 +69,7 @@ export default function Cards() {
         {cards.loading && <Loading />}
         {/* The specimen: the SAME component with no card, so the preview and
             the product cannot drift apart. */}
-        {none && <CardFace holder={holder} colour={colour} />}
+        {none && <CardFace holder={holder} />}
         {list?.map((card, index) => (
           <View key={card.id} style={{ gap: space.sm }}>
             <CardRow card={card} holder={holder} onChange={cards.reload} />
@@ -124,8 +117,6 @@ export default function Cards() {
         <View style={{ marginTop: space.lg }}>
         <Issue
           price={cards.data?.issuance_fee}
-          colour={colour}
-          onColour={setColour}
           verified={identity.data?.status === 'approved'}
           onNeedsVerification={() => setAskingToVerify(true)}
           onIssued={() => {
@@ -663,16 +654,12 @@ function group(pan: string): string {
  */
 function Issue({
   price,
-  colour,
-  onColour,
   verified,
   onNeedsVerification,
   onIssued,
 }: {
   /** From the server, never from this file — see the web's Issue. */
   readonly price: string | undefined;
-  readonly colour: CardColour;
-  readonly onColour: (colour: CardColour) => void;
   /** Whether Bitnob will accept an issue for this customer at all. */
   readonly verified: boolean;
   readonly onNeedsVerification: () => void;
@@ -683,13 +670,10 @@ function Issue({
   const colors = useTheme();
   const { busy, error, code, done, run } = useSubmit();
   const attempt = useIdempotencyKey();
-  const fundAttempt = useIdempotencyKey();
   const [pin, setPin] = useState('');
-  const [amount, setAmount] = useState('');
   const [stage, setStage] = useState<'offer' | 'confirm'>('offer');
 
   const free = price === '0.00';
-  const loading = amount.trim() !== '' && amount.trim() !== '0';
 
   /*
    * THE CONFIRM STEP, inline. It reads the same state the offer writes, so
@@ -703,18 +687,6 @@ function Issue({
           <Text style={styles.muted}>A virtual USD card</Text>
           <Text style={styles.amount}>{price === undefined ? '—' : `$${price}`}</Text>
         </View>
-        <View style={styles.row}>
-          <Text style={styles.muted}>Finish</Text>
-          <Text style={styles.amount}>
-            {CARD_COLOURS.find((c) => c.value === colour)?.label ?? colour}
-          </Text>
-        </View>
-        {loading && (
-          <View style={styles.row}>
-            <Text style={styles.muted}>Starting balance</Text>
-            <Text style={styles.amount}>{`$${amount.trim()}`}</Text>
-          </View>
-        )}
         <View style={styles.row}>
           <Text style={styles.muted}>From</Text>
           <Text style={styles.amount}>Your USD wallet</Text>
@@ -736,44 +708,13 @@ function Issue({
           disabled={pin === ''}
           onPress={() =>
             void run(async () => {
-              const card = await client.issueCard({
-                pin,
-                idempotencyKey: attempt.key,
-                colour,
-              });
+              await client.issueCard({ pin, idempotencyKey: attempt.key });
               attempt.next();
-
-              /*
-               * FUNDING IS A SECOND CALL, ordered this way deliberately —
-               * the same reasoning the web's Issue records. There is no
-               * endpoint that issues and loads at once, and a failure here
-               * leaves a real, empty card rather than a failed purchase, so
-               * the message says that instead of reporting it all as broken.
-               */
-              let funded = false;
-              if (loading) {
-                try {
-                  await client.fundCard(card.id, {
-                    amount: amount.trim(),
-                    pin,
-                    idempotencyKey: fundAttempt.key,
-                  });
-                  fundAttempt.next();
-                  funded = true;
-                } catch {
-                  funded = false;
-                }
-              }
-
               // Cleared the moment the request returns. A PIN authorises one
               // instruction; it is not a password to hold on to.
               setPin('');
-              setAmount('');
               setStage('offer');
               onIssued();
-              if (loading && !funded) {
-                return 'Your card is on its way. We could not load it — add money to it from the card itself.';
-              }
               return 'Your card is on its way.';
             })
           }
@@ -805,57 +746,6 @@ function Issue({
           icon="zap"
           title="Instant issuance"
           body="Get your card and start spending."
-        />
-      </View>
-
-      {/*
-        PICKING THE FINISH, ON THE CARD ITSELF.
-        Three swatches rather than a list of colour names: the specimen above
-        redraws as one is pressed, so the choice is made against the thing
-        being chosen. The value sent is one of exactly three the database's own
-        CHECK accepts, and `card-colours.test.ts` holds this list to it.
-      */}
-      <View style={{ marginTop: space.lg }}>
-        <Text style={styles.muted}>Finish</Text>
-        <View style={{ flexDirection: 'row', gap: 10, marginTop: space.sm }}>
-          {CARD_COLOURS.map((option) => (
-            <Pressable
-              key={option.value}
-              accessibilityRole="button"
-              accessibilityLabel={option.label}
-              accessibilityState={{ selected: colour === option.value }}
-              android_ripple={null}
-              onPress={() => onColour(option.value)}
-              style={{
-                width: 52,
-                height: 34,
-                borderRadius: radius.sm,
-                backgroundColor: CARD_FACES[option.value] ?? CARD_FACES.graphite,
-                borderWidth: 2,
-                // The selected one is RINGED rather than enlarged: a swatch
-                // that grows shifts the two beside it, which reads as the row
-                // moving rather than as a choice being made.
-                borderColor: colour === option.value ? colors.brand : 'transparent',
-              }}
-            />
-          ))}
-        </View>
-      </View>
-
-      {/*
-        AND HOW MUCH TO PUT ON IT, optional.
-        Empty means an empty card, which is a real answer and the resting
-        state. It stays a major-unit STRING all the way to the server; nothing
-        here parses it into a number.
-      */}
-      <View style={{ marginTop: space.md }}>
-        <Field
-          label="Starting balance (optional)"
-          inputMode="decimal"
-          autoComplete="off"
-          placeholder="0.00"
-          value={amount}
-          onChangeText={setAmount}
         />
       </View>
 

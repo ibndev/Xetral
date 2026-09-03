@@ -449,11 +449,23 @@ export function createFundingPort(
           baseUrl: paystackBaseUrl,
           secretKey: paystackSecretKey(config, credentials),
         }),
-        // Read once at construction rather than per call: Paystack refuses a
-        // bank the integration is not enabled for at the moment a customer
-        // asks, so a wrong value is loud, and a per-call read would put a
-        // settings query in front of every account issuance to no purpose.
-        preferredBank: config.paystackPreferredBank,
+        /*
+         * FROM THE SETTING, not from the environment — and this was the bug.
+         *
+         * It used to read `config.paystackPreferredBank` once at
+         * construction, while 044 seeds a `paystack_preferred_bank` row, the
+         * dashboard offers a box for it and GO-LIVE tells an operator to
+         * decide it. Nothing read that row, so filling it changed nothing;
+         * and a live integration carrying more than one NUBAN provider
+         * refuses a create that names no preferred bank.
+         *
+         * `settings` is absent on the unit-test and app-factory paths, where
+         * the environment is the only source there is.
+         */
+        preferredBank:
+          settings === undefined
+            ? config.paystackPreferredBank
+            : () => settings.paystackPreferredBank(config.paystackPreferredBank),
       }),
     );
   }
