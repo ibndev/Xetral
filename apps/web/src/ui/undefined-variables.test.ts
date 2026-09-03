@@ -36,9 +36,26 @@ describe('css custom properties', () => {
 
   it('every var() read resolves to a definition', () => {
     const read = new Set(Array.from(css.matchAll(/var\((--[a-z0-9-]+)/g), (m) => m[1] as string));
-    // Next injects the font variables through the root element's class, so
-    // they are defined by the framework rather than by this file.
-    const framework = /^--font-(bricolage|instrument|spline)$/;
+    /*
+     * Next injects the font variables through the root element's class, so
+     * they are defined by the framework rather than by this stylesheet.
+     *
+     * READ FROM `layout.tsx`, not listed here. This was a hardcoded
+     * `/^--font-(bricolage|instrument|spline)$/`, which is a second copy of a
+     * fact that lives somewhere else — so replacing the typefaces turned this
+     * test red for a variable that was perfectly well defined, and ADDING one
+     * would have widened the hole silently. The names come from the
+     * `variable:` fields of the `localFont` calls that create them.
+     */
+    const framework = new Set(
+      Array.from(
+        readFileSync(join(HERE, '..', 'app', 'layout.tsx'), 'utf8').matchAll(
+          /variable:\s*'(--[a-z0-9-]+)'/g,
+        ),
+        (m) => m[1] as string,
+      ),
+    );
+    expect(framework.size, 'no font variables found in layout.tsx').toBeGreaterThan(0);
     // And one is set inline, per element, by a component: the logo's metal
     // ramp is generated in TypeScript so the SVG gradient and the CSS one
     // cannot drift. Read from the SOURCE rather than listed here, so deleting
@@ -51,7 +68,7 @@ describe('css custom properties', () => {
     );
     const missing = [...read]
       .filter((name) => !light.has(name) && !dark.has(name))
-      .filter((name) => !framework.test(name) && !setInComponents.has(name))
+      .filter((name) => !framework.has(name) && !setInComponents.has(name))
       .sort();
 
     expect(

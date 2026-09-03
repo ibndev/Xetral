@@ -57,13 +57,14 @@ export default function Layout() {
    * so the two apps draw the same shapes at the same weights.
    */
   const [fontsLoaded, fontError] = useFonts({
-    'BricolageGrotesque-Regular': require('../assets/fonts/BricolageGrotesque-Regular.ttf'),
-    'BricolageGrotesque-SemiBold': require('../assets/fonts/BricolageGrotesque-SemiBold.ttf'),
-    'BricolageGrotesque-ExtraBold': require('../assets/fonts/BricolageGrotesque-ExtraBold.ttf'),
-    'InstrumentSans-Regular': require('../assets/fonts/InstrumentSans-Regular.ttf'),
-    'InstrumentSans-Medium': require('../assets/fonts/InstrumentSans-Medium.ttf'),
-    'InstrumentSans-SemiBold': require('../assets/fonts/InstrumentSans-SemiBold.ttf'),
-    'InstrumentSans-Bold': require('../assets/fonts/InstrumentSans-Bold.ttf'),
+    // ONE FAMILY, A FILE PER WEIGHT. React Native matches a custom family by
+    // NAME and ignores `fontWeight`, so a weight is a separate registration
+    // rather than a style — the rule `fonts.test.ts` enforces.
+    'Inter-Regular': require('../assets/fonts/Inter-Regular.ttf'),
+    'Inter-Medium': require('../assets/fonts/Inter-Medium.ttf'),
+    'Inter-SemiBold': require('../assets/fonts/Inter-SemiBold.ttf'),
+    'Inter-Bold': require('../assets/fonts/Inter-Bold.ttf'),
+    'Inter-ExtraBold': require('../assets/fonts/Inter-ExtraBold.ttf'),
     'SplineSansMono-Regular': require('../assets/fonts/SplineSansMono-Regular.ttf'),
     'SplineSansMono-SemiBold': require('../assets/fonts/SplineSansMono-SemiBold.ttf'),
   });

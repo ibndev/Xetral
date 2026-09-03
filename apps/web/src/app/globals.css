@@ -1,8 +1,8 @@
 /*
  * The Xetral design system.
  *
- * Built from the approved mockup: navy and amber on cool grey, Bricolage
- * Grotesque for display, Instrument Sans for text, Spline Sans Mono for
+ * Built from the approved mockup: navy and amber on cool grey, Inter for
+ * headings, titles, labels and text, and Spline Sans Mono for
  * anything a customer might read digit by digit.
  *
  * Written narrow-first throughout. A Nigerian customer is on a phone; the
@@ -186,8 +186,11 @@
    * fix — the fix is a subset with the glyph in it, and until then this at
    * least renders the same symbol for everyone.
    */
-  --font-display: var(--font-bricolage), 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif;
-  --font-sans:    var(--font-instrument), 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif;
+  /* ONE FAMILY for headings, titles, labels and body — see `layout.tsx`. The
+     two names are kept because the SCALE still distinguishes them: `display`
+     is set tighter and heavier, `sans` is set for reading. */
+  --font-display: var(--font-inter), 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-sans:    var(--font-inter), 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif;
   --font-mono:    var(--font-spline), 'Noto Sans Mono', 'DejaVu Sans Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* Motion — one curve and three durations, so nothing in the product moves

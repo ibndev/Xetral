@@ -237,8 +237,9 @@ export const space = { xs: 6, sm: 10, md: 14, lg: 18, xl: 24, xxl: 32 } as const
  * The typefaces from the design.
  *
  * These are the KEYS `_layout.tsx` registers the files under, which is what
- * `fontFamily` matches — not the family name inside the file. Bricolage's is
- * "Bricolage Grotesque 96pt ExtraBold"; nothing here would guess that.
+ * `fontFamily` matches — not the family name inside the file. A variable
+ * font's internal name is often nothing like its key, and nothing here would
+ * guess it.
  *
  * This comment used to say they were loaded and they were not: `expo-font` was
  * not a dependency, no font file existed in this app, and nothing called
@@ -272,17 +273,28 @@ export const space = { xs: 6, sm: 10, md: 14, lg: 18, xl: 24, xxl: 32 } as const
  * or synthesizes a faux-bold on top of an already-bold face (iOS), and the
  * second is worse than the first because it looks deliberate.
  */
+/*
+ * ONE FAMILY, matching the web. Bricolage is a DISPLAY face with deliberately
+ * idiosyncratic forms — the wrong register on a screen showing somebody their
+ * balance — and two grotesques doing similar jobs read as an accident rather
+ * than a pairing. Inter is the neutral one, designed for interface text, which
+ * is what a heading, a title and a label all are here.
+ *
+ * The `display*` and `sans*` names survive because the SCALE still
+ * distinguishes them and every screen is written against them; they now point
+ * at weights of the same family rather than at two families.
+ */
 export const font = {
   /** Display — headings and the balance. */
-  display: 'BricolageGrotesque-Regular',
-  displaySemi: 'BricolageGrotesque-SemiBold',
-  displayBold: 'BricolageGrotesque-ExtraBold',
+  display: 'Inter-SemiBold',
+  displaySemi: 'Inter-Bold',
+  displayBold: 'Inter-ExtraBold',
 
   /** Body, labels, buttons. */
-  sans: 'InstrumentSans-Regular',
-  sansMedium: 'InstrumentSans-Medium',
-  sansSemi: 'InstrumentSans-SemiBold',
-  sansBold: 'InstrumentSans-Bold',
+  sans: 'Inter-Regular',
+  sansMedium: 'Inter-Medium',
+  sansSemi: 'Inter-SemiBold',
+  sansBold: 'Inter-Bold',
 
   /** Figures. */
   mono: 'SplineSansMono-Regular',

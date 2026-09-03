@@ -154,7 +154,7 @@ export function LogoMark({ size = 28, tone = 'auto' }: Omit<LogoProps, 'wordmark
  *     gap leaves a hole at the vertical middle and the brand reads "X etral".
  *     The 'e' is tucked into that notch.
  *  2. The mark is set to the wordmark's CAP height, so the word is drawn at
- *     size/0.72 — Bricolage's cap height. Matching the line box instead makes
+ *     size/0.72 — the face's cap height. Matching the line box instead makes
  *     the mark look oversized, because a line box carries descender space
  *     that nothing in "etral" uses.
  *  3. The whole thing is labelled "Xetral" for assistive tech and the visible

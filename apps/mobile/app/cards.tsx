@@ -246,7 +246,7 @@ function CardFace({
             own slanted form.
 
             THE SLANT IS A TRANSFORM, NOT `fontStyle`. React Native matches a
-            custom `fontFamily` BY NAME, and there is no italic Bricolage file
+            custom `fontFamily` BY NAME, and there is no italic face
             registered — so `fontStyle: 'italic'` sent Android looking for a
             face that does not exist and it fell back to the system font at
             regular weight. That is the "VISA is too light" report: the same

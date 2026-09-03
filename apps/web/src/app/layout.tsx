@@ -15,21 +15,30 @@ import { LogoGradient } from '@/ui/logo';
  * page and when — which is exactly the kind of quiet leak a bank should not
  * have.
  *
- * All three are VARIABLE fonts, so one file per family covers every weight
- * the product uses: 140KB for the whole type system.
+ * Both are VARIABLE fonts, so one file per family covers every weight the
+ * product uses.
  */
-const bricolage = localFont({
-  src: './fonts/BricolageGrotesque.woff2',
-  variable: '--font-bricolage',
+/*
+ * ONE FAMILY FOR EVERYTHING THAT IS NOT A FIGURE.
+ *
+ * This was Bricolage Grotesque for headings and Instrument Sans for body.
+ * Bricolage is a DISPLAY face with deliberately idiosyncratic forms — that is
+ * what it is for, and it is the wrong register on a screen showing somebody
+ * their balance. Two grotesques doing similar jobs also read as an accident
+ * rather than a pairing.
+ *
+ * Inter is the neutral one: designed for interface text at small sizes, which
+ * is what a heading, a title and a label all are here. It carries the whole
+ * product except the figures, which keep the mono so a column of amounts still
+ * lines up.
+ *
+ * One variable file, 48KB, covering every weight from 100 to 900.
+ */
+const inter = localFont({
+  src: './fonts/Inter.woff2',
+  variable: '--font-inter',
   display: 'swap',
-  weight: '200 800',
-});
-
-const instrument = localFont({
-  src: './fonts/InstrumentSans.woff2',
-  variable: '--font-instrument',
-  display: 'swap',
-  weight: '400 700',
+  weight: '100 900',
 });
 
 const spline = localFont({
@@ -112,7 +121,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
     <html
       lang="en"
       data-theme="light"
-      className={`${bricolage.variable} ${instrument.variable} ${spline.variable}`}
+      className={`${inter.variable} ${spline.variable}`}
       suppressHydrationWarning
     >
       <head>

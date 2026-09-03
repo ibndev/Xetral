@@ -86,7 +86,7 @@ export function Logo({
           // The 800 face by name. A weight beside a custom family is dropped
           // on Android and synthesizes a faux-bold on iOS.
           fontFamily: font.displayBold,
-          // Bricolage's cap height is ~0.72em, so the word is set larger for
+          // The face's cap height is ~0.72em, so the word is set larger for
           // its capitals to match the mark's height.
           fontSize: Math.round(size / 0.72),
           letterSpacing: -0.6,
@@ -95,7 +95,7 @@ export function Logo({
           // chevron's arms reach the full width only at the very top and
           // bottom, so a zero gap still reads as "X etral". The 'e' is tucked
           // into that notch. Measured across 28/40/64px against the real
-          // Bricolage file; -0.08 begins to collide at display sizes.
+          // font file; -0.08 begins to collide at display sizes.
           marginLeft: size * -0.05,
         }}
       >
