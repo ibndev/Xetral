@@ -335,6 +335,16 @@ h3 { font-size: 16px; }
  * usual sign that the rule belongs in the stylesheet.
  */
 .hint   { display: block; color: var(--text-3); font-size: 13px; margin: 6px 0 0; line-height: 1.45; }
+/*
+ * A hint that is a CONFIRMED VALUE rather than guidance — today, the name a
+ * bank holds against an account number a customer typed.
+ *
+ * Written out rather than left to `.hint` and `.ok` colliding. Both are single
+ * classes, so the one declared later wins every property they share, and which
+ * that is depends on the order of two rules 1,200 lines apart. This file has
+ * paid for that once already, on `.icon-btn`.
+ */
+.hint.ok { display: block; margin: 6px 0 0; font-size: 13px; font-weight: 600; }
 .muted  { color: var(--text-2); }
 .nowrap { white-space: nowrap; }
 

@@ -10,6 +10,7 @@ import {
   BitnobCardAdapter,
   BitnobClient,
   type BitnobCredential,
+  BitnobPayoutAdapter,
   TwilioAdapter,
   VtpassAdapter,
 } from '@xetral/providers';
@@ -71,12 +72,14 @@ import { FundingService } from './funding/funding.service.js';
 import { DepositWebhookService } from './funding/deposit-webhook.service.js';
 import { DepositReconciliationService } from './funding/deposit-reconciliation.service.js';
 import { BitnobCryptoAdapter, BitnobFundingAdapter, BitnobFxAdapter } from '@xetral/providers';
-import type { CryptoPort, FundingPort, FxPort } from '@xetral/providers';
+import type { CryptoPort, FundingPort, FxPort, PayoutPort } from '@xetral/providers';
 import {
   CryptoController,
   CryptoWebhookController,
 } from './crypto/crypto.controller.js';
 import { CryptoService } from './crypto/crypto.service.js';
+import { PayoutService } from './payouts/payout.service.js';
+import { PayoutController } from './payouts/payout.controller.js';
 import { CryptoWebhookService } from './crypto/crypto-webhook.service.js';
 import { CryptoReconciliationService } from './crypto/crypto-reconciliation.service.js';
 import { CryptoDepositReconciliationService } from './crypto/crypto-deposit-reconciliation.service.js';
@@ -115,6 +118,7 @@ import {
   CARD_PORT,
   CLOCK,
   CRYPTO_PORT,
+  PAYOUT_PORT,
   DATABASE,
   FULFILMENT_PORTS,
   FUNDING_PORT,
@@ -148,6 +152,8 @@ export interface AppModuleOptions {
   readonly fundingPort?: FundingPort;
   /** Overridden in tests so crypto runs without a live Bitnob. */
   readonly cryptoPort?: CryptoPort;
+  /** Overridden in tests so bank payouts run without a live Bitnob. */
+  readonly payoutPort?: PayoutPort;
   /** Overridden in tests so FX runs without a live Bitnob. */
   readonly fxPort?: FxPort;
   /** Overridden in tests so the outbox can be drained without a live Resend. */
@@ -428,6 +434,39 @@ export function createFundingPort(
 
 /** On-chain assets, or a stand-in that refuses. Same reasoning as the funding
  *  port: one rail, so "not configured" and "unavailable" are the same. */
+/** Bank payouts, or a stand-in that refuses. Same reasoning as the other
+ *  single rails: one provider, so "not configured" and "unavailable" are the
+ *  same thing to a customer. */
+export function createPayoutPort(
+  config: ApiConfig,
+  credentials?: ProviderCredentialService,
+): PayoutPort {
+  const { bitnobBaseUrl } = config;
+
+  if (bitnobBaseUrl === undefined) {
+    new Logger('Payouts').warn(
+      'BITNOB_BASE_URL is not set: sending money to a bank will refuse.',
+    );
+    const refuse = async (): Promise<never> => {
+      throw new ServiceUnavailableException({ error: 'payout_provider_not_configured' });
+    };
+    return {
+      provider: 'bitnob',
+      banks: refuse,
+      lookup: refuse,
+      send: refuse,
+      status: refuse,
+    };
+  }
+
+  return new BitnobPayoutAdapter({
+    client: new BitnobClient({
+      baseUrl: bitnobBaseUrl,
+      ...bitnobCredentials(config, credentials),
+    }),
+  });
+}
+
 export function createCryptoPort(
   config: ApiConfig,
   credentials?: ProviderCredentialService,
@@ -752,6 +791,7 @@ export class AppModule {
         FundingController,
         DepositWebhookController,
         CryptoController,
+        PayoutController,
         CryptoWebhookController,
         FxController,
         HealthController,
@@ -850,6 +890,16 @@ export class AppModule {
           inject: [ProviderHealthService, ProviderCredentialService],
         },
         {
+          provide: PAYOUT_PORT,
+          useFactory: (health: ProviderHealthService, credentials: ProviderCredentialService) =>
+            watched(
+              options.payoutPort ?? createPayoutPort(options.config, credentials),
+              'bitnob',
+              health,
+            ),
+          inject: [ProviderHealthService, ProviderCredentialService],
+        },
+        {
           provide: FX_PORT,
           useFactory: (health: ProviderHealthService, credentials: ProviderCredentialService) =>
             watched(
@@ -896,6 +946,7 @@ export class AppModule {
         FundingService,
         DepositWebhookService,
         CryptoService,
+        PayoutService,
         CryptoWebhookService,
         FxService,
         CryptoReconciliationService,

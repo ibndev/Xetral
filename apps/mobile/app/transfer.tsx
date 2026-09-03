@@ -24,6 +24,39 @@ export default function Transfer() {
   const attempt = useIdempotencyKey();
 
   const [recipient, setRecipient] = useState('');
+
+  /*
+   * WHERE THE MONEY IS GOING, and this is the half the screen was missing.
+   *
+   * Sending has only ever meant sending to another Xetral customer. Money
+   * arrives through a dedicated account number and the only ways out were a
+   * card, a bill or crypto — a customer could not pay their landlord.
+   *
+   * Two destinations on ONE screen rather than two, because the question is
+   * the same one and only the shape of the answer differs. It also keeps the
+   * amount, the currency and the PIN step in one place rather than in two
+   * copies that drift — which is the web app's argument too, and these two
+   * screens are held to it by `parity.test.ts`.
+   */
+  const [destination, setDestination] = useState<'xetral' | 'bank'>('xetral');
+  const [bankCode, setBankCode] = useState('');
+  const [accountNumber, setAccountNumber] = useState('');
+
+  /*
+   * THE NAME THE BANK HOLDS, fetched before the customer confirms.
+   *
+   * The one control a bank payout has that a Xetral transfer does not need:
+   * an account number that passes every format check can still belong to a
+   * stranger, and the bank's own answer is the only claim about the
+   * beneficiary that does not come from the sender.
+   *
+   * Shown, and NOT sent. The server looks it up again for itself, because
+   * anything this app can send is something a stolen session can send.
+   */
+  const [beneficiary, setBeneficiary] = useState<string | undefined>(undefined);
+  const [lookingUp, setLookingUp] = useState(false);
+  const [lookupFailed, setLookupFailed] = useState(false);
+
   const [amount, setAmount] = useState('');
   const [currency, setCurrency] = useState('NGN');
   const [pin, setPin] = useState('');
@@ -62,6 +95,48 @@ export default function Transfer() {
    * that answer `insufficient_funds` with nothing on screen saying which.
    */
   const offered = sendableFor(session.data?.home_currency, [...held.keys()]);
+
+  /*
+   * Bank payouts are a per-country rail, so the country comes from the
+   * customer rather than a picker. Nigeria is the fallback for an account
+   * opened before 040, which is what those accounts are.
+   */
+  const homeCountry = session.data?.country ?? 'NG';
+
+  /* Loaded only when the bank tab is open: it is a provider call behind our
+   * API, and a customer who never opens the tab never pays for it. */
+  const banks = useLoad(
+    async () => (destination === 'bank' ? client.payoutBanks(homeCountry) : []),
+    [client, destination, homeCountry],
+  );
+
+  async function lookUp(code: string, number: string): Promise<void> {
+    // Ten digits is a NUBAN, which is where asking becomes useful rather than
+    // noise on every keystroke.
+    if (code === '' || number.length < 10) {
+      setBeneficiary(undefined);
+      setLookupFailed(false);
+      return;
+    }
+    setLookingUp(true);
+    setLookupFailed(false);
+    try {
+      const found = await client.lookupBankAccount({
+        country: homeCountry,
+        bankCode: code,
+        accountNumber: number,
+      });
+      setBeneficiary(found.account_name);
+    } catch {
+      // Deliberately not distinguishing "no such account" from "the bank did
+      // not answer": telling them apart would let somebody map which numbers
+      // are live at which bank, one request at a time.
+      setBeneficiary(undefined);
+      setLookupFailed(true);
+    } finally {
+      setLookingUp(false);
+    }
+  }
   /*
    * ONLY WHEN WE KNOW. `has_pin` is `boolean | null` and null means the server
    * could not tell — which must NOT route somebody into creating a PIN they
@@ -113,13 +188,33 @@ export default function Transfer() {
     return (
       <Shell back="/wallet" title="Confirm">
         <Panel title="Confirm" subtitle="Check this before you approve it">
-          {/* Echoed exactly as typed rather than resolved to a name:
-              resolving would be a lookup that says which handles and
-              addresses exist, and this screen is reachable by anybody. */}
-          <View style={styles.row}>
-            <Text style={styles.muted}>To</Text>
-            <Text style={styles.amount}>{recipient}</Text>
-          </View>
+          {/* For a XETRAL transfer, echoed exactly as typed rather than
+              resolved to a name: resolving would be a lookup that says which
+              handles and addresses exist, and this screen is reachable by
+              anybody. For a BANK payout it is the opposite and deliberately
+              so — the name comes from the bank, the sender did not author it,
+              and it is the only thing between a transposed digit and money
+              that cannot be recalled. */}
+          {destination === 'bank' ? (
+            <>
+              <View style={styles.row}>
+                <Text style={styles.muted}>To</Text>
+                <Text style={styles.amount}>{beneficiary}</Text>
+              </View>
+              <View style={styles.row}>
+                <Text style={styles.muted}>Account</Text>
+                <Text style={styles.amount}>
+                  {accountNumber} ·{' '}
+                  {banks.data?.find((bank) => bank.code === bankCode)?.name ?? ''}
+                </Text>
+              </View>
+            </>
+          ) : (
+            <View style={styles.row}>
+              <Text style={styles.muted}>To</Text>
+              <Text style={styles.amount}>{recipient}</Text>
+            </View>
+          )}
           <View style={styles.row}>
             <Text style={styles.muted}>Amount</Text>
             <Text style={styles.amount}>{formatAmount(amount || '0', currency)}</Text>
@@ -141,13 +236,32 @@ export default function Transfer() {
             disabled={pin === ''}
             onPress={() =>
               void run(async () => {
-                const result = await client.transfer({
-                  recipient,
-                  amount,
-                  currency,
-                  pin,
-                  idempotencyKey: attempt.key,
-                });
+                const result =
+                  destination === 'bank'
+                    ? await client
+                        .payToBank({
+                          country: homeCountry,
+                          bankCode,
+                          accountNumber,
+                          amount,
+                          currency,
+                          pin,
+                          idempotencyKey: attempt.key,
+                        })
+                        // One shape for the success line below, so the two
+                        // branches do not each grow a copy of the wording.
+                        .then((p) => ({
+                          amount: p.amount,
+                          fee: p.fee,
+                          currency: p.currency,
+                        }))
+                    : await client.transfer({
+                        recipient,
+                        amount,
+                        currency,
+                        pin,
+                        idempotencyKey: attempt.key,
+                      });
                 // The attempt is over, so the next Send is a new transfer and
                 // needs a new key — reusing this one would have the server
                 // replay this transfer and report success for money that
@@ -161,6 +275,8 @@ export default function Transfer() {
                 setStage('details');
                 setAmount('');
                 setRecipient('');
+                setAccountNumber('');
+                setBeneficiary(undefined);
                 return `Sent ${formatAmount(result.amount, result.currency)}${
                   result.fee === '0.00' ? '' : ` (fee ${formatAmount(result.fee, result.currency)})`
                 }.`;
@@ -187,20 +303,82 @@ export default function Transfer() {
     <Shell back="/wallet" title="Send money">
       <Panel
         title="Send money"
-        subtitle="To anyone on Xetral"
+        subtitle="To a Xetral account or a Nigerian bank"
       >
-        <Field
-          label="Who are you paying?"
-          // `url` on the link path so the keyboard offers a slash rather than
-          // an @ — but the API resolves all four shapes from this one field
-          // either way, so neither keyboard can produce something it refuses.
-          inputMode="text"
-          placeholder="@handle, email, phone or payment link"
-          autoCapitalize="none"
-          autoCorrect={false}
-          value={recipient}
-          onChangeText={setRecipient}
+        {/* Two destinations, one screen. `Select` rather than a pair of
+            buttons: this app already draws every choice that way, and a
+            hand-rolled segmented control would be one more thing whose
+            pressed state has to be kept in step with the theme. */}
+        <Select
+          label="Where is it going?"
+          value={destination}
+          onChange={(next) => setDestination(next as 'xetral' | 'bank')}
+          options={[
+            { value: 'xetral', label: 'A Xetral account' },
+            { value: 'bank', label: 'A bank account' },
+          ]}
         />
+
+        {destination === 'bank' ? (
+          <>
+            <Select
+              label="Bank"
+              value={bankCode}
+              onChange={(code) => {
+                setBankCode(code);
+                void lookUp(code, accountNumber);
+              }}
+              options={(banks.data ?? []).map((bank) => ({
+                value: bank.code,
+                label: bank.name,
+              }))}
+            />
+            {banks.error !== undefined && (
+              <Text style={styles.error}>
+                The bank list could not be loaded. Sending to a bank is
+                unavailable right now.
+              </Text>
+            )}
+
+            <Field
+              label="Account number"
+              inputMode="numeric"
+              placeholder="0123456789"
+              autoCapitalize="none"
+              autoCorrect={false}
+              maxLength={20}
+              value={accountNumber}
+              onChangeText={(text) => {
+                // Digits only, so a pasted number carrying spaces or dashes
+                // does not fail a lookup that would otherwise have worked.
+                const digits = text.replace(/[^0-9]/g, '');
+                setAccountNumber(digits);
+                void lookUp(bankCode, digits);
+              }}
+            />
+            {/* THE ONLY THING ON THIS SCREEN THE SENDER DID NOT WRITE. */}
+            {lookingUp && <Text style={styles.muted}>Checking the name…</Text>}
+            {beneficiary !== undefined && <Text style={styles.amount}>{beneficiary}</Text>}
+            {lookupFailed && (
+              <Text style={styles.error}>
+                We could not find that account. Check the number and the bank.
+              </Text>
+            )}
+          </>
+        ) : (
+          <Field
+            label="Who are you paying?"
+            // `url` on the link path so the keyboard offers a slash rather than
+            // an @ — but the API resolves all four shapes from this one field
+            // either way, so neither keyboard can produce something it refuses.
+            inputMode="text"
+            placeholder="@handle, email, phone or payment link"
+            autoCapitalize="none"
+            autoCorrect={false}
+            value={recipient}
+            onChangeText={setRecipient}
+          />
+        )}
 
         <Select
           label="Currency"
@@ -236,7 +414,14 @@ export default function Transfer() {
             once the customer can see what they are approving. */}
         <Button
           label="Review"
-          disabled={recipient === '' || amount === '' || !amountValid}
+          disabled={
+            amount === '' ||
+            !amountValid ||
+            // A payout cannot be reviewed without a name to review: a
+            // confirmation screen that confirms nothing is worse than none,
+            // because it will be read as having been checked.
+            (destination === 'bank' ? beneficiary === undefined : recipient === '')
+          }
           onPress={() => setStage('confirm')}
         />
 

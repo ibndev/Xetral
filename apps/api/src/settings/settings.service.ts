@@ -70,6 +70,7 @@ export const KILL_SWITCHES = {
   fx: (s: SettingsService) => s.fxEnabled(),
   cards: (s: SettingsService) => s.cardsEnabled(),
   bills: (s: SettingsService) => s.billsEnabled(),
+  payouts: (s: SettingsService) => s.payoutsEnabled(),
 } as const;
 
 export type KillSwitch = keyof typeof KILL_SWITCHES;
@@ -91,6 +92,7 @@ const DISABLED_ERROR: Record<KillSwitch, { readonly error: string }> = {
   fx: { error: 'fx_disabled' },
   cards: { error: 'cards_disabled' },
   bills: { error: 'bills_disabled' },
+  payouts: { error: 'payouts_disabled' },
 };
 
 @Injectable()
@@ -381,6 +383,18 @@ export class SettingsService implements OnApplicationBootstrap {
 
   async fxEnabled(): Promise<boolean> {
     return this.boolean('fx_enabled', true);
+  }
+
+  /**
+   * Bank payouts.
+   *
+   * Defaults TRUE, like the other rails and unlike gift cards. The default
+   * matters on a deployment whose migrations are behind the code: a missing
+   * row must not silently switch a flow off, because "the setting is not
+   * there yet" and "an operator turned it off" would look identical.
+   */
+  async payoutsEnabled(): Promise<boolean> {
+    return this.boolean('payouts_enabled', true);
   }
 
   async cardsEnabled(): Promise<boolean> {

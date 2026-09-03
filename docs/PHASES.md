@@ -22,6 +22,7 @@ shipped, that is called out explicitly.
 | 11 — Mobile and web clients | ✅ | |
 | 12 — Pre-deployment audit | ✅ | Bitnob credentials to go live |
 | 13 — Closing the audit's findings | ✅ | all four tiers landed |
+| 14 — Bitnob v2, and paying a bank | ✅ | Bitnob credentials to go live |
 
 All eleven phases are built, a **pre-deployment audit** (Phase 12) closed what
 building them phase by phase had left between the phases, and **Phase 13** is
@@ -1462,3 +1463,120 @@ Findings from building it:
 registered address, DPO address and NDPC reference in `apps/web/src/app/legal/`,
 have the terms reviewed by a Nigerian lawyer, grant `dispute_reviewer` to real
 people, and set `RETENTION_INTERVAL_SECONDS` on exactly one instance.
+
+---
+
+## Phase 14 — Talking to Bitnob again, and paying a bank ✅
+
+Not a feature list. One blocking bug that had made every Bitnob-backed flow
+fail, and the flow the product was missing once it worked.
+
+| File | What it is |
+|---|---|
+| `packages/providers/src/bitnob/signing.ts` | the four headers, and why a bearer token was refused |
+| `packages/ledger/sql/042_bitnob_v2.sql` | two credentials, and the retirement of the one that cannot work |
+| `packages/ledger/sql/043_bank_payouts.sql` | payouts, their state machine and the queue that sees a stuck one |
+| `packages/providers/src/ports/payout.ts` | the port, generic over its currency |
+| `packages/providers/src/bitnob/payout-adapter.ts` | quote, initialize, finalize |
+| `apps/api/src/payouts/` | reserve, send, reverse — Phase 9's shape |
+
+### The bug: every Bitnob call was being refused
+
+`BitnobClient` sent `authorization: Bearer <api key>`. That is how Bitnob's v1
+API worked and how their published Node SDK still reads. v2 does not accept
+it: it wants four headers carrying an HMAC-SHA256 over
+`CLIENT_ID:TIMESTAMP:NONCE:PAYLOAD`, and a bearer token gets a `401` reading
+*Invalid HMAC signature*.
+
+From inside the app that is indistinguishable from a wrong key, which is
+exactly what it looked like: cards, crypto, FX quotes and dedicated naira
+account numbers all reported "something went wrong" while `/admin/credentials`
+correctly said the credential was set. It was. It was the wrong SHAPE of
+credential, sent the wrong way, and nothing anywhere could say so.
+
+Findings from fixing it:
+
+1. **A CORRECT CONSTANT DECAYS, and this table has now been wrong twice.**
+   Phase 3 replaced a REST-shaped guess with paths from Bitnob's own published
+   SDK — right at the time, and now a description of an API that no longer
+   answers. `/api/v1/virtualcards/*` is `/api/cards` with per-card paths;
+   `/addresses/generate-naira-account`, which this repo's own header admitted
+   was a guess, is `/api/virtual-accounts`. "Verified against the vendor's SDK"
+   is a claim about a DATE as much as a source.
+2. **The script that exists to catch this had never been run.**
+   `verify-bitnob-sandbox.mjs` was written in Phase 13 for precisely this
+   failure. It is rewritten to sign, and its FIRST probe is now the one that
+   proves signing works at all.
+3. **THE STAGING GUARD BECAME UNPASSABLE AND UNSOUND AT ONCE.** It refused to
+   boot unless `BITNOB_BASE_URL` contained "sandbox" — and v2 serves sandbox
+   and production from ONE host, with the SECRET selecting between them. So a
+   correct base URL would not boot, and a URL contrived to contain the word
+   would pass while pointing at production. A check that cannot see the thing
+   it guards is worse than none, because it is trusted. It moved to where the
+   secret is used: the client asks `/api/whoami` once, before its first
+   money-moving call, and refuses a `live` account. Not at boot — a provider
+   call during startup is a new way for the API to fail to start.
+4. **The v1 key is RETIRED, not renamed.** It is neither an id their API
+   recognises nor a secret it can verify against, so carrying its value
+   forward would turn "you are still on the old credential" into "your
+   credential is wrong" — the same misdiagnosis, preserved in the schema.
+5. **The webhook hash was already right and stays.** SHA-256 signs what we
+   SEND and SHA-512 verifies what we RECEIVE. Two schemes, not an
+   inconsistency to tidy up.
+
+**Verified by recomputing the signature the way their server would**, against
+the built bundle: `/api/whoami` and `/api/trading/quotes` both verify over the
+exact bytes sent, with no authorization header, seconds not milliseconds, and
+a hex nonce. Pointed at an account reporting `live`, a staging instance sent
+`/api/whoami` and nothing else.
+
+### Then: paying a bank
+
+Sending money had only ever meant sending it to another Xetral customer.
+
+```
+Reserve   customer_wallet  -> customer_pending    the guard decides, BEFORE asking
+Sent      customer_pending -> provider_float      it left
+Failed    a reversal naming the reserve           it never left
+(neither)                                          we do not know; it stays held
+```
+
+Phase 9's shape exactly, and deliberately: an on-chain withdrawal and a bank
+payout ask the same question. No new entry kind and no new account role.
+
+6. **The beneficiary name is the BANK'S, and the schema makes it so.** An
+   account number that passes every format check can still belong to a
+   stranger. The service re-fetches the name rather than accepting one from
+   the request — anything a client can send, a stolen session can send — and
+   `payoutSchema` is `.strict()`, so a caller-supplied name is refused rather
+   than silently ignored.
+7. **A lookup costs no PIN and a payout does.** Nothing is destroyed by
+   asking, and an unknown account answers exactly as an unreachable bank does,
+   so the endpoint cannot be used to map which numbers are live where.
+8. **`Money` invariance bit twice in one afternoon, and vitest could not see
+   it.** `PayoutRequest` with a bare `Money` field compiled and rejected every
+   caller holding `ngn(…)`; making it generic then made the test's own
+   `PayoutRequest[]` unwidenable — not even with a cast. The answer both times
+   is the one `LedgerIntent` already records: carry `amountMinor` and a code.
+   The unit tests passed throughout, because vitest transpiles without
+   typechecking.
+9. **The coverage checks demanded the rest.** 019 refused a table with no
+   retention decision, 036 refused a view nobody classified AND a queue with
+   no arm in the overview, `kill-switches.test.ts` refused a switch nothing
+   reads and a service asserting a switch that does not exist, `di-tokens`
+   caught five constructor parameters that would have resolved to `undefined`
+   at runtime, and `error-codes` caught four codes the client would have
+   flattened to "Something went wrong". Every one of them fired before a human
+   read the diff.
+
+**Before sending real money to a bank, an operator must:** set
+`BITNOB_CLIENT_ID` and `BITNOB_CLIENT_SECRET` (the old `BITNOB_API_KEY` is
+read by nothing), point `BITNOB_BASE_URL` at `https://api.bitnob.com` with no
+version segment, apply migrations 041–043, and decide `transfer_fee_basis_points`
+deliberately — a payout charges the same fee a wallet transfer does, and the
+shipped default is zero.
+
+**What Bitnob does NOT offer, recorded so it is not searched for again:** there
+is no card-acquiring product. They issue cards to customers; they do not accept
+a customer's own card as a funding instrument. Funding a wallet is the
+dedicated virtual account (bank transfer in) or crypto.

@@ -38,6 +38,28 @@ function Transfer() {
    */
   const arrivedWith = params.get('to') ?? '';
   const [recipient, setRecipient] = useState(arrivedWith);
+
+  /*
+   * WHERE THE MONEY IS GOING, and this is the half the screen was missing.
+   *
+   * Sending has only ever meant sending to another Xetral customer, which is
+   * the smaller half of what this product is for: money arrives through a
+   * dedicated account number and the only ways out were a card, a bill or
+   * crypto. A customer could not pay their landlord.
+   *
+   * Two destinations on ONE screen rather than two screens, because the
+   * question a customer is answering is the same one — who am I paying — and
+   * the shape of the answer is the only thing that differs. It also keeps the
+   * amount, the currency and the PIN step in one place rather than in two
+   * copies that drift.
+   *
+   * Arriving from a payment link pins it to `xetral`: a link names a Xetral
+   * customer and nothing else, so offering a bank tab to somebody who
+   * followed one is offering a wrong turn.
+   */
+  const [destination, setDestination] = useState<'xetral' | 'bank'>('xetral');
+  const [bankCode, setBankCode] = useState('');
+  const [accountNumber, setAccountNumber] = useState('');
   const [amount, setAmount] = useState('');
   const [currency, setCurrency] = useState('NGN');
   const [pin, setPin] = useState('');
@@ -93,6 +115,7 @@ function Transfer() {
    */
   const session = useLoad(() => client.currentSession(), [client]);
 
+
   /*
    * ANOTHER COUNTRY'S LOCAL CURRENCY IS NOISE IN THIS PICKER.
    *
@@ -105,6 +128,26 @@ function Transfer() {
    * once it is theirs they must be able to move it.
    */
   const offered = sendableFor(session.data?.home_currency, [...held.keys()]);
+
+  /*
+   * Bank payouts are a per-country rail, so the country comes from the
+   * customer rather than from a picker. `FALLBACK_HOME_CURRENCY`'s lesson,
+   * applied to a country: an account opened before 040 has none, and Nigeria
+   * is the only corridor this platform has opened.
+   */
+  const homeCountry = session.data?.country ?? 'NG';
+  /*
+   * The bank list, loaded only when it is needed.
+   *
+   * It is a provider call behind our API, so a customer who never opens the
+   * bank tab never pays for it — and on a deployment with no Bitnob address
+   * the list simply fails to load and the tab says so, rather than the whole
+   * Send screen failing to render.
+   */
+  const banks = useLoad(
+    async () => (destination === 'bank' ? client.payoutBanks(homeCountry) : []),
+    [client, destination, homeCountry],
+  );
   /*
    * ONLY WHEN WE KNOW. `has_pin` is `boolean | null` and null means the server
    * could not tell — which must NOT route somebody into creating a PIN they
@@ -134,6 +177,51 @@ function Transfer() {
    */
   const [stage, setStage] = useState<'details' | 'confirm'>('details');
 
+  /*
+   * THE NAME THE BANK HOLDS, fetched before the customer confirms.
+   *
+   * This is the one control a bank payout has that a Xetral transfer does
+   * not need: an account number that passes every format check can still
+   * belong to a stranger, and the only claim about the beneficiary that does
+   * not come from the sender is the bank's own.
+   *
+   * It is shown, and it is NOT sent. The server looks it up again for itself
+   * — anything this page can send is something a stolen session can send, so
+   * a name from here would make the confirmation a formality. What is shown
+   * here is for the customer to read.
+   */
+  const [beneficiary, setBeneficiary] = useState<string | undefined>(undefined);
+  const [lookingUp, setLookingUp] = useState(false);
+  const [lookupFailed, setLookupFailed] = useState(false);
+
+  async function lookUp(code: string, number: string): Promise<void> {
+    // Ten digits is a NUBAN, which is the point at which asking is useful
+    // rather than noise on every keystroke.
+    if (code === '' || number.length < 10) {
+      setBeneficiary(undefined);
+      setLookupFailed(false);
+      return;
+    }
+    setLookingUp(true);
+    setLookupFailed(false);
+    try {
+      const found = await client.lookupBankAccount({
+        country: homeCountry,
+        bankCode: code,
+        accountNumber: number,
+      });
+      setBeneficiary(found.account_name);
+    } catch {
+      // Deliberately not distinguishing "no such account" from "the bank did
+      // not answer": a lookup that told them apart would let somebody map
+      // which numbers are live at which bank, one request at a time.
+      setBeneficiary(undefined);
+      setLookupFailed(true);
+    } finally {
+      setLookingUp(false);
+    }
+  }
+
   const amountValid = amount === '' || isValidAmount(amount, exponentFor(currency));
 
   /*
@@ -151,19 +239,40 @@ function Transfer() {
    */
   function review(event: React.FormEvent) {
     event.preventDefault();
+    // A bank payout cannot be reviewed without a name to review. Advancing
+    // with an unresolved account would put a confirmation screen in front of
+    // a customer that confirms nothing — which is worse than no screen,
+    // because they will read it as having been checked.
+    if (destination === 'bank' && beneficiary === undefined) return;
     setStage('confirm');
   }
 
   function confirm(event: React.FormEvent) {
     event.preventDefault();
     void run(async () => {
-      const result = await client.transfer({
-        recipient,
-        amount,
-        currency,
-        pin,
-        idempotencyKey: attempt.key,
-      });
+      const result =
+        destination === 'bank'
+          ? await client
+              .payToBank({
+                country: homeCountry,
+                bankCode,
+                accountNumber,
+                amount,
+                currency,
+                pin,
+                idempotencyKey: attempt.key,
+              })
+              // One shape for the success line below. A payout answers with
+              // its own view, and mapping it here keeps the two branches from
+              // each growing their own copy of the wording.
+              .then((p) => ({ amount: p.amount, fee: p.fee, currency: p.currency }))
+          : await client.transfer({
+              recipient,
+              amount,
+              currency,
+              pin,
+              idempotencyKey: attempt.key,
+            });
       // The attempt is over, so the next Send is a new transfer and needs a
       // new key — reusing this one would have the server replay this transfer
       // and report success for money that never moved.
@@ -177,6 +286,8 @@ function Transfer() {
       setStage('details');
       setAmount('');
       setRecipient('');
+      setAccountNumber('');
+      setBeneficiary(undefined);
       return `Sent ${formatAmount(result.amount, result.currency)}${
         result.fee === '0.00' ? '' : ` (fee ${formatAmount(result.fee, result.currency)})`
       }.`;
@@ -227,14 +338,34 @@ function Transfer() {
           </div>
           <h2>Check this before you approve it</h2>
 
-          {/* What is about to happen, in the words the customer typed. The
-              recipient is echoed exactly as entered rather than resolved to a
-              name: resolving would be a lookup that says which handles and
-              addresses exist, and this screen is reachable by anybody. */}
-          <div className="row">
-            <span className="muted">To</span>
-            <span className="mono">{recipient}</span>
-          </div>
+          {/* What is about to happen.
+              For a XETRAL transfer the recipient is echoed exactly as typed
+              rather than resolved to a name: resolving would be a lookup that
+              says which handles and addresses exist, and this screen is
+              reachable by anybody.
+              For a BANK payout it is the opposite, and deliberately — the
+              name comes from the bank, the sender did not author it, and
+              showing it is the only thing standing between a transposed digit
+              and money that cannot be recalled. */}
+          {destination === 'bank' ? (
+            <>
+              <div className="row">
+                <span className="muted">To</span>
+                <span>{beneficiary}</span>
+              </div>
+              <div className="row">
+                <span className="muted">Account</span>
+                <span className="mono">
+                  {accountNumber} · {banks.data?.find((b) => b.code === bankCode)?.name ?? ''}
+                </span>
+              </div>
+            </>
+          ) : (
+            <div className="row">
+              <span className="muted">To</span>
+              <span className="mono">{recipient}</span>
+            </div>
+          )}
           <div className="row">
             <span className="muted">Amount</span>
             <span className="mono">{formatAmount(amount || '0', currency)}</span>
@@ -271,8 +402,86 @@ function Transfer() {
     <Shell>
       <form className="card" onSubmit={review}>
         <h1>Send money</h1>
-        <h2>To anyone on Xetral</h2>
+        <h2>To a Xetral account or a Nigerian bank</h2>
 
+        {/* Two destinations, one screen. Deliberately NOT the `.choice`
+            pattern that broke this page's layout once: the global button rule
+            sets `white-space: nowrap`, so a button holding a sentence forced
+            the page 41px wider than a 360px handset. These hold one word. */}
+        {arrivedWith === '' && (
+          <div className="segmented" role="group" aria-label="Where the money is going">
+            <button
+              type="button"
+              className={destination === 'xetral' ? 'active' : ''}
+              onClick={() => setDestination('xetral')}
+            >
+              Xetral
+            </button>
+            <button
+              type="button"
+              className={destination === 'bank' ? 'active' : ''}
+              onClick={() => setDestination('bank')}
+            >
+              Bank account
+            </button>
+          </div>
+        )}
+
+        {destination === 'bank' ? (
+          <>
+            <label id="transfer-bank-label">
+              Bank
+              <Select
+                labelledBy="transfer-bank-label"
+                value={bankCode}
+                onChange={(code) => {
+                  setBankCode(code);
+                  void lookUp(code, accountNumber);
+                }}
+                options={(banks.data ?? []).map((bank) => ({
+                  value: bank.code,
+                  label: bank.name,
+                }))}
+              />
+              {banks.error !== undefined && (
+                <span className="hint">
+                  The bank list could not be loaded. Sending to a bank is
+                  unavailable right now.
+                </span>
+              )}
+            </label>
+
+            <label>
+              Account number
+              <input
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
+                placeholder="0123456789"
+                value={accountNumber}
+                maxLength={20}
+                onChange={(e) => {
+                  // Digits only, so a pasted number carrying spaces or
+                  // dashes does not fail a lookup that would have worked.
+                  const digits = e.target.value.replace(/[^0-9]/g, '');
+                  setAccountNumber(digits);
+                  void lookUp(bankCode, digits);
+                }}
+                required
+              />
+              {/* THE ONLY THING ON THIS SCREEN THE SENDER DID NOT WRITE. */}
+              {lookingUp && <span className="hint">Checking the name…</span>}
+              {beneficiary !== undefined && (
+                <span className="hint ok">{beneficiary}</span>
+              )}
+              {lookupFailed && (
+                <span className="hint">
+                  We could not find that account. Check the number and the bank.
+                </span>
+              )}
+            </label>
+          </>
+        ) : (
         <label>
           Who are you paying?
           <input
@@ -293,6 +502,7 @@ function Transfer() {
             Your own link is on <Link href="/settings">your settings page</Link>.
           </span>
         </label>
+        )}
 
         <label id="transfer-currency-label">
           Currency
@@ -333,7 +543,17 @@ function Transfer() {
 
         {/* NO TRANSACTION PIN HERE. It is asked on the confirm step, once the
             customer can see what they are approving. */}
-        <button type="submit" disabled={!amountValid || amount === '' || recipient === ''}>
+        <button
+          type="submit"
+          disabled={
+            !amountValid ||
+            amount === '' ||
+            (destination === 'bank'
+              ? // A payout cannot be reviewed without a name to review.
+                beneficiary === undefined
+              : recipient === '')
+          }
+        >
           Review
         </button>
 

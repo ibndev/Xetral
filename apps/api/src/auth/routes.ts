@@ -489,6 +489,25 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       .authenticated('POST', '/v1/fx/convert', { pin: false })
       .authenticated('POST', '/v1/fx/remit', { pin: true })
 
+      /*
+       * SENDING MONEY TO A BANK.
+       *
+       * Three routes, three answers to the PIN question, and the split is the
+       * decision rather than an accident of shape:
+       *
+       *  - the bank list is a catalogue, identical for every customer;
+       *  - the name lookup destroys nothing and the customer most likely to
+       *    check twice is one being careful, so it costs no PIN — the same
+       *    reasoning that lets a dispute be raised without one. It is still
+       *    metered by the authenticated ceiling, because a lookup with no
+       *    limit is a way to walk a bank's account space and harvest names;
+       *  - sending moves money that cannot be recalled.
+       */
+      .authenticated('GET', '/v1/payouts/banks', { pin: false })
+      .authenticated('GET', '/v1/payouts/lookup', { pin: false })
+      .authenticated('GET', '/v1/payouts', { pin: false })
+      .authenticated('POST', '/v1/payouts', { pin: true })
+
       .public(
         'POST',
         '/v1/webhooks/bitnob/crypto',

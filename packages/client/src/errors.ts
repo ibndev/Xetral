@@ -179,6 +179,24 @@ const API_ERROR_CODES = [
   'trade_not_found',
   'fx_provider_not_configured',
 
+  /*
+   * BANK PAYOUTS.
+   *
+   * `account_not_found` is what a bank lookup answers when nobody holds that
+   * number at that bank. Deliberately the SAME answer whether the account
+   * does not exist or the bank refused to say — a lookup that distinguished
+   * them would let somebody map which numbers are live at which bank, one
+   * request at a time.
+   *
+   * `not_found` is the generic 404 the payout list and detail routes give for
+   * a payout that is not the caller's. Not "forbidden": distinguishing "not
+   * yours" from "does not exist" turns the endpoint into a way to enumerate
+   * other people's transfers — the same rule 018 applies to disputes.
+   */
+  'account_not_found',
+  'not_found',
+  'payout_provider_not_configured',
+
   /* gift cards */
   'gift_cards_disabled',
   /*
@@ -212,6 +230,8 @@ const API_ERROR_CODES = [
   'fx_disabled',
   'cards_disabled',
   'bills_disabled',
+  // Bank payouts. Money already sent keeps settling — this refuses new ones.
+  'payouts_disabled',
   'no_rate_for_card',
   'not_clawable',
   'not_convertible',

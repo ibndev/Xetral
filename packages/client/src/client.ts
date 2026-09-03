@@ -159,6 +159,28 @@ export interface Withdrawal {
   readonly failure_reason: string | null;
 }
 
+/** A bank a customer may send to. The code is the provider's and opaque. */
+export interface PayoutBank {
+  readonly code: string;
+  readonly name: string;
+}
+
+export interface BankPayout {
+  readonly id: string;
+  readonly status: string;
+  readonly currency: string;
+  /** Major units, as a string. There is no `toNumber` in this package. */
+  readonly amount: string;
+  readonly fee: string;
+  readonly bank_name: string;
+  readonly account_number: string;
+  /** THE BANK'S ANSWER, stored on the row at the moment of sending. */
+  readonly account_name: string;
+  readonly narration: string | null;
+  readonly failure_reason: string | null;
+  readonly created_at: string;
+}
+
 export interface CryptoQuote {
   readonly asset: string;
   readonly network: string;
@@ -574,6 +596,66 @@ export class XetralClient {
   }
 
   /* ---------------------------- crypto -------------------------- */
+
+  /* ---------------------------------------------------------------- *
+   *  BANK PAYOUTS
+   *
+   *  Note what is NOT sent on `payToBank`: the beneficiary's name. The
+   *  server re-fetches it from the bank rather than accepting one from
+   *  here, because anything this client can send is something an attacker
+   *  holding a stolen session can send — and the whole value of the lookup
+   *  is that it produces a claim the sender did not author. The name this
+   *  client shows on a confirmation screen is for the CUSTOMER to read; it
+   *  is not evidence.
+   * ---------------------------------------------------------------- */
+
+  async payoutBanks(country: string): Promise<readonly PayoutBank[]> {
+    const query = new URLSearchParams({ country });
+    const body = await this.#get<{ banks: PayoutBank[] }>(
+      `/v1/payouts/banks?${query.toString()}`,
+    );
+    return body.banks;
+  }
+
+  async lookupBankAccount(input: {
+    country: string;
+    bankCode: string;
+    accountNumber: string;
+  }): Promise<{ account_name: string }> {
+    const query = new URLSearchParams({
+      country: input.country,
+      bank_code: input.bankCode,
+      account_number: input.accountNumber,
+    });
+    return this.#get(`/v1/payouts/lookup?${query.toString()}`);
+  }
+
+  async bankPayouts(): Promise<readonly BankPayout[]> {
+    const body = await this.#get<{ payouts: BankPayout[] }>('/v1/payouts');
+    return body.payouts;
+  }
+
+  async payToBank(input: {
+    country: string;
+    bankCode: string;
+    accountNumber: string;
+    amount: string;
+    currency: string;
+    narration?: string;
+    pin: string;
+    idempotencyKey: string;
+  }): Promise<BankPayout> {
+    return this.#post('/v1/payouts', {
+      country: input.country,
+      bank_code: input.bankCode,
+      account_number: input.accountNumber,
+      amount: input.amount,
+      currency: input.currency,
+      ...(input.narration === undefined ? {} : { narration: input.narration }),
+      transaction_pin: input.pin,
+      idempotency_key: input.idempotencyKey,
+    });
+  }
 
   async cryptoAddress(asset: string, network: string): Promise<CryptoAddress> {
     return this.#post('/v1/crypto/addresses', { asset, network });

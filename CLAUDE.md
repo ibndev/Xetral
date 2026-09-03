@@ -643,6 +643,65 @@ Schema: `packages/ledger/sql/039_profile_handles.sql`.
   refusal — a customer filled in a recipient, an amount and a PIN box before
   being told the PIN box was never going to work.
 
+### Paying a bank, not just a Xetral account — non-obvious rules
+
+Schema: `packages/ledger/sql/043_bank_payouts.sql`. Port in
+`packages/providers/src/ports/payout.ts`, service in
+`apps/api/src/payouts/payout.service.ts`, on the Send screen of both apps.
+
+- **SENDING MONEY MEANT SENDING IT TO ANOTHER XETRAL CUSTOMER**, which is the
+  smaller half of what this product is for. Money arrives through the
+  dedicated account number 006 issues, and the only ways out were a card, a
+  bill or crypto — a customer could not pay their landlord.
+- **THE MONEY FLOW IS PHASE 9'S, and reusing it is the point.** A bank payout
+  and an on-chain withdrawal ask the same question: money is leaving, to
+  somewhere we cannot reach into, through a provider that answers slowly. So
+  no new entry kind and no new account role — `wallet_withdrawal` and
+  `customer_pending` have both been in `001_ledger.sql` since Phase 1.
+- **THE BENEFICIARY NAME IS THE BANK'S, NEVER THE CUSTOMER'S.** An account
+  number that passes every format check can still belong to a stranger, and
+  the bank's own answer is the only claim about the beneficiary that does not
+  come from the sender. The service RE-FETCHES it rather than accepting one
+  from the request, and `payoutSchema` is `.strict()` so a caller-supplied
+  name is refused rather than ignored: anything a client can send, a stolen
+  session can send, and a confirmation screen showing a name the sender typed
+  confirms nothing.
+- **A LOOKUP COSTS NO PIN and a payout does.** Nothing is destroyed by
+  asking, and the customer most likely to check a name twice is one being
+  careful — the reasoning 018 applies to raising a dispute. The lookup is
+  still metered by the authenticated ceiling, because one with no limit is a
+  way to walk a bank's account space and harvest names.
+- **AN UNKNOWN ACCOUNT AND AN UNREACHABLE BANK ANSWER THE SAME WAY.**
+  Distinguishing them would let somebody map which numbers are live at which
+  bank, one request at a time.
+- **A PAYOUT IS THREE CALLS** — quote, initialize, finalize — and only the
+  last moves money. `provider_quote_id` and `provider_payout_id` are separate
+  columns for that reason: collapsed into one "provider reference" they
+  cannot say WHICH call a dying process got through, which is the only
+  question that matters afterwards.
+- **A TIMEOUT SETTLES NOTHING AND REVERSES NOTHING.** Reversing refunds a
+  transfer that may already be in somebody's account; retrying pays twice.
+  The row stays `reserved` and `bank_payouts_stuck` is what sees it.
+- **`sent -> failed` IS PERMITTED**, unlike a settled card spend, because a
+  bank transfer really can be returned days later — a closed account, a name
+  the bank rejects. That is an outcome, not a correction. `completed` is
+  still final, and nothing returns to `reserved`.
+- **THE DESTINATION IS IMMUTABLE ONCE THE ROW EXISTS.** The reserve is
+  already posted against the customer's balance, so an UPDATE moving the
+  account number would send authorised money to somebody never named — and
+  the ledger would agree, because the amount matched.
+- **IT HAS ITS OWN KILL SWITCH, and a wallet transfer does not.** The four
+  existing switches guard the four flows where money LEAVES; a transfer
+  between two customers leaves nothing. It ships ON, unlike gift cards,
+  because the money is the customer's own and the overdraft guard refuses it
+  when it is not.
+- **`PayoutRequest` is GENERIC over its currency.** `Money` is invariant, so
+  a bare `Money` field means the union and rejects every caller holding a
+  concrete amount. The fake port in the e2e records `amountMinor` + a code
+  rather than a `Money` for the same reason `LedgerIntent` postings do — a
+  list of `Money` is a list in one currency and cannot be widened, not even
+  with a cast.
+
 ### Countries, and why a currency is not one — non-obvious rules
 
 Schema: `packages/ledger/sql/040_countries.sql`, seeded by `040_countries.seed.sql`.
@@ -2071,6 +2130,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/040_countries.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/040_countries.seed.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/041_card_issuance.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/042_bitnob_v2.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/043_bank_payouts.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -2112,6 +2172,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/039_profile_handles.tes
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/040_countries.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/041_card_issuance.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/042_bitnob_v2.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/043_bank_payouts.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

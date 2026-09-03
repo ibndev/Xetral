@@ -888,6 +888,18 @@ export const SETTINGS: readonly Item[] = [
       'consults. Off means off, immediately.',
   },
   {
+    name: 'payouts_enabled',
+    kind: 'setting',
+    failure: 'default-is-deliberate',
+    ifMissed:
+      'sending money to a bank. On by default like the other rails, because ' +
+      'the money is the customer\'s own and the overdraft guard refuses it ' +
+      'when it is not — unlike gift cards, nothing here pays out against an ' +
+      'instrument that cannot be verified. Off refuses NEW payouts; ones ' +
+      'already sent keep settling, because money that has left is still ' +
+      'recorded.',
+  },
+  {
     name: 'crypto_enabled',
     kind: 'setting',
     failure: 'default-is-deliberate',

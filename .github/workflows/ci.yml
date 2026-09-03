@@ -128,6 +128,7 @@ jobs:
             -f packages/ledger/sql/040_countries.seed.sql \
             -f packages/ledger/sql/041_card_issuance.sql \
             -f packages/ledger/sql/042_bitnob_v2.sql \
+            -f packages/ledger/sql/043_bank_payouts.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       - name: Ledger and identity invariants
@@ -178,6 +179,7 @@ jobs:
                    packages/ledger/sql/040_countries.test.sql \
                    packages/ledger/sql/041_card_issuance.test.sql \
                    packages/ledger/sql/042_bitnob_v2.test.sql \
+                   packages/ledger/sql/043_bank_payouts.test.sql \
                    packages/ledger/sql/099_least_privilege.test.sql; do
             echo "== $f"
             psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
@@ -259,6 +261,7 @@ jobs:
             -f packages/ledger/sql/040_countries.seed.sql \
             -f packages/ledger/sql/041_card_issuance.sql \
             -f packages/ledger/sql/042_bitnob_v2.sql \
+            -f packages/ledger/sql/043_bank_payouts.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       # ------------------------------------------------------------------
