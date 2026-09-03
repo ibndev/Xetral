@@ -8,6 +8,11 @@ build/
 .env
 .env.*
 !.env.example
+# `.env.*` also swallowed this one, so the staging template `PHASES.md` and
+# `docker-compose.staging.yml` both point at had never actually been in the
+# repository — a documented file that does not exist. It holds placeholders
+# and no values; the rule above still ignores every real `.env.*`.
+!.env.staging.example
 *.pem
 *.key
 

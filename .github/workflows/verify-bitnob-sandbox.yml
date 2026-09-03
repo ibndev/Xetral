@@ -32,22 +32,35 @@ jobs:
         with:
           node-version: 22
 
-      - name: Refuse to run without a sandbox key
+      - name: Refuse to run without sandbox credentials
         # Named rather than left to fail inside the script, so the reason is the
         # first thing in the log rather than a stack trace.
+        #
+        # Through `env:`, never through `${{ }}` in the run block. An
+        # expression is pasted in as TEXT before bash sees it, and the repo
+        # rule about that has no exception for secrets — a value that reaches
+        # a shell as text is a value that can be a command.
+        env:
+          CLIENT_ID: ${{ secrets.BITNOB_SANDBOX_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.BITNOB_SANDBOX_CLIENT_SECRET }}
         run: |
-          if [ -z "${{ secrets.BITNOB_SANDBOX_API_KEY }}" ]; then
-            echo "::error::BITNOB_SANDBOX_API_KEY is not set for this repository."
-            echo "::error::Add it under Settings → Secrets and variables → Actions."
+          if [ -z "$CLIENT_ID" ] || [ -z "$CLIENT_SECRET" ]; then
+            echo "::error::BITNOB_SANDBOX_CLIENT_ID and BITNOB_SANDBOX_CLIENT_SECRET must both be set."
+            echo "::error::Bitnob v2 SIGNS each request, so the old single API key cannot be used."
+            echo "::error::Add them under Settings → Secrets and variables → Actions."
             exit 1
           fi
 
       - name: Probe the sandbox
         env:
-          # The script itself refuses any base URL without "sandbox" in it, so a
-          # production value cannot be exercised even by mistake.
-          BITNOB_BASE_URL: https://sandboxapi.bitnob.co/api/v1
-          BITNOB_API_KEY: ${{ secrets.BITNOB_SANDBOX_API_KEY }}
+          # ONE HOST for sandbox and production alike — v2 has no separate
+          # sandbox address. What keeps this off production is the script's
+          # first probe: it asks `/api/whoami` and aborts unless the answer is
+          # `sandbox`, which asks the provider rather than pattern-matching a
+          # URL somebody typed.
+          BITNOB_BASE_URL: https://api.bitnob.com
+          BITNOB_CLIENT_ID: ${{ secrets.BITNOB_SANDBOX_CLIENT_ID }}
+          BITNOB_CLIENT_SECRET: ${{ secrets.BITNOB_SANDBOX_CLIENT_SECRET }}
         run: node scripts/verify-bitnob-sandbox.mjs
 
       - name: Summarise what the provider said

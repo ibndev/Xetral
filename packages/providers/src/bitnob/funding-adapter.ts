@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { Currency } from '@xetral/shared';
 import { ProviderContractError } from '../ports/errors.js';
-import type { BitnobClient } from './client.js';
+import { BITNOB_ENDPOINTS, type BitnobClient } from './client.js';
 import type {
   CreateVirtualAccountRequest,
   FundingPort,
@@ -16,21 +16,27 @@ const PROVIDER = 'bitnob';
 /**
  * Bitnob dedicated Nigerian virtual accounts.
  *
- * CONFIRM BEFORE GO-LIVE, and it resolves with the same approval that gates
- * cards: the paths below follow the conventions verified for the card
- * endpoints in Phase 3 — a flat verb path under a base URL that already
- * contains `/api/v1`, camelCase request bodies — but the virtual-account
- * routes themselves could not be verified from this repository.
+ * THE PREVIOUS PATHS WERE A GUESS AND THEY WERE WRONG. This table used to say
+ * so in its own header — "the virtual-account routes themselves could not be
+ * verified from this repository" — and shipped anyway, following the naming
+ * conventions of the card endpoints. `/addresses/generate-naira-account` does
+ * not exist. It is `/api/virtual-accounts`, a resource of its own, verified
+ * against `bitnob/stealthdocs` (`docs/virtual-accounts/overview.mdx`,
+ * `docs.json`).
  *
- * The blast radius is deliberately small. Every path is in this one table, the
- * response shape is validated by a schema rather than read field-by-field at
- * call sites, and a wrong path fails loudly on the first call rather than
- * silently returning something plausible.
+ * The honest header was worth something and was not worth much: it named the
+ * risk and left the guess in the money path, where "confirm before go-live"
+ * competes with everything else on a go-live day.
+ *
+ * The blast radius was at least kept small, and that part held. Every path is
+ * in this one table, the response shape is validated by a schema rather than
+ * read field-by-field at call sites, and a wrong path fails loudly on the
+ * first call rather than silently returning something plausible.
  */
 export const BITNOB_FUNDING_ENDPOINTS = {
-  createVirtualAccount: '/addresses/generate-naira-account',
-  getVirtualAccount: (id: string) => `/addresses/naira-account/${id}`,
-  listDeposits: (id: string) => `/addresses/naira-account/${id}/transactions`,
+  createVirtualAccount: BITNOB_ENDPOINTS.createVirtualAccount,
+  getVirtualAccount: BITNOB_ENDPOINTS.getVirtualAccount,
+  listDeposits: BITNOB_ENDPOINTS.virtualAccountTransactions,
 } as const;
 
 /**
@@ -100,7 +106,15 @@ export class BitnobFundingAdapter implements FundingPort {
       'POST',
       BITNOB_FUNDING_ENDPOINTS.createVirtualAccount,
       {
-        customerId: request.providerCustomerId,
+        /*
+         * snake_case, and the currency is REQUIRED.
+         *
+         * NGN is the only currency this endpoint supports today, and naming
+         * it is not redundant: their docs say so as a statement about today,
+         * and a request that omits it is relying on that staying true.
+         */
+        customer_id: request.providerCustomerId,
+        currency: request.currency,
         // Their side de-duplicates on this, ours on the virtual_accounts
         // unique constraint. A retry needs both: without theirs we get a
         // second account number, and the first is already in the customer's

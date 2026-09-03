@@ -166,12 +166,23 @@ export class BitnobCardAdapter implements CardPort {
   constructor(private readonly client: BitnobClient) {}
 
   async issue(request: IssueCardRequest): Promise<VirtualCard> {
-    // camelCase, and `customerEmail` rather than an id: Bitnob keys a card user
-    // by the email registered through /virtualcards/registercarduser. Verified
-    // against their Node SDK, which is also where the casing comes from — their
-    // request bodies are camelCase even though webhook payloads are not.
+    /*
+     * `customer_id`, snake_case, and an ID rather than an email.
+     *
+     * All three changed with v2. The old surface keyed a card user by the
+     * email registered through `/virtualcards/registercarduser` and took
+     * camelCase bodies; `/api/cards` takes `customer_id` — the id returned by
+     * `POST /api/customers`, which is what `provider_customers` has always
+     * stored — and snake_case throughout.
+     *
+     * Their docs offer a nested `customer` object as an alternative, creating
+     * the customer and the card together. Deliberately not used: registering
+     * a customer is a KYC step with its own consent and audit trail, and
+     * Phase 5 records that it must never be a side effect of tapping "get a
+     * card".
+     */
     const payload = await this.client.request('POST', BITNOB_ENDPOINTS.issueCard, {
-      customerEmail: request.providerCustomerId,
+      customer_id: request.providerCustomerId,
       // Converted at the one boundary, never inline.
       amount: usdToMicro(request.initialFunding).toString(),
     });
@@ -190,9 +201,8 @@ export class BitnobCardAdapter implements CardPort {
   async fund(request: FundCardRequest): Promise<OperationOutcome> {
     const payload = await this.client.request(
       'POST',
-      BITNOB_ENDPOINTS.fundCard,
+      BITNOB_ENDPOINTS.cardBalance(request.providerCardId),
       {
-        cardId: request.providerCardId,
         amount: usdToMicro(request.amount).toString(),
       },
       request.idempotencyKey,
@@ -216,21 +226,32 @@ export class BitnobCardAdapter implements CardPort {
     return { state: 'pending', providerReference: id };
   }
 
+  /*
+   * Freezing and unfreezing are ONE endpoint under v2, distinguished by the
+   * body. They stay two methods here, because the port's two methods carry a
+   * decision the endpoint does not: freezing takes no PIN and unfreezing
+   * does. Collapsing them to `setStatus(status)` would put that decision at
+   * the call site, where a caller can pass the wrong constant.
+   */
   async freeze(providerCardId: string): Promise<VirtualCard> {
     return this.#toVirtualCard(
-      await this.client.request('POST', BITNOB_ENDPOINTS.freezeCard, { cardId: providerCardId }),
+      await this.client.request('POST', BITNOB_ENDPOINTS.cardStatus(providerCardId), {
+        status: 'frozen',
+      }),
     );
   }
 
   async unfreeze(providerCardId: string): Promise<VirtualCard> {
     return this.#toVirtualCard(
-      await this.client.request('POST', BITNOB_ENDPOINTS.unfreezeCard, { cardId: providerCardId }),
+      await this.client.request('POST', BITNOB_ENDPOINTS.cardStatus(providerCardId), {
+        status: 'active',
+      }),
     );
   }
 
   async terminate(providerCardId: string): Promise<VirtualCard> {
     return this.#toVirtualCard(
-      await this.client.request('POST', BITNOB_ENDPOINTS.terminateCard, { cardId: providerCardId }),
+      await this.client.request('POST', BITNOB_ENDPOINTS.terminateCard(providerCardId)),
     );
   }
 

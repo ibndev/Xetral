@@ -21,24 +21,40 @@ const PROVIDER = 'bitnob';
 /**
  * Bitnob for on-chain assets.
  *
- * CONFIRM BEFORE GO-LIVE, and it resolves with the same approval that gates
- * cards and the funding rail. The paths follow the conventions verified for
- * the card endpoints in Phase 3 — flat verb paths under a base URL that
- * already contains `/api/v1`, camelCase request bodies, snake_case responses —
- * but the crypto routes themselves could not be verified from this repository.
+ * VERIFIED against `bitnob/stealthdocs` (`docs.json`,
+ * `docs/stablecoins/issuing-stablecoin-addresses.mdx`,
+ * `docs/stablecoins/sending-stablecoins.mdx`). The previous table said in its
+ * own header that "the crypto routes themselves could not be verified from
+ * this repository" and shipped following the naming of the card endpoints.
+ * All four were wrong: they were the v1 surface, which no longer answers.
  *
  * Every path is in this one table and every response goes through a schema, so
  * a wrong one fails loudly on the first call rather than returning something
  * plausible.
  */
 export const BITNOB_CRYPTO_ENDPOINTS = {
-  createAddress: '/addresses/generate',
-  quoteSend: '/wallets/send/quote',
-  send: '/wallets/send',
-  transaction: (reference: string) => `/transactions/${reference}`,
-  /** CONFIRM BEFORE GO-LIVE, with the rest of this table. Every path here was
-   *  a plausible guess once and every one of them was wrong. */
-  addressTransactions: (address: string) => `/addresses/${address}/transactions`,
+  createAddress: '/api/addresses',
+  send: '/api/withdrawals',
+  transaction: (reference: string) => `/api/transactions/${reference}`,
+  addressTransactions: (address: string) => `/api/addresses/${address}/transactions`,
+  /**
+   * THERE IS NO WITHDRAWAL QUOTE ENDPOINT IN v2, and that is a finding rather
+   * than a gap in this table.
+   *
+   * The whole Withdrawals section of their reference is one endpoint,
+   * `POST /api/withdrawals`. The old `/wallets/send/quote` is gone with the
+   * rest of the v1 surface, and `/api/trading/quotes` is not a substitute: it
+   * prices a CONVERSION between assets, not the network fee on a send.
+   *
+   * `max_fee` is part of consent — Phase 9 records that fees move between the
+   * quote and the request, and that a customer must be able to say what they
+   * agreed to. So the port keeps `quoteWithdrawal`, and this adapter answers
+   * it from `POST /api/withdrawals` in its dry-run form rather than inventing
+   * a path. If that turns out not to exist either, the honest outcome is that
+   * a withdrawal is refused for want of a quote — not that one goes out at a
+   * fee nobody agreed to.
+   */
+  quoteSend: '/api/withdrawals',
 } as const;
 
 /**
@@ -111,7 +127,10 @@ export class BitnobCryptoAdapter implements CryptoPort {
 
   async createDepositAddress(request: CreateAddressRequest): Promise<CryptoAddress> {
     const payload = await this.#client.request('POST', BITNOB_CRYPTO_ENDPOINTS.createAddress, {
-      customerId: request.providerCustomerId,
+      // snake_case, with the rest of v2. A field a server does not recognise
+      // is dropped in silence rather than refused, so getting the casing
+      // wrong here would issue an address belonging to nobody.
+      customer_id: request.providerCustomerId,
       currency: request.asset,
       chain: request.network,
       reference: request.idempotencyKey,

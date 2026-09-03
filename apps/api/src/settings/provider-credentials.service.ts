@@ -287,8 +287,10 @@ function environmentValue(
   name: string,
 ): string | undefined {
   switch (`${provider}.${name}`) {
-    case 'bitnob.api_key':
-      return config.bitnobApiKey;
+    case 'bitnob.client_id':
+      return config.bitnobClientId;
+    case 'bitnob.client_secret':
+      return config.bitnobClientSecret;
     case 'bitnob.webhook_secret':
       return config.bitnobWebhookSecret;
     case 'vtpass.api_key':

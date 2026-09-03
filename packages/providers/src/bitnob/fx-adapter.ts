@@ -7,16 +7,34 @@ import { parseMinor } from './crypto-adapter.js';
 
 const PROVIDER = 'bitnob';
 
-/**
- * Bitnob for FX.
- *
- * CONFIRM BEFORE GO-LIVE with the rest of the Bitnob surface. The paths follow
- * the conventions verified for the card endpoints in Phase 3, and every one is
- * in this table so confirming them is a small diff.
- */
+/** Bitnob for FX. */
 export const BITNOB_FX_ENDPOINTS = {
-  rate: '/rates',
-  convert: '/wallets/swap',
+  /**
+   * VERIFIED against `bitnob/stealthdocs` (`docs.json`, `docs/trading/*`).
+   *
+   * Both paths changed with v2. `/rates` and `/wallets/swap` were the v1
+   * surface, and a swap is now a two-step trade: quote, then order. This
+   * adapter still calls one endpoint per port method, because `FxPort` models
+   * a rate and a conversion and nothing here needs a quote that outlives the
+   * request — the ledger's own idempotency key is what makes a retry safe,
+   * and a quote id would be a second, weaker copy of that.
+   */
+  /**
+   * A PRICE IS ASKED FOR IN THE BODY, not in the path, and that is a
+   * deliberate choice between two documented endpoints.
+   *
+   * `GET /api/trading/prices/{pair}` exists, and nothing in their docs says
+   * how a pair is spelled — `BTCUSDT`, `BTC-USDT`, `BTC_USDT` are all
+   * plausible and two of them 404. `POST /api/trading/quotes` takes
+   * `base_currency` and `quote_currency` as separate fields, which their own
+   * examples show, so there is no separator to get wrong.
+   *
+   * Guessing the separator is precisely the mistake this whole file is
+   * correcting, one layer down: a plausible constant, a test written from the
+   * same assumption, and a 404 on the first live call.
+   */
+  rate: '/api/trading/quotes',
+  convert: '/api/trading/orders',
 } as const;
 
 /**
@@ -70,10 +88,10 @@ export class BitnobFxAdapter implements FxPort {
       throw new ProviderContractError(PROVIDER, `${base} to ${quote} is not a conversion`);
     }
 
-    const payload = await this.#client.request(
-      'GET',
-      `${BITNOB_FX_ENDPOINTS.rate}?from=${base}&to=${quote}`,
-    );
+    const payload = await this.#client.request('POST', BITNOB_FX_ENDPOINTS.rate, {
+      base_currency: base,
+      quote_currency: quote,
+    });
 
     const parsed = rateResponse.safeParse(payload);
     if (!parsed.success) {
@@ -122,8 +140,11 @@ export class BitnobFxAdapter implements FxPort {
     }
 
     const payload = await this.#client.request('POST', BITNOB_FX_ENDPOINTS.convert, {
-      fromCurrency: base,
-      toCurrency: quote,
+      // snake_case, with the rest of v2. The old camelCase names are what a
+      // v1 body looked like, and a field a server does not recognise is
+      // dropped in silence rather than refused.
+      base_currency: base,
+      quote_currency: quote,
       amount: amount.amount.toString(),
       // Their de-duplication and ours agree on what "the same trade" means.
       reference,

@@ -71,11 +71,23 @@ export interface ApiConfig {
    * configuration still serves wallets and auth, and refuses card routes rather
    * than booting with a placeholder key that would fail on the first real call.
    */
-  /** Includes the version segment: `https://api.bitnob.co/api/v1` (sandbox:
-   *  `https://sandboxapi.bitnob.co/api/v1`). The endpoint table is relative to
+  /** The BARE HOST — `https://api.bitnob.com` — for sandbox and production
+   *  alike. The v2 paths carry their own `/api` prefix, so a base URL still
+   *  ending in `/api/v1` turns every request into `/api/v1/api/cards`. The
+   *  endpoint table is relative to
    *  it, so omitting `/api/v1` produces 404s on every card call. */
   readonly bitnobBaseUrl: string | undefined;
-  readonly bitnobApiKey: string | undefined;
+  /**
+   * Identifies the caller, and travels in every request. Not secret.
+   *
+   * Two values rather than one because Bitnob v2 signs rather than bearers —
+   * see `packages/providers/src/bitnob/signing.ts`. The old `BITNOB_API_KEY`
+   * cannot be reused as either: it is neither an id their API recognises nor
+   * a secret it can verify against.
+   */
+  readonly bitnobClientId: string | undefined;
+  /** Signs every request, and is never transmitted. */
+  readonly bitnobClientSecret: string | undefined;
   readonly bitnobWebhookSecret: string | undefined;
 
   /**
@@ -749,7 +761,8 @@ export function loadConfig(env: Env): ApiConfig {
     redisUrl: env['REDIS_URL'] === '' ? undefined : env['REDIS_URL'],
     transferFeeBasisPoints: basisPoints(env, 'TRANSFER_FEE_BASIS_POINTS'),
     bitnobBaseUrl: optional(env, 'BITNOB_BASE_URL'),
-    bitnobApiKey: optional(env, 'BITNOB_API_KEY'),
+    bitnobClientId: optional(env, 'BITNOB_CLIENT_ID'),
+    bitnobClientSecret: optional(env, 'BITNOB_CLIENT_SECRET'),
     bitnobWebhookSecret: optional(env, 'BITNOB_WEBHOOK_SECRET'),
     metricsToken: optional(env, 'METRICS_TOKEN'),
     encryptionKeyring: parseEncryptionKeyring(env),
@@ -860,13 +873,37 @@ function parseEnvironment(env: Env): Environment {
 }
 
 /**
- * A provider host that is not a sandbox is the one thing staging must not have.
+ * A provider that is not a sandbox is the one thing staging must not have.
  *
- * Matched on the URL rather than on a flag somebody sets alongside it: the
- * flag and the URL can disagree, and the URL is the thing that actually
- * carries the request. Bitnob's own SDK names its two hosts
- * `https://api.bitnob.co/api/v1` and `https://sandboxapi.bitnob.co/api/v1`, and
- * VTpass uses `vtpass.com` and `sandbox.vtpass.com`.
+ * BITNOB CAN NO LONGER BE CHECKED THIS WAY, and finding that out is the
+ * reason this function is shaped as it is.
+ *
+ * The rule used to be one sentence: match on the URL rather than on a flag
+ * somebody sets alongside it, because the flag and the URL can disagree and
+ * the URL is the thing that actually carries the request. That was right for
+ * Bitnob v1, whose two hosts were `api.bitnob.co` and `sandboxapi.bitnob.co`,
+ * and it is still right for VTpass.
+ *
+ * Bitnob v2 serves sandbox and production from ONE host,
+ * `https://api.bitnob.com`. Their own docs: "There is no environment header
+ * and no separate host... The secret you sign with selects the environment."
+ * So the URL carries no information about which money is real, and the old
+ * check has two failure modes at once — it can never pass with a correct base
+ * URL, so staging simply refuses to boot; and if somebody satisfied it by
+ * putting the word "sandbox" in the URL somewhere, it would pass while
+ * pointing at production.
+ *
+ * A CHECK THAT CANNOT SEE THE THING IT GUARDS IS WORSE THAN NO CHECK, because
+ * it is trusted. The environment is a property of the SECRET now, so the
+ * guard moved to where the secret is used: `BitnobClient` asks
+ * `GET /api/whoami` once, before its first money-moving call, and refuses
+ * when a staging deployment is signing with a live secret.
+ *
+ * That is deliberately not done here. This function runs at boot with no
+ * network and no database, and a boot-time provider call would be a new way
+ * for the API to fail to start — the reason `/v1/admin/readiness` reports
+ * rather than refuses. Asking at the first use costs one round trip on one
+ * request and cannot be skipped.
  *
  * An UNSET provider is fine — an instance with no card configuration serves
  * everything else and refuses those routes. It is a SET, live one that is
@@ -875,9 +912,22 @@ function parseEnvironment(env: Env): Environment {
 function assertProviderSandbox(env: Env): void {
   const live: string[] = [];
 
+  /*
+   * Still refused: a base URL from the v1 era.
+   *
+   * Not a sandbox test — it cannot be one any more — but a shape test. Every
+   * v2 path carries its own `/api` prefix, so a base URL ending in `/api/v1`
+   * produces `/api/v1/api/cards` and 404s everything, and a `bitnob.co` host
+   * is the retired API. Both are what a copied v1 configuration looks like,
+   * and on staging that means the deployment has not been reviewed since the
+   * credential model changed.
+   */
   const bitnob = optional(env, 'BITNOB_BASE_URL');
-  if (bitnob !== undefined && !/sandbox/i.test(bitnob)) {
-    live.push(`BITNOB_BASE_URL=${bitnob}`);
+  if (bitnob !== undefined && (/\/api\/v[0-9]/.test(bitnob) || /bitnob\.co(\/|$)/i.test(bitnob))) {
+    live.push(
+      `BITNOB_BASE_URL=${bitnob} (this is a v1 address; v2 is https://api.bitnob.com ` +
+        `with no version segment, and the environment comes from BITNOB_CLIENT_SECRET)`,
+    );
   }
 
   const vtpass = optional(env, 'VTPASS_BASE_URL');
@@ -887,10 +937,11 @@ function assertProviderSandbox(env: Env): void {
 
   if (live.length > 0) {
     throw new ConfigError(
-      `XETRAL_ENVIRONMENT is 'staging' but these point at a LIVE provider: ` +
-        `${live.join(', ')}. A staging instance that can reach production ` +
-        `providers can spend real money and issue real cards. Use the sandbox ` +
-        `hosts, or set XETRAL_ENVIRONMENT=production if this is production.`,
+      `XETRAL_ENVIRONMENT is 'staging' but these are wrong or point at a LIVE ` +
+        `provider: ${live.join(', ')}. A staging instance that can reach ` +
+        `production providers can spend real money and issue real cards. Use ` +
+        `the sandbox hosts and a sandbox client secret, or set ` +
+        `XETRAL_ENVIRONMENT=production if this is production.`,
     );
   }
 }

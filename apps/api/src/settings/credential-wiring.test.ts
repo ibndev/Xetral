@@ -34,10 +34,10 @@ describe('the Bitnob key reaches the adapters', () => {
     // ignores whatever an operator pasted.
     const offenders = source()
       .split('\n')
-      // `[,)]` after the name, so `bitnobApiKeyResolver(...)` — which is the
+      // `[,)]` after the name, so `bitnobCredentials(...)` — which is the
       // CORRECT spelling — does not match. The first version of this test
       // reported all five resolved clients as offenders.
-      .filter((line) => /apiKey:\s*bitnobApiKey\s*[,)]/.test(line));
+      .filter((line) => /client(Id|Secret):\s*config\.bitnobClient(Id|Secret)\s*[,)]/.test(line));
 
     expect(
       offenders,
@@ -49,39 +49,61 @@ describe('the Bitnob key reaches the adapters', () => {
   it('every Bitnob client is built through the resolver', () => {
     const src = source();
     const clients = (src.match(/new BitnobClient\(/g) ?? []).length;
-    const resolved = (src.match(/bitnobApiKeyResolver\(config, credentials\)/g) ?? []).length;
+    const resolved = (src.match(/\.\.\.bitnobCredentials\(config, credentials\)/g) ?? []).length;
 
     expect(clients, 'app.module.ts builds no Bitnob clients at all').toBeGreaterThan(0);
     expect(
       resolved,
-      `${clients} Bitnob clients are built and ${resolved} take a resolved key`,
+      `${clients} Bitnob clients are built and ${resolved} take resolved credentials`,
     ).toBe(clients);
   });
 
-  it('a missing key refuses with a message naming where to put one', async () => {
-    // NOT `Bearer undefined`, which Bitnob answers 401 to — and a 401 reads
-    // as "the key is wrong" when the truth is that there is no key. The
+  it('a missing credential refuses with a message naming where to put one', async () => {
+    // NOT an unsigned request, which Bitnob answers 401 to — and a 401 reads
+    // as "the credential is wrong" when the truth is that there is none. The
     // difference is what an operator does next.
     const client = new BitnobClient({
       baseUrl: 'https://example.invalid',
-      apiKey: async () => undefined,
+      clientId: async () => undefined,
+      clientSecret: async () => undefined,
       // Would fail the request if it were ever reached; the refusal happens
       // first, which is what this asserts.
       fetch: () => {
-        throw new Error('the request was sent without a key');
+        throw new Error('the request was sent without credentials');
       },
     });
 
-    await expect(client.request('GET', '/health')).rejects.toThrow(/no API key is configured/);
+    await expect(client.request('GET', '/api/whoami')).rejects.toThrow(
+      /no Bitnob client id and no client secret is configured/,
+    );
   });
 
-  it('a resolved key is what gets sent', async () => {
-    let sent: string | undefined;
+  it('names the half that is missing, when only one is', async () => {
+    // An operator with an id and no secret is one paste away from working. A
+    // message naming both would send them to check the one that is already
+    // right.
     const client = new BitnobClient({
       baseUrl: 'https://example.invalid',
-      apiKey: async () => 'from-the-database',
+      clientId: async () => 'client_live_abc',
+      clientSecret: async () => undefined,
+      fetch: () => {
+        throw new Error('the request was sent unsigned');
+      },
+    });
+
+    await expect(client.request('GET', '/api/whoami')).rejects.toThrow(
+      /no Bitnob client secret is configured/,
+    );
+  });
+
+  it('resolved credentials are what sign the request', async () => {
+    let headers: Record<string, string> = {};
+    const client = new BitnobClient({
+      baseUrl: 'https://example.invalid',
+      clientId: async () => 'client_from_the_database',
+      clientSecret: async () => 'secret_from_the_database',
       fetch: (_url, init) => {
-        sent = (init.headers as Record<string, string>)['authorization'];
+        headers = init.headers as Record<string, string>;
         return Promise.resolve(
           new Response(JSON.stringify({ ok: true }), {
             status: 200,
@@ -91,7 +113,15 @@ describe('the Bitnob key reaches the adapters', () => {
       },
     });
 
-    await client.request('GET', '/health');
-    expect(sent).toBe('Bearer from-the-database');
+    await client.request('GET', '/api/whoami');
+
+    expect(headers['x-auth-client']).toBe('client_from_the_database');
+    expect(headers['x-auth-signature']).toMatch(/^[0-9a-f]{64}$/);
+    // THE SECRET IS NEVER TRANSMITTED. Asserted over every header value
+    // rather than over the one it might plausibly appear in, because what is
+    // being guarded against is the header nobody thought to check.
+    expect(Object.values(headers).join(' ')).not.toContain('secret_from_the_database');
+    // And no bearer token survives from the v1 shape.
+    expect(headers['authorization']).toBeUndefined();
   });
 });

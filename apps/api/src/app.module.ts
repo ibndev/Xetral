@@ -9,6 +9,7 @@ import {
   BitnobBalanceAdapter,
   BitnobCardAdapter,
   BitnobClient,
+  type BitnobCredential,
   TwilioAdapter,
   VtpassAdapter,
 } from '@xetral/providers';
@@ -188,14 +189,52 @@ export interface AppModuleOptions {
  * an incident. `secretFor` already falls back to the environment, so an
  * unchanged deployment behaves exactly as before.
  */
-export function bitnobApiKeyResolver(
+/**
+ * The two credentials every Bitnob port needs, resolved PER REQUEST.
+ *
+ * Two rather than one because v2 signs its requests instead of bearing a
+ * token: the id says who is calling, the secret proves it, and the secret
+ * never goes over the wire. See `packages/providers/src/bitnob/signing.ts`.
+ *
+ * `BITNOB_API_KEY` is deliberately not consulted as a fallback for either. A
+ * v1 key is not an id their API recognises and not a secret it can verify
+ * against, so accepting it here would turn "you are still on the old
+ * credential" into "your credential is wrong" — which is exactly the
+ * misdiagnosis this whole change is correcting.
+ */
+export function bitnobCredentials(
   config: ApiConfig,
   credentials?: ProviderCredentialService,
-): string | (() => Promise<string | undefined>) {
+): {
+  clientId: BitnobCredential;
+  clientSecret: BitnobCredential;
+  requireSandbox: boolean;
+} {
+  /*
+   * On staging, the client refuses a LIVE Bitnob account before its first
+   * money-moving call. This used to be a substring test on BITNOB_BASE_URL
+   * and cannot be any more: v2 serves sandbox and production from one host
+   * and the SECRET selects the environment, so the URL carries no
+   * information about which money is real. See `assertProviderSandbox`.
+   */
+  const requireSandbox = config.environment === 'staging';
   // No service — the e2e app factories and the unit tests build ports
-  // directly. Falls back to the value it always used.
-  if (credentials === undefined) return config.bitnobApiKey ?? '';
-  return () => credentials.secretFor('bitnob', 'api_key', config.bitnobApiKey);
+  // directly. Falls back to the environment, as the credential table's own
+  // precedence rule says: the database is authoritative, the environment is
+  // the fallback.
+  if (credentials === undefined) {
+    return {
+      clientId: config.bitnobClientId ?? '',
+      clientSecret: config.bitnobClientSecret ?? '',
+      requireSandbox,
+    };
+  }
+  return {
+    clientId: () => credentials.secretFor('bitnob', 'client_id', config.bitnobClientId),
+    clientSecret: () =>
+      credentials.secretFor('bitnob', 'client_secret', config.bitnobClientSecret),
+    requireSandbox,
+  };
 }
 
 export function createProviderBalancePort(
@@ -208,7 +247,7 @@ export function createProviderBalancePort(
   return new BitnobBalanceAdapter(
     new BitnobClient({
       baseUrl: bitnobBaseUrl,
-      apiKey: bitnobApiKeyResolver(config, credentials),
+      ...bitnobCredentials(config, credentials),
     }),
   );
 }
@@ -239,7 +278,7 @@ export function createCardPort(
   return new BitnobCardAdapter(
     new BitnobClient({
       baseUrl: bitnobBaseUrl,
-      apiKey: bitnobApiKeyResolver(config, credentials),
+      ...bitnobCredentials(config, credentials),
     }),
   );
 }
@@ -381,7 +420,7 @@ export function createFundingPort(
   return new BitnobFundingAdapter({
     client: new BitnobClient({
       baseUrl: bitnobBaseUrl,
-      apiKey: bitnobApiKeyResolver(config, credentials),
+      ...bitnobCredentials(config, credentials),
     }),
     amountUnit: config.bitnobNgnAmountUnit,
   });
@@ -419,7 +458,7 @@ export function createCryptoPort(
   return new BitnobCryptoAdapter({
     client: new BitnobClient({
       baseUrl: bitnobBaseUrl,
-      apiKey: bitnobApiKeyResolver(config, credentials),
+      ...bitnobCredentials(config, credentials),
     }),
   });
 }
@@ -445,7 +484,7 @@ export function createFxPort(
   return new BitnobFxAdapter({
     client: new BitnobClient({
       baseUrl: bitnobBaseUrl,
-      apiKey: bitnobApiKeyResolver(config, credentials),
+      ...bitnobCredentials(config, credentials),
     }),
   });
 }

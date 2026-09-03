@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { usd } from '@xetral/shared';
 import { BitnobCardAdapter } from './card-adapter.js';
@@ -60,12 +61,13 @@ function adapterWith(responses: Parameters<typeof stub>[0]): {
   calls: Call[];
 } {
   const { fetch, calls } = stub(responses);
-  // The version prefix belongs to the base URL, exactly as in Bitnob's SDK
-  // (BitnobLiveURL = 'https://api.bitnob.co/api/v1'). The trailing slash is
-  // deliberate — the client must not double it.
+  // The BARE HOST. Under v2 every path carries its own `/api` prefix, so a
+  // base URL still ending in `/api/v1` would produce `/api/v1/api/cards`. The
+  // trailing slash is deliberate — the client must not double it.
   const client = new BitnobClient({
-    baseUrl: 'https://api.bitnob.test/api/v1/',
-    apiKey: 'sk',
+    baseUrl: 'https://api.bitnob.test/',
+    clientId: 'client_abc',
+    clientSecret: 'sekret',
     fetch,
   });
   return { adapter: new BitnobCardAdapter(client), calls };
@@ -131,17 +133,57 @@ describe('issuing', () => {
     // 2500 cents must leave as 25,000,000 micro. Sending cents would fund the
     // card with a ten-thousandth of the intended amount.
     expect(sent['amount']).toBe('25000000');
-    // camelCase, and keyed by the registered card-user email. Both verified
-    // against Bitnob's own SDK rather than guessed from REST convention.
-    expect(sent['customerEmail']).toBe('cus_5');
-    expect(calls[0]?.url).toBe('https://api.bitnob.test/api/v1/virtualcards/create');
+    // snake_case, and keyed by the customer ID rather than their email. All
+    // three changed with v2 — casing, field name and endpoint — and the old
+    // spellings are what this test asserted while the code that produced
+    // them could no longer reach a live API.
+    expect(sent['customer_id']).toBe('cus_5');
+    expect(sent['customerEmail']).toBeUndefined();
+    expect(calls[0]?.url).toBe('https://api.bitnob.test/api/cards');
   });
 
-  it('authenticates the request', async () => {
+  it('SIGNS the request rather than bearing a token', async () => {
+    // The bug this whole change corrects. A bearer token gets a 401 from v2
+    // reading "Invalid HMAC signature", which is indistinguishable from a
+    // wrong key — so cards, crypto and FX all reported "something went
+    // wrong" while /admin/credentials said the credential was set.
     const { adapter, calls } = adapterWith([{ json: cardBody() }]);
     await adapter.get('card_77');
     const headers = calls[0]?.init.headers as Record<string, string>;
-    expect(headers['authorization']).toBe('Bearer sk');
+
+    expect(headers['authorization']).toBeUndefined();
+    expect(headers['x-auth-client']).toBe('client_abc');
+    expect(headers['x-auth-signature']).toMatch(/^[0-9a-f]{64}$/);
+    expect(headers['x-auth-nonce']).toMatch(/^[0-9a-f]{32}$/);
+    // Seconds, not milliseconds — one of the three causes their docs list
+    // for a 401, and the one JavaScript produces by default.
+    expect(headers['x-auth-timestamp']).toMatch(/^[0-9]{10}$/);
+    // The secret signs and never travels.
+    expect(Object.values(headers).join(' ')).not.toContain('sekret');
+  });
+
+  it('signs the EXACT body it sends', async () => {
+    // Their docs are explicit: re-serialising between signing and sending —
+    // reordering keys, changing whitespace — signs a string that never
+    // arrives, and the request is refused with nothing to say why.
+    const { adapter, calls } = adapterWith([{ json: cardBody() }]);
+    await adapter.issue({
+      ownerId: 'u1',
+      providerCustomerId: 'cus_5',
+      nameOnCard: 'Ada Obi',
+      initialFunding: usd(2500),
+    });
+
+    const call = calls[0];
+    const headers = call?.init.headers as Record<string, string>;
+    const expected = createHmac('sha256', 'sekret')
+      .update(
+        `client_abc:${headers['x-auth-timestamp']}:${headers['x-auth-nonce']}:${String(call?.init.body)}`,
+        'utf8',
+      )
+      .digest('hex');
+
+    expect(headers['x-auth-signature']).toBe(expected);
   });
 });
 
@@ -275,7 +317,8 @@ describe('failures are classified by what to do about them', () => {
     };
     const client = new BitnobClient({
       baseUrl: 'https://api.bitnob.test',
-      apiKey: 'sk',
+      clientId: 'client_abc',
+      clientSecret: 'sekret',
       fetch: abort,
       timeoutMs: 5,
     });
@@ -292,7 +335,12 @@ describe('failures are classified by what to do about them', () => {
   it('surfaces a gateway HTML page as a contract error, not a parse crash', async () => {
     const html: FetchLike = async () =>
       ({ ok: true, status: 200, text: async () => '<html>504</html>' }) as Response;
-    const client = new BitnobClient({ baseUrl: 'https://api.bitnob.test', apiKey: 'sk', fetch: html });
+    const client = new BitnobClient({
+      baseUrl: 'https://api.bitnob.test',
+      clientId: 'client_abc',
+      clientSecret: 'sekret',
+      fetch: html,
+    });
     await expect(new BitnobCardAdapter(client).get('c')).rejects.toBeInstanceOf(
       ProviderContractError,
     );
@@ -312,7 +360,7 @@ describe('failures are classified by what to do about them', () => {
 });
 
 describe('lifecycle operations', () => {
-  it('freezes, unfreezes and terminates by verb path, with the card in the body', async () => {
+  it('freezes, unfreezes and terminates by CARD PATH, not by verb path', async () => {
     const { adapter, calls } = adapterWith([
       { json: cardBody({ status: 'frozen' }) },
       { json: cardBody({ status: 'active' }) },
@@ -323,24 +371,36 @@ describe('lifecycle operations', () => {
     expect((await adapter.unfreeze('card_77')).status).toBe('active');
     expect((await adapter.terminate('card_77')).status).toBe('terminated');
 
-    // NOT /virtualcards/{id}/freeze. Bitnob has no per-card sub-resources; the
-    // card is named in the body. This asserted the REST-shaped guess until the
-    // paths were checked against their SDK, and a test agreeing with the code
-    // proves only that they were written by the same person.
+    /*
+     * THIS TEST HAS NOW ASSERTED THREE DIFFERENT SHAPES, and that is the
+     * point worth keeping.
+     *
+     *   1. `/virtualcards/{id}/freeze` — a REST-shaped guess.
+     *   2. `/virtualcards/freeze` with the card in the body — verified
+     *      against Bitnob's own Node SDK, and correct at the time.
+     *   3. `/api/cards/{id}/status` with `{ status }` — v2, which retired
+     *      the whole `/virtualcards` namespace.
+     *
+     * So the SDK on npm is now a description of an API that no longer
+     * answers. "Verified against the vendor's own SDK" was worth more than a
+     * guess and less than it looked like: a table of constants needs a source
+     * AND a date, because a correct one decays.
+     */
     expect(calls.map((c) => c.url)).toEqual([
-      'https://api.bitnob.test/api/v1/virtualcards/freeze',
-      'https://api.bitnob.test/api/v1/virtualcards/unfreeze',
-      'https://api.bitnob.test/api/v1/virtualcards/terminate',
+      'https://api.bitnob.test/api/cards/card_77/status',
+      'https://api.bitnob.test/api/cards/card_77/status',
+      'https://api.bitnob.test/api/cards/card_77/terminate',
     ]);
-    for (const call of calls) {
-      expect(JSON.parse(String(call.init.body))).toEqual({ cardId: 'card_77' });
-    }
+    // Freeze and unfreeze are ONE endpoint distinguished by the body, which
+    // is why the two urls above are identical and these two bodies are not.
+    expect(JSON.parse(String(calls[0]?.init.body))).toEqual({ status: 'frozen' });
+    expect(JSON.parse(String(calls[1]?.init.body))).toEqual({ status: 'active' });
   });
 
   it('does not double up the slash between base url and path', async () => {
     const { adapter, calls } = adapterWith([{ json: cardBody() }]);
     await adapter.get('card_77');
-    expect(calls[0]?.url).toBe('https://api.bitnob.test/api/v1/virtualcards/card/card_77');
+    expect(calls[0]?.url).toBe('https://api.bitnob.test/api/cards/card_77');
   });
 });
 

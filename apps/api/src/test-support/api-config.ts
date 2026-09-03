@@ -62,7 +62,8 @@ export function testApiConfig(databaseUrl: string, overrides: Partial<ApiConfig>
     redisUrl: undefined,
     transferFeeBasisPoints: 0,
     bitnobBaseUrl: undefined,
-    bitnobApiKey: undefined,
+    bitnobClientId: undefined,
+    bitnobClientSecret: undefined,
     bitnobWebhookSecret: undefined,
     // Undefined by default, so a suite that does not name it gets the
     // production-shaped answer: the endpoint is not there at all.

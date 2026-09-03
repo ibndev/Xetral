@@ -103,7 +103,7 @@ beforeAll(async () => {
         config: testApiConfig(DATABASE_URL as string, {
           // The environment holds one value; the database will hold another.
           // Which wins is the point of the test below.
-          bitnobApiKey: 'from-the-environment',
+          bitnobClientId: 'from-the-environment',
         }),
         pool,
         clock: systemClock,

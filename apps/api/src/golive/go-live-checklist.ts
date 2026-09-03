@@ -340,13 +340,28 @@ export const PROVIDERS: readonly Item[] = [
       'FX all speak to one provider and there is no host to call.',
   },
   {
-    name: 'BITNOB_API_KEY',
+    name: 'BITNOB_CLIENT_ID',
     kind: 'env',
     failure: 'refuses-the-first-request',
     flow: 'cards, NGN funding, crypto, FX',
     ifMissed:
-      'the same four flows refuse. A key pasted into `/admin/credentials` ' +
-      'overrides this one, with five seconds of cache.',
+      'the same four flows refuse. Bitnob v2 SIGNS each request rather than ' +
+      'bearing a token, so it needs an id AND a secret; the old ' +
+      'BITNOB_API_KEY is neither and is not read. A value pasted into ' +
+      '`/admin/credentials` overrides this one, with five seconds of cache.',
+  },
+  {
+    name: 'BITNOB_CLIENT_SECRET',
+    kind: 'env',
+    failure: 'refuses-the-first-request',
+    flow: 'cards, NGN funding, crypto, FX',
+    ifMissed:
+      'the same four flows refuse. THIS VALUE ALSO SELECTS THE ENVIRONMENT: ' +
+      'sandbox and production share one host and differ only in the secret ' +
+      'signed with, so a sandbox secret here means no real card is ever ' +
+      'issued and a live one on staging means every test card is real. On ' +
+      'staging the API asks `/api/whoami` before its first request and ' +
+      'refuses a live account.',
   },
   {
     name: 'BITNOB_WEBHOOK_SECRET',

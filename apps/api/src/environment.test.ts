@@ -51,9 +51,25 @@ describe('naming the environment', () => {
 });
 
 describe('staging cannot reach a live provider', () => {
-  it('refuses to boot pointed at live Bitnob', () => {
-    // The failure this exists to prevent: a staging box issuing REAL cards
-    // and spending REAL money, discovered when somebody reconciles.
+  /*
+   * BITNOB IS NO LONGER GUARDED BY ITS URL, and that is the finding rather
+   * than a weakening.
+   *
+   * v2 serves sandbox and production from ONE host,
+   * `https://api.bitnob.com` — their docs: "There is no environment header
+   * and no separate host... The secret you sign with selects the
+   * environment." So the URL carries no information about which money is
+   * real, and the old substring test had two failure modes at once: it could
+   * never pass with a correct base URL, so staging would not boot at all;
+   * and a URL contrived to contain the word "sandbox" would pass it while
+   * pointing at production.
+   *
+   * What this file can still check is the SHAPE — a v1 address on a staging
+   * box means the deployment has not been reviewed since the credential
+   * model changed. The environment itself is checked where the secret is
+   * used: `sandbox-guard.test.ts` in `@xetral/providers`.
+   */
+  it('refuses to boot pointed at a retired v1 Bitnob address', () => {
     expect(() =>
       loadConfig(
         env({
@@ -61,7 +77,21 @@ describe('staging cannot reach a live provider', () => {
           BITNOB_BASE_URL: 'https://api.bitnob.co/api/v1',
         }),
       ),
-    ).toThrow(/LIVE provider/);
+    ).toThrow(/v1 address/);
+  });
+
+  it('refuses a v2 host that still carries a version segment', () => {
+    // Every v2 path carries its own `/api` prefix, so this one produces
+    // `/api/v1/api/cards` and 404s every request — a failure that reads as
+    // "the provider is down" rather than "the base URL is wrong".
+    expect(() =>
+      loadConfig(
+        env({
+          XETRAL_ENVIRONMENT: 'staging',
+          BITNOB_BASE_URL: 'https://api.bitnob.com/api/v1',
+        }),
+      ),
+    ).toThrow(/no version segment/);
   });
 
   it('refuses to boot pointed at live VTpass', () => {
@@ -94,11 +124,13 @@ describe('staging cannot reach a live provider', () => {
     expect(error?.message).toContain('VTPASS_BASE_URL');
   });
 
-  it('accepts the sandbox hosts', () => {
+  it('accepts the correct v2 host, which is the SAME one production uses', () => {
+    // Nothing about this address says sandbox, and nothing can: the secret
+    // decides. Accepting it here is what lets staging boot at all.
     const config = loadConfig(
       env({
         XETRAL_ENVIRONMENT: 'staging',
-        BITNOB_BASE_URL: 'https://sandboxapi.bitnob.co/api/v1',
+        BITNOB_BASE_URL: 'https://api.bitnob.com',
         VTPASS_BASE_URL: 'https://sandbox.vtpass.com',
       }),
     );

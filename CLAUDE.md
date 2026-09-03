@@ -1806,7 +1806,7 @@ numbers), **Resend** (email).
 Do **not** reintroduce Reloadly, Maplerad, Anchor, Paystack or ALAT. They appear in
 the reference plugin and are out of scope.
 
-### Bitnob specifics — verified from their docs
+### Bitnob specifics — verified from their docs (v2, September 2026)
 
 - **Card spend is two events, not one.** Authorization, then Settlement up to 7–14
   business days later, each with its own webhook. If no settlement arrives the hold
@@ -1825,15 +1825,55 @@ the reference plugin and are out of scope.
   boundary inside the adapter, with its own tests.
 - Webhook `event_id` is the natural source for `idempotency_key`. Format the key as
   `bitnob:<event_id>` so two providers cannot collide.
-- JSON keys in webhook payloads are snake_case. Request bodies to their REST
-  API are **camelCase** (`customerEmail`, `cardId`) — the two do not match, and
-  both are verified against their official Node SDK.
-- The webhook signature is **HMAC-SHA512**, hex, in `x-bitnob-signature`. It was
-  SHA-256 here on the strength of "everyone uses SHA-256", which would have
-  rejected every webhook in production and looked like a bad secret.
-- Card endpoints have **no per-card sub-resources**. Every operation is a flat
-  POST to a verb path (`/virtualcards/freeze`) with `cardId` in the body, under
-  a base URL that includes `/api/v1`.
+- **EVERY REQUEST IS SIGNED, NOT BORNE, and getting this wrong refused every
+  Bitnob call in the product.** v2 wants four headers — `x-auth-client`,
+  `x-auth-timestamp`, `x-auth-nonce`, `x-auth-signature` — an HMAC-SHA256 hex
+  digest over `CLIENT_ID:TIMESTAMP:NONCE:PAYLOAD` keyed by the client secret.
+  A bearer token gets `401 "Invalid HMAC signature"`, which from inside the
+  app is indistinguishable from a wrong key: cards, crypto, FX and naira
+  account numbers all reported "something went wrong" while
+  `/admin/credentials` correctly said the credential was set. All signing
+  lives in `bitnob/signing.ts`.
+- **Sign the EXACT bytes sent.** `BitnobClient` serialises once and passes the
+  same string to the signature and to `fetch`. Re-serialising in between —
+  reordering keys, changing whitespace — signs a string that never arrives.
+  Same discipline as the Airalo adapter, for the same reason.
+- **The timestamp is SECONDS**, and `Date.now()` is milliseconds. Their docs
+  name it as one of three causes of a 401. The nonce is 16 CSPRNG bytes, hex.
+- **Two credentials, and only one is secret.** `BITNOB_CLIENT_ID` travels in
+  the clear; `BITNOB_CLIENT_SECRET` signs and is never transmitted. The old
+  `BITNOB_API_KEY` is neither, so `042` retires that slot rather than
+  renaming it — carrying the value forward would turn "you are still on the
+  old credential" into "your credential is wrong".
+- **THE SECRET SELECTS THE ENVIRONMENT.** Sandbox and production share one
+  host, `https://api.bitnob.com`, with no version segment and no environment
+  header. So the staging guard cannot be a substring test on a URL — it was,
+  and that check became both unpassable and unsound at once. On staging the
+  client asks `GET /api/whoami` before its first request and refuses a `live`
+  account.
+- **The base URL is the BARE HOST.** Every v2 path carries its own `/api`
+  prefix, so a URL ending in `/api/v1` produces `/api/v1/api/cards`.
+- JSON keys are **snake_case in both directions** now — webhook payloads and
+  request bodies alike. v1 request bodies were camelCase; a field a server
+  does not recognise is dropped in silence rather than refused, which is why
+  the casing is worth stating.
+- The webhook signature is **HMAC-SHA512**, hex, in `x-bitnob-signature`, and
+  is unchanged by v2. It was SHA-256 here on the strength of "everyone uses
+  SHA-256", which would have rejected every webhook in production and looked
+  like a bad secret. SHA-256 signs what we SEND and SHA-512 verifies what we
+  RECEIVE — two schemes, not an inconsistency to tidy up.
+- **Card operations are per-card PATHS**: `/api/cards/:id/status` with
+  `{ status: 'frozen' | 'active' }`, `/api/cards/:id/balance`,
+  `/api/cards/:id/terminate`. The `/virtualcards/*` namespace is retired.
+- **A CORRECT CONSTANT DECAYS, and this table has now been wrong twice.**
+  Phase 3 replaced a REST-shaped guess with paths from Bitnob's own published
+  Node SDK, which was right at the time and is now a description of an API
+  that no longer answers. "Verified against the vendor's SDK" is a claim about
+  a DATE as much as a source, so `verify-bitnob-sandbox.mjs` records both — and
+  that script, which exists precisely to catch this, had never been run.
+- **There is no card-acquiring product.** Bitnob issues cards to customers; it
+  does not accept a customer's own card as a funding instrument. Funding a
+  wallet is the dedicated virtual account (bank transfer in) or crypto.
 - Card issuing **requires approval** from Bitnob before use. The card webhook
   EVENT NAMES are the one thing still unconfirmed, and they resolve as part of
   that approval — an unrecognised event throws and is retried, so a wrong name
@@ -2030,6 +2070,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/039_profile_handles.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/040_countries.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/040_countries.seed.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/041_card_issuance.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/042_bitnob_v2.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -2070,6 +2111,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/038_usdc.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/039_profile_handles.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/040_countries.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/041_card_issuance.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/042_bitnob_v2.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,
