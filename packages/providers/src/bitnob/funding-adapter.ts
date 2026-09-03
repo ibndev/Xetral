@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { Currency } from '@xetral/shared';
-import { ProviderContractError } from '../ports/errors.js';
+import { ProviderContractError, ProviderRejectedError } from '../ports/errors.js';
 import { BITNOB_ENDPOINTS, type BitnobClient } from './client.js';
 import type {
   CreateVirtualAccountRequest,
@@ -102,6 +102,30 @@ export class BitnobFundingAdapter implements FundingPort {
       );
     }
 
+    /*
+     * BITNOB'S PREREQUISITE, STATED HERE RATHER THAN IN THE PORT.
+     *
+     * Their virtual-account endpoint requires a customer already carrying a
+     * BVN — their docs are explicit that the BVN lives on the customer and
+     * that the name and date of birth must match the national registry. So
+     * this adapter genuinely cannot issue an account to somebody unverified.
+     *
+     * That is a fact about BITNOB, not about the rail: the same account under
+     * CBN tier 1 needs a name and a phone number. Keeping the requirement in
+     * the adapter is what lets a second provider have a different one, which
+     * is the whole point of the port.
+     */
+    const providerCustomerId = request.customer.providerCustomerId;
+    if (providerCustomerId === undefined || providerCustomerId === '') {
+      throw new ProviderRejectedError(
+        PROVIDER,
+        'Bitnob issues a naira account only to a customer it already holds a ' +
+          'verified BVN for. Complete identity verification first, or use a ' +
+          'funding provider that opens a tier 1 account.',
+        'kyc_required',
+      );
+    }
+
     const payload = await this.#client.request(
       'POST',
       BITNOB_FUNDING_ENDPOINTS.createVirtualAccount,
@@ -113,7 +137,7 @@ export class BitnobFundingAdapter implements FundingPort {
          * it is not redundant: their docs say so as a statement about today,
          * and a request that omits it is relying on that staying true.
          */
-        customer_id: request.providerCustomerId,
+        customer_id: providerCustomerId,
         currency: request.currency,
         // Their side de-duplicates on this, ours on the virtual_accounts
         // unique constraint. A retry needs both: without theirs we get a
@@ -188,6 +212,10 @@ export class BitnobFundingAdapter implements FundingPort {
     }
 
     return {
+      provider: PROVIDER,
+      // Bitnob's virtual-account routes are addressed by the ACCOUNT id, so
+      // there is nothing customer-level for the sweep to key on.
+      providerCustomerRef: undefined,
       providerAccountId: data.id,
       accountNumber: data.account_number,
       bankName: data.bank_name,

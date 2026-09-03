@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { formatAmount } from '@xetral/client';
 import type { KycLimits, KycStatus } from '@xetral/client';
 import { Shell } from '@/ui/shell';
@@ -24,6 +24,18 @@ export default function Kyc() {
   const { data, loading, reload } = useLoad<KycStatus | null>(() => client.kyc(), [client]);
   const { busy, error, code, run } = useSubmit();
 
+  /*
+   * WHAT SIGNUP ALREADY TOOK IS NOT ASKED AGAIN.
+   *
+   * This form used to open with five empty boxes, two of which the account
+   * already held — and a verification step that re-asks for a name and a
+   * phone number is one people abandon on the screen that unblocks the card
+   * they came for. The session carries both, so they arrive filled in and
+   * STILL EDITABLE: the name on a BVN is not always the name somebody typed
+   * about themselves, and the reviewer reads it off a document either way.
+   */
+  const session = useLoad(() => client.currentSession(), [client]);
+
   const [form, setForm] = useState({
     fullName: '',
     dateOfBirth: '',
@@ -31,6 +43,18 @@ export default function Kyc() {
     bvn: '',
     address: '',
   });
+
+  useEffect(() => {
+    const known = session.data;
+    if (known === undefined) return;
+    // Only ever fills a box the customer has not touched. Overwriting what
+    // somebody has typed because a request finished late is the worse bug.
+    setForm((f) => ({
+      ...f,
+      fullName: f.fullName === '' ? (known.full_name ?? '') : f.fullName,
+      phone: f.phone === '' ? (known.phone ?? '') : f.phone,
+    }));
+  }, [session.data]);
 
   const set = (field: keyof typeof form) => (e: { target: { value: string } }) =>
     setForm((f) => ({ ...f, [field]: e.target.value }));
@@ -74,7 +98,7 @@ export default function Kyc() {
 
       <form className="card" onSubmit={submit}>
         <h1>Verify your identity</h1>
-        <h2>Required before you can be issued an account number or a card</h2>
+        <h2>Your BVN, and a check of what we already hold</h2>
 
         <label>
           Full name, as it appears on your BVN

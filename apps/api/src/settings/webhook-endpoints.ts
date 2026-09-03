@@ -23,8 +23,16 @@ export interface WebhookEndpoint {
 
 export const WEBHOOK_ENDPOINTS: readonly WebhookEndpoint[] = [
   {
+    path: '/v1/webhooks/paystack/deposits',
+    label: 'Deposits into dedicated Nigerian account numbers (Paystack)',
+    // The SAME key that authorises outbound calls. Paystack has no separate
+    // webhook secret, and naming a second slot here would send an operator
+    // looking for a value that does not exist.
+    secret: 'paystack.secret_key',
+  },
+  {
     path: '/v1/webhooks/bitnob/deposits',
-    label: 'Deposits into dedicated Nigerian account numbers',
+    label: 'Deposits into dedicated Nigerian account numbers (Bitnob)',
     secret: 'bitnob.webhook_secret',
   },
   {

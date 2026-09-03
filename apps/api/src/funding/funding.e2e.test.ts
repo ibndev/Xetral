@@ -75,6 +75,8 @@ class FakeFundingPort implements FundingPort {
     }
     this.#seq += 1;
     return {
+      provider: 'bitnob',
+      providerCustomerRef: undefined,
       providerAccountId: `bva_${this.#run}_${this.#seq}`,
       // Ten digits, unique per run: derived from the run id so two runs cannot
       // both claim a NUBAN, which is UNIQUE across the whole table.
@@ -90,6 +92,8 @@ class FakeFundingPort implements FundingPort {
 
   async getVirtualAccount(id: string): Promise<VirtualAccount> {
     return {
+      provider: 'bitnob',
+      providerCustomerRef: undefined,
       providerAccountId: id,
       accountNumber: '1000000001',
       bankName: 'Providus Bank',
@@ -243,14 +247,27 @@ describe('getting an account number', () => {
     expect(port.created).toHaveLength(1);
   });
 
-  it('refuses a customer with no provider identity', async () => {
-    // Issuing a Nigerian bank account to an unidentified person is not a thing
-    // we may do. Registering them as a side effect of "add money" would hide a
-    // regulatory step behind a convenience.
+  it('OPENS ONE FOR A CUSTOMER WHO HAS NOT VERIFIED ANYTHING', async () => {
+    /*
+     * THIS TEST USED TO ASSERT THE OPPOSITE, and the assertion was Bitnob's
+     * requirement written down as the platform's.
+     *
+     * "A Nigerian bank account cannot be issued to an unidentified person" is
+     * true of BITNOB, which will not issue one without a verified BVN. It is
+     * not true of the rail: CBN's tiered KYC permits a tier 1 account on a
+     * name and a phone number, capped — and `029_kyc_tiers.seed.sql` has
+     * capped tier 0 at 50,000 naira a day since it landed. So the platform
+     * enforced the ceiling while refusing the account that ceiling exists for,
+     * on the screen a customer opens in order to put money in.
+     *
+     * The requirement did not disappear; it moved to where it is true. The
+     * Bitnob adapter refuses an unverified customer in its own code with its
+     * own reason, which `funding-adapter.test.ts` asserts.
+     */
     const customer = await onboard(false);
-    const res = await getAccount(customer);
-    expect(res.status).toBe(409);
-    expect(res.body.error).toBe('kyc_required');
+    const res = await getAccount(customer).expect(200);
+    expect(res.body.account_number).toMatch(/^[0-9]{10}$/);
+    expect(res.body.currency).toBe('NGN');
   });
 
   it('does not issue a second account after a timeout', async () => {

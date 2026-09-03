@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { formatAmount } from '@xetral/client';
 import type { Deposit } from '@xetral/client';
 import { Shell } from '@/ui/shell';
@@ -11,28 +10,25 @@ import { useLoad, useSubmit, useXetral } from '@/lib/hooks';
 /**
  * Adding money, and WHAT IS AND IS NOT GATED ON VERIFICATION.
  *
- * This screen used to be a wall. Unverified, the account lookup answered
- * `kyc_required`, `FormError` rendered "Verify your identity to use this", and
- * that was the entire page — on the screen somebody opens in order to put
- * money in. It read as "you may not deposit until you verify", which is not
- * true and is the worst thing it could have said.
+ * THIS SCREEN USED TO BE A WALL, and then it was a smaller wall.
  *
- * WHAT IS ACTUALLY TRUE: an unverified account may hold and move ₦50,000 a
- * day. That is tier 0 in `029_kyc_tiers.seed.sql`, it has been the policy
- * since that migration landed, and NOTHING SHOWED IT TO ANYBODY. So the
- * allowance is now the first thing on the page, read from `/v1/kyc/limits` —
- * the customer's real ceiling rather than a number written into a screen.
+ * First, an unverified customer got `kyc_required` as the entire page — on
+ * the screen somebody opens in order to put money in, which read as "you may
+ * not deposit until you verify". That was fixed by showing the tier 0 ceiling
+ * and naming the one thing that needed verifying: the account NUMBER.
  *
- * WHAT GENUINELY IS GATED, and why it is not ours to ungate: a dedicated
- * Nigerian account number is a BANK ACCOUNT ISSUED IN A PERSON'S NAME.
- * Bitnob will not create one without a registered customer, and Nigerian
- * regulation does not permit an unidentified one — this is `provider_
- * customers`, the same mapping that gates cards. That is a fact about the
- * rail, not a policy choice this screen can make, so the honest thing is to
- * say which one thing needs verification and why, rather than refusing the
- * whole page.
+ * THE SECOND HALF OF THAT WAS ALSO WRONG. "Regulation does not permit an
+ * unidentified account" is a statement about BITNOB, which will not issue one
+ * without a verified BVN. CBN's tiered KYC permits a tier 1 account on a name
+ * and a phone number, capped — and `029_kyc_tiers.seed.sql` has capped tier 0
+ * at ₦50,000 a day since it landed. The platform was enforcing the tier 1
+ * ceiling and refusing the account that ceiling is for.
  *
- * The deposit history is shown either way. A customer whose transfer is
+ * So there is no gate here at all now. The requirement moved to the Bitnob
+ * adapter, where it is true, and the default rail opens an account from what
+ * signup already holds.
+ *
+ * The deposit history is shown either way. A customer whose transfer has gone
  * missing needs to see what arrived far more than a verified one does.
  */
 export default function AddMoney() {
@@ -52,11 +48,6 @@ export default function AddMoney() {
    */
   const account = useLoad(() => client.existingFundingAccount(), [client]);
   const deposits = useLoad<readonly Deposit[]>(() => client.deposits(), [client]);
-
-  // Whether they may HAVE one. `kyc_required` is what issuing answers for an
-  // unverified customer, and it is the one refusal this screen owns.
-  const verified = useLoad(() => client.kyc().catch(() => null), [client]);
-  const isVerified = verified.data?.status === 'approved';
 
   const has = account.data != null;
 
@@ -91,50 +82,46 @@ export default function AddMoney() {
         )}
 
         {/*
-          NO ACCOUNT YET — one button, and where it goes depends on whether the
-          customer can have one.
+          NO ACCOUNT YET — one button, and NO VERIFICATION GATE IN FRONT OF IT.
 
-          A dedicated Nigerian account number is a BANK ACCOUNT ISSUED IN A
-          PERSON'S NAME. Bitnob will not create one without a registered
-          customer and Nigerian regulation does not permit an unidentified one,
-          so verification is a fact about the rail rather than a policy this
-          screen chose. What this screen decides is only whether to send
-          somebody to prove who they are first, or to open the account now.
+          This screen used to send an unverified customer to /kyc first, on
+          the reasoning that a Nigerian account number is a bank account
+          issued in a person's name and regulation does not permit an
+          unidentified one. The second half of that was wrong: CBN's tiered
+          KYC permits a tier 1 account on a name and a phone number, capped —
+          and `029_kyc_tiers.seed.sql` has capped tier 0 at ₦50,000 a day
+          since it landed. So the platform enforced the tier 1 ceiling while
+          refusing the account that ceiling is for, on the screen somebody
+          opens in order to put money in.
+
+          What was true was a fact about BITNOB, which will not issue without
+          a verified BVN. That requirement now lives in its adapter, and the
+          default rail does not have it.
         */}
         {!account.loading && !has && (
           <>
-            {isVerified ? (
-              <>
-                <p className="hint">
-                  Open your Xetral account number and any Nigerian bank can pay into it.
-                </p>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() =>
-                    void run(async () => {
-                      await client.fundingAccount();
-                      account.reload();
-                      return 'Your account is open.';
-                    })
-                  }
-                >
-                  {busy ? 'Opening…' : 'Create account'}{' '}
-                  <Icon name="arrowRight" size={18} />
-                </button>
-                <FormError error={issueError} code={issueCode} />
-              </>
-            ) : (
-              <>
-                <p className="hint">
-                  Your account number is issued in your name, so we need your identity
-                  first. It takes a minute.
-                </p>
-                <Link className="btn" href="/kyc">
-                  Verify my identity <Icon name="arrowRight" size={18} />
-                </Link>
-              </>
-            )}
+            <p className="hint">
+              Your naira account is ready. Get it below.
+            </p>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() =>
+                void run(async () => {
+                  await client.fundingAccount();
+                  account.reload();
+                  return 'Your account is open.';
+                })
+              }
+            >
+              {busy ? 'Activating…' : 'Activate Account'}{' '}
+              <Icon name="arrowRight" size={18} />
+            </button>
+            <p className="hint">
+              You can receive up to {'\u20A6'}50,000 a day straight away. Verifying your
+              identity raises that, and is only asked for when you need it.
+            </p>
+            <FormError error={issueError} code={issueCode} />
           </>
         )}
 

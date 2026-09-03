@@ -197,6 +197,16 @@ const API_ERROR_CODES = [
   'not_found',
   'payout_provider_not_configured',
 
+  /*
+   * NAIRA FUNDING.
+   *
+   * `profile_incomplete` is what a customer sees when the platform cannot
+   * give a rail the name or email address it needs to open an account. It
+   * names the FIELD, because "something is missing" on the screen somebody
+   * opens to receive money is not something they can act on.
+   */
+  'profile_incomplete',
+
   /* gift cards */
   'gift_cards_disabled',
   /*

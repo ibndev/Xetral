@@ -232,6 +232,21 @@ export class SettingsService implements OnApplicationBootstrap {
     return this.integer('card_issuance_fee_cents', 200);
   }
 
+  /**
+   * What the ISSUER charges us to create a card, in cents.
+   *
+   * A separate number from the price above, and deliberately not "half of
+   * it". One is what this business charges; the other is what a supplier
+   * bills. They move for unrelated reasons, and a single split would make a
+   * price rise look like a bigger supplier bill.
+   *
+   * Booked as a provider cost rather than netted off revenue, so the margin
+   * on a card is a number somebody can see.
+   */
+  async cardIssuanceProviderCostCents(): Promise<number> {
+    return this.integer('card_issuance_provider_cost_cents', 100);
+  }
+
   /* ---------------------------------- tax ------------------------------ */
 
   /**

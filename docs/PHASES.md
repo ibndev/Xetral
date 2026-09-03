@@ -23,6 +23,7 @@ shipped, that is called out explicitly.
 | 12 — Pre-deployment audit | ✅ | Bitnob credentials to go live |
 | 13 — Closing the audit's findings | ✅ | all four tiers landed |
 | 14 — Bitnob v2, and paying a bank | ✅ | Bitnob credentials to go live |
+| 15 — Funding without KYC, KYC before a card | ✅ | Paystack credentials to go live |
 
 All eleven phases are built, a **pre-deployment audit** (Phase 12) closed what
 building them phase by phase had left between the phases, and **Phase 13** is
@@ -1580,3 +1581,115 @@ shipped default is zero.
 is no card-acquiring product. They issue cards to customers; they do not accept
 a customer's own card as a funding instrument. Funding a wallet is the
 dedicated virtual account (bank transfer in) or crypto.
+
+---
+
+## Phase 15 — Putting money in without KYC, and asking for it before a card ✅
+
+Not a feature list. One requirement that had been written down in the wrong
+place, and one screen asking for the wrong secret.
+
+| File | What it is |
+|---|---|
+| `packages/providers/src/ports/funding.ts` | the port, carrying an identity rather than a provider's prerequisite |
+| `packages/providers/src/paystack/` | client, funding adapter, webhook verification |
+| `apps/api/src/funding/funding-provider.ts` | the switch, read per call |
+| `apps/api/src/funding/paystack-webhook.service.ts` | verify, resolve, post |
+| `packages/ledger/sql/044_paystack_funding.sql` | the setting, the credential slot, who issued an account |
+| `packages/ledger/sql/045_card_fee_split.sql` | what a card costs US, and its finish |
+| `apps/api/src/cards/card-colours.test.ts` | the three the database accepts and the three both apps offer |
+
+### The requirement that was in the wrong place
+
+`FundingPort` took a `providerCustomerId` and nothing else, so an account could
+only be issued to a customer some provider had already verified. The comment
+above it said a Nigerian bank account cannot be issued to an unidentified
+person.
+
+That is true of **Bitnob**, which will not issue one without a verified BVN. It
+is not true of the rail. CBN's tiered KYC permits a tier 1 account on a name and
+a phone number, capped — and `029_kyc_tiers.seed.sql` has capped tier 0 at
+₦50,000 a day since it landed. So the platform enforced the ceiling while
+refusing the account that ceiling exists for, on the screen a customer opens in
+order to put money in.
+
+1. **THE REQUIREMENT DID NOT DISAPPEAR, IT MOVED TO WHERE IT IS TRUE.** The port
+   now carries the identity the platform HAS — name, email, phone, and a
+   provider customer id where one exists — and each adapter decides what it
+   needs. The Bitnob adapter refuses an unverified customer in its own code with
+   its own reason and its own `kyc_required` code, before it calls anything;
+   `bitnob/funding-adapter.test.ts` asserts all three, and the e2e asserts the
+   other half — that the SAME customer is issued an account on the default rail.
+   The two halves have to be tested together, because either alone reads as
+   correct.
+2. **PAYSTACK IS THE DEFAULT, AND RULE 0 IS DELIBERATELY REVERSED FOR IT.** The
+   rule is about not inheriting the reference plugin's architecture by
+   inheriting its providers, not about the vendor. This is one rail chosen on
+   its own merits, and nothing else from the plugin comes with it.
+3. **THE RAIL IS A SETTING, read per call with five seconds of cache.** The
+   reason to switch is almost always that the current provider is having a bad
+   afternoon, and 009's argument is that an operational decision taken under
+   pressure should not be a release.
+4. **SWITCHING MOVES NOBODY.** A dedicated account number is permanent and saved
+   in somebody's banking app as a beneficiary, so `virtual_accounts` records the
+   ISSUER and reads are routed by the row rather than by the setting. Reading
+   the issuer off the currently-configured port would relabel every existing
+   account the moment an operator flipped it — and an unresolvable deposit does
+   not fail loudly, it posts to SUSPENSE.
+5. **`charge.success` IS NOT ENOUGH; the channel must be `dedicated_nuban`.**
+   Paystack fires that event for every successful charge, so crediting on the
+   event name alone would turn any other Paystack product on the same
+   integration into a way to create wallet balances.
+6. **PAYSTACK BEARS A TOKEN AND BITNOB SIGNS, one directory apart.** Copying
+   either scheme onto the other is a 401 that reads as a bad key — which is
+   exactly what `bitnob/signing.ts` exists because of.
+
+### The screen that asked for the wrong secret
+
+`kyc_required` is refused by ISSUING, not by the card list. So an unverified
+customer saw the offer, tapped Create card, was asked for a transaction PIN,
+typed it, and only then learnt they needed to verify — on the one screen where
+the requirement is regulatory rather than ours.
+
+7. **THE REGULATOR IS NAMED, because the rule is theirs.** Both apps now gate
+   the issue panel on an approved identity and say so: "As required by CBN,
+   please complete your KYC", with a Verify KYC button. Telling somebody the
+   rule that binds us is the difference between "they want more forms" and
+   "this is the law".
+8. **WHAT SIGNUP ALREADY TOOK IS NOT ASKED AGAIN.** The identity form opened
+   with five empty boxes, two of which the account already held. The session
+   carries the name and the phone, and both arrive filled in and STILL
+   EDITABLE — the name on a BVN is not always the name somebody typed about
+   themselves, and the reviewer reads it off a document either way. Neither is
+   a claim about identity: `kyc_submissions.full_name` remains the only name a
+   money decision or a card may carry.
+9. **THE $2 IS TWO INDEPENDENT PAIRS ON ONE ENTRY, not one net figure.** The
+   customer pays the price and the issuer bills the platform for issuing.
+   Booking the whole of it as revenue made the margin on a card look like 100%
+   and left the cost of the product nowhere in the books; netting them would
+   report $1 of turnover on a $2 sale, understating the business and hiding the
+   cost at the same time. Each pair sums to zero on its own — which is the
+   property the per-currency balance invariant already guarantees, used for a
+   second purpose.
+10. **A COLOUR PICKER WHOSE ONLY FEEDBACK IS THE PICKER IS A LIST OF WORDS WITH
+    BACKGROUNDS.** The chosen finish is held by the page rather than the form,
+    so the specimen ABOVE it redraws — the choice is made against the thing
+    being chosen. `card-colours.test.ts` reads the CHECK out of the migration
+    and fails the build if the three offered and the three accepted disagree in
+    either direction, and if the column's default is not one of them.
+11. **AND THE INSERT THAT WROTE IT WAS WRONG IN A WAY NOTHING COULD SEE.** The
+    statement referenced `$9` and the array passed eight values, so EVERY issue
+    answered 500 while the compiler, every unit suite and the e2e file's own
+    types were satisfied. A SQL string is invisible to TypeScript — the same
+    shape as the freeze that wrote to a table called `sessions` — and only a
+    round trip catches it. There is one now: the finish the customer chose is
+    read back out of the response, and an omitted one must come back as the
+    default rather than as whatever the column happened to hold.
+
+**Before taking real deposits on the default rail, an operator must:** set
+`PAYSTACK_SECRET_KEY` (one credential — it both authorises calls and verifies
+webhooks, because Paystack signs with the same key), apply migrations 044 and
+045, give Paystack the `/v1/webhooks/paystack/deposits` URL, decide
+`paystack_preferred_bank`, and set `card_issuance_provider_cost_cents` to what
+the issuer actually bills — the shipped default is $1 against a $2 price, and
+both are rows an operator reviews.

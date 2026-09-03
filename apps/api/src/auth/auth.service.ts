@@ -66,6 +66,18 @@ export interface SessionSummary {
    */
   readonly first_name: string | null;
   /**
+   * THE WHOLE NAME AND THE PHONE, so verification does not ask twice.
+   *
+   * Both are what the customer typed at SIGNUP. They are here to PREFILL the
+   * identity form — a "quick check" that asks again for a name and a number
+   * already on file is a five-field form somebody abandons — and for nothing
+   * else. Neither is a claim about who somebody legally is: that is
+   * `kyc_submissions.full_name`, read off a document by a reviewer, and it
+   * remains the only name any money decision or any card may carry.
+   */
+  readonly full_name: string | null;
+  readonly phone: string | null;
+  /**
    * Whether a transaction PIN exists.
    *
    * SO A SCREEN CAN ASK BEFORE IT NEEDS TO. Without it the only way to learn
@@ -612,6 +624,8 @@ export class AuthService {
     userUuid: string,
   ): Promise<{
     first_name: string | null;
+    full_name: string | null;
+    phone: string | null;
     has_pin: boolean | null;
     country: string | null;
     home_currency: string | null;
@@ -633,6 +647,8 @@ export class AuthService {
    */
   async #core(userUuid: string): Promise<{
     first_name: string | null;
+    full_name: string | null;
+    phone: string | null;
     has_pin: boolean | null;
     country: string | null;
     home_currency: string | null;
@@ -640,6 +656,7 @@ export class AuthService {
     try {
       const result = await this.pool.query<{
         full_name: string | null;
+        phone: string | null;
         has_pin: boolean;
         country: string | null;
         home_currency: string | null;
@@ -661,6 +678,7 @@ export class AuthService {
                   (SELECT k.full_name FROM kyc_submissions k
                     WHERE k.user_id = u.id ORDER BY k.created_at DESC LIMIT 1)
                 ) AS full_name,
+                u.phone,
                 (p.user_id IS NOT NULL) AS has_pin,
                 u.country,
                 c.currency AS home_currency
@@ -672,7 +690,14 @@ export class AuthService {
       );
       const row = result.rows[0];
       if (row === undefined) {
-        return { first_name: null, has_pin: null, country: null, home_currency: null };
+        return {
+          first_name: null,
+          full_name: null,
+          phone: null,
+          has_pin: null,
+          country: null,
+          home_currency: null,
+        };
       }
 
       const full = row.full_name?.trim();
@@ -680,6 +705,19 @@ export class AuthService {
         // The first token. Nigerian names are commonly three parts and the
         // first is the one somebody is called.
         first_name: full === undefined || full === '' ? null : (full.split(/\s+/)[0] ?? null),
+        /*
+         * THE WHOLE NAME AND THE PHONE, so the verification form does not ask
+         * again for what signup already took.
+         *
+         * A customer arriving at KYC has already typed both; asking a second
+         * time is how a "quick check" becomes a five-field form somebody
+         * abandons. Neither is a claim about identity — `users.full_name` is
+         * what somebody typed ABOUT THEMSELVES and no money decision reads it
+         * — so this prefills a box the customer can still correct, and the
+         * reviewer still reads the name off the document.
+         */
+        full_name: full === undefined || full === '' ? null : full,
+        phone: row.phone,
         has_pin: row.has_pin,
         country: row.country,
         home_currency: row.home_currency,
@@ -691,7 +729,14 @@ export class AuthService {
         `could not read the profile for ${userUuid}: ${describe(error)}. ` +
           `Reporting the PIN state as UNKNOWN rather than guessing.`,
       );
-      return { first_name: null, has_pin: null, country: null, home_currency: null };
+      return {
+        first_name: null,
+        full_name: null,
+        phone: null,
+        has_pin: null,
+        country: null,
+        home_currency: null,
+      };
     }
   }
 

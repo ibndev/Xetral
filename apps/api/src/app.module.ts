@@ -10,6 +10,8 @@ import {
   BitnobCardAdapter,
   BitnobClient,
   type BitnobCredential,
+  PaystackClient,
+  PaystackFundingAdapter,
   BitnobPayoutAdapter,
   TwilioAdapter,
   VtpassAdapter,
@@ -79,6 +81,8 @@ import {
 } from './crypto/crypto.controller.js';
 import { CryptoService } from './crypto/crypto.service.js';
 import { PayoutService } from './payouts/payout.service.js';
+import { PaystackWebhookService } from './funding/paystack-webhook.service.js';
+import { SwitchingFundingPort } from './funding/funding-provider.js';
 import { PayoutController } from './payouts/payout.controller.js';
 import { CryptoWebhookService } from './crypto/crypto-webhook.service.js';
 import { CryptoReconciliationService } from './crypto/crypto-reconciliation.service.js';
@@ -208,6 +212,22 @@ export interface AppModuleOptions {
  * credential" into "your credential is wrong" — which is exactly the
  * misdiagnosis this whole change is correcting.
  */
+/**
+ * Paystack's secret key, resolved PER REQUEST.
+ *
+ * One value, not two: it both authorises calls and verifies webhooks, because
+ * Paystack signs an inbound event with the same key it authenticates an
+ * outbound call with. A separate webhook slot would be a box an operator
+ * fills with a value nothing reads.
+ */
+export function paystackSecretKey(
+  config: ApiConfig,
+  credentials?: ProviderCredentialService,
+): string | (() => Promise<string | undefined>) {
+  if (credentials === undefined) return config.paystackSecretKey ?? '';
+  return () => credentials.secretFor('paystack', 'secret_key', config.paystackSecretKey);
+}
+
 export function bitnobCredentials(
   config: ApiConfig,
   credentials?: ProviderCredentialService,
@@ -398,37 +418,88 @@ export function createFulfilmentPorts(config: ApiConfig): ReadonlyMap<ServiceKin
  * unavailable" really are the same statement, and a customer asking for an
  * account number deserves a clear refusal rather than a 500.
  */
+/**
+ * The naira funding rails, and the switch between them.
+ *
+ * BOTH are built when their configuration is present, and the SETTING decides
+ * which opens the next account — read per call, so switching during a
+ * provider incident is one action on the dashboard rather than a release
+ * under pressure.
+ *
+ * Paystack is the default. It opens an account from a name and an email
+ * address; Bitnob refuses anybody it has not already verified a BVN for,
+ * which is the wrong gate on the screen a customer opens in order to put
+ * money in.
+ */
 export function createFundingPort(
   config: ApiConfig,
   credentials?: ProviderCredentialService,
+  settings?: SettingsService,
 ): FundingPort {
-  // Only the address decides this — the key is resolved per request, so a
-  // deployment started without one is fixed by pasting a key rather than by
-  // a restart. See `bitnobApiKeyResolver`.
-  const { bitnobBaseUrl } = config;
+  const adapters = new Map<string, FundingPort>();
 
-  if (bitnobBaseUrl === undefined) {
-    new Logger('Funding').warn(
-      'BITNOB_BASE_URL is not set: customers CANNOT be issued account ' +
-        'numbers and cannot fund their wallets.',
+  const { paystackBaseUrl } = config;
+  if (paystackBaseUrl !== undefined) {
+    adapters.set(
+      'paystack',
+      new PaystackFundingAdapter({
+        client: new PaystackClient({
+          baseUrl: paystackBaseUrl,
+          secretKey: paystackSecretKey(config, credentials),
+        }),
+        // Read once at construction rather than per call: Paystack refuses a
+        // bank the integration is not enabled for at the moment a customer
+        // asks, so a wrong value is loud, and a per-call read would put a
+        // settings query in front of every account issuance to no purpose.
+        preferredBank: config.paystackPreferredBank,
+      }),
     );
+  }
+
+  const { bitnobBaseUrl } = config;
+  if (bitnobBaseUrl !== undefined) {
+    adapters.set(
+      'bitnob',
+      new BitnobFundingAdapter({
+        client: new BitnobClient({
+          baseUrl: bitnobBaseUrl,
+          ...bitnobCredentials(config, credentials),
+        }),
+        amountUnit: config.bitnobNgnAmountUnit,
+      }),
+    );
+  }
+
+  if (adapters.size === 0 || settings === undefined) {
+    if (adapters.size === 0) {
+      new Logger('Funding').warn(
+        'Neither PAYSTACK_BASE_URL nor BITNOB_BASE_URL is set: customers CANNOT ' +
+          'be issued account numbers and cannot fund their wallets.',
+      );
+    }
+    // No settings service is the unit-test and app-factory path, where a port
+    // is built directly. One adapter and no switch is the honest shape there.
+    const only = adapters.values().next();
+    if (!only.done) return only.value;
+
     const refuse = async (): Promise<never> => {
       throw new ServiceUnavailableException({ error: 'funding_provider_not_configured' });
     };
     return {
-      provider: 'bitnob',
+      provider: 'paystack',
       createVirtualAccount: refuse,
       getVirtualAccount: refuse,
       listDeposits: refuse,
     };
   }
 
-  return new BitnobFundingAdapter({
-    client: new BitnobClient({
-      baseUrl: bitnobBaseUrl,
-      ...bitnobCredentials(config, credentials),
-    }),
-    amountUnit: config.bitnobNgnAmountUnit,
+  return new SwitchingFundingPort({
+    adapters,
+    settings,
+    // Paystack unless this deployment has no Paystack configuration at all,
+    // in which case falling back to a rail that cannot answer would be worse
+    // than falling back to the one that can.
+    fallback: adapters.has('paystack') ? 'paystack' : 'bitnob',
   });
 }
 
@@ -871,13 +942,22 @@ export class AppModule {
         },
         {
           provide: FUNDING_PORT,
-          useFactory: (health: ProviderHealthService, credentials: ProviderCredentialService) =>
+          useFactory: (
+            health: ProviderHealthService,
+            credentials: ProviderCredentialService,
+            settings: SettingsService,
+          ) =>
             watched(
-              options.fundingPort ?? createFundingPort(options.config, credentials),
-              'bitnob',
+              options.fundingPort ??
+                createFundingPort(options.config, credentials, settings),
+              // The rail that actually served is recorded on the account row;
+              // this label is what `provider_health` buckets under, and the
+              // switch reports its default. A deployment that flips to Bitnob
+              // gets its health under 'bitnob' from the adapter's own errors.
+              'funding',
               health,
             ),
-          inject: [ProviderHealthService, ProviderCredentialService],
+          inject: [ProviderHealthService, ProviderCredentialService, SettingsService],
         },
         {
           provide: CRYPTO_PORT,
@@ -945,6 +1025,7 @@ export class AppModule {
         KycService,
         FundingService,
         DepositWebhookService,
+        PaystackWebhookService,
         CryptoService,
         PayoutService,
         CryptoWebhookService,

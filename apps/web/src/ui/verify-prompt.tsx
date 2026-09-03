@@ -19,10 +19,21 @@ import { Icon } from './icon';
 export function VerifyPrompt({
   what,
   detail,
+  /**
+   * The heading, when the reason is REGULATORY rather than about a partner.
+   *
+   * A card is refused because the CBN requires an identified customer, not
+   * because an issuer chose to — and telling somebody the rule that binds us
+   * is the difference between "they want more forms" and "this is the law".
+   */
+  title,
+  cta,
 }: {
   /** The product they were reaching for, in the customer's words. */
   readonly what: string;
   readonly detail?: string | undefined;
+  readonly title?: string | undefined;
+  readonly cta?: string | undefined;
 }) {
   return (
     <section className="card verify-prompt animate-in">
@@ -31,7 +42,7 @@ export function VerifyPrompt({
       </span>
 
       <div className="verify-body">
-        <h2>Verify your identity for {what}</h2>
+        <h2>{title ?? `Verify your identity for ${what}`}</h2>
         <p>
           {detail ??
             `${what} is issued through a licensed partner, who can only issue it to a
@@ -41,7 +52,7 @@ export function VerifyPrompt({
           Your naira wallet, transfers, airtime, data and bills all work without this.
         </p>
         <Link href="/kyc" className="btn">
-          Verify my identity
+          {cta ?? 'Verify my identity'}
         </Link>
       </div>
     </section>

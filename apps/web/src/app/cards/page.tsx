@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { formatAmount } from '@xetral/client';
-import type { Card, CardSecrets } from '@xetral/client';
+import { CARD_COLOURS, formatAmount } from '@xetral/client';
+import type { Card, CardColour, CardSecrets } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { FormError } from '@/ui/form-error';
 import { Icon } from '@/ui/icon';
@@ -51,6 +51,14 @@ export default function Cards() {
   const [adding, setAdding] = useState(false);
   const issuing = none || adding;
 
+  /*
+   * THE CHOSEN FINISH LIVES HERE, not inside the form, because the thing it
+   * changes is the specimen ABOVE the form. State held in `Issue` could style
+   * the swatch and nothing else, and a colour picker whose only feedback is
+   * the picker is a list of words with backgrounds.
+   */
+  const [colour, setColour] = useState<CardColour>('graphite');
+
   return (
     <Shell>
       <div className="section-head row-between">
@@ -80,7 +88,7 @@ export default function Cards() {
         customer decides on. It carries the masked number every card face
         carries, because there is nothing else it could honestly show.
       */}
-      {none && <CardFace holder={holder} />}
+      {none && <CardFace holder={holder} colour={colour} />}
 
       {cards?.map((card, index) => (
         <CardRow
@@ -92,9 +100,28 @@ export default function Cards() {
         />
       ))}
 
-      {issuing && (
+      {/*
+        KYC BEFORE ANYTHING ELSE, and this is the bug it fixes.
+        `kyc_required` is refused by ISSUING, not by the list — so an
+        unverified customer saw the offer, tapped Create card, was asked for a
+        transaction PIN, typed it, and only THEN learnt they needed to verify.
+        The one screen where the requirement is regulatory asked for the wrong
+        secret first.
+      */}
+      {issuing && identity.data?.status !== 'approved' && !identity.loading && (
+        <VerifyPrompt
+          what="a USD card"
+          title="As required by CBN, please complete your KYC."
+          detail="A dollar card is issued in your name by a licensed partner, and the Central Bank requires an identified customer before one can be created. It takes a minute — we already have most of what is needed."
+          cta="Verify KYC"
+        />
+      )}
+
+      {issuing && identity.data?.status === 'approved' && (
         <Issue
           price={data?.issuance_fee}
+          colour={colour}
+          onColour={setColour}
           onIssued={() => {
             setAdding(false);
             reload();
@@ -126,15 +153,29 @@ function CardFace({
   holder,
   badge,
   expiry,
+  /**
+   * The finish, when it is not the card's own.
+   *
+   * The specimen has no row to read one off, so the picker on the Issue form
+   * passes what the customer has chosen and this draws it — which is the whole
+   * point of showing a swatch: the choice is visible on the thing being
+   * chosen, not on a chip beside it. Graphite is the default face, so it needs
+   * no class.
+   */
+  colour,
 }: {
   card?: Card;
   holder: string | undefined;
   badge?: string;
   expiry?: string;
+  colour?: string;
 }) {
+  const finish = colour ?? card?.colour ?? 'graphite';
   return (
     <article
-      className={`virtual-card ${card === undefined ? 'is-specimen' : `is-${card.status}`}`}
+      className={`virtual-card ${finish === 'graphite' ? '' : `is-${finish}`} ${
+        card === undefined ? 'is-specimen' : `is-${card.status}`
+      }`}
       aria-label={
         card === undefined
           ? 'What a Xetral card looks like'
@@ -563,32 +604,72 @@ function group(pan: string): string {
  */
 function Issue({
   price,
+  colour,
+  onColour,
   onIssued,
   onCancel,
 }: {
   /** From the server, never from this file. Undefined while the list loads. */
   price: string | undefined;
+  colour: CardColour;
+  onColour: (colour: CardColour) => void;
   onIssued: () => void;
   onCancel?: () => void;
 }) {
   const client = useXetral();
   const { busy, error, code, done, run } = useSubmit();
   const attempt = useIdempotencyKey();
+  const fundAttempt = useIdempotencyKey();
   const [pin, setPin] = useState('');
+  const [amount, setAmount] = useState('');
   const [stage, setStage] = useState<'offer' | 'confirm'>('offer');
 
   const free = price === '0.00';
+  const loading = amount.trim() !== '' && amount.trim() !== '0';
 
   function buy(event: React.FormEvent) {
     event.preventDefault();
     void run(async () => {
-      await client.issueCard({ pin, idempotencyKey: attempt.key });
+      const card = await client.issueCard({ pin, idempotencyKey: attempt.key, colour });
       attempt.next();
+
+      /*
+       * FUNDING IS A SECOND CALL, AND IT IS ORDERED THIS WAY DELIBERATELY.
+       *
+       * There is no endpoint that issues and loads in one step, and inventing
+       * one would mean a single request that can half-succeed against a
+       * provider — the failure Phase 5 records about ordering the provider
+       * call and the ledger entry. So the card is bought first and money goes
+       * on second, against the card that now exists.
+       *
+       * A failure HERE is therefore not a failed purchase: the customer holds
+       * a real, empty card, and the message says so rather than reporting the
+       * whole thing as broken. `Add money` on the card itself is the retry.
+       */
+      let funded = false;
+      if (loading) {
+        try {
+          await client.fundCard(card.id, {
+            amount: amount.trim(),
+            pin,
+            idempotencyKey: fundAttempt.key,
+          });
+          fundAttempt.next();
+          funded = true;
+        } catch {
+          funded = false;
+        }
+      }
+
       // Cleared the moment the request returns. A PIN authorises one
       // instruction; it is not a password to hold on to.
       setPin('');
+      setAmount('');
       setStage('offer');
       onIssued();
+      if (loading && !funded) {
+        return 'Your card is on its way. We could not load it — add money to it from the card itself.';
+      }
       return 'Your card is on its way.';
     });
   }
@@ -615,6 +696,18 @@ function Issue({
           <span className="muted">A virtual USD card</span>
           <span className="mono">{price === undefined ? '—' : `$${price}`}</span>
         </div>
+        <div className="row">
+          <span className="muted">Finish</span>
+          <span className="mono">
+            {CARD_COLOURS.find((c) => c.value === colour)?.label ?? colour}
+          </span>
+        </div>
+        {loading && (
+          <div className="row">
+            <span className="muted">Starting balance</span>
+            <span className="mono">${amount.trim()}</span>
+          </div>
+        )}
         <div className="row">
           <span className="muted">From</span>
           <span className="mono">Your USD wallet</span>
@@ -666,6 +759,50 @@ function Issue({
           </div>
         </div>
       </div>
+
+      {/*
+        PICKING THE FINISH, ON THE CARD ITSELF.
+        A radio group naming three colours asks somebody to imagine what they
+        are choosing. The swatches select and the specimen above redraws, so
+        the choice is made against the thing being chosen — and the field sent
+        to the server is one of exactly three values the database's own CHECK
+        accepts, which `card-colours.test.ts` holds this list to.
+      */}
+      <fieldset>
+        <legend className="price-label">Finish</legend>
+        <div className="swatches" role="group" aria-label="Card finish">
+          {CARD_COLOURS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={`swatch ${option.value === 'graphite' ? '' : `is-${option.value}`}`}
+              aria-pressed={colour === option.value}
+              aria-label={option.label}
+              title={option.label}
+              onClick={() => onColour(option.value)}
+            />
+          ))}
+        </div>
+      </fieldset>
+
+      {/*
+        AND HOW MUCH TO PUT ON IT, optional.
+        Empty means an empty card, which is a real answer and the resting
+        state — a required amount would make somebody name a figure before
+        they have a card to put it on. It is a major-unit STRING all the way
+        to the server, never parsed into a number here.
+      */}
+      <label>
+        Starting balance (optional)
+        <input
+          type="text"
+          inputMode="decimal"
+          autoComplete="off"
+          placeholder="0.00"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+        />
+      </label>
 
       {/* THE PRICE AND THE BUTTON ON ONE ROW. `.price-row` is a flex row that
           wraps, so on a handset the button drops under the figure rather than

@@ -10,8 +10,14 @@ paths:
 
 # Working on a provider adapter
 
-Live set: Bitnob, VTpass, Airalo, Twilio. Do not add Reloadly, Maplerad, Anchor,
-Paystack or ALAT — they exist in the reference plugin and are out of scope.
+Live set: Paystack, Bitnob, VTpass, Airalo, Twilio. Do not add Reloadly,
+Maplerad, Anchor or ALAT — they exist in the reference plugin and are out of
+scope.
+
+Paystack was on that list and is back, deliberately, for ONE rail: it is the
+default naira funding provider because Bitnob refuses to issue a dedicated
+account to an unverified customer and CBN tier 1 does not require one. The rule
+is about not inheriting the plugin's architecture, not about the vendor.
 
 ## Boundary rules
 

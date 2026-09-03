@@ -364,6 +364,41 @@ export const PROVIDERS: readonly Item[] = [
       'refuses a live account.',
   },
   {
+    name: 'PAYSTACK_SECRET_KEY',
+    kind: 'env',
+    failure: 'refuses-the-first-request',
+    flow: 'naira funding',
+    ifMissed:
+      'no customer can be issued a naira account number and no deposit can '  +
+      'be verified. ONE value does both: it authorises calls AND verifies '  +
+      'webhooks, because Paystack signs an inbound event with the same key it '  +
+      'authenticates an outbound call with — so there is deliberately no '  +
+      'separate webhook secret to forget. sk_test_ or sk_live_ decides '  +
+      'whether the money is real.',
+  },
+  {
+    name: 'PAYSTACK_BASE_URL',
+    kind: 'env',
+    failure: 'default-is-deliberate',
+    flow: 'naira funding',
+    ifMissed:
+      'defaults to https://api.paystack.co, which is the only host Paystack '  +
+      'serves. Present so a proxy or a recording fixture can be pointed at '  +
+      'instead, not because the default is in doubt.',
+  },
+  {
+    name: 'PAYSTACK_PREFERRED_BANK',
+    kind: 'env',
+    failure: 'wrong-by-default',
+    flow: 'naira funding',
+    ifMissed:
+      'Paystack chooses the issuing bank. Usually fine, and worth setting '  +
+      'deliberately: test integrations issue Titan accounts and live ones are '  +
+      'usually Wema, and a business enabled for one and not the other gets a '  +
+      'refusal at the moment a customer asks for an account. The stored '  +
+      'setting `paystack_preferred_bank` overrides this.',
+  },
+  {
     name: 'BITNOB_WEBHOOK_SECRET',
     kind: 'env',
     failure: 'refuses-the-first-request',
@@ -886,6 +921,41 @@ export const SETTINGS: readonly Item[] = [
     ifMissed:
       'a real switch, read on every card route rather than a row nothing '  +
       'consults. Off means off, immediately.',
+  },
+  {
+    name: 'card_issuance_provider_cost_cents',
+    kind: 'setting',
+    failure: 'wrong-by-default',
+    flow: 'USD cards',
+    ifMissed:
+      'the shipped 100 is the commonly quoted issuer charge and is a starting '  +
+      'point, not a verified contract term. It is booked as a provider cost '  +
+      'against the balance held with the issuer, so a wrong figure makes the '  +
+      'margin on a card wrong AND puts `provider_float` out of step with what '  +
+      'the issuer says it holds — which the balance reconciliation reports as '  +
+      'drift. Set it to what the issuer actually bills.',
+  },
+  {
+    name: 'funding_provider',
+    kind: 'setting',
+    failure: 'default-is-deliberate',
+    flow: 'naira funding',
+    ifMissed:
+      'defaults to `paystack`, which opens an account from a name and an '  +
+      'email address. `bitnob` is the alternative and REFUSES anybody without '  +
+      'a verified BVN, so switching to it while customers are unverified '  +
+      'stops new accounts being opened. Accounts already issued keep working '  +
+      'either way — a number is permanent and its bank has it saved.',
+  },
+  {
+    name: 'paystack_preferred_bank',
+    kind: 'setting',
+    failure: 'wrong-by-default',
+    flow: 'naira funding',
+    ifMissed:
+      'blank, so Paystack chooses. See PAYSTACK_PREFERRED_BANK: a bank the '  +
+      'integration is not enabled for is refused at the moment a customer '  +
+      'asks for an account, not at boot.',
   },
   {
     name: 'payouts_enabled',

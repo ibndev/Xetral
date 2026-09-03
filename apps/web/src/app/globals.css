@@ -876,6 +876,53 @@ h3 { font-size: 16px; }
    pointer. */
 .virtual-card.is-specimen { opacity: .96; }
 
+/*
+ * THE THREE FINISHES, as a change of MATERIAL rather than of hue.
+ *
+ * The base card is black because a premium card is black: the material is the
+ * statement and what moves on it is light. So a "colour" here is not a
+ * repaint — it is the same near-black card with a different tint in the deep
+ * gradient stop, the way anodised metal reads. A card in flat blue would be
+ * the navy panel this file already argued its way out of.
+ *
+ * The sheen gradients are inherited untouched, so all three catch light in
+ * the same place and read as one family rather than three products.
+ */
+.virtual-card.is-sapphire {
+  background:
+    radial-gradient(circle at 84% 4%, rgba(255, 255, 255, .16) 0%, transparent 34%),
+    radial-gradient(circle at 12% 96%, rgba(255, 255, 255, .05) 0%, transparent 42%),
+    linear-gradient(150deg, #1E2A3F 0%, #111A28 42%, #04070C 100%);
+}
+.virtual-card.is-emerald {
+  background:
+    radial-gradient(circle at 84% 4%, rgba(255, 255, 255, .16) 0%, transparent 34%),
+    radial-gradient(circle at 12% 96%, rgba(255, 255, 255, .05) 0%, transparent 42%),
+    linear-gradient(150deg, #1B3029 0%, #0E1D18 42%, #030706 100%);
+}
+
+/*
+ * PICKING ONE. Three swatches, each a small version of the face it selects,
+ * because a colour name beside a radio button asks somebody to imagine the
+ * thing they are choosing when it could simply be shown.
+ */
+.swatches { display: flex; gap: 10px; margin: var(--s-2) 0 0; }
+.swatch {
+  width: 46px;
+  height: 30px;
+  border-radius: 8px;
+  padding: 0;
+  border: 2px solid transparent;
+  background: linear-gradient(150deg, #23262C 0%, #131519 42%, #050506 100%);
+  cursor: pointer;
+}
+.swatch.is-sapphire { background: linear-gradient(150deg, #1E2A3F 0%, #111A28 42%, #04070C 100%); }
+.swatch.is-emerald  { background: linear-gradient(150deg, #1B3029 0%, #0E1D18 42%, #030706 100%); }
+/* The selected one is ringed rather than enlarged: a swatch that grows shifts
+   the two beside it, which reads as the row moving rather than as a choice. */
+.swatch[aria-pressed='true'] { border-color: var(--brand-500); }
+.swatch:hover:where(:not(:disabled)) { background: inherit; }
+
 /* Pager dots under the card stack. Presentational only — the cards are all
    rendered and this says how many there are. */
 .vc-dots { display: flex; gap: 6px; justify-content: center; margin-top: 2px; }

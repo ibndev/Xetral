@@ -129,6 +129,8 @@ jobs:
             -f packages/ledger/sql/041_card_issuance.sql \
             -f packages/ledger/sql/042_bitnob_v2.sql \
             -f packages/ledger/sql/043_bank_payouts.sql \
+            -f packages/ledger/sql/044_paystack_funding.sql \
+            -f packages/ledger/sql/045_card_fee_split.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       - name: Ledger and identity invariants
@@ -180,6 +182,8 @@ jobs:
                    packages/ledger/sql/041_card_issuance.test.sql \
                    packages/ledger/sql/042_bitnob_v2.test.sql \
                    packages/ledger/sql/043_bank_payouts.test.sql \
+                   packages/ledger/sql/044_paystack_funding.test.sql \
+                   packages/ledger/sql/045_card_fee_split.test.sql \
                    packages/ledger/sql/099_least_privilege.test.sql; do
             echo "== $f"
             psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
@@ -262,6 +266,8 @@ jobs:
             -f packages/ledger/sql/041_card_issuance.sql \
             -f packages/ledger/sql/042_bitnob_v2.sql \
             -f packages/ledger/sql/043_bank_payouts.sql \
+            -f packages/ledger/sql/044_paystack_funding.sql \
+            -f packages/ledger/sql/045_card_fee_split.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       # ------------------------------------------------------------------
@@ -403,6 +409,15 @@ jobs:
               -X POST -H 'content-type: application/json' \
               -H 'x-bitnob-signature: deadbeef' -d '{"event":"probe"}'
           done
+
+          # Paystack SIGNS WITH A DIFFERENT HEADER, so it cannot join the loop
+          # above — and that difference is exactly what makes a probe worth
+          # having. It is also the rail money ARRIVES on by default: an
+          # unmounted deposit webhook is every naira transfer landing nowhere.
+          check "forged webhook paystack/deposits" 401 \
+            http://127.0.0.1:3100/v1/webhooks/paystack/deposits \
+            -X POST -H 'content-type: application/json' \
+            -H 'x-paystack-signature: deadbeef' -d '{"event":"charge.success"}'
 
           # Account recovery. Both are PUBLIC by necessity — a customer who has
           # lost their password has no session — so a 404 here means the one

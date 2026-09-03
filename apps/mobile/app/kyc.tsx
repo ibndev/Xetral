@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Text, View } from 'react-native';
 import type { KycLimits, KycStatus } from '@xetral/client';
 import { Shell } from '@/shell';
@@ -22,6 +22,15 @@ export default function Kyc() {
   const status = useLoad<KycStatus | null>(() => client.kyc(), [client]);
   const { busy, error, code, done, run } = useSubmit();
 
+  /*
+   * WHAT SIGNUP ALREADY TOOK IS NOT ASKED AGAIN — the web's reasoning, and the
+   * same session fields. Five empty boxes on the screen that unblocks the card
+   * somebody came for is a form people abandon; two of them were already on
+   * file. They arrive filled in and STILL EDITABLE, because the name on a BVN
+   * is not always the name somebody typed about themselves.
+   */
+  const session = useLoad(() => client.currentSession(), [client]);
+
   const [form, setForm] = useState({
     fullName: '',
     dateOfBirth: '',
@@ -31,6 +40,18 @@ export default function Kyc() {
   });
   const set = (field: keyof typeof form) => (value: string) =>
     setForm((f) => ({ ...f, [field]: value }));
+
+  useEffect(() => {
+    const known = session.data;
+    if (known === undefined) return;
+    // Only ever fills a box nobody has touched. Overwriting typed input
+    // because a request finished late is the worse bug.
+    setForm((f) => ({
+      ...f,
+      fullName: f.fullName === '' ? (known.full_name ?? '') : f.fullName,
+      phone: f.phone === '' ? (known.phone ?? '') : f.phone,
+    }));
+  }, [session.data]);
 
   if (status.loading) {
     return (

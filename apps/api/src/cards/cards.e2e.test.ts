@@ -308,6 +308,48 @@ afterAll(async () => {
 });
 
 describe('issuing', () => {
+  /*
+   * THE FINISH THE CUSTOMER PICKED, READ BACK OUT OF THE DATABASE.
+   *
+   * This is here because the insert that writes it was wrong in a way nothing
+   * else could see: the statement referenced `$9` and the array passed eight
+   * values, so EVERY issue answered 500 while the compiler, the unit suites
+   * and this file's own types were all satisfied. A SQL string is invisible to
+   * TypeScript — the same shape as the freeze that wrote to a table called
+   * `sessions` — and only a round trip catches it.
+   *
+   * `card-colours.test.ts` holds the offered list to the database's CHECK;
+   * this holds the WRITE to what the customer chose.
+   */
+  it('records the finish the customer chose, and defaults without one', async () => {
+    const customer = await onboard();
+    await fundWallet(customer.userId, 100_00);
+
+    const chosen = await request(app.getHttpServer())
+      .post('/v1/cards')
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send({ transaction_pin: PIN, idempotency_key: randomUUID(), colour: 'emerald' })
+      .expect(201);
+    expect(chosen.body.colour).toBe('emerald');
+
+    const plain = await request(app.getHttpServer())
+      .post('/v1/cards')
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send({ transaction_pin: PIN, idempotency_key: randomUUID() })
+      .expect(201);
+    // Not "whatever the column happened to hold": an omitted finish is the
+    // default one, and the customer sees the same card the specimen drew.
+    expect(plain.body.colour).toBe('graphite');
+
+    // And the offer is closed. A colour outside the three is refused by the
+    // schema before it can reach a CHECK that would refuse it at 500.
+    await request(app.getHttpServer())
+      .post('/v1/cards')
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send({ transaction_pin: PIN, idempotency_key: randomUUID(), colour: 'ruby' })
+      .expect(400);
+  });
+
   it('charges the price, then moves what the customer loads onto the card', async () => {
     const customer = await onboard();
     await fundWallet(customer.userId, 100_00);

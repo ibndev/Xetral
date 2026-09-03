@@ -1,5 +1,4 @@
 import { Text, View } from 'react-native';
-import { router } from 'expo-router';
 import { formatAmount } from '@xetral/client';
 import type { Deposit } from '@xetral/client';
 import { Shell } from '@/shell';
@@ -51,9 +50,7 @@ export default function AddMoney() {
    */
   const account = useLoad(() => client.existingFundingAccount(), [client]);
   const deposits = useLoad<readonly Deposit[]>(() => client.deposits(), [client]);
-  const verified = useLoad(() => client.kyc().catch(() => null), [client]);
 
-  const isVerified = verified.data?.status === 'approved';
   const has = account.data != null;
 
   return (
@@ -94,48 +91,39 @@ export default function AddMoney() {
         )}
 
         {/*
-          NO ACCOUNT YET — one button, and where it goes depends on whether the
-          customer may have one. A dedicated Nigerian account number is a BANK
-          ACCOUNT ISSUED IN A PERSON'S NAME: the provider will not create one
-          for somebody unidentified and regulation does not permit it, so
-          verification is a fact about the rail rather than a policy this screen
-          chose. All this screen decides is whether to send them to prove who
-          they are first, or to open it now.
+          NO ACCOUNT YET — one button, and NO VERIFICATION GATE IN FRONT OF IT.
+
+          This sent an unverified customer to /kyc first, on the reasoning
+          that "regulation does not permit an unidentified account". That is a
+          statement about BITNOB, which will not issue one without a verified
+          BVN. CBN's tiered KYC permits a tier 1 account on a name and a phone
+          number, capped — and `029_kyc_tiers.seed.sql` has capped tier 0 at
+          ₦50,000 a day since it landed, so the platform enforced the ceiling
+          and refused the account it is for.
+
+          The requirement now lives in the Bitnob adapter, where it is true.
+          The default rail opens an account from what signup already holds.
         */}
         {!account.loading && !has && (
           <>
-            {isVerified ? (
-              <>
-                <Text style={styles.hint}>
-                  Open your Xetral account number and any Nigerian bank can pay into it.
-                </Text>
-                <Button
-                  label={busy ? 'Opening…' : 'Create account'}
-                  icon="arrowRight"
-                  busy={busy}
-                  onPress={() =>
-                    void run(async () => {
-                      await client.fundingAccount();
-                      account.reload();
-                      return 'Your account is open.';
-                    })
-                  }
-                />
-                <FormError error={issueError} code={issueCode} />
-              </>
-            ) : (
-              <>
-                <Text style={styles.hint}>
-                  Your account number is issued in your name, so we need your identity
-                  first. It takes a minute.
-                </Text>
-                <Button
-                  label="Verify my identity"
-                  icon="arrowRight"
-                  onPress={() => router.push('/kyc')}
-                />
-              </>
-            )}
+            <Text style={styles.hint}>Your naira account is ready. Get it below.</Text>
+            <Button
+              label={busy ? 'Activating…' : 'Activate Account'}
+              icon="arrowRight"
+              busy={busy}
+              onPress={() =>
+                void run(async () => {
+                  await client.fundingAccount();
+                  account.reload();
+                  return 'Your account is open.';
+                })
+              }
+            />
+            <Text style={styles.hint}>
+              You can receive up to {'\u20A6'}50,000 a day straight away. Verifying your
+              identity raises that, and is only asked for when you need it.
+            </Text>
+            <FormError error={issueError} code={issueCode} />
           </>
         )}
 

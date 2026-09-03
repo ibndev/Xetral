@@ -61,6 +61,7 @@ export class CardController {
 
     return this.cards.issue(subjectOf(request), {
       idempotencyKey: parsed.data.idempotency_key,
+      ...(parsed.data.colour === undefined ? {} : { colour: parsed.data.colour }),
     });
   }
 

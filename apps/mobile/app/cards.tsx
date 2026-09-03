@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Text, View } from 'react-native';
-import { formatAmount } from '@xetral/client';
-import type { Card, CardSecrets } from '@xetral/client';
+import { Pressable, Text, View } from 'react-native';
+import { CARD_COLOURS, formatAmount } from '@xetral/client';
+import type { Card, CardColour, CardSecrets } from '@xetral/client';
 import { Logo } from '@/logo';
 import { Shell } from '@/shell';
 import { Icon } from '@/icon';
@@ -50,6 +50,13 @@ export default function Cards() {
   const none = !cards.loading && (list?.length ?? 0) === 0;
   const [adding, setAdding] = useState(false);
 
+  /*
+   * THE CHOSEN FINISH LIVES HERE, not inside the form, because the thing it
+   * changes is the specimen ABOVE the form — the same arrangement as the web.
+   * State held in `Issue` could style the swatch and nothing else.
+   */
+  const [colour, setColour] = useState<CardColour>('graphite');
+
   return (
     <Shell>
       <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: space.md }}>
@@ -66,7 +73,7 @@ export default function Cards() {
         {cards.loading && <Loading />}
         {/* The specimen: the SAME component with no card, so the preview and
             the product cannot drift apart. */}
-        {none && <CardFace holder={holder} />}
+        {none && <CardFace holder={holder} colour={colour} />}
         {list?.map((card, index) => (
           <View key={card.id} style={{ gap: space.sm }}>
             <CardRow card={card} holder={holder} onChange={cards.reload} />
@@ -97,10 +104,32 @@ export default function Cards() {
         `styles.card` carries a bottom margin and no top one, which is right
         everywhere else and wrong at exactly this seam.
       */}
-      {(none || adding) && (
+      {/*
+        KYC BEFORE ANYTHING ELSE, and this is the bug it fixes.
+        `kyc_required` is refused by ISSUING, not by the list — the check
+        above only catches a list that refuses, which it does not. So an
+        unverified customer saw the offer, tapped Create card, was asked for a
+        transaction PIN, typed it, and only THEN learnt they needed to verify.
+        The one screen where the requirement is regulatory asked for the wrong
+        secret first.
+      */}
+      {(none || adding) && identity.data?.status !== 'approved' && !identity.loading && (
+        <View style={{ marginTop: space.lg }}>
+          <VerifyPrompt
+            what="a USD card"
+            title="As required by CBN, please complete your KYC."
+            detail="A dollar card is issued in your name by a licensed partner, and the Central Bank requires an identified customer before one can be created. It takes a minute — we already have most of what is needed."
+            cta="Verify KYC"
+          />
+        </View>
+      )}
+
+      {(none || adding) && identity.data?.status === 'approved' && (
         <View style={{ marginTop: space.lg }}>
         <Issue
           price={cards.data?.issuance_fee}
+          colour={colour}
+          onColour={setColour}
           onIssued={() => {
             setAdding(false);
             cards.reload();
@@ -122,14 +151,33 @@ export default function Cards() {
  * and deliberately never stored here, and a card cannot exist without an
  * approved KYC record.
  */
+/**
+ * The three finishes, as FLAT bases.
+ *
+ * The web draws each as a gradient; React Native has no gradient primitive and
+ * this app deliberately ships no gradient library, so each is the one tone the
+ * web's gradient reads as from arm's length. They are written out here rather
+ * than taken from the palette for the same reason the graphite base is: the
+ * palette INVERTS for dark, and a card face built from it turns near-white.
+ */
+const CARD_FACES: Record<string, string> = {
+  graphite: '#0B0B0D',
+  sapphire: '#0D1725',
+  emerald: '#0A1A15',
+};
+
 function CardFace({
   card,
   holder,
+  colour,
 }: {
   /** Absent for the SPECIMEN — the card a customer is shown before they have
    *  one. Same component, so the preview cannot drift from the product. */
   readonly card?: Card;
   readonly holder: string | undefined;
+  /** What the picker has chosen, for the specimen. A real card carries its
+   *  own, so this is only how the preview follows the swatches. */
+  readonly colour?: string | undefined;
 }) {
   const expiry =
     card === undefined || card.expiry_month === null || card.expiry_year === null
@@ -179,7 +227,7 @@ function CardFace({
          * one translucent disc — the same light from the same corner as the
          * web's, at the fidelity a View can give.
          */
-        backgroundColor: '#0B0B0D',
+        backgroundColor: CARD_FACES[colour ?? card?.colour ?? 'graphite'] ?? CARD_FACES.graphite,
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,.14)',
         opacity: status === 'terminated' ? 0.55 : status === 'frozen' ? 0.8 : 1,
@@ -605,10 +653,14 @@ function group(pan: string): string {
  */
 function Issue({
   price,
+  colour,
+  onColour,
   onIssued,
 }: {
   /** From the server, never from this file — see the web's Issue. */
   readonly price: string | undefined;
+  readonly colour: CardColour;
+  readonly onColour: (colour: CardColour) => void;
   readonly onIssued: () => void;
 }) {
   const client = useXetral();
@@ -616,10 +668,13 @@ function Issue({
   const colors = useTheme();
   const { busy, error, code, done, run } = useSubmit();
   const attempt = useIdempotencyKey();
+  const fundAttempt = useIdempotencyKey();
   const [pin, setPin] = useState('');
+  const [amount, setAmount] = useState('');
   const [stage, setStage] = useState<'offer' | 'confirm'>('offer');
 
   const free = price === '0.00';
+  const loading = amount.trim() !== '' && amount.trim() !== '0';
 
   /*
    * THE CONFIRM STEP, inline. It reads the same state the offer writes, so
@@ -633,6 +688,18 @@ function Issue({
           <Text style={styles.muted}>A virtual USD card</Text>
           <Text style={styles.amount}>{price === undefined ? '—' : `$${price}`}</Text>
         </View>
+        <View style={styles.row}>
+          <Text style={styles.muted}>Finish</Text>
+          <Text style={styles.amount}>
+            {CARD_COLOURS.find((c) => c.value === colour)?.label ?? colour}
+          </Text>
+        </View>
+        {loading && (
+          <View style={styles.row}>
+            <Text style={styles.muted}>Starting balance</Text>
+            <Text style={styles.amount}>{`$${amount.trim()}`}</Text>
+          </View>
+        )}
         <View style={styles.row}>
           <Text style={styles.muted}>From</Text>
           <Text style={styles.amount}>Your USD wallet</Text>
@@ -654,13 +721,44 @@ function Issue({
           disabled={pin === ''}
           onPress={() =>
             void run(async () => {
-              await client.issueCard({ pin, idempotencyKey: attempt.key });
+              const card = await client.issueCard({
+                pin,
+                idempotencyKey: attempt.key,
+                colour,
+              });
               attempt.next();
+
+              /*
+               * FUNDING IS A SECOND CALL, ordered this way deliberately —
+               * the same reasoning the web's Issue records. There is no
+               * endpoint that issues and loads at once, and a failure here
+               * leaves a real, empty card rather than a failed purchase, so
+               * the message says that instead of reporting it all as broken.
+               */
+              let funded = false;
+              if (loading) {
+                try {
+                  await client.fundCard(card.id, {
+                    amount: amount.trim(),
+                    pin,
+                    idempotencyKey: fundAttempt.key,
+                  });
+                  fundAttempt.next();
+                  funded = true;
+                } catch {
+                  funded = false;
+                }
+              }
+
               // Cleared the moment the request returns. A PIN authorises one
               // instruction; it is not a password to hold on to.
               setPin('');
+              setAmount('');
               setStage('offer');
               onIssued();
+              if (loading && !funded) {
+                return 'Your card is on its way. We could not load it — add money to it from the card itself.';
+              }
               return 'Your card is on its way.';
             })
           }
@@ -692,6 +790,57 @@ function Issue({
           icon="zap"
           title="Instant issuance"
           body="Get your card and start spending."
+        />
+      </View>
+
+      {/*
+        PICKING THE FINISH, ON THE CARD ITSELF.
+        Three swatches rather than a list of colour names: the specimen above
+        redraws as one is pressed, so the choice is made against the thing
+        being chosen. The value sent is one of exactly three the database's own
+        CHECK accepts, and `card-colours.test.ts` holds this list to it.
+      */}
+      <View style={{ marginTop: space.lg }}>
+        <Text style={styles.muted}>Finish</Text>
+        <View style={{ flexDirection: 'row', gap: 10, marginTop: space.sm }}>
+          {CARD_COLOURS.map((option) => (
+            <Pressable
+              key={option.value}
+              accessibilityRole="button"
+              accessibilityLabel={option.label}
+              accessibilityState={{ selected: colour === option.value }}
+              android_ripple={null}
+              onPress={() => onColour(option.value)}
+              style={{
+                width: 52,
+                height: 34,
+                borderRadius: radius.sm,
+                backgroundColor: CARD_FACES[option.value] ?? CARD_FACES.graphite,
+                borderWidth: 2,
+                // The selected one is RINGED rather than enlarged: a swatch
+                // that grows shifts the two beside it, which reads as the row
+                // moving rather than as a choice being made.
+                borderColor: colour === option.value ? colors.brand : 'transparent',
+              }}
+            />
+          ))}
+        </View>
+      </View>
+
+      {/*
+        AND HOW MUCH TO PUT ON IT, optional.
+        Empty means an empty card, which is a real answer and the resting
+        state. It stays a major-unit STRING all the way to the server; nothing
+        here parses it into a number.
+      */}
+      <View style={{ marginTop: space.md }}>
+        <Field
+          label="Starting balance (optional)"
+          inputMode="decimal"
+          autoComplete="off"
+          placeholder="0.00"
+          value={amount}
+          onChangeText={setAmount}
         />
       </View>
 

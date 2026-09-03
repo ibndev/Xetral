@@ -114,7 +114,23 @@ export function Done({ message }: { readonly message: string | undefined }) {
  * It names what still works, which is the part that stops "verify your
  * identity" on a card screen reading as "the whole app is locked".
  */
-export function VerifyPrompt({ what }: { readonly what: string }) {
+export function VerifyPrompt({
+  what,
+  /**
+   * The heading and the detail, when the reason is REGULATORY rather than
+   * about a partner's policy. A card is refused because the CBN requires an
+   * identified customer, and telling somebody the rule that binds us is the
+   * difference between "they want more forms" and "this is the law".
+   */
+  title,
+  detail,
+  cta,
+}: {
+  readonly what: string;
+  readonly title?: string | undefined;
+  readonly detail?: string | undefined;
+  readonly cta?: string | undefined;
+}) {
   const styles = useStyles();
   const colors = useTheme();
   return (
@@ -132,10 +148,10 @@ export function VerifyPrompt({ what }: { readonly what: string }) {
       >
         <Icon name="shield" size={20} color={colors.info} />
       </View>
-      <Text style={styles.h2}>Verify your identity for {what}</Text>
+      <Text style={styles.h2}>{title ?? `Verify your identity for ${what}`}</Text>
       <Text style={styles.lead}>
-        {what} is issued through a licensed partner, who can only issue it to a
-        verified person.
+        {detail ??
+          `${what} is issued through a licensed partner, who can only issue it to a verified person.`}
       </Text>
       <Text style={styles.hint}>
         Your naira wallet, transfers, airtime, data and bills all work without
@@ -143,7 +159,7 @@ export function VerifyPrompt({ what }: { readonly what: string }) {
       </Text>
       <Link href={'/kyc' as never} asChild>
         <Pressable accessibilityRole="button" style={styles.button}>
-          <Text style={styles.buttonText}>Verify my identity</Text>
+          <Text style={styles.buttonText}>{cta ?? 'Verify my identity'}</Text>
         </Pressable>
       </Link>
     </View>

@@ -122,6 +122,7 @@ describe('the public surface is small and justified', () => {
       'POST /v1/webhooks/bitnob',
       'POST /v1/webhooks/bitnob/crypto',
       'POST /v1/webhooks/bitnob/deposits',
+      'POST /v1/webhooks/paystack/deposits',
     ]);
   });
 

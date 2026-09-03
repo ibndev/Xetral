@@ -291,6 +291,8 @@ function environmentValue(
       return config.bitnobClientId;
     case 'bitnob.client_secret':
       return config.bitnobClientSecret;
+    case 'paystack.secret_key':
+      return config.paystackSecretKey;
     case 'bitnob.webhook_secret':
       return config.bitnobWebhookSecret;
     case 'vtpass.api_key':

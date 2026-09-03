@@ -65,6 +65,9 @@ export function testApiConfig(databaseUrl: string, overrides: Partial<ApiConfig>
     bitnobClientId: undefined,
     bitnobClientSecret: undefined,
     bitnobWebhookSecret: undefined,
+    paystackSecretKey: undefined,
+    paystackBaseUrl: 'https://api.paystack.co',
+    paystackPreferredBank: undefined,
     // Undefined by default, so a suite that does not name it gets the
     // production-shaped answer: the endpoint is not there at all.
     metricsToken: undefined,

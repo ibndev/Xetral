@@ -1128,6 +1128,75 @@ Reverse   pending -> wallet           it did not — a reversal naming the reser
   on the port would give Airalo and Twilio a method that throws. Use
   `supportsVerification()`.
 
+### Two naira rails, and an account without KYC — non-obvious rules
+
+Schema: `packages/ledger/sql/044_paystack_funding.sql`. Adapter in
+`packages/providers/src/paystack/`, switch in
+`apps/api/src/funding/funding-provider.ts`.
+
+- **"A BANK ACCOUNT CANNOT BE ISSUED TO AN UNIDENTIFIED PERSON" WAS A
+  STATEMENT ABOUT BITNOB, NOT ABOUT THE RAIL.** They will not issue a naira
+  account without a verified BVN. CBN's tiered KYC permits a tier 1 account on
+  a name and a phone number, capped — and `029_kyc_tiers.seed.sql` has capped
+  tier 0 at ₦50,000 a day since it landed. So the platform enforced the tier 1
+  ceiling while refusing the account that ceiling is for, on the screen a
+  customer opens in order to put money in.
+- **The requirement did not disappear, it moved to where it is true.** The
+  Bitnob adapter refuses an unverified customer in its own code with its own
+  reason; the port carries the identity the platform HAS and each adapter
+  decides what it needs. That is the boundary rule the fulfilment port already
+  follows for VTpass codes and Airalo's token cache.
+- **PAYSTACK IS THE DEFAULT AND RULE 0 WAS DELIBERATELY REVERSED FOR IT.** The
+  rule is about not inheriting the reference plugin's architecture, not about
+  the vendor; this is one rail chosen on its own merits.
+- **The rail is a SETTING, read per call.** The reason to switch is almost
+  always that the current provider is having a bad afternoon, and 009's
+  argument is that an operational decision taken under pressure should not be
+  a release. Five seconds of cache is the delay; a deploy is the alternative.
+- **SWITCHING MOVES NOBODY.** A dedicated account number is permanent and
+  saved in somebody's banking app as a beneficiary, so every account already
+  issued keeps working at the provider that issued it. `VirtualAccount`
+  carries `provider` and the row records it — reading the issuer off the
+  currently-configured port would relabel every existing account the moment an
+  operator flipped the setting.
+- **`resolveAccount` takes the provider as an ARGUMENT, not from the port.**
+  The port is now a switch whose `provider` is the configured default, so
+  filtering on it would have stopped resolving every Bitnob account the moment
+  the default changed — and an unresolvable deposit does not fail loudly, it
+  posts to SUSPENSE. Correct for money we cannot attribute, and completely
+  wrong as a consequence of a settings change.
+- **PAYSTACK BEARS A TOKEN AND BITNOB SIGNS, one directory apart.** Copying
+  either scheme onto the other is a 401 that reads as a bad key — which is
+  exactly what `bitnob/signing.ts` exists because of.
+- **ONE Paystack credential, not two.** The secret key both authorises calls
+  and verifies webhooks, because Paystack signs an inbound event with the same
+  key. A matching "webhook secret" slot would be a box an operator fills with
+  a value nothing reads.
+- **`charge.success` IS NOT ENOUGH; THE CHANNEL MUST BE `dedicated_nuban`.**
+  Paystack fires that event for every successful charge — a card payment, a
+  USSD collection, a transfer into a dedicated account. Crediting on the event
+  name alone would turn any other Paystack product on the same integration
+  into a way to create wallet balances.
+- **Keyed on Paystack's `reference`, which BOTH paths see.** The webhook
+  carries it and so does `GET /transaction`, so a lost webhook resolved by the
+  sweep and a late redelivery produce the same key and the second is a replay.
+  013's finding 4 was exactly a delivery id and a money id being different
+  fields on the one rail that creates money.
+- **There is no `PAYSTACK_NGN_AMOUNT_UNIT`.** Bitnob has one because its unit
+  could not be verified before go-live and being wrong was made recoverable;
+  Paystack's is unambiguous in their own client, so a switch would be a way to
+  configure a known answer wrongly. The CEILING still applies, because it
+  catches more than a misread unit.
+- **`provider_customer_ref` is nullable and exists for the SWEEP.**
+  Paystack's transaction list is a customer-level query and does not accept a
+  dedicated-account id, so without it the reconciliation worker would silently
+  stop working for the default provider — running, reporting nothing, and
+  finding nothing, which looks exactly like a rail with no lost webhooks.
+- **`POST /dedicated_account` has no idempotency key**, so the adapter LOOKS
+  before it creates. Our unique index stops a second row; only the lookup
+  stops a second live account number receiving money against a row we never
+  wrote.
+
 ### NGN funding — non-obvious rules
 
 Schema: `packages/ledger/sql/006_funding.sql`. Bitnob dedicated Nigerian
@@ -1857,13 +1926,24 @@ Schema: `packages/ledger/sql/015_error_events.sql`.
 
 ## Providers
 
-Live set: **Bitnob** (NGN virtual accounts, crypto, USDT, stablecoin, virtual
-USD cards, FX),
+Live set: **Paystack** (NGN virtual accounts — the default funding rail),
+**Bitnob** (NGN virtual accounts as the fallback, crypto, USDT, stablecoin,
+virtual USD cards, FX),
 **VTpass** (airtime, data, bills), **Airalo** (eSIM), **Twilio** (virtual
 numbers), **Resend** (email).
 
-Do **not** reintroduce Reloadly, Maplerad, Anchor, Paystack or ALAT. They appear in
-the reference plugin and are out of scope.
+Do **not** reintroduce Reloadly, Maplerad, Anchor or ALAT. They appear in the
+reference plugin and are out of scope.
+
+**PAYSTACK IS THE ONE EXCEPTION, AND IT IS A DELIBERATE REVERSAL.** It was on
+that list, and the rule was right at the time: the list is about not inheriting
+the plugin's architecture by inheriting its providers. Paystack is back as the
+DEFAULT naira funding rail because Bitnob will not issue a dedicated account to
+anybody it has not already verified a BVN for, and that is the wrong gate on
+the screen a customer opens in order to put money in — CBN tier 1 permits the
+account, and `029_kyc_tiers.seed.sql` has capped tier 0 at ₦50,000 a day since
+it landed. Chosen on its own merits for one rail, not inherited. Nothing else
+from the plugin comes with it.
 
 ### Bitnob specifics — verified from their docs (v2, September 2026)
 
@@ -2131,6 +2211,8 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/040_countries.seed.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/041_card_issuance.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/042_bitnob_v2.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/043_bank_payouts.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/044_paystack_funding.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/045_card_fee_split.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -2173,6 +2255,8 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/040_countries.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/041_card_issuance.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/042_bitnob_v2.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/043_bank_payouts.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/044_paystack_funding.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/045_card_fee_split.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

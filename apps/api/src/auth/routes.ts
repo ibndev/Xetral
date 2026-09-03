@@ -518,6 +518,17 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
 
       .public(
         'POST',
+        '/v1/webhooks/paystack/deposits',
+        'Paystack has no session with us; the request is authenticated by an ' +
+          'HMAC-SHA512 over the raw body keyed by the SECRET KEY — the same value ' +
+          'that authorises outbound calls, because Paystack has no separate ' +
+          'webhook secret. This is the default rail, so it is the route that ' +
+          'creates most customer balances and the one where ' +
+          'verification-before-parsing matters most',
+      )
+
+      .public(
+        'POST',
         '/v1/webhooks/bitnob/deposits',
         'Bitnob has no session with us; the request is authenticated by an HMAC ' +
           'signature over the raw body, checked before anything is parsed. This is ' +

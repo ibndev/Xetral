@@ -68,6 +68,14 @@ export interface CardView {
   readonly expiry_year: number | null;
   readonly balance: string;
   /**
+   * The finish, chosen once at creation.
+   *
+   * A string the apps map to a stylesheet class, constrained at the database
+   * so a value neither app can draw cannot reach a row. Always present: every
+   * card issued before this existed defaults to the face it already had.
+   */
+  readonly colour: string;
+  /**
    * What the CUSTOMER calls this card, or null.
    *
    * Not `name_on_card`, which is their legal name and is not theirs to set.
@@ -102,6 +110,7 @@ interface CardRow {
   expiry_month: number | null;
   expiry_year: number | null;
   label: string | null;
+  colour: string;
 }
 
 /**
@@ -131,7 +140,7 @@ export class CardService {
     const userId = await this.#activeUserId(userUuid);
     const rows = await this.pool.query<CardRow>(
       `SELECT id, uuid, user_id, provider_card_id, status, currency,
-              last4, expiry_month, expiry_year, label
+              last4, expiry_month, expiry_year, label, colour
          FROM cards WHERE user_id = $1::bigint ORDER BY id DESC`,
       [userId],
     );
@@ -166,7 +175,7 @@ export class CardService {
    */
   async issue(
     userUuid: string,
-    input: { idempotencyKey: string },
+    input: { idempotencyKey: string; colour?: string },
   ): Promise<CardView> {
     await this.settings.assertServiceEnabled('cards');
     const userId = await this.#activeUserId(userUuid);
@@ -224,7 +233,7 @@ export class CardService {
     let row: CardRow;
     try {
       await client.query('BEGIN');
-      row = await this.#insertCard(client, userId, issued);
+      row = await this.#insertCard(client, userId, issued, undefined, input.colour);
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');
@@ -259,7 +268,7 @@ export class CardService {
     const updated = await this.pool.query<CardRow>(
       `UPDATE cards SET label = $2 WHERE id = $1::bigint
        RETURNING id, uuid, user_id, provider_card_id, status, currency,
-                 last4, expiry_month, expiry_year, label`,
+                 last4, expiry_month, expiry_year, label, colour`,
       [row.id, label],
     );
 
@@ -483,7 +492,7 @@ export class CardService {
   async freezeAsStaff(cardUuid: string, staffUuid: string, reason: string): Promise<void> {
     const found = await this.pool.query<CardRow>(
       `SELECT id, uuid, user_id, provider_card_id, status, currency,
-              last4, expiry_month, expiry_year, label
+              last4, expiry_month, expiry_year, label, colour
          FROM cards WHERE uuid = $1::uuid`,
       [cardUuid],
     );
@@ -663,9 +672,30 @@ export class CardService {
 
     const split = await this.tax.splitFee(fee);
 
+    /*
+     * WHAT THE CARD COSTS US, recorded separately from what it costs them.
+     *
+     * The customer pays $2 and the issuer bills the platform for issuing —
+     * commonly $1 of it. Booking the whole $2 as revenue made the margin on a
+     * card look like 100% and left the cost of the product nowhere in the
+     * books.
+     *
+     * Two INDEPENDENT pairs on one entry, each summing to zero on its own:
+     * the customer's money moves from their wallet into revenue and the tax
+     * liability, and the issuer's charge moves from our balance with them
+     * into an expense. Netting them would report $1 of turnover on a $2 sale,
+     * understating the business and hiding the cost at the same time.
+     */
+    const providerCost: Money<'USD'> = {
+      amount: BigInt(await this.settings.cardIssuanceProviderCostCents()),
+      currency: 'USD',
+    };
+
     // The fee, the tax and the wallet leg are three CONDITIONAL legs for the
     // same reason a transfer's are: a zero-rate VAT on a real fee must still
-    // post the fee, and a zero leg is not a leg.
+    // post the fee, and a zero leg is not a leg. The provider cost is a fourth
+    // and fifth on the same rule — an issuer that charges nothing must not
+    // produce two zero postings the ledger would refuse.
     const onEntry = async (client: PoolClient, entry: WrittenEntry): Promise<void> => {
       if (split.tax.amount <= 0n) return;
       await this.tax.record(client, {
@@ -697,6 +727,12 @@ export class CardService {
               : []),
             ...(split.tax.amount > 0n
               ? [posting({ kind: 'liability_tax_payable', currency: 'USD' }, split.tax)]
+              : []),
+            ...(providerCost.amount > 0n
+              ? [
+                  posting({ kind: 'expense_provider_cost', currency: 'USD' }, providerCost),
+                  posting({ kind: 'provider_float', currency: 'USD' }, negate(providerCost)),
+                ]
               : []),
           ],
         },
@@ -764,6 +800,26 @@ export class CardService {
     if (entryId === undefined) return;
 
     const split = await this.tax.splitFee(fee);
+    /*
+     * THE PROVIDER'S COST COMES BACK TOO, and it has to be read the same way
+     * it was written: from the setting, not from the entry.
+     *
+     * If the card was never created the issuer charged us nothing, so leaving
+     * the cost posted would report an expense against a card that does not
+     * exist — and `provider_float` would drift from what the issuer says it
+     * holds, which is exactly what 020's reconciliation is there to catch.
+     *
+     * Reading it from the setting rather than the original entry means a
+     * changed cost between charge and refund reverses the NEW figure. That is
+     * a real if narrow risk, and the alternative — parsing postings back off
+     * the entry being reversed — is a second, weaker copy of what the entry
+     * already says. The window is one failed provider call wide.
+     */
+    const providerCost: Money<'USD'> = {
+      amount: BigInt(await this.settings.cardIssuanceProviderCostCents()),
+      currency: 'USD',
+    };
+
     await this.ledger.post({
       idempotencyKey: `card-issue-fee-reversal:${idempotencyKey}`,
       kind: 'reversal',
@@ -778,6 +834,12 @@ export class CardService {
           : []),
         ...(split.tax.amount > 0n
           ? [posting({ kind: 'liability_tax_payable', currency: 'USD' }, negate(split.tax))]
+          : []),
+        ...(providerCost.amount > 0n
+          ? [
+              posting({ kind: 'expense_provider_cost', currency: 'USD' }, negate(providerCost)),
+              posting({ kind: 'provider_float', currency: 'USD' }, providerCost),
+            ]
           : []),
       ],
     });
@@ -814,14 +876,16 @@ export class CardService {
     userId: string,
     card: VirtualCard,
     replacesCardId?: string,
+    colour?: string,
   ): Promise<CardRow> {
     const inserted = await client.query<CardRow>(
       `INSERT INTO cards (user_id, provider, provider_card_id, currency,
                           last4, expiry_month, expiry_year, status,
-                          replaces_card_id)
-       VALUES ($1::bigint, $2, $3, 'USD', $4, $5, $6, $7::card_status, $8::bigint)
+                          replaces_card_id, colour)
+       VALUES ($1::bigint, $2, $3, 'USD', $4, $5, $6, $7::card_status, $8::bigint,
+               COALESCE($9, 'graphite'))
        RETURNING id, uuid, user_id, provider_card_id, status, currency,
-                 last4, expiry_month, expiry_year, label`,
+                 last4, expiry_month, expiry_year, label, colour`,
       [
         userId,
         PROVIDER,
@@ -831,6 +895,7 @@ export class CardService {
         card.expiryYear,
         card.status,
         replacesCardId ?? null,
+        colour ?? null,
       ],
     );
     const row = inserted.rows[0];
@@ -959,6 +1024,7 @@ export class CardService {
       expiry_month: row.expiry_month,
       expiry_year: row.expiry_year,
       label: row.label,
+      colour: row.colour,
       balance: toMajor({ amount: balance, currency: 'USD' }),
       ...(await this.#freezeContext(row)),
     };
@@ -1021,7 +1087,7 @@ export class CardService {
     const userId = await this.#activeUserId(userUuid);
     const result = await this.pool.query<CardRow>(
       `SELECT id, uuid, user_id, provider_card_id, status, currency,
-              last4, expiry_month, expiry_year, label
+              last4, expiry_month, expiry_year, label, colour
          FROM cards WHERE uuid = $1 AND user_id = $2::bigint`,
       [cardUuid, userId],
     );
@@ -1033,7 +1099,7 @@ export class CardService {
   async #cardByProviderId(providerCardId: string): Promise<CardRow | undefined> {
     const result = await this.pool.query<CardRow>(
       `SELECT id, uuid, user_id, provider_card_id, status, currency,
-              last4, expiry_month, expiry_year, label
+              last4, expiry_month, expiry_year, label, colour
          FROM cards WHERE provider = $1 AND provider_card_id = $2`,
       [PROVIDER, providerCardId],
     );

@@ -23,9 +23,23 @@ import { z } from 'zod';
  * step rather than on the form, which is a client concern; the route's
  * requirement is unchanged.
  */
+/**
+ * The three finishes a card can have.
+ *
+ * A zod enum AND a database CHECK, and the duplication is deliberate — the
+ * two answer different questions. This one refuses a bad request with a field
+ * name a client can act on; the CHECK refuses a row however it was written,
+ * including from a psql prompt. `card-colours.test.ts` fails the build if
+ * they disagree, because a value one accepts and the other refuses is a
+ * request that 500s instead of 400s.
+ */
+export const CARD_COLOURS = ['graphite', 'sapphire', 'emerald'] as const;
+
 export const issueCardSchema = z.object({
   transaction_pin: z.string().min(1).max(32),
   idempotency_key: z.string().trim().min(8).max(128),
+  /** Optional: a customer who does not choose gets the default finish. */
+  colour: z.enum(CARD_COLOURS).optional(),
 });
 
 /**

@@ -104,6 +104,22 @@ export interface CryptoAddress {
   readonly memo: string | null;
 }
 
+/**
+ * The finishes a card can have, offered by both apps from ONE list.
+ *
+ * The API's zod enum and the database CHECK are the two places that DECIDE;
+ * this is what the apps OFFER, and it is here rather than in each app for the
+ * reason the currency catalogue is: two copies drift, and the one that drifts
+ * offers a customer a choice the server refuses.
+ */
+export const CARD_COLOURS = [
+  { value: 'graphite', label: 'Graphite' },
+  { value: 'sapphire', label: 'Sapphire' },
+  { value: 'emerald', label: 'Emerald' },
+] as const;
+
+export type CardColour = (typeof CARD_COLOURS)[number]['value'];
+
 export interface Card {
   readonly id: string;
   readonly status: string;
@@ -116,6 +132,9 @@ export interface Card {
    *  which is their legal name and is not theirs to set. Null is the resting
    *  state; render the last four digits instead of a blank. */
   readonly label?: string | null;
+  /** The finish. Always present from the API; optional here so an older
+   *  response cannot fail to parse into this type. */
+  readonly colour?: string;
 }
 
 /**
@@ -385,6 +404,16 @@ export class XetralClient {
      *  to their verified name, and null when there is neither. A screen that
      *  greets them falls back rather than inventing one from an email. */
     first_name: string | null;
+    /**
+     * The whole name and the phone, both as typed at SIGNUP.
+     *
+     * They exist so the identity form can PREFILL rather than ask a second
+     * time for what the account already holds. Neither is the verified name:
+     * that is read off a document by a reviewer, is what a card carries, and
+     * is the only one any money decision reads.
+     */
+    full_name: string | null;
+    phone: string | null;
     /**
      * Whether a transaction PIN exists, or NULL when the server could not
      * tell.
@@ -821,10 +850,15 @@ export class XetralClient {
    *
    * The PIN stays, because this MOVES MONEY: issuing charges the card price.
    */
-  async issueCard(input: { pin: string; idempotencyKey: string }): Promise<Card> {
+  async issueCard(input: {
+    pin: string;
+    idempotencyKey: string;
+    colour?: CardColour;
+  }): Promise<Card> {
     return this.#post('/v1/cards', {
       transaction_pin: input.pin,
       idempotency_key: input.idempotencyKey,
+      ...(input.colour === undefined ? {} : { colour: input.colour }),
     });
   }
 

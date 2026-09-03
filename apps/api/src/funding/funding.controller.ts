@@ -13,6 +13,7 @@ import type { AuthenticatedRequest } from '../auth/auth.guard.js';
 import { FundingService } from './funding.service.js';
 import type { DepositView, VirtualAccountView } from './funding.service.js';
 import { DepositWebhookService } from './deposit-webhook.service.js';
+import { PaystackWebhookService } from './paystack-webhook.service.js';
 
 @Controller('v1/funding')
 export class FundingController {
@@ -72,7 +73,40 @@ export class FundingController {
  */
 @Controller('v1/webhooks')
 export class DepositWebhookController {
-  constructor(@Inject(DepositWebhookService) private readonly deposits: DepositWebhookService) {}
+  constructor(
+    @Inject(DepositWebhookService) private readonly deposits: DepositWebhookService,
+    @Inject(PaystackWebhookService)
+    private readonly paystackDeposits: PaystackWebhookService,
+  ) {}
+
+  /**
+   * Paystack, the default rail.
+   *
+   * Its OWN route rather than a branch inside the Bitnob one: the two are
+   * signed with different credentials and carry no field in common, so a
+   * single endpoint would be two handlers with a shared chance to run the
+   * wrong one against money-creating input.
+   */
+  @Post('paystack/deposits')
+  @HttpCode(200)
+  async paystack(@Req() request: Request): Promise<{ received: true }> {
+    // The RAW body, not the parsed one. The signature covers the exact bytes
+    // Paystack sent, and a re-serialised object normalises whitespace and
+    // unicode escapes — producing failures that look like a wrong key.
+    const raw = (request as Request & { rawBody?: Buffer }).rawBody;
+    if (raw === undefined) {
+      throw new BadRequestException({ error: 'raw_body_unavailable' });
+    }
+
+    await this.paystackDeposits.handle(
+      raw.toString('utf8'),
+      request.headers as Record<string, string>,
+    );
+
+    // 200 and nothing else. A body here would be the only place a webhook
+    // could leak what we know about a customer to whoever can reach the URL.
+    return { received: true };
+  }
 
   @Post('bitnob/deposits')
   @HttpCode(200)

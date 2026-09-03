@@ -89,6 +89,28 @@ export interface ApiConfig {
   /** Signs every request, and is never transmitted. */
   readonly bitnobClientSecret: string | undefined;
   readonly bitnobWebhookSecret: string | undefined;
+  /**
+   * Paystack, the DEFAULT naira funding rail.
+   *
+   * ONE credential, not two: the secret key both authorises requests and
+   * verifies webhooks, because Paystack signs an inbound event with the same
+   * key it authenticates an outbound call with. Bitnob has a separate webhook
+   * secret; adding a matching slot here would be a box nothing reads.
+   *
+   * `sk_test_` or `sk_live_` — and which one decides whether the money is
+   * real, the same way a Bitnob client secret does.
+   */
+  readonly paystackSecretKey: string | undefined;
+  /** Bare host: `https://api.paystack.co`. */
+  readonly paystackBaseUrl: string | undefined;
+  /**
+   * Which bank Paystack issues the NUBAN at — `wema-bank` live, `titan-bank`
+   * in test. Undefined lets Paystack choose, which is what their API does
+   * with no preference. A value the integration is not enabled for is refused
+   * at the moment a customer asks for an account, so it is worth setting
+   * deliberately rather than defaulting to a guess.
+   */
+  readonly paystackPreferredBank: string | undefined;
 
   /**
    * The bearer token a metrics scraper must present.
@@ -764,6 +786,9 @@ export function loadConfig(env: Env): ApiConfig {
     bitnobClientId: optional(env, 'BITNOB_CLIENT_ID'),
     bitnobClientSecret: optional(env, 'BITNOB_CLIENT_SECRET'),
     bitnobWebhookSecret: optional(env, 'BITNOB_WEBHOOK_SECRET'),
+    paystackSecretKey: optional(env, 'PAYSTACK_SECRET_KEY'),
+    paystackBaseUrl: optional(env, 'PAYSTACK_BASE_URL') ?? 'https://api.paystack.co',
+    paystackPreferredBank: optional(env, 'PAYSTACK_PREFERRED_BANK'),
     metricsToken: optional(env, 'METRICS_TOKEN'),
     encryptionKeyring: parseEncryptionKeyring(env),
     kycBlindIndexKey: parseBlindIndexKey(env),
