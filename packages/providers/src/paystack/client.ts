@@ -69,6 +69,25 @@ export const PAYSTACK_ENDPOINTS = {
   /** Reconciliation: what Paystack recorded that no webhook told us about. */
   transactions: (customerCode: string) =>
     `/transaction?customer=${encodeURIComponent(customerCode)}&status=success`,
+
+  /*
+   * PAYING OUT. Verified against Paystack's own published Node SDK
+   * (`paystack-api@2.0.6`, resources/misc.js, verification.js,
+   * transfer_recipient.js, transfer.js) rather than guessed — the rule this
+   * repo records twice about Bitnob, where a table of plausible constants
+   * passed every test written from the same assumptions and failed on the
+   * first live call.
+   *
+   * `country` is Paystack's own slug ("nigeria"), not an ISO code.
+   */
+  banks: (country: string, currency: string) =>
+    `/bank?country=${encodeURIComponent(country)}&currency=${encodeURIComponent(currency)}&perPage=100`,
+  resolveAccount: (accountNumber: string, bankCode: string) =>
+    `/bank/resolve?account_number=${encodeURIComponent(accountNumber)}` +
+    `&bank_code=${encodeURIComponent(bankCode)}`,
+  createTransferRecipient: '/transferrecipient',
+  createTransfer: '/transfer',
+  getTransfer: (id: string) => `/transfer/${encodeURIComponent(id)}`,
 } as const;
 
 export class PaystackClient {

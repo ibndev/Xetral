@@ -5,22 +5,17 @@ import { Icon } from './icon';
  * What a customer sees when they reach a product that needs a verified
  * identity.
  *
- * This exists because "kyc_required" as an error message is a dead end. The
- * customer is told to do something, not told why, not told what it unlocks,
- * and given no way to start. Rendered as a NOTICE rather than an error,
- * because nothing has gone wrong: they have simply arrived at the one part of
- * the product that needs more than an email address.
- *
- * It also names what still works. A customer who reads "verify your identity"
- * on a card screen reasonably concludes the whole app is locked, when in fact
- * their wallet, transfers, airtime, data and bills are all available right
- * now — which is most of what they came for.
+ * ONE LINE AND ONE BUTTON. This used to carry three paragraphs — what the
+ * partner does, what the Central Bank requires, how long it takes, and which
+ * other features still work — and every one of them was true and none of them
+ * was what the customer needed. A person who has just tapped "Create card"
+ * wants to know what to do next, and reading four sentences to find a button
+ * is slower than the verification itself.
  */
 export function VerifyPrompt({
   what,
-  detail,
   /**
-   * The heading, when the reason is REGULATORY rather than about a partner.
+   * The line, when the reason is REGULATORY rather than about a partner.
    *
    * A card is refused because the CBN requires an identified customer, not
    * because an issuer chose to — and telling somebody the rule that binds us
@@ -31,7 +26,6 @@ export function VerifyPrompt({
 }: {
   /** The product they were reaching for, in the customer's words. */
   readonly what: string;
-  readonly detail?: string | undefined;
   readonly title?: string | undefined;
   readonly cta?: string | undefined;
 }) {
@@ -43,14 +37,6 @@ export function VerifyPrompt({
 
       <div className="verify-body">
         <h2>{title ?? `Verify your identity for ${what}`}</h2>
-        <p>
-          {detail ??
-            `${what} is issued through a licensed partner, who can only issue it to a
-             verified person.`}
-        </p>
-        <p className="hint">
-          Your naira wallet, transfers, airtime, data and bills all work without this.
-        </p>
         <Link href="/kyc" className="btn">
           {cta ?? 'Verify my identity'}
         </Link>

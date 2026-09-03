@@ -6,10 +6,16 @@ import {
   Logger,
   NotFoundException,
   ServiceUnavailableException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import type { Pool } from 'pg';
 import { LedgerService } from '@xetral/ledger';
-import { ProviderTimeoutError } from '@xetral/providers';
+import {
+  ProviderContractError,
+  ProviderRejectedError,
+  ProviderTimeoutError,
+  ProviderUnavailableError,
+} from '@xetral/providers';
 import type { FundingCustomer, FundingPort } from '@xetral/providers';
 import { toMajor } from '@xetral/shared';
 import type { Currency } from '@xetral/shared';
@@ -137,6 +143,52 @@ export class FundingService {
         // BECAUSE the request carried an idempotency key; inventing one here
         // would make the retry a second account.
         throw new ServiceUnavailableException({ error: 'account_issue_pending' });
+      }
+
+      /*
+       * WHAT THE PROVIDER SAID, WRITTEN DOWN — because without this the whole
+       * class of "Activate Account fails and nobody can say why" is a 500.
+       *
+       * Every other provider error fell through to Nest's default handler,
+       * which answers a bare 500 with no code the client names. The customer
+       * saw "something went wrong"; the operator saw a stack trace with the
+       * refusal buried in it. And these are exactly the failures an operator
+       * CAN fix: dedicated accounts not enabled on the integration, a
+       * `preferred_bank` this business is not approved for, a key from the
+       * wrong environment. Every one arrives as the provider's own sentence,
+       * and every one was being thrown away.
+       *
+       * The sentence goes to the LOG, never to the customer: it names our
+       * integration and sometimes our merchant id. What the customer gets is
+       * a code their app can turn into a real message.
+       */
+      const rail = await this.#activeProviderName();
+      if (error instanceof ProviderRejectedError) {
+        this.#logger.error(
+          `${rail} REFUSED to open a naira account: ${error.message} ` +
+            `(provider code ${error.providerCode ?? 'none'}). This is a refusal, not an ` +
+            `outage — the credential is reaching them. Check that dedicated accounts are ` +
+            `enabled on the integration and that paystack_preferred_bank names a bank it ` +
+            `is approved for.`,
+        );
+        // `kyc_required` is a real answer a client already handles — Bitnob
+        // returns it for an unverified customer — so it is passed through
+        // rather than flattened into the generic code.
+        throw new UnprocessableEntityException({
+          error: error.providerCode === 'kyc_required' ? 'kyc_required' : 'account_issue_refused',
+        });
+      }
+      if (error instanceof ProviderContractError) {
+        this.#logger.error(
+          `${rail} answered a shape this adapter does not accept while opening a naira ` +
+            `account: ${error.message}. Their API has changed, or the credential belongs ` +
+            `to a different product; waiting will not fix it.`,
+        );
+        throw new ServiceUnavailableException({ error: 'account_issue_unavailable' });
+      }
+      if (error instanceof ProviderUnavailableError) {
+        this.#logger.error(`${rail} is unreachable while opening a naira account: ${error.message}`);
+        throw new ServiceUnavailableException({ error: 'account_issue_unavailable' });
       }
       throw error;
     }
@@ -277,6 +329,27 @@ export class FundingService {
    * The provider mapping is passed when it exists, so a verified customer
    * does not acquire a second customer record at the provider.
    */
+  /**
+   * WHICH RAIL IS ACTUALLY SERVING, for a log line that has to name it.
+   *
+   * `port.provider` is the configured DEFAULT and the switch says so, so a
+   * message built from it would name the wrong provider on a deployment that
+   * had flipped the setting — which is the one moment somebody is reading
+   * these logs. Falls back to the default rather than failing: a diagnostic
+   * that can itself throw makes an outage harder to read, not easier.
+   */
+  async #activeProviderName(): Promise<string> {
+    const switching = this.port as FundingPort & {
+      activeProvider?: () => Promise<string>;
+    };
+    if (typeof switching.activeProvider !== 'function') return this.port.provider;
+    try {
+      return await switching.activeProvider();
+    } catch {
+      return this.port.provider;
+    }
+  }
+
   async #fundingCustomer(userId: string): Promise<FundingCustomer> {
     const result = await this.pool.query<{
       email: string | null;

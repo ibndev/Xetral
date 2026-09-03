@@ -69,14 +69,10 @@ export default function AddMoney() {
               <div className="pending">{account.data.currency}</div>
             </div>
             <p className="hint">
-              Send to <strong>{account.data.account_name}</strong>. Yours permanently —
-              save it as a beneficiary.
+              Send to <strong>{account.data.account_name}</strong>. Yours permanently.
             </p>
             {account.data.status !== 'active' && (
-              <p className="hint">
-                Your account is still being activated. It will start accepting transfers
-                shortly.
-              </p>
+              <p className="hint">Still being activated. Transfers will start arriving shortly.</p>
             )}
           </>
         )}
@@ -99,30 +95,42 @@ export default function AddMoney() {
           default rail does not have it.
         */}
         {!account.loading && !has && (
-          <>
+          /*
+            EACH PIECE IN ITS OWN ROW, WITH ROOM AROUND IT.
+
+            This was three siblings inside a card whose default gap is tight
+            enough for a form: a line, a button and a second line, stacked hard
+            against one another so the primary action on the page read as part
+            of a paragraph. `.activate` is a small grid — the statement, the
+            button, then the ceiling — so the button is a deliberate act with
+            space either side rather than the middle of a sentence.
+          */
+          <div className="activate">
+            <p className="activate-lead">Your naira account is ready. Get it below.</p>
+
+            <div>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() =>
+                  void run(async () => {
+                    await client.fundingAccount();
+                    account.reload();
+                    return 'Your account is open.';
+                  })
+                }
+              >
+                {busy ? 'Activating…' : 'Activate Account'}{' '}
+                <Icon name="arrowRight" size={18} />
+              </button>
+            </div>
+
             <p className="hint">
-              Your naira account is ready. Get it below.
+              You can receive up to {'\u20A6'}50,000 a day straight away.
             </p>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() =>
-                void run(async () => {
-                  await client.fundingAccount();
-                  account.reload();
-                  return 'Your account is open.';
-                })
-              }
-            >
-              {busy ? 'Activating…' : 'Activate Account'}{' '}
-              <Icon name="arrowRight" size={18} />
-            </button>
-            <p className="hint">
-              You can receive up to {'\u20A6'}50,000 a day straight away. Verifying your
-              identity raises that, and is only asked for when you need it.
-            </p>
+
             <FormError error={issueError} code={issueCode} />
-          </>
+          </div>
         )}
 
         {/* Anything that is NOT the verification gate. A provider outage or a

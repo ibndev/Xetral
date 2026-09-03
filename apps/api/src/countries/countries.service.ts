@@ -23,6 +23,16 @@ export interface Country {
   readonly dial_code: string;
   readonly currency: string;
   readonly enabled: boolean;
+  /**
+   * HOW MONEY LEAVES HERE — 'bank' or 'mobile_money'.
+   *
+   * Sent so the Send screen can ask the right question. Nigeria is a bank
+   * code and a ten-digit NUBAN; Ghana and Kenya are a wallet on a phone
+   * number, and showing a customer in Accra a list of Nigerian banks is
+   * offering them a product their money cannot reach. Data rather than a
+   * `switch` in two apps, for the reason 040 gives about countries.
+   */
+  readonly payout_method: string;
 }
 
 @Injectable()
@@ -38,7 +48,7 @@ export class CountriesService {
    */
   async open(): Promise<readonly Country[]> {
     const result = await this.pool.query<Country>(
-      `SELECT code, name, dial_code, currency, enabled
+      `SELECT code, name, dial_code, currency, enabled, payout_method
          FROM countries WHERE enabled ORDER BY name`,
     );
     return result.rows;

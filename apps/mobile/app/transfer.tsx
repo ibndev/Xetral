@@ -103,6 +103,21 @@ export default function Transfer() {
    */
   const homeCountry = session.data?.country ?? 'NG';
 
+  /*
+   * HOW MONEY LEAVES WHERE THIS CUSTOMER IS — data, not a `switch`.
+   *
+   * The bank option offered a Nigerian bank list to everybody. In Ghana and
+   * Kenya money moves to a mobile money wallet on a phone number, so a
+   * customer in Accra was being offered a product their money cannot reach.
+   * 046 puts the answer on the country row, which is where 040 says a fact
+   * about a country belongs. 'bank' is the fallback: conservative, and what
+   * Nigeria needs.
+   */
+  const countries = useLoad(() => client.session.countries(), [client]);
+  const mobileMoney =
+    (countries.data?.find((c) => c.code === homeCountry)?.payout_method ?? 'bank') ===
+    'mobile_money';
+
   /* Loaded only when the bank tab is open: it is a provider call behind our
    * API, and a customer who never opens the tab never pays for it. */
   const banks = useLoad(
@@ -303,7 +318,11 @@ export default function Transfer() {
     <Shell back="/wallet" title="Send money">
       <Panel
         title="Send money"
-        subtitle="To a Xetral account or a Nigerian bank"
+        subtitle={
+          mobileMoney
+            ? 'To a Xetral account or a mobile money wallet'
+            : 'To a Xetral account or a bank account'
+        }
       >
         {/* Two destinations, one screen. `Select` rather than a pair of
             buttons: this app already draws every choice that way, and a
@@ -315,14 +334,17 @@ export default function Transfer() {
           onChange={(next) => setDestination(next as 'xetral' | 'bank')}
           options={[
             { value: 'xetral', label: 'A Xetral account' },
-            { value: 'bank', label: 'A bank account' },
+            {
+              value: 'bank',
+              label: mobileMoney ? 'A mobile money wallet' : 'A bank account',
+            },
           ]}
         />
 
         {destination === 'bank' ? (
           <>
             <Select
-              label="Bank"
+              label={mobileMoney ? 'Mobile money provider' : 'Bank'}
               value={bankCode}
               onChange={(code) => {
                 setBankCode(code);
@@ -333,17 +355,10 @@ export default function Transfer() {
                 label: bank.name,
               }))}
             />
-            {banks.error !== undefined && (
-              <Text style={styles.error}>
-                The bank list could not be loaded. Sending to a bank is
-                unavailable right now.
-              </Text>
-            )}
-
             <Field
-              label="Account number"
+              label={mobileMoney ? 'Wallet number' : 'Account number'}
               inputMode="numeric"
-              placeholder="0123456789"
+              placeholder={mobileMoney ? '0244123456' : '0123456789'}
               autoCapitalize="none"
               autoCorrect={false}
               maxLength={20}
@@ -361,7 +376,9 @@ export default function Transfer() {
             {beneficiary !== undefined && <Text style={styles.amount}>{beneficiary}</Text>}
             {lookupFailed && (
               <Text style={styles.error}>
-                We could not find that account. Check the number and the bank.
+                {mobileMoney
+                  ? 'We could not find that wallet. Check the number and the provider.'
+                  : 'We could not find that account. Check the number and the bank.'}
               </Text>
             )}
           </>

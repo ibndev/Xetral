@@ -46,7 +46,7 @@ export default function Crypto() {
   if (withdrawals.code === 'kyc_required') {
     return (
       <Shell>
-        <VerifyPrompt what="crypto" detail={withdrawals.error} />
+        <VerifyPrompt what="crypto" />
       </Shell>
     );
   }

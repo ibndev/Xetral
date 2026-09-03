@@ -60,8 +60,7 @@ export default function Settings() {
           ))}
         </View>
         <Text style={styles.hint}>
-          The header toggle switches between light and dark. This is where you hand
-          the choice back to the phone.
+          Follow the phone’s own setting.
         </Text>
       </Panel>
 

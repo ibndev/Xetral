@@ -936,6 +936,19 @@ export const SETTINGS: readonly Item[] = [
       'drift. Set it to what the issuer actually bills.',
   },
   {
+    name: 'payout_provider',
+    kind: 'setting',
+    failure: 'default-is-deliberate',
+    flow: 'bank payouts',
+    ifMissed:
+      'defaults to `paystack`, which is the rail this deployment already '  +
+      'holds a credential for. It is SEPARATE from `funding_provider` '  +
+      'because a business can be approved for dedicated accounts and not yet '  +
+      'for transfers — so check the transfers product is live before sending '  +
+      'money out. Payouts already sent keep being read from the rail that '  +
+      'sent them.',
+  },
+  {
     name: 'funding_provider',
     kind: 'setting',
     failure: 'default-is-deliberate',

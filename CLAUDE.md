@@ -702,6 +702,52 @@ Schema: `packages/ledger/sql/043_bank_payouts.sql`. Port in
   list of `Money` is a list in one currency and cannot be widened, not even
   with a cast.
 
+### Two payout rails, and how money leaves per country — non-obvious rules
+
+Schema: `packages/ledger/sql/046_payout_provider.sql`. Adapter in
+`packages/providers/src/paystack/payout-adapter.ts`, switch in
+`apps/api/src/payouts/payout-provider.ts`.
+
+- **THE BANK LIST HAD EXACTLY ONE IMPLEMENTATION AND IT WAS BITNOB'S**, built
+  only when `BITNOB_BASE_URL` is set. Paystack has been the default FUNDING
+  rail since 044, so the shipped deployment holds Paystack credentials and no
+  Bitnob ones — and on that deployment every method of the payout port
+  refused. The Send screen asked for banks, was refused, and told the customer
+  the list could not be loaded. Nothing was broken except that the only
+  adapter able to answer needed a credential nobody had.
+- **`payout_provider` IS SEPARATE FROM `funding_provider`**, deliberately.
+  Money in and money out are different products with different approvals: a
+  business can be live for dedicated accounts and not yet for transfers, and
+  one setting covering both would make enabling either mean claiming both.
+- **A PAYOUT RECORDS WHO SENT IT, and that column is immutable.** A
+  provider-side payout id is opaque and only its issuer can resolve it, so
+  reading the rail off the setting would make a payout in flight unresolvable
+  the moment an operator flipped it — and an unresolvable payout is one
+  nothing can settle or reverse, the exact state `bank_payouts_stuck` counts.
+  The default is `bitnob` because every row predating the column was sent by
+  the only adapter there was.
+- **PAYSTACK'S `country` IS A NAME, NOT AN ISO CODE** — `nigeria`, not `NG` —
+  and sending the code returns an EMPTY list rather than an error. "No banks"
+  and "broken credential" then look identical on screen, which is the whole
+  confusion this adapter exists to end.
+- **THE BANK LIST IS FILTERED TO WHAT CAN RECEIVE A TRANSFER.** Their
+  catalogue carries mobile money wallets and inactive entries; offering one
+  under a heading that says "Bank account" produces a selection that fails at
+  the lookup, which reads to the customer as their own account number being
+  wrong.
+- **SENDING IS TWO CALLS** — register the recipient, then transfer — because
+  Paystack pays a recipient rather than an account number. Only the second
+  moves money, and they are separated for the reason the Bitnob adapter's
+  quote and finalize are: a process that dies between them must be able to say
+  which one it got through.
+- **`payout_method` IS ON THE COUNTRY.** The Send screen offered a Nigerian
+  bank list everywhere; in Ghana and Kenya money moves to a mobile money
+  wallet on a phone number, so a customer in Accra was being offered a product
+  their money cannot reach. 040's argument is that a country is DATA, so this
+  is a column rather than a `switch` in two apps — and the default is `bank`,
+  the conservative answer, because a bank transfer that refuses is recoverable
+  and a send to a number that is not a wallet is not.
+
 ### Countries, and why a currency is not one — non-obvious rules
 
 Schema: `packages/ledger/sql/040_countries.sql`, seeded by `040_countries.seed.sql`.
@@ -1231,6 +1277,15 @@ Suspense   provider_float -> suspense           it arrived; we cannot say whose
 - **Issuing requires `provider_customers` to exist.** KYC is a prerequisite,
   never a side effect of tapping "add money".
 - **A forged webhook answers 401 and is dropped**, never 500 and never retried.
+- **A PROVIDER REFUSAL ON ACCOUNT ISSUANCE IS RELAYED, NOT SWALLOWED.** Every
+  error but a timeout fell through to a bare 500 with no code a client names:
+  the customer saw "something went wrong" and the operator saw a stack trace.
+  These are exactly the failures an operator CAN fix — dedicated accounts not
+  enabled on the integration, a `preferred_bank` the business is not approved
+  for, a key from the wrong environment — and each arrives as the provider's
+  own sentence. That sentence goes to the LOG, never to the customer, because
+  it names our integration; what the customer gets is `account_issue_refused`
+  or `account_issue_unavailable`, which their app can turn into real words.
 
 ### FX and remittance — non-obvious rules
 
@@ -2213,6 +2268,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/042_bitnob_v2.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/043_bank_payouts.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/044_paystack_funding.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/045_card_fee_split.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/046_payout_provider.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -2257,6 +2313,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/042_bitnob_v2.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/043_bank_payouts.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/044_paystack_funding.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/045_card_fee_split.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/046_payout_provider.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

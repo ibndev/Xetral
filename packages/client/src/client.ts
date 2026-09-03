@@ -24,6 +24,15 @@ export interface XetralCountry {
   readonly dial_code: string;
   readonly currency: string;
   readonly enabled: boolean;
+  /**
+   * HOW MONEY LEAVES HERE — 'bank' or 'mobile_money'.
+   *
+   * The Send screen asks a different question in each: a bank code and a
+   * ten-digit account number in Nigeria, a wallet on a phone number in Ghana
+   * and Kenya. Optional so an app built against an API that predates 046 does
+   * not break; callers fall back to 'bank', which is the conservative answer.
+   */
+  readonly payout_method?: string;
 }
 
 export interface Balance {

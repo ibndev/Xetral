@@ -794,20 +794,20 @@ h3 { font-size: 16px; }
   padding: 18px;
   border-radius: var(--r-md);
   /*
-   * BLACK, and the light on it is a SHEEN rather than a colour.
+   * PURE BLACK, and the light on it is a SHEEN rather than a colour.
    *
-   * It was navy with a blue glow, which reads as a themed panel — the card
-   * took the brand's hue and became another surface in the palette. A premium
-   * card is black: the material is the statement, and what moves on it is
-   * light rather than colour. So the gradient runs near-black to black off a
-   * single warm-neutral highlight in the top corner, the way light falls on a
-   * matte card held at an angle, and the edge is a hairline of that same
-   * light rather than a blue rule.
+   * The base used to start at #23262C, which is a mid grey — so the top third
+   * of the card read as charcoal and the whole thing looked washed out beside
+   * a black page. The material is now black end to end and EVERY light on it
+   * is white at low opacity: two soft highlights here, a diagonal sheen and a
+   * fine ruling in ::before. That is what makes it read as a glossy physical
+   * object rather than as a dark panel — the gloss is light falling on black,
+   * never a lighter black.
    */
   background:
-    radial-gradient(circle at 84% 4%, rgba(255, 255, 255, .16) 0%, transparent 34%),
-    radial-gradient(circle at 12% 96%, rgba(255, 255, 255, .05) 0%, transparent 42%),
-    linear-gradient(150deg, #23262C 0%, #131519 42%, #050506 100%);
+    radial-gradient(circle at 84% 4%, rgba(255, 255, 255, .18) 0%, transparent 36%),
+    radial-gradient(circle at 12% 96%, rgba(255, 255, 255, .06) 0%, transparent 44%),
+    linear-gradient(150deg, #0B0B0C 0%, #050505 45%, #000 100%);
   border: 1px solid rgba(255, 255, 255, .14);
   color: #fff;
   /* THE ONE SURFACE THAT KEEPS A SHADOW, and it is not an exception to the
@@ -840,8 +840,8 @@ h3 { font-size: 16px; }
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(160deg, transparent 30%, rgba(255, 255, 255, .10) 43%, transparent 49%),
-    repeating-linear-gradient(170deg, transparent 0 7px, rgba(255, 255, 255, .022) 8px 9px);
+    linear-gradient(160deg, transparent 28%, rgba(255, 255, 255, .14) 43%, transparent 50%),
+    repeating-linear-gradient(170deg, transparent 0 7px, rgba(255, 255, 255, .025) 8px 9px);
   pointer-events: none;
 }
 @media (min-width: 420px) { .virtual-card { padding: 22px; } }
@@ -892,13 +892,13 @@ h3 { font-size: 16px; }
   background:
     radial-gradient(circle at 84% 4%, rgba(255, 255, 255, .16) 0%, transparent 34%),
     radial-gradient(circle at 12% 96%, rgba(255, 255, 255, .05) 0%, transparent 42%),
-    linear-gradient(150deg, #1E2A3F 0%, #111A28 42%, #04070C 100%);
+    linear-gradient(150deg, #0B1220 0%, #06090F 45%, #000 100%);
 }
 .virtual-card.is-emerald {
   background:
     radial-gradient(circle at 84% 4%, rgba(255, 255, 255, .16) 0%, transparent 34%),
     radial-gradient(circle at 12% 96%, rgba(255, 255, 255, .05) 0%, transparent 42%),
-    linear-gradient(150deg, #1B3029 0%, #0E1D18 42%, #030706 100%);
+    linear-gradient(150deg, #08160F 0%, #040A07 45%, #000 100%);
 }
 
 /*
@@ -913,11 +913,11 @@ h3 { font-size: 16px; }
   border-radius: 8px;
   padding: 0;
   border: 2px solid transparent;
-  background: linear-gradient(150deg, #23262C 0%, #131519 42%, #050506 100%);
+  background: linear-gradient(150deg, #0B0B0C 0%, #050505 45%, #000 100%);
   cursor: pointer;
 }
-.swatch.is-sapphire { background: linear-gradient(150deg, #1E2A3F 0%, #111A28 42%, #04070C 100%); }
-.swatch.is-emerald  { background: linear-gradient(150deg, #1B3029 0%, #0E1D18 42%, #030706 100%); }
+.swatch.is-sapphire { background: linear-gradient(150deg, #0B1220 0%, #06090F 45%, #000 100%); }
+.swatch.is-emerald  { background: linear-gradient(150deg, #08160F 0%, #040A07 45%, #000 100%); }
 /* The selected one is ringed rather than enlarged: a swatch that grows shifts
    the two beside it, which reads as the row moving rather than as a choice. */
 .swatch[aria-pressed='true'] { border-color: var(--brand-500); }
@@ -1774,11 +1774,31 @@ td.right, th.right { text-align: right; padding-right: 0; }
   font-size: 13.5px;
   font-weight: 600;
 }
-/* The rail is a well and the selected pill comes back UP out of it, to the
-   page's own white — the one place inside a container where lighter is the
-   right direction, because the pill is the thing in front. */
-.segmented button.active { background: var(--surface-raised); color: var(--text); }
+/*
+ * THE SELECTED PILL IS INK, NOT PAPER, and this is a correction.
+ *
+ * It used to come UP out of the well to the page's own white, which is a
+ * defensible idea and reads as almost nothing: white on off-white, with the
+ * only other cue a text colour one step darker. On the Send screen — where
+ * the two tabs decide whether the money goes to a Xetral account or out to a
+ * bank — "which one is selected?" was a question a customer had to squint at.
+ *
+ * So the active tab takes the brand's ink and white text: the strongest
+ * contrast on the screen, on the one control where being wrong sends money
+ * somewhere else.
+ */
+.segmented button.active {
+  background: var(--brand-700);
+  color: var(--on-brand);
+}
 .segmented button:hover:not(.active) { background: transparent; color: var(--text); }
+/* The active pill keeps its ink on hover. Without this the global button
+   hover rule repaints it and the selected tab changes colour under the
+   pointer, which reads as the selection moving. */
+.segmented button.active:hover:where(:not(:disabled)) {
+  background: var(--brand-700);
+  color: var(--on-brand);
+}
 
 /* ONE LINE, AND IT SCROLLS RATHER THAN WRAPPING OR PUSHING THE PAGE.
  *
@@ -2616,3 +2636,26 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
    imply the fields below it stay put.
    --------------------------------------------------------------------------- */
 
+
+/*
+ * OPENING AN ACCOUNT: the statement, the act, the ceiling — three rows.
+ *
+ * These were three siblings of a `.card`, whose gap is set for the fields of
+ * a form, so the primary action on the screen a customer opens in order to
+ * put money in sat hard against a line of text above it and a line below.
+ * Explicit rows with the button in a wrapper of its own is what makes it read
+ * as a button rather than as part of a sentence, and the wrapper is what
+ * keeps it its own width instead of stretching across the card.
+ */
+.activate {
+  display: grid;
+  gap: var(--s-4);
+  margin-top: var(--s-4);
+}
+.activate-lead {
+  margin: 0;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+}
+.activate .hint { margin: 0; }

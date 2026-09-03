@@ -12,6 +12,7 @@ import {
   type BitnobCredential,
   PaystackClient,
   PaystackFundingAdapter,
+  PaystackPayoutAdapter,
   BitnobPayoutAdapter,
   TwilioAdapter,
   VtpassAdapter,
@@ -83,6 +84,7 @@ import { CryptoService } from './crypto/crypto.service.js';
 import { PayoutService } from './payouts/payout.service.js';
 import { PaystackWebhookService } from './funding/paystack-webhook.service.js';
 import { SwitchingFundingPort } from './funding/funding-provider.js';
+import { SwitchingPayoutPort } from './payouts/payout-provider.js';
 import { PayoutController } from './payouts/payout.controller.js';
 import { CryptoWebhookService } from './crypto/crypto-webhook.service.js';
 import { CryptoReconciliationService } from './crypto/crypto-reconciliation.service.js';
@@ -511,18 +513,64 @@ export function createFundingPort(
 export function createPayoutPort(
   config: ApiConfig,
   credentials?: ProviderCredentialService,
+  settings?: SettingsService,
 ): PayoutPort {
-  const { bitnobBaseUrl } = config;
+  const adapters = new Map<string, PayoutPort>();
 
-  if (bitnobBaseUrl === undefined) {
-    new Logger('Payouts').warn(
-      'BITNOB_BASE_URL is not set: sending money to a bank will refuse.',
+  /*
+   * PAYSTACK FIRST, AND THIS IS THE BUG IT FIXES.
+   *
+   * There was only ever a Bitnob adapter here, built only when
+   * `BITNOB_BASE_URL` is set. Paystack is the default FUNDING rail, so the
+   * shipped deployment holds Paystack credentials and no Bitnob ones — and on
+   * that deployment every method of this port refused. The Send screen asked
+   * for the bank list, got `payout_provider_not_configured`, and told the
+   * customer the list could not be loaded. Nothing was broken except that the
+   * only adapter that could answer needed a credential nobody had.
+   */
+  const { paystackBaseUrl } = config;
+  if (paystackBaseUrl !== undefined) {
+    adapters.set(
+      'paystack',
+      new PaystackPayoutAdapter({
+        client: new PaystackClient({
+          baseUrl: paystackBaseUrl,
+          secretKey: paystackSecretKey(config, credentials),
+        }),
+      }),
     );
+  }
+
+  const { bitnobBaseUrl } = config;
+  if (bitnobBaseUrl !== undefined) {
+    adapters.set(
+      'bitnob',
+      new BitnobPayoutAdapter({
+        client: new BitnobClient({
+          baseUrl: bitnobBaseUrl,
+          ...bitnobCredentials(config, credentials),
+        }),
+      }),
+    );
+  }
+
+  if (adapters.size === 0 || settings === undefined) {
+    if (adapters.size === 0) {
+      new Logger('Payouts').warn(
+        'Neither PAYSTACK_BASE_URL nor BITNOB_BASE_URL is set: sending money to a ' +
+          'bank will refuse, and the bank list will not load.',
+      );
+    }
+    // No settings service is the unit-test and app-factory path. One adapter
+    // and no switch is the honest shape there.
+    const only = adapters.values().next();
+    if (!only.done) return only.value;
+
     const refuse = async (): Promise<never> => {
       throw new ServiceUnavailableException({ error: 'payout_provider_not_configured' });
     };
     return {
-      provider: 'bitnob',
+      provider: 'paystack',
       banks: refuse,
       lookup: refuse,
       send: refuse,
@@ -530,12 +578,7 @@ export function createPayoutPort(
     };
   }
 
-  return new BitnobPayoutAdapter({
-    client: new BitnobClient({
-      baseUrl: bitnobBaseUrl,
-      ...bitnobCredentials(config, credentials),
-    }),
-  });
+  return new SwitchingPayoutPort({ adapters, settings, fallback: 'paystack' });
 }
 
 export function createCryptoPort(
@@ -971,13 +1014,20 @@ export class AppModule {
         },
         {
           provide: PAYOUT_PORT,
-          useFactory: (health: ProviderHealthService, credentials: ProviderCredentialService) =>
+          useFactory: (
+            health: ProviderHealthService,
+            credentials: ProviderCredentialService,
+            settings: SettingsService,
+          ) =>
             watched(
-              options.payoutPort ?? createPayoutPort(options.config, credentials),
-              'bitnob',
+              options.payoutPort ?? createPayoutPort(options.config, credentials, settings),
+              // The rail that actually sent is recorded on the payout row;
+              // this label is what `provider_health` buckets under, and the
+              // switch reports its default — the same arrangement funding uses.
+              'payouts',
               health,
             ),
-          inject: [ProviderHealthService, ProviderCredentialService],
+          inject: [ProviderHealthService, ProviderCredentialService, SettingsService],
         },
         {
           provide: FX_PORT,

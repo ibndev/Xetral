@@ -105,8 +105,17 @@ export default function AddMoney() {
           The default rail opens an account from what signup already holds.
         */}
         {!account.loading && !has && (
-          <>
-            <Text style={styles.hint}>Your naira account is ready. Get it below.</Text>
+          /*
+            EACH PIECE IN ITS OWN ROW, WITH ROOM AROUND IT — the web's
+            `.activate`, and the same reason. These were three siblings of a
+            Panel whose spacing is set for the fields of a form, so the
+            primary action on the screen a customer opens in order to put
+            money in sat hard against a line of text either side of it.
+          */
+          <View style={{ gap: space.lg, marginTop: space.md }}>
+            <Text style={[styles.h2, { marginBottom: 0 }]}>
+              Your naira account is ready. Get it below.
+            </Text>
             <Button
               label={busy ? 'Activating…' : 'Activate Account'}
               icon="arrowRight"
@@ -120,11 +129,10 @@ export default function AddMoney() {
               }
             />
             <Text style={styles.hint}>
-              You can receive up to {'\u20A6'}50,000 a day straight away. Verifying your
-              identity raises that, and is only asked for when you need it.
+              You can receive up to {'\u20A6'}50,000 a day straight away.
             </Text>
             <FormError error={issueError} code={issueCode} />
-          </>
+          </View>
         )}
 
         <FormError error={account.error} code={account.code} />

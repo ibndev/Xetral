@@ -70,8 +70,7 @@ export default function Forgot() {
                   that from the outside — and would leave somebody who mistyped
                   their address waiting for mail that is not coming. */}
               <p className="lead">
-                The link lasts one hour and can be used once. If nothing arrives,
-                check the address you typed and try again.
+                The link lasts one hour and works once.
               </p>
               <Link className="btn block" href="/signin">
                 Back to sign in

@@ -253,8 +253,7 @@ function Limits() {
       ))}
       {data.next_tier === 1 && (
         <p className="hint">
-          Verifying your identity raises every one of these, and is what lets us
-          issue you an account number and a card.
+          Verifying raises every limit here, and unlocks a dollar card.
         </p>
       )}
     </div>

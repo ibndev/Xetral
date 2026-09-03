@@ -136,6 +136,23 @@ function Transfer() {
    * is the only corridor this platform has opened.
    */
   const homeCountry = session.data?.country ?? 'NG';
+
+  /*
+   * HOW MONEY LEAVES WHERE THIS CUSTOMER IS — data, not a `switch`.
+   *
+   * The bank tab offered a Nigerian bank list to everybody. In Ghana and
+   * Kenya money moves to a mobile money wallet on a phone number, not to a
+   * ten-digit NUBAN, so a customer in Accra was being offered a product their
+   * money cannot reach. 046 puts the answer on the country row, which is
+   * where 040 says a fact about a country belongs.
+   *
+   * Falls back to 'bank' while the list loads and on an API that predates
+   * 046 — the conservative answer, and the one Nigeria needs.
+   */
+  const countries = useLoad(() => client.session.countries(), [client]);
+  const payoutMethod =
+    countries.data?.find((c) => c.code === homeCountry)?.payout_method ?? 'bank';
+  const mobileMoney = payoutMethod === 'mobile_money';
   /*
    * The bank list, loaded only when it is needed.
    *
@@ -402,7 +419,7 @@ function Transfer() {
     <Shell>
       <form className="card" onSubmit={review}>
         <h1>Send money</h1>
-        <h2>To a Xetral account or a Nigerian bank</h2>
+        <h2>{mobileMoney ? 'To a Xetral account or a mobile money wallet' : 'To a Xetral account or a bank account'}</h2>
 
         {/* Two destinations, one screen. Deliberately NOT the `.choice`
             pattern that broke this page's layout once: the global button rule
@@ -422,7 +439,7 @@ function Transfer() {
               className={destination === 'bank' ? 'active' : ''}
               onClick={() => setDestination('bank')}
             >
-              Bank account
+              {mobileMoney ? 'Mobile money' : 'Bank account'}
             </button>
           </div>
         )}
@@ -430,7 +447,7 @@ function Transfer() {
         {destination === 'bank' ? (
           <>
             <label id="transfer-bank-label">
-              Bank
+              {mobileMoney ? 'Mobile money provider' : 'Bank'}
               <Select
                 labelledBy="transfer-bank-label"
                 value={bankCode}
@@ -443,21 +460,15 @@ function Transfer() {
                   label: bank.name,
                 }))}
               />
-              {banks.error !== undefined && (
-                <span className="hint">
-                  The bank list could not be loaded. Sending to a bank is
-                  unavailable right now.
-                </span>
-              )}
             </label>
 
             <label>
-              Account number
+              {mobileMoney ? 'Wallet number' : 'Account number'}
               <input
                 type="text"
                 inputMode="numeric"
                 autoComplete="off"
-                placeholder="0123456789"
+                placeholder={mobileMoney ? '0244123456' : '0123456789'}
                 value={accountNumber}
                 maxLength={20}
                 onChange={(e) => {

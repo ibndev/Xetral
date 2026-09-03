@@ -131,6 +131,7 @@ jobs:
             -f packages/ledger/sql/043_bank_payouts.sql \
             -f packages/ledger/sql/044_paystack_funding.sql \
             -f packages/ledger/sql/045_card_fee_split.sql \
+            -f packages/ledger/sql/046_payout_provider.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       - name: Ledger and identity invariants
@@ -184,6 +185,7 @@ jobs:
                    packages/ledger/sql/043_bank_payouts.test.sql \
                    packages/ledger/sql/044_paystack_funding.test.sql \
                    packages/ledger/sql/045_card_fee_split.test.sql \
+                   packages/ledger/sql/046_payout_provider.test.sql \
                    packages/ledger/sql/099_least_privilege.test.sql; do
             echo "== $f"
             psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
@@ -268,6 +270,7 @@ jobs:
             -f packages/ledger/sql/043_bank_payouts.sql \
             -f packages/ledger/sql/044_paystack_funding.sql \
             -f packages/ledger/sql/045_card_fee_split.sql \
+            -f packages/ledger/sql/046_payout_provider.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       # ------------------------------------------------------------------

@@ -21,6 +21,7 @@ export * from './bitnob/funding-webhooks.js';
 export * from './paystack/client.js';
 export * from './paystack/funding-adapter.js';
 export * from './paystack/funding-webhooks.js';
+export * from './paystack/payout-adapter.js';
 export * from './bitnob/crypto-adapter.js';
 export * from './bitnob/crypto-webhooks.js';
 export * from './bitnob/fx-adapter.js';

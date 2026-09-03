@@ -161,6 +161,11 @@ const API_ERROR_CODES = [
 
   /* funding */
   'account_issue_pending',
+  // The rail UNDERSTOOD and refused: dedicated accounts not enabled on the
+  // integration, a preferred bank it is not approved for. An operator fixes
+  // this, and the provider's own sentence is in the API log.
+  'account_issue_refused',
+  'account_issue_unavailable',
   'deposit_not_found',
   'funding_provider_not_configured',
 

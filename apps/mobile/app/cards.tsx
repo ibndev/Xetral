@@ -57,6 +57,9 @@ export default function Cards() {
    */
   const [colour, setColour] = useState<CardColour>('graphite');
 
+  /** Set by tapping Create card without a verified identity. */
+  const [askingToVerify, setAskingToVerify] = useState(false);
+
   return (
     <Shell>
       <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: space.md }}>
@@ -105,36 +108,41 @@ export default function Cards() {
         everywhere else and wrong at exactly this seam.
       */}
       {/*
-        KYC BEFORE ANYTHING ELSE, and this is the bug it fixes.
-        `kyc_required` is refused by ISSUING, not by the list — the check
-        above only catches a list that refuses, which it does not. So an
-        unverified customer saw the offer, tapped Create card, was asked for a
-        transaction PIN, typed it, and only THEN learnt they needed to verify.
-        The one screen where the requirement is regulatory asked for the wrong
-        secret first.
-      */}
-      {(none || adding) && identity.data?.status !== 'approved' && !identity.loading && (
-        <View style={{ marginTop: space.lg }}>
-          <VerifyPrompt
-            what="a USD card"
-            title="As required by CBN, please complete your KYC."
-            detail="A dollar card is issued in your name by a licensed partner, and the Central Bank requires an identified customer before one can be created. It takes a minute — we already have most of what is needed."
-            cta="Verify KYC"
-          />
-        </View>
-      )}
+        THE OFFER IS ALWAYS SHOWN; THE KYC SECTION APPEARS WHEN THEY ASK FOR A
+        CARD — the web's arrangement, and the same reasoning. Hiding the offer
+        from an unverified customer means they never learn what the product is
+        or what it costs; showing it and then asking for a PIN before
+        mentioning KYC is the opposite mistake.
 
-      {(none || adding) && identity.data?.status === 'approved' && (
+        BITNOB NEEDS THE IDENTITY BEFORE IT WILL ISSUE, which is why the check
+        is here and not after payment: `provider_customers` is written by KYC
+        approval and `POST /v1/cards` refuses without it, before the price is
+        charged. Taking the money first would be charging for a card we
+        already know cannot be created.
+      */}
+      {(none || adding) && !askingToVerify && (
         <View style={{ marginTop: space.lg }}>
         <Issue
           price={cards.data?.issuance_fee}
           colour={colour}
           onColour={setColour}
+          verified={identity.data?.status === 'approved'}
+          onNeedsVerification={() => setAskingToVerify(true)}
           onIssued={() => {
             setAdding(false);
             cards.reload();
           }}
         />
+        </View>
+      )}
+
+      {(none || adding) && askingToVerify && (
+        <View style={{ marginTop: space.lg }}>
+          <VerifyPrompt
+            what="a USD card"
+            title="As required by CBN, please complete your KYC."
+            cta="Verify KYC"
+          />
         </View>
       )}
     </Shell>
@@ -161,9 +169,11 @@ export default function Cards() {
  * palette INVERTS for dark, and a card face built from it turns near-white.
  */
 const CARD_FACES: Record<string, string> = {
-  graphite: '#0B0B0D',
-  sapphire: '#0D1725',
-  emerald: '#0A1A15',
+  // PURE BLACK, matching the web's base after it stopped starting at a mid
+  // grey. The gloss is the translucent white disc below, not a lighter black.
+  graphite: '#000000',
+  sapphire: '#070C15',
+  emerald: '#04100A',
 };
 
 function CardFace({
@@ -248,7 +258,7 @@ function CardFace({
           borderRadius: 110,
           // WHITE, not blue. On a black face a blue disc is a colour cast; a
           // white one is light falling on the material.
-          backgroundColor: 'rgba(255,255,255,.10)',
+          backgroundColor: 'rgba(255,255,255,.13)',
         }}
       />
 
@@ -655,12 +665,17 @@ function Issue({
   price,
   colour,
   onColour,
+  verified,
+  onNeedsVerification,
   onIssued,
 }: {
   /** From the server, never from this file — see the web's Issue. */
   readonly price: string | undefined;
   readonly colour: CardColour;
   readonly onColour: (colour: CardColour) => void;
+  /** Whether Bitnob will accept an issue for this customer at all. */
+  readonly verified: boolean;
+  readonly onNeedsVerification: () => void;
   readonly onIssued: () => void;
 }) {
   const client = useXetral();
@@ -875,7 +890,7 @@ function Issue({
           label="Create card"
           icon="arrowRight"
           disabled={price === undefined}
-          onPress={() => setStage('confirm')}
+          onPress={() => (verified ? setStage('confirm') : onNeedsVerification())}
         />
       </View>
 

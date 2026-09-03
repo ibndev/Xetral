@@ -114,21 +114,25 @@ export function Done({ message }: { readonly message: string | undefined }) {
  * It names what still works, which is the part that stops "verify your
  * identity" on a card screen reading as "the whole app is locked".
  */
+/**
+ * ONE LINE AND ONE BUTTON — the web's VerifyPrompt, and the same reasoning.
+ * This carried three paragraphs; a person who has just tapped "Create card"
+ * wants to know what to do next, and reading four sentences to find a button
+ * is slower than the verification itself.
+ */
 export function VerifyPrompt({
   what,
   /**
-   * The heading and the detail, when the reason is REGULATORY rather than
-   * about a partner's policy. A card is refused because the CBN requires an
-   * identified customer, and telling somebody the rule that binds us is the
-   * difference between "they want more forms" and "this is the law".
+   * The line, when the reason is REGULATORY rather than about a partner's
+   * policy. A card is refused because the CBN requires an identified customer,
+   * and telling somebody the rule that binds us is the difference between
+   * "they want more forms" and "this is the law".
    */
   title,
-  detail,
   cta,
 }: {
   readonly what: string;
   readonly title?: string | undefined;
-  readonly detail?: string | undefined;
   readonly cta?: string | undefined;
 }) {
   const styles = useStyles();
@@ -148,14 +152,8 @@ export function VerifyPrompt({
       >
         <Icon name="shield" size={20} color={colors.info} />
       </View>
-      <Text style={styles.h2}>{title ?? `Verify your identity for ${what}`}</Text>
-      <Text style={styles.lead}>
-        {detail ??
-          `${what} is issued through a licensed partner, who can only issue it to a verified person.`}
-      </Text>
-      <Text style={styles.hint}>
-        Your naira wallet, transfers, airtime, data and bills all work without
-        this.
+      <Text style={[styles.h2, { marginBottom: space.lg }]}>
+        {title ?? `Verify your identity for ${what}`}
       </Text>
       <Link href={'/kyc' as never} asChild>
         <Pressable accessibilityRole="button" style={styles.button}>

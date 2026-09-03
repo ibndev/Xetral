@@ -59,6 +59,9 @@ export default function Cards() {
    */
   const [colour, setColour] = useState<CardColour>('graphite');
 
+  /** Set by tapping Create card without a verified identity. */
+  const [askingToVerify, setAskingToVerify] = useState(false);
+
   return (
     <Shell>
       <div className="section-head row-between">
@@ -76,7 +79,7 @@ export default function Cards() {
       {loading && <p className="spinner">Loading…</p>}
       {error !== undefined &&
         (code === 'kyc_required' ? (
-          <VerifyPrompt what="a USD card" detail={error} />
+          <VerifyPrompt what="a USD card" />
         ) : (
           <p className="error">{error}</p>
         ))}
@@ -101,32 +104,39 @@ export default function Cards() {
       ))}
 
       {/*
-        KYC BEFORE ANYTHING ELSE, and this is the bug it fixes.
-        `kyc_required` is refused by ISSUING, not by the list — so an
-        unverified customer saw the offer, tapped Create card, was asked for a
-        transaction PIN, typed it, and only THEN learnt they needed to verify.
-        The one screen where the requirement is regulatory asked for the wrong
-        secret first.
+        THE OFFER IS ALWAYS SHOWN; THE KYC SECTION APPEARS WHEN THEY ASK FOR A
+        CARD. It used to be the other way round — an unverified customer never
+        saw what the product was or what it cost, only a wall — which is the
+        opposite mistake to the one before it, where they saw the offer and
+        were asked for a PIN before being told about KYC.
       */}
-      {issuing && identity.data?.status !== 'approved' && !identity.loading && (
-        <VerifyPrompt
-          what="a USD card"
-          title="As required by CBN, please complete your KYC."
-          detail="A dollar card is issued in your name by a licensed partner, and the Central Bank requires an identified customer before one can be created. It takes a minute — we already have most of what is needed."
-          cta="Verify KYC"
-        />
-      )}
-
-      {issuing && identity.data?.status === 'approved' && (
+      {issuing && !askingToVerify && (
         <Issue
           price={data?.issuance_fee}
           colour={colour}
           onColour={setColour}
+          /*
+           * BITNOB NEEDS THE IDENTITY BEFORE IT WILL ISSUE, so the check is
+           * here rather than after payment. `provider_customers` is written by
+           * KYC approval and `POST /v1/cards` refuses without it — before the
+           * price is charged. Taking the money first would be charging for a
+           * card we already know cannot be created.
+           */
+          verified={identity.data?.status === 'approved'}
+          onNeedsVerification={() => setAskingToVerify(true)}
           onIssued={() => {
             setAdding(false);
             reload();
           }}
           {...(adding ? { onCancel: () => setAdding(false) } : {})}
+        />
+      )}
+
+      {issuing && askingToVerify && (
+        <VerifyPrompt
+          what="a USD card"
+          title="As required by CBN, please complete your KYC."
+          cta="Verify KYC"
         />
       )}
     </Shell>
@@ -606,6 +616,8 @@ function Issue({
   price,
   colour,
   onColour,
+  verified,
+  onNeedsVerification,
   onIssued,
   onCancel,
 }: {
@@ -613,6 +625,9 @@ function Issue({
   price: string | undefined;
   colour: CardColour;
   onColour: (colour: CardColour) => void;
+  /** Whether Bitnob will accept an issue for this customer at all. */
+  verified: boolean;
+  onNeedsVerification: () => void;
   onIssued: () => void;
   onCancel?: () => void;
 }) {
@@ -815,7 +830,11 @@ function Issue({
           <p className="price">{price === undefined ? '—' : free ? 'Free' : `$${price}`}</p>
         </div>
 
-        <button type="button" onClick={() => setStage('confirm')} disabled={price === undefined}>
+        <button
+          type="button"
+          onClick={() => (verified ? setStage('confirm') : onNeedsVerification())}
+          disabled={price === undefined}
+        >
           Create card <Icon name="arrowRight" size={18} />
         </button>
       </div>

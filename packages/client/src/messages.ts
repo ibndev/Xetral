@@ -149,6 +149,19 @@ export function messageFor(error: unknown): string {
       return 'Too many wrong codes. Try again in 15 minutes.';
     case 'totp_already_enrolled':
       return 'An authenticator is already set up. Replacing it is an administrator action.';
+    /*
+     * OPENING A NAIRA ACCOUNT, and the three answers are deliberately
+     * different. `account_issue_pending` is "we do not know yet"; the other
+     * two are ours to fix and say so, rather than telling a customer to try
+     * again at something that will keep failing until an operator acts.
+     */
+    case 'account_issue_pending':
+      return 'Your account is being opened. Check back in a moment.';
+    case 'account_issue_refused':
+    case 'account_issue_unavailable':
+      return 'We could not open your account number just now. We are on it — try again shortly.';
+    case 'funding_provider_not_configured':
+      return 'Adding money is not available yet.';
     case 'network':
       return 'No connection. Check your network and try again.';
     case 'invalid_request':

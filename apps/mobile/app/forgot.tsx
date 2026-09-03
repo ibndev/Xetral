@@ -79,9 +79,7 @@ export default function Forgot() {
             // us, on purpose, and inventing certainty here would leave somebody
             // who mistyped their address waiting for mail that is not coming.
             <Text style={styles.lead}>
-              The link lasts one hour and can be used once. Open it on this
-              phone or on a computer. If nothing arrives, check the address you
-              typed and ask again.
+              The link lasts one hour and works once.
             </Text>
           ) : (
             <>
