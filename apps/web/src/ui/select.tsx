@@ -174,14 +174,39 @@ export function Select({
     const onPointerDown = (event: PointerEvent): void => {
       if (!root.current?.contains(event.target as Node)) setOpen(false);
     };
-    // A scroll would slide the list away from the trigger it belongs to.
-    const onScroll = (): void => setOpen(false);
+    /*
+     * A WIDTH CHANGE CLOSES THE LIST. A HEIGHT CHANGE MUST NOT.
+     *
+     * THE FAILURE THIS EXISTS FOR: the bank picker closed the instant it was
+     * tapped, on a phone, every time — and only the bank picker, which is the
+     * only SEARCHABLE list in the product.
+     *
+     * Opening a searchable select focuses its filter box. Focusing an input on
+     * a handset raises the on-screen keyboard. The keyboard shrinks the
+     * viewport, the browser fires `resize`, and this handler closed the list
+     * that had just opened. So the component's own opening sequence triggered
+     * its own closing, deterministically, and only where a keyboard exists —
+     * which is why it never showed on a laptop.
+     *
+     * The original intent was that a layout change slides the list away from
+     * its trigger. That was never true of THIS list: it renders inside the
+     * control's own stacking context, in ordinary flow, so it moves with the
+     * trigger. What remains worth closing on is a real layout change — a
+     * rotation or a window drag — and those change the WIDTH. A keyboard does
+     * not.
+     */
+    let width = window.innerWidth;
+    const onResize = (): void => {
+      if (window.innerWidth === width) return;
+      width = window.innerWidth;
+      setOpen(false);
+    };
 
     document.addEventListener('pointerdown', onPointerDown);
-    window.addEventListener('resize', onScroll);
+    window.addEventListener('resize', onResize);
     return () => {
       document.removeEventListener('pointerdown', onPointerDown);
-      window.removeEventListener('resize', onScroll);
+      window.removeEventListener('resize', onResize);
     };
   }, [open]);
 

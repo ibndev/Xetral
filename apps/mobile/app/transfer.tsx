@@ -378,7 +378,16 @@ export default function Transfer() {
             />
             {/* THE ONLY THING ON THIS SCREEN THE SENDER DID NOT WRITE. */}
             {lookingUp && <Text style={styles.muted}>Checking the name…</Text>}
-            {beneficiary !== undefined && <Text style={styles.amount}>{beneficiary}</Text>}
+            {/*
+              `styles.beneficiary`, not `styles.amount`. The amount style is
+              the tabular mono face this screen uses for FIGURES, and a
+              person's name set in it reads as a serial number. This is small,
+              semibold and in the theme's own success colour — the same
+              treatment the web screen gives it, and legible on both grounds.
+            */}
+            {beneficiary !== undefined && (
+              <Text style={styles.beneficiary}>{beneficiary}</Text>
+            )}
             {lookupFailed && (
               <Text style={styles.error}>
                 {mobileMoney

@@ -150,8 +150,25 @@ export class AdminService {
      */
     const rows = await this.pool.query<UserSummary & { row_id: string }>(
       // nosemgrep: semgrep.no-interpolated-sql
+      /*
+       * TWO NAMES, AND THE LIST NEEDS BOTH.
+       *
+       * `u.full_name` is what somebody typed about themselves at signup and
+       * `k.full_name` is what a reviewer read off a document. 040 keeps them
+       * apart because only the second may inform a money decision — and the
+       * accounts that predate the signup field have ONLY the second, so a
+       * screen reading the first alone shows a customer list with no names in
+       * it at all.
+       *
+       * Both are returned and the screen decides. Nothing here collapses
+       * them into one column, which is what would make the distinction
+       * quietly disappear.
+       */
       `SELECT u.id::text AS row_id, u.uuid AS id, u.email, u.status, u.created_at,
               u.full_name, u.phone, u.handle,
+              (SELECT k.full_name FROM kyc_submissions k
+                WHERE k.user_id = u.id AND k.status IN ('approved','pending')
+                ORDER BY k.id DESC LIMIT 1) AS verified_name,
               (SELECT k.status::text FROM kyc_submissions k
                 WHERE k.user_id = u.id ORDER BY k.id DESC LIMIT 1) AS kyc_status
          FROM users u
@@ -171,8 +188,29 @@ export class AdminService {
     const row = found.rows[0];
     if (row === undefined) throw new NotFoundException({ error: 'user_not_found' });
 
+    /*
+     * SEVEN INDEPENDENT QUESTIONS, NOT ONE ALL-OR-NOTHING ANSWER.
+     *
+     * THE FAILURE THIS EXISTS FOR. These ran under `Promise.all`, so ONE
+     * failing query took the whole page down — and the page then rendered
+     * every field as "not set", which reads as a customer with no name, no
+     * email and no phone rather than as a screen that did not load. An
+     * operator looking at it concludes the account is broken; the account is
+     * fine.
+     *
+     * That is exactly wrong for a support screen. Its whole purpose is to be
+     * usable during an incident, and an incident is when a table is missing,
+     * a migration is behind, or a view has been replaced. Cards failing to
+     * load is a reason to show no cards, not a reason to hide somebody's
+     * phone number.
+     *
+     * So every section stands alone, and a failing one is LOGGED BY NAME —
+     * which is the part that was missing. The profile is the exception: it is
+     * the identity of the page, and rendering a customer whose own row could
+     * not be read would be a page about nobody.
+     */
     const [profile, balances, devices, statusHistory, tierHistory, tierLimits, cards] =
-      await Promise.all([
+      await this.#sections(row.id, [
       this.pool.query(
         /*
          * TWO NAMES AND TWO PHONE NUMBERS, KEPT APART ON PURPOSE.
@@ -246,14 +284,60 @@ export class AdminService {
     ]);
 
     return {
-      profile: profile.rows[0] ?? {},
-      balances: balances.rows,
-      devices: devices.rows,
-      status_history: statusHistory.rows,
-      tier_history: tierHistory.rows,
-      tier_limits: tierLimits.rows,
-      cards: cards.rows,
+      // `?? []` on each: the array destructuring above is positional and
+      // TypeScript cannot know `#sections` returns exactly seven, so the
+      // fallbacks are the compiler's price for a positional API rather than a
+      // claim that a section can be absent.
+      profile: (profile ?? [])[0] ?? {},
+      balances: balances ?? [],
+      devices: devices ?? [],
+      status_history: statusHistory ?? [],
+      tier_history: tierHistory ?? [],
+      tier_limits: tierLimits ?? [],
+      cards: cards ?? [],
     };
+  }
+
+  /**
+   * Runs each section, names the ones that failed, and returns the rest.
+   *
+   * The names are positional and match the destructuring at the call site.
+   * A section that throws yields an empty list and one log line saying WHICH
+   * — so "the cards panel is empty" and "the cards query is broken" stop
+   * looking identical, which is the only reason anybody could tell them
+   * apart.
+   */
+  async #sections(
+    userId: string,
+    queries: readonly Promise<{ rows: unknown[] }>[],
+  ): Promise<Record<string, unknown>[][]> {
+    const NAMES = [
+      'profile',
+      'balances',
+      'devices',
+      'status history',
+      'tier history',
+      'tier limits',
+      'cards',
+    ] as const;
+
+    const settled = await Promise.allSettled(queries);
+
+    return settled.map((result, index) => {
+      if (result.status === 'fulfilled') return result.value.rows as Record<string, unknown>[];
+
+      const name = NAMES[index] ?? `section ${index}`;
+      const reason = result.reason;
+      this.#logger.error(
+        `the ${name} section of the customer view failed for user ${userId}: ` +
+          `${reason instanceof Error ? `${reason.name}: ${reason.message}` : String(reason)}`,
+      );
+
+      // The profile IS the page. Everything else degrades to an empty panel;
+      // a customer whose own row cannot be read is not a page to render.
+      if (index === 0) throw reason;
+      return [];
+    });
   }
 
   /**

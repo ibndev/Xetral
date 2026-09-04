@@ -22,6 +22,20 @@ export default function UserDetail({ params }: { params: Promise<{ id: string }>
   const { id } = use(params);
   const admin = useAdmin();
   const detail = useLoad(() => admin.user(id), [admin, id]);
+  const [copied, setCopied] = useState(false);
+
+  function copyId(): void {
+    // Best effort. `navigator.clipboard` is unavailable over plain HTTP and
+    // in some embedded browsers, and a support screen must not throw because
+    // somebody tapped an id.
+    void navigator.clipboard?.writeText(id).then(
+      () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1600);
+      },
+      () => undefined,
+    );
+  }
 
   const profile = (detail.data?.profile ?? {}) as Record<string, string>;
   const balances = detail.data?.balances ?? [];
@@ -33,7 +47,7 @@ export default function UserDetail({ params }: { params: Promise<{ id: string }>
   return (
     <>
       <div className="panel">
-        <h1>{profile['account_name'] ?? profile['email'] ?? 'Customer'}</h1>
+        <h1>{profile['account_name'] ?? profile['full_name'] ?? profile['email'] ?? 'Customer'}</h1>
         <h2>
           <Link href="/admin/users">← All customers</Link>
         </h2>
@@ -94,9 +108,25 @@ export default function UserDetail({ params }: { params: Promise<{ id: string }>
           <span className="muted">Country</span>
           <span>{profile['country'] ?? <span className="muted">not set</span>}</span>
         </div>
+        {/*
+          THE SHORT FORM, WITH THE WHOLE THING ON DEMAND.
+
+          A UUID is thirty-six characters and on this row it was wider than
+          every other value on the page, so the one line an operator reads
+          most — the name, the email, the phone — sat under a wall of hex.
+
+          The first eight characters of a v4 UUID are thirty-two random bits.
+          That is plenty to say "the customer you are looking at" in a ticket
+          or across a desk, and it is NOT an identifier anything accepts: the
+          API takes the full UUID, so a short form cannot be pasted somewhere
+          it would match the wrong person. Whoever needs the real one opens
+          the row and copies it.
+        */}
         <div className="row">
           <span className="muted">Customer id</span>
-          <span className="mono">{id}</span>
+          <span className="mono" title={id} style={{ cursor: 'pointer' }} onClick={copyId}>
+            {copied ? 'copied' : `${id.slice(0, 8)}…`}
+          </span>
         </div>
         <div className="row">
           <span className="muted">Joined</span>

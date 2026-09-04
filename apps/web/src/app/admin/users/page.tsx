@@ -17,6 +17,24 @@ import { Select } from '@/ui/select';
  * that renders the whole customer table is a screen that puts the whole
  * customer table into a browser cache, a screenshot and a support ticket.
  */
+/**
+ * WHO THIS IS, in one line.
+ *
+ * The signup name first, then the name a reviewer read off a document, then
+ * the email address. The order is the point: `full_name` is what the customer
+ * calls themselves and is the right thing to greet them by, while
+ * `verified_name` is the only one a money decision may read — so the display
+ * prefers the friendly one and falls back to the documented one rather than
+ * showing an account with no name at all.
+ */
+function nameOf(user: {
+  readonly full_name: string | null;
+  readonly verified_name: string | null;
+  readonly email: string | null;
+}): string {
+  return user.full_name ?? user.verified_name ?? user.email ?? 'Customer';
+}
+
 export default function Users() {
   const admin = useAdmin();
   const [search, setSearch] = useState('');
@@ -92,27 +110,30 @@ export default function Users() {
               {users.data.map((user) => (
                 <tr key={user.id}>
                   {/*
-                    THE NAME LEADS AND THE ADDRESS IS UNDER IT, ONCE.
-                    
-                    This column was an email address alone — the identifier
-                    support has LEAST often, since a customer on the phone
-                    gives a name and somebody reporting a payment link gives a
-                    handle. The first fix put the name on top and the address
-                    beneath, and on an account with no name that printed the
-                    SAME address twice, which reads as a rendering bug.
+                    THE NAME ON TOP, THE WHOLE EMAIL UNDER IT.
 
-                    So the second line carries only what the first is not
-                    already saying. `full_name` is what the customer typed
-                    about themselves — never the verified name, which only a
-                    reviewer reading a document establishes.
+                    Two rounds got this wrong in opposite directions. The
+                    column started as an email address alone — the identifier
+                    support has LEAST often, since a customer on the phone
+                    gives a name. Then the name went on top and the address
+                    beneath it was hidden whenever the name was missing, which
+                    on these accounts meant the address appeared twice.
+
+                    Both lines now say a different thing, always: who this is,
+                    and how to reach them. `full_name` is what the customer
+                    typed about themselves — never the verified name, which
+                    only a reviewer reading a document establishes.
                   */}
                   <td>
-                    <Link href={`/admin/users/${user.id}`}>
-                      {user.full_name ?? user.email ?? 'Customer'}
-                    </Link>
+                    <Link href={`/admin/users/${user.id}`}>{nameOf(user)}</Link>
                     <div className="cell-sub">
-                      {[user.full_name === null ? null : user.email,
-                        user.handle === null ? null : `@${user.handle}`]
+                      {[
+                        // The address, unless the line above is already it —
+                        // an account with neither name printed its own email
+                        // twice, which reads as a rendering fault.
+                        nameOf(user) === user.email ? null : user.email,
+                        user.handle === null ? null : `@${user.handle}`,
+                      ]
                         .filter((part) => part !== null && part !== '')
                         .join(' · ')}
                     </div>

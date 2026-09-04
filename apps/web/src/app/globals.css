@@ -2840,3 +2840,28 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
   font-size: 12.5px;
   color: var(--text-3);
 }
+
+/*
+ * THE NAME THE BANK RETURNED, under the account number.
+ *
+ * ITS OWN CLASS, WITH ITS OWN COLOUR, rather than `hint ok` — which set
+ * everything about the text except the colour, and got one from whichever of
+ * `.hint` and `.ok` happened to come later in this file. Two single-class
+ * selectors at equal specificity resolved by source order is not a decision,
+ * it is a coincidence, and it is the same shape as the icon-button collision
+ * `button-specificity.test.ts` exists because of.
+ *
+ * This is the ONLY thing on the transfer screen the sender did not type. An
+ * account number that passes every format check can still belong to a
+ * stranger, and the bank's own answer is the one claim about the beneficiary
+ * that does not come from whoever is sending the money — so it has to be
+ * legible in both themes, and small enough not to read as an error.
+ */
+.beneficiary {
+  display: block;
+  margin: 6px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--ok);
+}

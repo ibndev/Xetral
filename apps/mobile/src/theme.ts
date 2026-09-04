@@ -538,6 +538,24 @@ function buildSheet(colors: Palette) {
 
   error: { color: colors.danger, fontSize: 13.5, marginTop: 10 },
   ok: { color: colors.ok, fontSize: 13.5, marginTop: 10 },
+  /*
+   * THE NAME THE BANK RETURNED, under the account number on the Send screen.
+   *
+   * The only thing on that screen the sender did not type. An account number
+   * that passes every format check can still belong to a stranger, and the
+   * bank's own answer is the one claim about the beneficiary that does not
+   * come from whoever is sending the money — so it has to be legible on both
+   * grounds and small enough not to read as an error.
+   *
+   * NOT `amount`, which is the tabular mono face used for FIGURES: a person's
+   * name set in it reads as a serial number.
+   */
+  beneficiary: {
+    color: colors.ok,
+    fontSize: 13,
+    fontFamily: font.sansSemi,
+    marginTop: 6,
+  },
   muted: { color: colors.text3, fontFamily: font.sans, fontSize: 12.5 },
     link: { color: colors.link, fontFamily: font.sansSemi, fontSize: 14.5 },
   });

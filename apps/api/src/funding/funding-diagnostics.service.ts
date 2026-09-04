@@ -185,36 +185,97 @@ export class FundingDiagnosticsService {
    * operator reads the one line that names the file to apply.
    */
   async #schemaCheck(): Promise<DiagnosticCheck> {
+    /*
+     * COLUMNS **AND** RELATIONS, because a migration behind shows up as both.
+     *
+     * The first version of this check named five COLUMNS from 044 to 046 —
+     * the ones the account-issuance INSERT writes — and that was too narrow
+     * by exactly the amount that matters. A deployment can be behind by a
+     * whole migration, and then it is a TABLE or a VIEW that is absent: the
+     * customer view reads `card_history` and `kyc_tier_limits`, the admin
+     * queues read a dozen views, and any one of them missing is a 500 on a
+     * screen whose other panels work perfectly.
+     *
+     * Written out rather than derived from the SQL directory, for the reason
+     * `INTRODUCED_BY` is: a list built at runtime from files shipped beside
+     * the bundle reports whatever the bundle carries, which is the thing
+     * already in doubt.
+     */
+    const REQUIRED: readonly (readonly [string, string])[] = [
+      // Relations, named as `<relation>` with no dot.
+      ['virtual_accounts', '006_funding.sql'],
+      ['deposits', '006_funding.sql'],
+      ['error_events', '015_error_events.sql'],
+      ['notification_outbox', '012_notifications.sql'],
+      ['kyc_submissions', '009_admin.sql'],
+      ['platform_settings', '009_admin.sql'],
+      ['provider_credentials', '026_provider_credentials.sql'],
+      ['kyc_tier_limits', '029_kyc_tiers.sql'],
+      ['card_history', '030_card_lifecycle.sql'],
+      ['countries', '040_countries.sql'],
+      ['bank_payouts', '043_bank_payouts.sql'],
+      ['entry_status', '023_entry_status.sql'],
+      ['admin_work_queue', '036_attention.sql'],
+      // Columns, named as `<table>.<column>`.
+      ['users.full_name', '040_countries.sql'],
+      ['users.country', '040_countries.sql'],
+      ['users.handle', '039_profile_handles.sql'],
+      ['virtual_accounts.provider', '044_paystack_funding.sql'],
+      ['virtual_accounts.provider_customer_ref', '044_paystack_funding.sql'],
+      ['cards.colour', '045_card_fee_split.sql'],
+      ['bank_payouts.provider', '046_payout_provider.sql'],
+      ['countries.payout_method', '046_payout_provider.sql'],
+      ['error_events.last_reference', '047_error_reference.sql'],
+    ];
+
     const missing: string[] = [];
-    for (const [table, column, file] of [
-      ['virtual_accounts', 'provider', '044_paystack_funding.sql'],
-      ['virtual_accounts', 'provider_customer_ref', '044_paystack_funding.sql'],
-      ['cards', 'colour', '045_card_fee_split.sql'],
-      ['bank_payouts', 'provider', '046_payout_provider.sql'],
-      ['countries', 'payout_method', '046_payout_provider.sql'],
-    ] as const) {
-      const found = await this.pool.query(
-        `SELECT 1 FROM information_schema.columns
-          WHERE table_name = $1 AND column_name = $2`,
-        [table, column],
-      );
-      if (found.rowCount === 0) missing.push(`${table}.${column} (${file})`);
+    for (const [name, file] of REQUIRED) {
+      const [table, column] = name.split('.');
+      if (table === undefined) continue;
+
+      const found =
+        column === undefined
+          ? // A TABLE OR A VIEW. `to_regclass` answers for both and returns
+            // NULL rather than raising, which is the only form that does not
+            // need its own error handling per relation.
+            await this.pool.query(`SELECT to_regclass($1) IS NOT NULL AS present`, [table])
+          : await this.pool.query(
+              `SELECT true AS present FROM information_schema.columns
+                WHERE table_name = $1 AND column_name = $2`,
+              [table, column],
+            );
+
+      const present =
+        column === undefined
+          ? (found.rows[0] as { present?: boolean } | undefined)?.present === true
+          : (found.rowCount ?? 0) > 0;
+
+      if (!present) missing.push(`${name} (${file})`);
     }
 
-    return missing.length === 0
-      ? {
-          name: 'Database schema',
-          state: 'pass',
-          detail: 'Every column this build writes exists. Migrations 044–046 are applied.',
-        }
-      : {
-          name: 'Database schema',
-          state: 'fail',
-          detail:
-            `The database is behind this build and that alone will fail every account ` +
-            `request, whatever Paystack says. Missing: ${missing.join('; ')}. Apply those ` +
-            `files from packages/ledger/sql in order.`,
-        };
+    if (missing.length === 0) {
+      return {
+        name: 'Database schema',
+        state: 'pass',
+        detail: `All ${REQUIRED.length} relations and columns this build reads exist.`,
+      };
+    }
+
+    // The FILES, deduplicated and in order — because the action is "apply
+    // these", and a list of twenty columns is a list somebody has to turn
+    // into that themselves.
+    const files = [...new Set(missing.map((entry) => entry.slice(entry.indexOf('(') + 1, -1)))]
+      .sort()
+      .join(', ');
+
+    return {
+      name: 'Database schema',
+      state: 'fail',
+      detail:
+        `The database is behind this build, and that alone will fail requests whatever ` +
+        `the provider says. Apply ${files} from packages/ledger/sql, in order. Missing: ` +
+        `${missing.join('; ')}.`,
+    };
   }
 
   async #paystackChecks(): Promise<readonly DiagnosticCheck[]> {

@@ -491,7 +491,7 @@ function Transfer() {
               {/* THE ONLY THING ON THIS SCREEN THE SENDER DID NOT WRITE. */}
               {lookingUp && <span className="hint">Checking the name…</span>}
               {beneficiary !== undefined && (
-                <span className="hint ok">{beneficiary}</span>
+                <span className="beneficiary">{beneficiary}</span>
               )}
               {lookupFailed && (
                 <span className="hint">

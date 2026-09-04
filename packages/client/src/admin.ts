@@ -51,6 +51,11 @@ export interface AdminUser {
    * a money decision.
    */
   readonly full_name: string | null;
+  /** What a REVIEWER read off a document, kept separate from `full_name` for
+   *  040's reason: only this one may inform a money decision. Present here
+   *  because accounts predating the signup name field have only this, and a
+   *  customer list with no names in it is not a customer list. */
+  readonly verified_name: string | null;
   readonly phone: string | null;
   readonly handle: string | null;
 }
