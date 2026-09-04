@@ -345,16 +345,76 @@ export class FundingDiagnosticsService {
       });
     }
 
-    checks.push({
-      name: 'Deposit webhook',
-      state: 'warn',
-      detail:
-        `Paystack must be given ${this.config.webhookBaseUrl ?? '<WEBHOOK_BASE_URL unset>'}` +
-        `/v1/webhooks/paystack/deposits on their dashboard. Nothing here can verify they ` +
-        `have it — an account can be opened and still never credit anybody.`,
-    });
+    checks.push(await this.#webhookCheck());
 
     return checks;
+  }
+
+  /**
+   * THE WEBHOOK, ANSWERED FROM EVIDENCE RATHER THAN LEFT AMBER FOR EVER.
+   *
+   * This used to be a permanent warning saying "nothing here can verify
+   * Paystack has the URL". True of the DASHBOARD SETTING, and the wrong thing
+   * to report: an operator who has pasted it correctly is left staring at an
+   * amber row that will never go green, next to rows that do. A check whose
+   * answer cannot change is not a check, and one that stays amber when
+   * everything is right is exactly how people learn to ignore amber.
+   *
+   * Two questions, separated:
+   *
+   * WHAT WE CONTROL is `WEBHOOK_BASE_URL`. Unset, the API cannot even tell an
+   * operator which URL to paste — that is ours and it is a real failure.
+   *
+   * WHAT WE CAN OBSERVE is whether a Paystack deposit has ever arrived. A
+   * delivered webhook is proof the whole path works: their dashboard, DNS,
+   * the edge, the route and the signature. Nothing else can prove it, and no
+   * amount of configuration checking substitutes — which is why the answer
+   * comes from `deposits` rather than from a setting.
+   *
+   * Not-yet-delivered is a `warn` and says WHY: on a deployment where nobody
+   * has transferred money in, no webhook can have arrived, and that is not a
+   * fault. It is the honest state, and it clears itself on the first deposit.
+   */
+  async #webhookCheck(): Promise<DiagnosticCheck> {
+    const base = this.config.webhookBaseUrl;
+    if (base === undefined || base === '') {
+      return {
+        name: 'Deposit webhook',
+        state: 'fail',
+        detail:
+          'WEBHOOK_BASE_URL is not set, so this deployment cannot even tell you which URL ' +
+          'to give Paystack. Set it to the public API origin and redeploy.',
+      };
+    }
+
+    const url = `${base.replace(/\/+$/, '')}/v1/webhooks/paystack/deposits`;
+
+    let delivered = 0;
+    try {
+      const rows = await this.pool.query<{ n: string }>(
+        `SELECT count(*)::text AS n FROM deposits WHERE provider = 'paystack'`,
+      );
+      delivered = Number(rows.rows[0]?.n ?? '0');
+    } catch (error) {
+      this.#logger.warn(`could not count Paystack deposits: ${String(error)}`);
+    }
+
+    return delivered > 0
+      ? {
+          name: 'Deposit webhook',
+          state: 'pass',
+          detail:
+            `Confirmed by delivery: ${delivered} Paystack deposit(s) have arrived at ${url}. ` +
+            'That proves their dashboard, the edge, the route and the signature all work.',
+        }
+      : {
+          name: 'Deposit webhook',
+          state: 'warn',
+          detail:
+            `Give Paystack ${url} on their dashboard. Nothing has been delivered yet, which ` +
+            'is expected until somebody transfers money in — this turns green on the first ' +
+            'deposit, and only a real delivery can prove the path end to end.',
+        };
   }
 
   async #secretKey(): Promise<string | undefined> {

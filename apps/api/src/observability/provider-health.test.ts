@@ -138,4 +138,43 @@ describe('the wrapper', () => {
     const guarded = watched(new Adapter(), 'bitnob', health);
     await expect(guarded.ping()).resolves.toBe('https://api.example');
   });
+
+  it('READS A GETTER OVER A PRIVATE FIELD, which is what broke every naira account', () => {
+    /*
+     * THE FAILURE THIS EXISTS FOR, and the two tests above are why it
+     * survived: one covers a METHOD reading a private field, the other covers
+     * `provider` as a plain PROPERTY. Neither covers the combination —
+     * a GETTER over a private field — and that is what both switching ports
+     * are.
+     *
+     * `Reflect.get(target, property, receiver)` runs a getter with `this`
+     * bound to the receiver. Handed the proxy, which is what a `get` trap
+     * receives and what every example forwards, the getter executes against
+     * an object that has no such private field and JavaScript answers:
+     *
+     *   TypeError: Cannot read private member #fallback from an object whose
+     *   class did not declare it
+     *
+     * `SwitchingFundingPort.provider` is exactly that shape, and it is read
+     * while BUILDING the customer record — before Paystack is called at all.
+     * So opening a naira account threw for every customer, and the failure
+     * looked like the rail refusing, which pointed every investigation at the
+     * provider dashboard.
+     *
+     * A private field is the one part of an object a proxy cannot forward, so
+     * the only correct receiver is the target.
+     */
+    const { health } = recorder();
+    class SwitchingPort {
+      readonly #fallback = 'paystack';
+      get provider(): string {
+        return this.#fallback;
+      }
+      async createVirtualAccount(): Promise<string> {
+        return this.#fallback;
+      }
+    }
+    const guarded = watched(new SwitchingPort(), 'paystack', health);
+    expect(guarded.provider).toBe('paystack');
+  });
 });

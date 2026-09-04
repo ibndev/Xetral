@@ -109,6 +109,33 @@ export function outcomeOf(
  * working. The health write is FIRE AND FORGET: awaiting it would put a
  * database round trip in front of every provider response, and a slow health
  * table would become a slow card.
+ *
+ * THE RECEIVER IS THE TARGET, NEVER THE PROXY, AND THAT ONE ARGUMENT BROKE
+ * OPENING A NAIRA ACCOUNT FOR EVERY CUSTOMER.
+ *
+ * `Reflect.get(target, property, receiver)` runs a GETTER with `this` bound to
+ * the receiver. Passed the proxy — which is what a `get` trap is handed, and
+ * what every example on the internet forwards — a getter that reads a PRIVATE
+ * field executes against an object that does not have one, and JavaScript
+ * answers:
+ *
+ *   TypeError: Cannot read private member #fallback from an object whose
+ *   class did not declare it
+ *
+ * `SwitchingFundingPort.provider` and `SwitchingPayoutPort.provider` are
+ * exactly that: a getter over `#fallback`. So `this.port.provider` threw on
+ * every read — and it is read while BUILDING the customer record, before the
+ * provider is ever called, so the failure looked like the rail refusing and
+ * pointed every investigation at Paystack. Bank payouts and crypto read it
+ * too.
+ *
+ * The method path was never affected, because it applies against `target`
+ * explicitly. That is why this survived: the calls worked and the property
+ * did not, which is not a shape anybody looks for.
+ *
+ * A private field is deliberately NOT proxy-transparent — it is the one part
+ * of an object a proxy cannot forward — so the only correct receiver here is
+ * the target itself.
  */
 export function watched<T extends object>(
   port: T,
@@ -117,7 +144,11 @@ export function watched<T extends object>(
 ): T {
   return new Proxy(port, {
     get(target, property, receiver): unknown {
-      const value = Reflect.get(target, property, receiver) as unknown;
+      // `target`, NOT `receiver`. See the header: forwarding the proxy makes
+      // every getter over a private field throw. `receiver` is accepted and
+      // ignored so the signature still documents what a trap is handed.
+      void receiver;
+      const value = Reflect.get(target, property, target) as unknown;
       if (typeof value !== 'function' || typeof property !== 'string') return value;
 
       return (...args: unknown[]): unknown => {
