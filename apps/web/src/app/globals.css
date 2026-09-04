@@ -2787,38 +2787,19 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
  * control: it is information first, and a button-shaped account number on the
  * balance card would compete with Send and Top up beneath it.
  */
-.account-line {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  width: 100%;
-  margin-top: var(--s-3);
-  padding: 10px 12px;
-  min-height: 0;
-  text-align: left;
-  background: rgba(255, 255, 255, .10);
-  border-radius: var(--r-sm);
-  color: inherit;
-  font-weight: 500;
-}
-.account-line:hover:where(:not(:disabled)) { background: rgba(255, 255, 255, .16); }
-.account-holder {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13px;
-  opacity: .78;
-}
-/* Tabular, because a ten-digit string is copied by EYE into a banking app and
-   a proportional font makes it hard to keep place in. */
-.account-number {
-  font-size: 14px;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: .01em;
-  white-space: nowrap;
-}
+/*
+ * `.account-line`, `.account-holder` and `.account-number` USED TO LIVE HERE.
+ *
+ * They styled a button under the balance carrying the customer's dedicated
+ * account number. It moved to the top-up screen — the screen somebody opens
+ * in order to be paid — because three things nobody reads while checking what
+ * they have do not belong inside the one figure they opened the app to see.
+ *
+ * Removed rather than left: `class-coverage.test.ts` fails on a class nothing
+ * uses, for the reason every coverage check here exists — dead CSS is read as
+ * a description of the product, and the next person styles against it.
+ */
+
 @media (max-width: 400px) {
   /* The name wraps above the number rather than truncating to nothing: on a
      narrow handset "XETRAL/OLAWALE O" ellipsised to "XETR…" confirms nobody. */

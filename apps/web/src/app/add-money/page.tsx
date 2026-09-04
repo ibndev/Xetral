@@ -54,23 +54,30 @@ export default function AddMoney() {
   return (
     <Shell>
       <div className="card">
-        <h1>Add money</h1>
-        <h2>Transfer from any Nigerian bank</h2>
+        <h1>Top Up Wallet From Any Bank</h1>
 
         {account.loading && <p className="hint">Checking your account…</p>}
 
         {account.data != null && (
           <>
+            {/*
+              THE NAME ON TOP, INSIDE THE SAME BOX AS THE NUMBER.
+              
+              It was a line of prose UNDER the box — "Send to <name>. Yours
+              permanently." — which separates the three things a customer
+              copies into their banking app across two containers, and puts
+              the one they are asked for FIRST last. A beneficiary is a name,
+              a bank and a number, and they are read together.
+            */}
             <div className="balance">
-              <div>
+              <div style={{ minWidth: 0 }}>
+                <div className="pending">{account.data.account_name}</div>
                 <div className="amount mono">{account.data.account_number}</div>
                 <div className="pending">{account.data.bank_name}</div>
               </div>
               <div className="pending">{account.data.currency}</div>
             </div>
-            <p className="hint">
-              Send to <strong>{account.data.account_name}</strong>. Yours permanently.
-            </p>
+            <p className="hint">Transfer money to fund your wallet</p>
             {account.data.status !== 'active' && (
               <p className="hint">Still being activated. Transfers will start arriving shortly.</p>
             )}

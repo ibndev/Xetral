@@ -138,7 +138,7 @@ export function testApiConfig(databaseUrl: string, overrides: Partial<ApiConfig>
       perIdentifier: { max: 1000, windowSeconds: 3600 },
       perIp: { max: 1000, windowSeconds: 3600 },
     },
-    resendApiKey: undefined,
+    brevoApiKey: undefined,
     notificationFrom: undefined,
     notificationReplyTo: undefined,
     notificationIntervalSeconds: undefined,

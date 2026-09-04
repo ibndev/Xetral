@@ -361,7 +361,16 @@ export interface ApiConfig {
     readonly perIp: RateLimitRule;
   };
 
-  readonly resendApiKey: string | undefined;
+  /**
+   * The Brevo v3 API key, for TRANSACTIONAL mail.
+   *
+   * Replaces `RESEND_API_KEY`, which is read by nothing now. Retired rather
+   * than renamed: a value carried across would be a Resend key sitting in a
+   * slot Brevo reads, and the 401 that produces reads as "your key is wrong"
+   * rather than "that is the wrong provider's key" — the misdiagnosis 042
+   * records about the retired Bitnob v1 credential.
+   */
+  readonly brevoApiKey: string | undefined;
   readonly notificationFrom: string | undefined;
   readonly notificationReplyTo: string | undefined;
   /**
@@ -868,7 +877,7 @@ export function loadConfig(env: Env): ApiConfig {
         windowSeconds: integer(env, 'PASSWORD_RESET_RATE_LIMIT_WINDOW_SECONDS', 3600),
       },
     },
-    resendApiKey: optional(env, 'RESEND_API_KEY'),
+    brevoApiKey: optional(env, 'BREVO_API_KEY'),
     notificationFrom: optional(env, 'NOTIFICATION_FROM'),
     notificationReplyTo: optional(env, 'NOTIFICATION_REPLY_TO'),
     notificationIntervalSeconds: optionalInteger(env, 'NOTIFICATION_INTERVAL_SECONDS'),

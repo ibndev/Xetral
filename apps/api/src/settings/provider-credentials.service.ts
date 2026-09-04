@@ -305,8 +305,8 @@ function environmentValue(
       return config.airaloClientSecret;
     case 'twilio.auth_token':
       return config.twilioAuthToken;
-    case 'resend.api_key':
-      return config.resendApiKey;
+    case 'brevo.api_key':
+      return config.brevoApiKey;
     // Dojah has no adapter yet, so it has no config field to override. When
     // one lands, the case goes here and the warning starts working — which is
     // the point of the switch: there is one place to notice.

@@ -54,8 +54,8 @@ export default function AddMoney() {
   const has = account.data != null;
 
   return (
-    <Shell back="/wallet" title="Add money">
-      <Panel title="Add money" subtitle="Transfer from any Nigerian bank">
+    <Shell back="/wallet" title="Top Up Wallet">
+      <Panel title="Top Up Wallet From Any Bank">
         {account.loading && <Loading />}
 
         {account.data != null && (
@@ -69,17 +69,24 @@ export default function AddMoney() {
                 gap: 4,
               }}
             >
+              {/*
+                THE NAME ON TOP, INSIDE THE SAME BOX AS THE NUMBER.
+
+                It was a line of prose UNDER the box, which splits the three
+                things a customer copies into their banking app across two
+                containers and puts the one they are asked for FIRST last. A
+                beneficiary is a name, a bank and a number, read together.
+              */}
+              <Text style={styles.muted} selectable>
+                {account.data.account_name}
+              </Text>
               <Text style={[styles.amount, { fontSize: 22 }]} selectable>
                 {account.data.account_number}
               </Text>
               <Text style={styles.muted}>{account.data.bank_name}</Text>
             </View>
 
-            <Text style={styles.hint}>
-              Send to <Text style={{ fontFamily: font.sansBold }}>{account.data.account_name}</Text>.
-              This account is yours permanently — save it as a beneficiary and money you
-              send lands in your wallet automatically.
-            </Text>
+            <Text style={styles.hint}>Transfer money to fund your wallet</Text>
 
             {account.data.status !== 'active' && (
               <Text style={styles.hint}>

@@ -541,7 +541,7 @@ export const PROVIDERS: readonly Item[] = [
       'a default price is a price nobody chose.',
   },
   {
-    name: 'RESEND_API_KEY',
+    name: 'BREVO_API_KEY',
     kind: 'env',
     failure: 'silent',
     flow: 'every email',
@@ -1367,7 +1367,7 @@ export const CREDENTIALS: readonly Item[] = [
     ifMissed: 'the stored twin of `TWILIO_AUTH_TOKEN`; the database wins when both are set.',
   },
   {
-    name: 'resend.api_key',
+    name: 'brevo.api_key',
     kind: 'credential',
     failure: 'silent',
     flow: 'every email',

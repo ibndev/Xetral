@@ -29,4 +29,4 @@ export * from './bitnob/payout-adapter.js';
 export * from './vtpass/vtpass-adapter.js';
 export * from './airalo/airalo-adapter.js';
 export * from './twilio/twilio-adapter.js';
-export * from './resend/resend-adapter.js';
+export * from './brevo/brevo-adapter.js';

@@ -102,7 +102,7 @@ import { MetricsController } from './observability/metrics.controller.js';
 import { ErrorRecordingFilter } from './observability/error.filter.js';
 import { ErrorAlertService } from './observability/error-alert.service.js';
 import { NotificationWorker } from './notifications/notification.worker.js';
-import { ResendNotificationAdapter } from '@xetral/providers';
+import { BrevoNotificationAdapter } from '@xetral/providers';
 import type { NotificationPort } from '@xetral/providers';
 import { LoginRateLimitGuard, PasswordResetRateLimitGuard } from './auth/login-rate-limit.guard.js';
 import { RequestRateLimiter } from './auth/request-rate-limit.service.js';
@@ -671,20 +671,20 @@ export function createFxPort(
  * routes that depend on email refuse up front.
  */
 export function createNotificationPort(config: ApiConfig): NotificationPort | undefined {
-  const { resendApiKey, notificationFrom } = config;
+  const { brevoApiKey, notificationFrom } = config;
   const logger = new Logger('Notifications');
 
-  if (resendApiKey === undefined || notificationFrom === undefined) {
+  if (brevoApiKey === undefined || notificationFrom === undefined) {
     logger.warn(
-      'RESEND_API_KEY or NOTIFICATION_FROM is not set: NO EMAIL WILL BE SENT. Password ' +
+      'BREVO_API_KEY or NOTIFICATION_FROM is not set: NO EMAIL WILL BE SENT. Password ' +
         'reset is unavailable, and customers will not be told when a new device signs ' +
         'into their account.',
     );
     return undefined;
   }
 
-  return new ResendNotificationAdapter({
-    apiKey: resendApiKey,
+  return new BrevoNotificationAdapter({
+    apiKey: brevoApiKey,
     from: notificationFrom,
     ...(config.notificationReplyTo === undefined
       ? {}
@@ -1077,7 +1077,7 @@ export class AppModule {
           provide: NOTIFICATION_PORT,
           useFactory: (health: ProviderHealthService, credentials: ProviderCredentialService) => {
             const port = options.notificationPort ?? createNotificationPort(options.config);
-            return port === undefined ? undefined : watched(port, 'resend', health);
+            return port === undefined ? undefined : watched(port, 'brevo', health);
           },
           inject: [ProviderHealthService, ProviderCredentialService],
         },
