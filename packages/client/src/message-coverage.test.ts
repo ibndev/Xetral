@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { knownErrorCodes } from './errors.js';
+import type { ApiErrorCode } from './errors.js';
 import { messageFor } from './messages.js';
 import { ApiError } from './errors.js';
 
@@ -61,7 +62,18 @@ describe('every API error code says something a person can act on', () => {
     // passes the test above and fails a customer.
     const generic = knownErrorCodes()
       .filter((code) => !GENERIC_IS_CORRECT.has(code))
-      .filter((code) => messageFor(new ApiError(code, 400)).startsWith('Something went wrong'));
+      // The cast, and why it is right HERE and nowhere else.
+      //
+      // `knownErrorCodes()` returns `readonly string[]` on purpose — its own
+      // comment says "not for switching on, use the type" — so that no caller
+      // can branch on a value the compiler has not checked against the union.
+      // This test is the one place that has to do the opposite: it iterates
+      // the codes precisely to prove every one of them has words, and every
+      // element genuinely IS an `ApiErrorCode` because the array is derived
+      // from the same literal the union is.
+      .filter((code) =>
+        messageFor(new ApiError(code as ApiErrorCode, 400)).startsWith('Something went wrong'),
+      );
     expect(generic).toEqual([]);
   });
 
