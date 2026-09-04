@@ -40,7 +40,27 @@ const ElevationContext = createContext<Demand | undefined>(undefined);
  * Returns the client unchanged when there is no provider above it — every
  * customer-facing screen — so this cannot alter behaviour outside `/admin`.
  */
-export function useElevating<T extends object>(client: T): T {
+/**
+ * What this Proxy needs from whatever it wraps.
+ *
+ * A CONSTRAINT RATHER THAN A CAST, and that distinction cost every acting
+ * route on the dashboard. This used to reach for the method through
+ * `target as { elevateStaffSession(...) }`, which asserts rather than checks
+ * — and `AdminClient`, the class actually wrapped here, did not have it.
+ * `XetralClient` did. So the compiler was satisfied, the Proxy threw a
+ * TypeError at the moment an operator submitted a correct code, and a
+ * TypeError is not an `ApiError`, so it rendered as "Something went wrong."
+ *
+ * An operator holding a correct PIN and a correct six-digit code was told
+ * every single time that something had gone wrong, and nothing on the
+ * dashboard could be saved at all. Constraining the parameter means a client
+ * without the method is a build failure.
+ */
+export interface Elevatable {
+  elevateStaffSession(code: string): Promise<void>;
+}
+
+export function useElevating<T extends Elevatable>(client: T): T {
   const demand = useContext(ElevationContext);
 
   return useMemo(() => {
@@ -61,8 +81,7 @@ export function useElevating<T extends object>(client: T): T {
             // original call is repeated. Retried ONCE: a second refusal is a
             // real one, and a loop here would ask for a code for ever.
             const code = await demand();
-            await (target as { elevateStaffSession(c: string): Promise<void> })
-              .elevateStaffSession(code);
+            await target.elevateStaffSession(code);
             return await (value as (...a: unknown[]) => Promise<unknown>).apply(target, args);
           }
         };

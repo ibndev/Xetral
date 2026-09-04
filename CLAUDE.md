@@ -607,6 +607,28 @@ wrapper in `apps/api/src/observability/provider-health.service.ts`, screen at
   forty-seven methods; a Proxy wraps every one of them and any added later,
   which a hand-written list cannot promise — the same argument that wraps
   provider ports once at the injection boundary.
+- **THE PROMPT REACHED FOR A METHOD THE CLIENT DID NOT HAVE, and that broke
+  every acting route on the dashboard.** The Proxy caught `totp_required`,
+  asked for a code, and then called `target.elevateStaffSession(code)` through
+  a CAST — on `AdminClient`, which did not have it. `XetralClient` did. A cast
+  asserts rather than checks, so the compiler was satisfied and the failure
+  was a runtime `TypeError`, which is not an `ApiError` and therefore rendered
+  as "Something went wrong." An operator holding a CORRECT PIN and a CORRECT
+  code was told so every single time, and nothing on the dashboard could be
+  saved at all — a read-only operations surface with nothing saying so. The
+  Proxy is CONSTRAINED on an `Elevatable` interface now rather than cast, and
+  `elevation-contract.test.ts` asserts the method from the package that owns
+  it, so the mistake cannot cross the boundary again.
+- **A PROVIDER KEY TAKES THE TRANSACTION PIN, reversing an earlier removal.**
+  It was dropped on the reasoning that a PIN authorises money leaving a
+  customer's own account and pasting a key moves nothing. True, and it
+  undervalued what the key is: every provider call authenticates with it, so
+  replacing one points the funding rail, the card issuer or the payout rail
+  wherever the person pasting it likes. The real cost of asking was never the
+  factor, it was the COLLISION — a form with one box labelled PIN and a
+  refusal saying "enter the six-digit code" — and that was a missing elevation
+  prompt, not a reason to drop a factor. The code goes to the prompt; the PIN
+  goes to the form.
 - **One code buys the WINDOW, not one action.** Codes are single-use and change
   every thirty seconds, so a per-action code refuses a reviewer on their second
   approval, and the end of that is a shared authenticator on a desk.

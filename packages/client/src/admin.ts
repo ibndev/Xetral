@@ -393,6 +393,34 @@ export class AdminClient {
     this.#fetch = options.fetch ?? ((input, init) => fetch(input, init));
   }
 
+  /**
+   * Turning a valid authenticator code into an elevated session.
+   *
+   * IT LIVES HERE, AND ITS ABSENCE WAS A BUG THAT BROKE EVERY ACTING ROUTE.
+   *
+   * `elevation.tsx` wraps this client in a Proxy: a `totp_required` refusal
+   * becomes a prompt, the code is exchanged for an elevated session, and the
+   * original call is retried. That is the right shape, and it called
+   * `target.elevateStaffSession(code)` on a class that did not have the
+   * method — `XetralClient` did. The Proxy reached for it through a cast, so
+   * the compiler was satisfied and the failure was a runtime TypeError, which
+   * is not an `ApiError` and therefore rendered as "Something went wrong."
+   *
+   * So an operator holding a correct PIN and a correct six-digit code was
+   * told, every single time, that something had gone wrong — and nothing on
+   * the dashboard could be saved at all. `elevation.test.ts` now asserts the
+   * method is here, because a cast asserting a method exists is exactly what
+   * hid it.
+   *
+   * ONE CODE BUYS THE WINDOW, not one action: codes are single-use and rotate
+   * every thirty seconds, so a per-action code refuses a reviewer on their
+   * second approval and the end of that is a shared authenticator on a desk.
+   * The transaction PIN is still required on every acting request inside it.
+   */
+  async elevateStaffSession(code: string): Promise<void> {
+    await this.#post('/v1/auth/totp/elevate', { totp_code: code });
+  }
+
   /* ----------------------------- monitoring ---------------------------- */
 
   async overview(): Promise<AdminOverview> {
@@ -890,10 +918,26 @@ export class AdminClient {
    * `admin` role and by a session elevated with an authenticator code. Asking
    * for it meant every operator had to hold a customer PIN to do their job.
    */
-  async setCredential(provider: string, name: string, secret: string): Promise<AdminCredential> {
+  /**
+   * Pastes a provider credential. TAKES A PIN.
+   *
+   * It moves no money in this request and it decides where all of it goes
+   * afterwards: the value written here is what every provider call
+   * authenticates with, so replacing it can point the funding rail, the card
+   * issuer or the payout rail somewhere else. The authenticator code is
+   * handled by the elevation prompt rather than by a second field here —
+   * two boxes on one form asking for two different six-digit secrets is how
+   * an operator holding both correct ones gets told they are wrong.
+   */
+  async setCredential(
+    provider: string,
+    name: string,
+    secret: string,
+    pin: string,
+  ): Promise<AdminCredential> {
     return this.#post(
       `/v1/admin/credentials/${encodeURIComponent(provider)}/${encodeURIComponent(name)}`,
-      { secret },
+      { secret, transaction_pin: pin },
     );
   }
 

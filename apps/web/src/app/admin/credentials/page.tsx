@@ -146,12 +146,13 @@ function Credential({
   // Always empty. Pre-filling it with anything — even a mask — invites somebody
   // to save the mask as the key.
   const [secret, setSecret] = useState('');
+  const [pin, setPin] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
   const [done, setDone] = useState(false);
   const [rotations, setRotations] = useState<readonly Record<string, unknown>[] | undefined>();
 
-  const ready = secret.trim() !== '';
+  const ready = secret.trim() !== '' && pin !== '';
 
   return (
     <div style={{ borderBottom: '1px solid var(--line)', paddingBottom: 16, marginBottom: 16 }}>
@@ -195,14 +196,33 @@ function Credential({
           </label>
 
           {/*
-            NO TRANSACTION PIN. It authorises money leaving a CUSTOMER'S OWN
-            account; pasting a provider key moves nothing and is already gated
-            by the `admin` role and by a session elevated with an authenticator
-            code. Asking for it meant every operator had to hold a customer PIN
-            to do their job — and the refusal read "enter the six-digit code
-            from your authenticator app" beside a field labelled PIN, so
-            somebody holding both correct secrets was told they were wrong.
+            A TRANSACTION PIN, and this is back deliberately.
+
+            It was removed on the reasoning that a PIN authorises money
+            leaving a customer's own account and pasting a key moves nothing.
+            True, and it undervalued what the key IS: every provider call
+            authenticates with it, so replacing one can point the funding
+            rail, the card issuer or the payout rail at somebody else's
+            account. No money moves in this request; where all of it goes
+            afterwards is decided by it.
+
+            The authenticator code is NOT a second field here. It goes to the
+            elevation prompt, which is what appears when the session needs
+            one — two boxes on one form asking for two different six-digit
+            secrets is exactly how an operator holding both correct ones ends
+            up being told they are wrong.
           */}
+          <label>
+            Transaction PIN
+            <input
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
+              maxLength={6}
+              value={pin}
+              onChange={(e) => setPin(e.target.value)}
+            />
+          </label>
 
           <div className="actions">
             <button
@@ -215,11 +235,15 @@ function Credential({
                 setDone(false);
                 void (async () => {
                   try {
-                    await admin.setCredential(credential.provider, credential.name, secret);
+                    await admin.setCredential(credential.provider, credential.name, secret, pin);
                     // Cleared on success and left in place on failure, so a
                     // typed key survives a refusal but never sits in a form
                     // field after it has been stored.
                     setSecret('');
+                    // The PIN authorises ONE instruction. Cleared whatever
+                    // happened, so it is never left in a field for the next
+                    // save to reuse.
+                    setPin('');
                     setDone(true);
                     onSaved();
                   } catch (cause) {

@@ -121,6 +121,43 @@ afterAll(async () => {
 });
 
 describe('pasting a provider key', () => {
+  it('REFUSES without a transaction PIN', async () => {
+    /*
+     * The PIN was removed from this route once, on the reasoning that it
+     * authorises money leaving a customer's own account and pasting a key
+     * moves nothing. That undervalued what the key IS: every provider call
+     * authenticates with it, so replacing one points the funding rail, the
+     * card issuer or the payout rail wherever the person pasting it likes.
+     *
+     * Asserted as a REFUSAL rather than by sending one and watching it pass:
+     * the suite already sent a PIN before the requirement came back, so those
+     * tests were green either way and proved nothing about whether it is
+     * demanded.
+     */
+    const operator = await makeAdmin();
+
+    // 400 `transaction_pin_required`, not 401. The distinction is the point:
+    // "you did not send the factor" is a different sentence to the operator
+    // from "the factor you sent is wrong", and a client that showed one for
+    // both would send somebody hunting for a mistyped PIN they never typed.
+    const res = await request(app.getHttpServer())
+      .post('/v1/admin/credentials/bitnob/api_key')
+      .set('Authorization', `Bearer ${operator.token}`)
+      .send({ secret: KEY })
+      .expect(400);
+    expect(res.body.error).toBe('transaction_pin_required');
+  });
+
+  it('refuses a WRONG transaction PIN', async () => {
+    const operator = await makeAdmin();
+
+    await request(app.getHttpServer())
+      .post('/v1/admin/credentials/bitnob/api_key')
+      .set('Authorization', `Bearer ${operator.token}`)
+      .send({ secret: KEY, transaction_pin: '999999' })
+      .expect(401);
+  });
+
   it('stores it sealed, and answers with a hint rather than the key', async () => {
     const operator = await makeAdmin();
 

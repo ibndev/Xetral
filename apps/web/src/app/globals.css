@@ -2751,3 +2751,26 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
   color: var(--text-3);
   font-size: 14px;
 }
+
+/*
+ * A SETTING'S REASONING, FOLDED AWAY.
+ *
+ * The descriptions are rows written by the migration that introduced each
+ * setting, and several run to a paragraph — right when somebody is deciding
+ * what a control does, far too much when they are scanning fifty-four of them
+ * for one. The text is unchanged; only its default state is.
+ */
+.setting-why { margin-top: 6px; }
+.setting-why > summary {
+  cursor: pointer;
+  color: var(--text-3);
+  font-size: 13px;
+  /* The default triangle is a platform glyph that does not match anything
+     else here, and `list-style: none` alone leaves it on Safari. */
+  list-style: none;
+}
+.setting-why > summary::-webkit-details-marker { display: none; }
+.setting-why > summary::before { content: '▸ '; }
+.setting-why[open] > summary::before { content: '▾ '; }
+.setting-why > summary:hover { color: var(--text-2); }
+.setting-why > p { margin-top: 6px; }

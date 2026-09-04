@@ -313,28 +313,28 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
         role: 'admin',
       })
       /*
-       * NO TRANSACTION PIN, and the reason is a category error rather than a
-       * relaxation.
+       * A TRANSACTION PIN, AND THIS REVERSES AN EARLIER DECISION DELIBERATELY.
        *
-       * A transaction PIN is the factor that authorises MONEY LEAVING A
-       * CUSTOMER'S OWN ACCOUNT. Pasting a provider key moves nothing: it is an
-       * administrative act, already gated by the `admin` role read fresh from
-       * the database and by a session elevated with an authenticator code
-       * minutes earlier.
+       * The PIN was removed from here on the reasoning that it authorises
+       * money leaving a customer's own account, and pasting a provider key
+       * moves nothing. That argument is still true as far as it goes, and it
+       * undervalued what this endpoint actually is: the credential it writes
+       * is what every provider call authenticates with, so somebody who can
+       * replace it can point the funding rail, the card issuer or the payout
+       * rail at an account they control. It moves no money in one request and
+       * it decides where all of it goes afterwards.
        *
-       * Requiring it here also had a cost that pointed the wrong way. Every
-       * operator had to hold a customer transaction PIN to do their job, and
-       * the refusal said "enter the six-digit code from your authenticator
-       * app" beside a field labelled PIN — so an operator with two correct
-       * secrets was told they were wrong. Demanding a third factor for a
-       * non-money action is how a shared PIN ends up on a desk, which is the
-       * same argument 014 makes about codes.
+       * The real cost of asking was never the factor — it was the COLLISION.
+       * The refusal said "enter the six-digit code from your authenticator
+       * app" beside a single field labelled PIN, so an operator holding two
+       * correct secrets typed the code into the PIN box and was told they
+       * were wrong. That was a missing elevation prompt, not a reason to drop
+       * a factor, and the prompt exists now: the code goes to it and the PIN
+       * goes to the form, which are two boxes asking two different questions.
        *
-       * The PIN stays on everything that MOVES money, staff routes included:
-       * freezing an account, attributing a suspense deposit, resolving a
-       * dispute. `route-coverage.test.ts` keeps that list honest.
+       * `route-coverage.test.ts` keeps the whole list honest.
        */
-      .staff('POST', '/v1/admin/credentials/:provider/:name', { pin: false, role: 'admin' })
+      .staff('POST', '/v1/admin/credentials/:provider/:name', { pin: true, role: 'admin' })
 
       // THE COMPLIANCE QUEUE, on the `compliance` role — the same people who
       // review identity, because the two questions are the same one asked at

@@ -32,27 +32,69 @@ export default function Settings() {
     byCategory.set(setting.category, list);
   }
 
+  /*
+   * ONE CATEGORY AT A TIME, because fifty-four rows in one column is not a
+   * page anybody reads.
+   *
+   * They were all stacked, so finding the funding rail meant scrolling past
+   * every fee, every retention period and every risk threshold — and an
+   * operator scrolling past a control is an operator who has stopped seeing
+   * it. The categories already exist: `platform_settings.category` is a
+   * column every migration fills, so this is the data's own grouping rather
+   * than a list typed here that a new setting would fall out of.
+   *
+   * `undefined` until the first load answers, so the tab that opens is the
+   * first category the SERVER returned rather than one guessed here and then
+   * corrected — which would render an empty panel for a moment on every
+   * visit.
+   */
+  const categories = [...byCategory.keys()];
+  const [chosen, setChosen] = useState<string | undefined>();
+  const active = chosen !== undefined && byCategory.has(chosen) ? chosen : categories[0];
+  const items = active === undefined ? [] : (byCategory.get(active) ?? []);
+
   return (
     <>
       <div className="panel">
         <h1>Settings</h1>
-        <h2>Changes take effect within thirty seconds, on every instance</h2>
-        <p className="lead">
-          Every change is recorded with who made it and when. Bounds are enforced by
-          the database.
-        </p>
+        <h2>Every change is recorded, and bounds are enforced by the database</h2>
         <AdminError error={settings.error} code={settings.code} role="finance" />
         {settings.loading && <p className="spinner">Loading…</p>}
+
+        {categories.length > 0 && (
+          /* A RAIL, so it scrolls rather than wrapping. Eight categories do
+             not fit across a narrow window, and a wrapped row moves the tabs
+             under the pointer as the selection changes width. */
+          <div
+            className="segmented rail"
+            role="tablist"
+            aria-label="Setting categories"
+            style={{ marginTop: 'var(--s-4)' }}
+          >
+            {categories.map((category) => (
+              <button
+                key={category}
+                type="button"
+                role="tab"
+                aria-selected={category === active}
+                className={category === active ? 'active' : ''}
+                style={{ textTransform: 'capitalize' }}
+                onClick={() => setChosen(category)}
+              >
+                {category} <span className="muted">{byCategory.get(category)?.length}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
-      {[...byCategory.entries()].map(([category, items]) => (
-        <div className="panel" key={category}>
-          <h2 style={{ textTransform: 'capitalize' }}>{category}</h2>
+      {active !== undefined && (
+        <div className="panel">
           {items.map((setting) => (
             <Setting key={setting.key} setting={setting} onSaved={settings.reload} />
           ))}
         </div>
-      ))}
+      )}
     </>
   );
 }
@@ -73,12 +115,32 @@ function Setting({ setting, onSaved }: { setting: AdminSetting; onSaved: () => v
       <div className="field-row two">
         <div>
           <strong>{setting.label}</strong>
-          <p className="hint">{setting.description}</p>
           <p className="hint mono">
             {setting.key} · {setting.type}
             {setting.min !== null && ` · min ${setting.min}`}
             {setting.max !== null && ` · max ${setting.max}`}
           </p>
+          {/*
+            THE EXPLANATION IS FOLDED AWAY, not deleted.
+
+            These descriptions are rows in `platform_settings`, written by the
+            migration that introduced each setting, and several run to a
+            paragraph — which is the right length when somebody is deciding
+            what a control does for the first time and far too much when they
+            are scanning for one. Trimming them in the database would throw
+            away the reasoning; trimming them here would mean this page
+            disagreeing with what an operator reads at a psql prompt.
+
+            `details` rather than state: it is one element, it is keyboard
+            reachable without anything written here, and a page of them
+            collapses on load with no flash.
+          */}
+          {setting.description !== '' && (
+            <details className="setting-why">
+              <summary>What this does</summary>
+              <p className="hint">{setting.description}</p>
+            </details>
+          )}
         </div>
 
         <div>
