@@ -2774,3 +2774,54 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
 .setting-why[open] > summary::before { content: '▾ '; }
 .setting-why > summary:hover { color: var(--text-2); }
 .setting-why > p { margin-top: 6px; }
+
+/*
+ * WHERE MONEY COMES IN, on the balance card.
+ *
+ * It lived only on Add money, so a customer who wanted to be paid had to
+ * remember which screen held their account number and go there — and that
+ * number is the one string in this app somebody reads out loud to another
+ * person. It belongs on the screen they already have open.
+ *
+ * A BUTTON, because it copies. Drawn as a line of text rather than as a
+ * control: it is information first, and a button-shaped account number on the
+ * balance card would compete with Send and Top up beneath it.
+ */
+.account-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  margin-top: var(--s-3);
+  padding: 10px 12px;
+  min-height: 0;
+  text-align: left;
+  background: rgba(255, 255, 255, .10);
+  border-radius: var(--r-sm);
+  color: inherit;
+  font-weight: 500;
+}
+.account-line:hover:where(:not(:disabled)) { background: rgba(255, 255, 255, .16); }
+.account-holder {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  opacity: .78;
+}
+/* Tabular, because a ten-digit string is copied by EYE into a banking app and
+   a proportional font makes it hard to keep place in. */
+.account-number {
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .01em;
+  white-space: nowrap;
+}
+@media (max-width: 400px) {
+  /* The name wraps above the number rather than truncating to nothing: on a
+     narrow handset "XETRAL/OLAWALE O" ellipsised to "XETR…" confirms nobody. */
+  .account-line { flex-wrap: wrap; }
+  .account-holder { flex: 1 0 100%; }
+}

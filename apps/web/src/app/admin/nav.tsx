@@ -7,6 +7,7 @@ import type { ReactNode } from 'react';
 import { resetXetral, xetral } from '@/lib/session';
 import { Logo } from '@/ui/logo';
 import { Icon } from '@/ui/icon';
+import { ThemeToggle } from '@/ui/theme-toggle';
 import type { IconName } from '@/ui/icon';
 
 /**
@@ -182,6 +183,19 @@ export function AdminShell({ children }: { readonly children: ReactNode }) {
             <span className="admin-brand-suffix">operations</span>
           </Link>
           <span className="spacer" />
+          {/*
+            THE SAME TOGGLE THE CUSTOMER APP USES, not a second one.
+
+            The dashboard inherited whatever `data-theme` the customer app had
+            last been left on — and since nothing here could change it, an
+            operator who had never opened the customer app in light mode had a
+            dark dashboard with no way out. It is one preference for one
+            person across both surfaces, so it is one control: the toggle
+            writes the same attribute and the same stored choice, and a second
+            implementation here would be a second thing to keep in step with
+            the pre-paint bootstrap.
+          */}
+          <ThemeToggle />
           <Link href="/wallet" className="btn ghost small admin-wide-only">
             My wallet
           </Link>

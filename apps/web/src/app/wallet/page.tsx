@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { formatAmount, symbolFor } from '@xetral/client';
 import type { Balance, Transaction } from '@xetral/client';
@@ -64,6 +65,35 @@ export default function Wallet() {
 
   const session = useLoad(() => client.currentSession(), [client]);
   const balances = useLoad(() => client.balances(), [client]);
+  /*
+   * THE ACCOUNT NUMBER, ON THE SCREEN THEY OPEN FIRST.
+   *
+   * It lived only on Add money, so a customer who wanted to be paid had to
+   * remember which screen held it and go there — and the number is the one
+   * thing on this app somebody reads out loud to another person. It belongs
+   * where they already are.
+   *
+   * A READ, never an issue: `existingFundingAccount` opens nothing, which is
+   * the distinction that stopped the Add money page from opening a bank
+   * account as a side effect of being looked at. A customer with none gets
+   * `null` and nothing renders, because not having one is the resting state
+   * of a new account rather than a fault worth a line of text.
+   */
+  const fundingAccount = useLoad(
+    () => client.existingFundingAccount().catch(() => null),
+    [client],
+  );
+  // Narrowed ONCE, into a local: `fundingAccount.data` is a property access,
+  // so TypeScript cannot carry a null check across the closure below.
+  const inbound = fundingAccount.data;
+
+  /** Reset by a timer, so the tick is feedback rather than a new state. */
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1600);
+    return () => clearTimeout(timer);
+  }, [copied]);
 
   /*
    * EVERY CURRENCY THE PLATFORM OFFERS, not only the ones this customer has
@@ -167,6 +197,36 @@ export default function Wallet() {
           <div className="balance-sub">
             {formatAmount(active.pending, currency)} pending — held, not yet spendable
           </div>
+        )}
+
+        {/*
+          WHERE MONEY COMES IN, read out in the order somebody says it:
+          the name on the account, the bank, then the number.
+
+          The name is the PROVIDER'S — what a sender's banking app will show
+          them when they type this number in — so it is the string that
+          confirms they have the right person. Ours would confirm nothing.
+
+          `mono` and `tabular-nums` on the digits, because this is copied by
+          eye into another app and a proportional font makes a ten-digit
+          string hard to keep place in.
+        */}
+        {inbound !== null && inbound !== undefined && (
+          <button
+            type="button"
+            className="account-line"
+            onClick={() => {
+              void navigator.clipboard?.writeText(inbound.account_number);
+              setCopied(true);
+            }}
+            title="Copy your account number"
+          >
+            <span className="account-holder">{inbound.account_name}</span>
+            <span className="account-number mono">
+              {inbound.bank_name}: {inbound.account_number}
+            </span>
+            <Icon name={copied ? 'check' : 'copy'} size={15} />
+          </button>
         )}
 
         <div className="quick-actions">

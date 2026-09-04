@@ -58,11 +58,27 @@ export default function Home() {
 
   const session = useLoad(() => client.currentSession(), [client]);
   const balances = useLoad(() => client.balances(), [client]);
+  /*
+   * THE ACCOUNT NUMBER, ON THE SCREEN THEY OPEN FIRST — the web's reasoning.
+   * It lived only on Add money, and it is the one string in this app somebody
+   * reads out loud to another person.
+   *
+   * A READ, never an issue: `existingFundingAccount` opens nothing. A
+   * customer with none gets null and nothing renders, because not having one
+   * is the resting state of a new account rather than a fault.
+   */
+  const inboundAccount = useLoad(
+    () => client.existingFundingAccount().catch(() => null),
+    [client],
+  );
 
   // Every currency the platform OFFERS, not only the ones this customer has
   // received — the API returns a zero row for each, so this list is the
   // platform's answer rather than an accident of transaction history.
   const assets = balances.data ?? [];
+
+  // Narrowed once into a local.
+  const inbound = inboundAccount.data;
   const active = assets.find((b) => b.currency === preferred) ?? assets[0];
   const currency = active?.currency ?? 'NGN';
 
@@ -148,6 +164,51 @@ export default function Home() {
             {hidden ? MASK : formatAmount(active.pending, currency)} pending — held, not yet
             spendable
           </Text>
+        )}
+
+        {/*
+          WHERE MONEY COMES IN, in the order somebody says it: the name on the
+          account, the bank, then the number. The name is the PROVIDER'S —
+          what a sender's banking app shows them — so it is the string that
+          confirms they have the right person; ours would confirm nothing.
+
+          Tapping copies. `tabular-nums` is not available here, so the digits
+          take the mono family for the same reason: a ten-digit string is
+          copied by eye and a proportional face makes it hard to keep place.
+        */}
+        {inbound !== null && inbound !== undefined && (
+          /*
+            DISPLAY ONLY, and deliberately not a copy button.
+            Copying needs `expo-clipboard`, which is a NATIVE module: adding
+            one forces a new development and preview build on every device,
+            which is a real cost for a convenience nobody asked for. The web
+            copies because there it is free. Here the number is selectable and
+            read out, which is what it is for.
+          */
+          <View
+            accessible
+            accessibilityLabel={`Your account number, ${inbound.account_number} at ${inbound.bank_name}`}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: space.sm,
+              marginTop: space.md,
+              paddingHorizontal: space.md,
+              paddingVertical: 10,
+              borderRadius: radius.sm,
+              backgroundColor: 'rgba(255,255,255,0.10)',
+            }}
+          >
+            <Text
+              numberOfLines={1}
+              style={{ flex: 1, color: colors.text2, fontSize: 13, fontFamily: font.sans }}
+            >
+              {inbound.account_name}
+            </Text>
+            <Text selectable style={{ color: colors.text, fontSize: 14, fontFamily: font.mono }}>
+              {inbound.bank_name}: {inbound.account_number}
+            </Text>
+          </View>
         )}
 
 

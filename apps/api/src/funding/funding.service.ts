@@ -20,6 +20,7 @@ import type { FundingCustomer, FundingPort } from '@xetral/providers';
 import { toMajor } from '@xetral/shared';
 import type { Currency } from '@xetral/shared';
 import { API_CONFIG, DATABASE, FUNDING_PORT, LEDGER } from '../tokens.js';
+import { isMissingSchema, reportMissingSchema } from '../database-schema.js';
 import type { ApiConfig } from '../config.js';
 
 /**
@@ -193,30 +194,62 @@ export class FundingService {
       throw error;
     }
 
-    const inserted = await this.pool.query<AccountRow>(
-      `INSERT INTO virtual_accounts
-         (user_id, provider, provider_account_id, provider_customer_ref,
-          account_number, bank_name, account_name, currency, status)
-       VALUES ($1::bigint, $2, $3, $4, $5, $6, $7, 'NGN', $8)
-       ON CONFLICT (user_id, currency) WHERE (status <> 'closed') DO NOTHING
-       RETURNING id, user_id, provider_account_id, account_number, bank_name,
-                 account_name, currency, status`,
-      [
-        userId,
-        // WHO ACTUALLY ISSUED IT, off the account rather than off the port.
-        // The port is a switch whose `provider` is the configured default, so
-        // reading it here would relabel this row the moment an operator
-        // changed the setting — and the row is what routes every later read
-        // and every webhook back to the rail that holds the money.
-        issued.provider,
-        issued.providerAccountId,
-        issued.providerCustomerRef ?? null,
-        issued.accountNumber,
-        issued.bankName,
-        issued.accountName,
-        issued.active ? 'active' : 'pending',
-      ],
-    );
+    /*
+     * WRAPPED, because this INSERT writes columns a MIGRATION adds.
+     *
+     * `provider` and `provider_customer_ref` arrive in 044. On a deployment
+     * where this code rolled out and that migration did not, Postgres answers
+     * `column "provider" of relation "virtual_accounts" does not exist`,
+     * nothing caught it, Nest answered a bare 500, and the customer read
+     * "something went wrong" on the screen they opened in order to put money
+     * in. From outside that is indistinguishable from a wrong key or an
+     * unapproved integration, so an operator can spend a day on the provider
+     * dashboard while the answer is one `psql -f` away.
+     *
+     * Note WHERE this sits: after the provider call. An account may now exist
+     * at the rail that we cannot record — which the log says, because the
+     * adapter looks before it creates, so the retry after the migration finds
+     * that account rather than opening a second live number.
+     */
+    let inserted;
+    try {
+      inserted = await this.pool.query<AccountRow>(
+        `INSERT INTO virtual_accounts
+           (user_id, provider, provider_account_id, provider_customer_ref,
+            account_number, bank_name, account_name, currency, status)
+         VALUES ($1::bigint, $2, $3, $4, $5, $6, $7, 'NGN', $8)
+         ON CONFLICT (user_id, currency) WHERE (status <> 'closed') DO NOTHING
+         RETURNING id, user_id, provider_account_id, account_number, bank_name,
+                   account_name, currency, status`,
+        [
+          userId,
+          // WHO ACTUALLY ISSUED IT, off the account rather than off the port.
+          // The port is a switch whose `provider` is the configured default, so
+          // reading it here would relabel this row the moment an operator
+          // changed the setting — and the row is what routes every later read
+          // and every webhook back to the rail that holds the money.
+          issued.provider,
+          issued.providerAccountId,
+          issued.providerCustomerRef ?? null,
+          issued.accountNumber,
+          issued.bankName,
+          issued.accountName,
+          issued.active ? 'active' : 'pending',
+        ],
+      );
+    } catch (error) {
+      if (isMissingSchema(error)) {
+        reportMissingSchema(this.#logger, error, 'opening a naira account');
+        this.#logger.error(
+          `The rail may have opened account ${issued.accountNumber} for user ${userId} ` +
+            `and this deployment could not record it. The adapter looks before it ` +
+            `creates, so applying the migration and retrying finds that same account ` +
+            `rather than opening a second one.`,
+        );
+        throw new ServiceUnavailableException({ error: 'account_issue_unavailable' });
+      }
+      throw error;
+    }
 
     const row = inserted.rows[0];
     if (row !== undefined) return toAccountView(row);

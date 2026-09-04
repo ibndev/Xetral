@@ -247,6 +247,40 @@ describe('getting an account number', () => {
     expect(port.created).toHaveLength(1);
   });
 
+  it('NAMES THE MISSING MIGRATION when the schema is behind the build', async () => {
+    /*
+     * THE FAILURE THIS IS FOR. `virtual_accounts.provider` arrives in 044. On
+     * a deployment where the code rolled out and that migration did not,
+     * Postgres answers `column "provider" ... does not exist`, nothing caught
+     * it, and the customer read "something went wrong" on the screen they
+     * opened in order to put money in — which from outside is
+     * indistinguishable from a wrong key, an unapproved integration or a
+     * provider outage. An operator can lose a day on the provider dashboard
+     * while the answer is one `psql -f` away.
+     *
+     * Reproduced by actually DROPPING the column rather than by mocking the
+     * error, because what is being tested is that a real Postgres 42703
+     * reaches the handler and comes back as a named refusal. Restored in a
+     * `finally`, since every later suite shares this database.
+     */
+    const customer = await onboard(false);
+
+    await pool.query('ALTER TABLE virtual_accounts DROP COLUMN provider');
+    try {
+      const res = await getAccount(customer);
+      // A 503, not a 500: this deployment cannot serve the request right now
+      // and a person has to act. The code is one the client already renders.
+      expect(res.status).toBe(503);
+      expect(res.body.error).toBe('account_issue_unavailable');
+    } finally {
+      await pool.query(
+        `ALTER TABLE virtual_accounts
+           ADD COLUMN provider TEXT NOT NULL DEFAULT 'bitnob'
+             CHECK (length(btrim(provider)) > 0)`,
+      );
+    }
+  });
+
   it('OPENS ONE FOR A CUSTOMER WHO HAS NOT VERIFIED ANYTHING', async () => {
     /*
      * THIS TEST USED TO ASSERT THE OPPOSITE, and the assertion was Bitnob's
