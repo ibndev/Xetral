@@ -35,6 +35,12 @@ export type AdminAction =
   | 'giftcard.approve'
   | 'giftcard.reject'
   | 'giftcard.clawback'
+  /* MONEY GIVEN BACK TO A CUSTOMER, from a held row that never completed.
+     A reason is required — by 049's CHECK as well as by this union — because
+     it is the sentence the customer is eventually read back to, and because
+     a recovery queue cleared with one-word reasons is indistinguishable from
+     one nobody worked. */
+  | 'recovery.reverse'
   /* A dispute resolved. Recorded whichever way it went: an upheld one moved
      money, and a rejected one is a decision a customer may come back about. */
   | 'dispute.accept'

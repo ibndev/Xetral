@@ -303,6 +303,21 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
        * of pending mail is not a list of live account-takeover links.
        */
       .staff('GET', '/v1/admin/notifications', { pin: false, role: 'support' })
+      /*
+       * MONEY WAITING FOR A PERSON. A READ, on `support` — it names customers
+       * whose money is held, which is exactly who support is fielding calls
+       * from.
+       */
+      .staff('GET', '/v1/admin/recovery', { pin: false, role: 'support' })
+      /*
+       * AND GIVING IT BACK, which is not a read.
+       *
+       * `finance` rather than `support`: it moves money, and the role that
+       * answers the phone should not be the role that can post a reversal.
+       * `pin: true` puts it behind the transaction PIN and — through the guard
+       * — a fresh second factor, like every other acting route.
+       */
+      .staff('POST', '/v1/admin/recovery/:kind/:id', { pin: true, role: 'finance' })
 
       .staff('GET', '/v1/admin/users', { pin: false, role: 'support' })
       .staff('GET', '/v1/admin/users/:id', { pin: false, role: 'support' })

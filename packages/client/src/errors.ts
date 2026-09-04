@@ -203,6 +203,18 @@ const API_ERROR_CODES = [
   'payout_provider_not_configured',
 
   /*
+   * RECOVERY.
+   *
+   * `not_recoverable` is one answer to several questions — no such held row,
+   * it is not held any more, or somebody has already given this one back —
+   * and collapsing them is deliberate. The screen lists exactly what is
+   * recoverable, so an operator who sees this has raced another operator or
+   * a sweep, and every one of those answers means the same thing to them:
+   * reload, and it will not be there.
+   */
+  'not_recoverable',
+
+  /*
    * NAIRA FUNDING.
    *
    * `profile_incomplete` is what a customer sees when the platform cannot

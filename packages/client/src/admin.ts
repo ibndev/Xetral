@@ -426,6 +426,41 @@ export interface AdminRecentFailure {
   readonly reference: string | null;
 }
 
+/**
+ * Money held against something that never completed.
+ *
+ * `hours_held` rather than a timestamp alone: a queue of three that has been
+ * three since Tuesday is a queue nobody is working, and the age is what says
+ * which. Amounts are STRINGS in minor units, like every amount that crosses
+ * this boundary.
+ */
+export interface AdminHeldMoney {
+  readonly kind: 'bank_payout' | 'purchase';
+  readonly subject_uuid: string;
+  readonly user_id: string;
+  readonly email: string | null;
+  readonly currency: string;
+  readonly amount_minor: string;
+  readonly status: string;
+  readonly created_at: string;
+  readonly hours_held: number;
+  /** Where it was going — the bank and account, or the service and target. */
+  readonly destination: string;
+}
+
+/** What was given back, by whom, and why. Append-only on the server. */
+export interface AdminRecoveryRecord {
+  readonly uuid: string;
+  readonly kind: string;
+  readonly subject_uuid: string;
+  readonly email: string | null;
+  readonly amount_minor: string;
+  readonly currency: string;
+  readonly reason: string;
+  readonly actioned_by: string | null;
+  readonly created_at: string;
+}
+
 export interface AdminFundingDiagnosis {
   /** Which rail opens the NEXT account. Accounts already issued keep working
    *  at whoever issued them, so this is not a claim about them. */
@@ -784,6 +819,39 @@ export class AdminClient {
       `/v1/admin/users/${encodeURIComponent(id)}/transactions?${query.toString()}`,
     );
     return body.transactions;
+  }
+
+  /**
+   * Money waiting for a person, and what has already been given back.
+   *
+   * Both in one call, because "has somebody already dealt with this?" is asked
+   * in the same breath as "what is waiting?".
+   */
+  async recoveryQueue(): Promise<{
+    readonly waiting: readonly AdminHeldMoney[];
+    readonly recovered: readonly AdminRecoveryRecord[];
+  }> {
+    return this.#get('/v1/admin/recovery');
+  }
+
+  /**
+   * Give one held row back to the customer.
+   *
+   * THERE IS NO AMOUNT PARAMETER, deliberately. The sum comes from the held
+   * row on the server, so this cannot credit an arbitrary customer an
+   * arbitrary amount — and the server refuses a body carrying one rather than
+   * ignoring it.
+   */
+  async recover(
+    kind: 'bank_payout' | 'purchase',
+    subjectUuid: string,
+    reason: string,
+    pin: string,
+  ): Promise<AdminRecoveryRecord> {
+    return this.#post(
+      `/v1/admin/recovery/${encodeURIComponent(kind)}/${encodeURIComponent(subjectUuid)}`,
+      { reason, transaction_pin: pin },
+    );
   }
 
   /** Whether anything is actually being sent. Carries no message body. */

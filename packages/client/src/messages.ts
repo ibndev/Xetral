@@ -296,6 +296,8 @@ function sentenceFor(error: ApiError): string {
     case 'account_not_found':
     case 'not_found':
       return 'We could not find that.';
+    case 'not_recoverable':
+      return 'That is no longer waiting to be recovered. Reload the queue.';
 
     /* purchases */
     case 'purchase_failed':

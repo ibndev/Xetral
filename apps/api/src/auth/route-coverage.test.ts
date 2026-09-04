@@ -210,6 +210,9 @@ describe('the privileged surface is declared as privileged', () => {
       // `support`, because it names every flow that is off and every
       // credential that is absent — a map of where the platform is soft.
       'GET /v1/admin/readiness (admin)',
+      // Money waiting for a person. `support`, because it names the customers
+      // whose money is held — exactly who support is fielding calls from.
+      'GET /v1/admin/recovery (support)',
       'GET /v1/admin/risk/cases (compliance)',
       'GET /v1/admin/risk/cases/:id (compliance)',
       'GET /v1/admin/risk/signals (compliance)',
@@ -249,7 +252,11 @@ describe('the privileged surface is declared as privileged', () => {
       // in the application ever wrote either price table before this.
       'POST /v1/admin/prices/:id/retire (finance)',
       'POST /v1/admin/prices/fx (finance)',
+      // Giving held money back. `finance` rather than `support`: it moves
+      // money, and the role that answers the phone should not be the role
+      // that can post a reversal.
       'POST /v1/admin/prices/giftcard (finance)',
+      'POST /v1/admin/recovery/:kind/:id (finance)',
       // Opening and noting take no PIN; closing does, because it resolves
       // every signal the case covers.
       'POST /v1/admin/risk/cases (compliance)',

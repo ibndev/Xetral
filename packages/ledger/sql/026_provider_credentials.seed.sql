@@ -42,21 +42,10 @@ VALUES
    'instance with no price set cannot sell one whatever this holds.',
    'TWILIO_AUTH_TOKEN', TRUE),
 
-  /**
-   * BREVO — the only thing that sends email.
-   *
-   * A TRANSACTIONAL key (v3, prefixed `xkeysib-`), not a campaign one: every
-   * message this platform sends is addressed to one person about their own
-   * account and must reach somebody who has unsubscribed from marketing.
-   * 033's trigger already refuses a `marketing`-class message to a customer
-   * with no live grant, and the point of that rule is that security mail is
-   * untouched by it.
-   */
-  ('brevo', 'api_key', 'Brevo API key',
+  ('resend', 'api_key', 'Resend API key',
    'The only thing that sends email. Without it the outbox fills, the API '
-   'answers "check your inbox", and nothing is ever delivered. The sender '
-   'domain must also be authenticated in Brevo or every send is refused.',
-   'BREVO_API_KEY', TRUE),
+   'answers "check your inbox", and nothing is ever delivered.',
+   'RESEND_API_KEY', TRUE),
 
   /**
    * DOJAH — identity verification.

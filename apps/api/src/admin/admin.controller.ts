@@ -27,6 +27,7 @@ import { CardService } from '../cards/card.service.js';
 import { KycService } from '../kyc/kyc.service.js';
 import { ErrorRecorder } from '../observability/error-recorder.service.js';
 import { ReadinessService, type Readiness } from '../golive/readiness.service.js';
+import { RecoveryService, type HeldMoney, type RecoveryRecord } from './recovery.service.js';
 import {
   FundingDiagnosticsService,
   type FundingDiagnosis,
@@ -73,6 +74,28 @@ const userTransactionsQuery = z.object({
   before: z.string().regex(/^[0-9]+$/).optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),
 });
+
+/**
+ * A recovery takes a REASON and nothing else.
+ *
+ * `.strict()` so an amount cannot be smuggled in: the sum comes from the held
+ * row, and a caller-supplied one is refused rather than ignored — the rule
+ * `payoutSchema` follows about a caller-supplied beneficiary name, for the
+ * same reason. Anything a client can send, a stolen session can send.
+ *
+ * `transaction_pin` is allowed through because the guard reads it from the
+ * body before the handler runs; `.strict()` would otherwise refuse the very
+ * request the route declares.
+ *
+ * Eight characters minimum, matching 049's CHECK: a queue cleared with
+ * one-word reasons is indistinguishable from one nobody worked.
+ */
+const recoverySchema = z
+  .object({
+    reason: z.string().trim().min(8).max(500),
+    transaction_pin: z.string().optional(),
+  })
+  .strict();
 
 const settingSchema = z.object({
   value: z.string().trim().min(1).max(500),
@@ -210,6 +233,7 @@ export class AdminController {
     @Inject(ReadinessService) private readonly readinessService: ReadinessService,
     @Inject(FundingDiagnosticsService)
     private readonly diagnostics: FundingDiagnosticsService,
+    @Inject(RecoveryService) private readonly recovery: RecoveryService,
   ) {}
 
   /* ------------------------------ overview ----------------------------- */
@@ -282,6 +306,62 @@ export class AdminController {
   @Get('notifications')
   async notifications(): Promise<Record<string, unknown>> {
     return this.admin.notifications();
+  }
+
+  /* ------------------------------ recovery ----------------------------- */
+
+  /**
+   * Money held against something that never completed, and what has already
+   * been given back.
+   *
+   * Both in one response, because "has somebody already dealt with this?" is
+   * asked in the same breath as "what is waiting?" — and an operator who
+   * cannot see the answer presses the button again.
+   */
+  @Get('recovery')
+  async recoveryQueue(): Promise<{
+    waiting: readonly HeldMoney[];
+    recovered: readonly RecoveryRecord[];
+  }> {
+    const [waiting, recovered] = await Promise.all([
+      this.recovery.waiting(),
+      this.recovery.recovered(),
+    ]);
+    return { waiting, recovered };
+  }
+
+  /**
+   * Give one held row back.
+   *
+   * THE AMOUNT IS NOT A PARAMETER. It comes from the held row, so this cannot
+   * credit an arbitrary customer an arbitrary sum — which is what a
+   * money-printing button on an operations screen would be.
+   */
+  @Post('recovery/:kind/:id')
+  async recover(
+    @Param('kind') kind: string,
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<RecoveryRecord> {
+    const parsed = recoverySchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException({
+        error: 'invalid_request',
+        fields: parsed.error.issues.map((i) => i.path.join('.')),
+      });
+    }
+    if (kind !== 'bank_payout' && kind !== 'purchase') {
+      throw new BadRequestException({ error: 'invalid_request', fields: ['kind'] });
+    }
+
+    return this.recovery.recover(
+      kind,
+      id,
+      claims(request).sub,
+      parsed.data.reason,
+      request.ip,
+    );
   }
 
   /* -------------------------------- users ------------------------------ */

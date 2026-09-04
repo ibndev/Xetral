@@ -56,6 +56,10 @@ export const GROUPS: readonly Group[] = [
     title: 'Money',
     items: [
       { href: '/admin/suspense', label: 'Suspense', icon: 'wallet' },
+      // Money that left a wallet and never arrived. Beside Suspense, and the
+      // mirror of it: suspense is money we hold and cannot attribute, this is
+      // money we took and did not deliver.
+      { href: '/admin/recovery', label: 'Recovery', icon: 'swap' },
       { href: '/admin/tax', label: 'Tax', icon: 'receipt' },
       { href: '/admin/prices', label: 'Prices', icon: 'trend' },
       { href: '/admin/giftcards', label: 'Gift cards', icon: 'gift' },
