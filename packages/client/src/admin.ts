@@ -863,6 +863,18 @@ export class AdminClient {
     return this.#get<AdminFundingDiagnosis>('/v1/admin/funding/diagnostics');
   }
 
+  /**
+   * Clear the recent-failure list.
+   *
+   * ACKNOWLEDGED, NOT DELETED — the records stay, and anything still failing
+   * reopens itself on its next occurrence, so this cannot be used to make a
+   * live fault disappear. Answers how many were cleared, which is how an
+   * operator tells "I cleared them" from "they were already gone".
+   */
+  async clearFailures(): Promise<{ readonly resolved: number }> {
+    return this.#post<{ readonly resolved: number }>('/v1/admin/errors/resolve-all', {});
+  }
+
   /* -------------------------------- pricing ----------------------------- */
 
   /**

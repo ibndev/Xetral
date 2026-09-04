@@ -9,6 +9,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { FALLBACK_COUNTRY } from '@xetral/client';
 import type { XetralCountry } from '@xetral/client';
 import { Link, router } from 'expo-router';
 import { deviceDescriptor } from '@/device';
@@ -63,7 +64,13 @@ export default function SignUp() {
    * the harder half to fix, because its address is compiled in and a wrong
    * list is a rebuild, a release and a reinstall.
    */
-  const [countries, setCountries] = useState<readonly XetralCountry[]>([]);
+  /*
+   * SEEDED WITH NIGERIA, not empty. The picker draws its flag and its
+   * dialling code from the SELECTED OPTION, so an empty list showed a bare
+   * `+` and no flag until the fetch returned — and nothing at all on a
+   * handset that could not reach the API. See `FALLBACK_COUNTRY`.
+   */
+  const [countries, setCountries] = useState<readonly XetralCountry[]>([FALLBACK_COUNTRY]);
   useEffect(() => {
     let live = true;
     void xetral()

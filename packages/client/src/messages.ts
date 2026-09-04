@@ -298,6 +298,10 @@ function sentenceFor(error: ApiError): string {
       return 'We could not find that.';
     case 'not_recoverable':
       return 'That is no longer waiting to be recovered. Reload the queue.';
+    case 'handle_taken':
+      return 'That handle is not available. Try another.';
+    case 'handle_invalid':
+      return 'Handles are 3–20 characters: letters, numbers and underscores, starting and ending with a letter or number.';
 
     /* purchases */
     case 'purchase_failed':

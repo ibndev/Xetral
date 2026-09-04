@@ -185,6 +185,28 @@ export class ErrorRecorder {
     );
     return (result.rowCount ?? 0) > 0;
   }
+
+  /**
+   * Mark every open fingerprint dealt with, and say how many.
+   *
+   * ACKNOWLEDGED, NOT DELETED. `error_events` is where the sentence behind a
+   * 500 lives, and the reference an operator reads off a customer's screen
+   * resolves against it — a list somebody can empty is one where the evidence
+   * for the incident being investigated disappears at the moment somebody
+   * tidies up. Clearing sets `resolved_at`, and `record_error` clears that
+   * again on the next occurrence, so a fault that is still happening comes
+   * straight back rather than staying hidden behind a fix that did not work.
+   *
+   * One statement rather than a loop over what the screen last rendered: a
+   * fingerprint recorded between the read and the write would otherwise be
+   * cleared without anybody having seen it.
+   */
+  async resolveAll(): Promise<number> {
+    const result = await this.pool.query(
+      `UPDATE error_events SET resolved_at = now() WHERE resolved_at IS NULL`,
+    );
+    return result.rowCount ?? 0;
+  }
 }
 
 function truncate(message: string): string {

@@ -1,5 +1,12 @@
 import { randomInt } from 'node:crypto';
-import { Inject, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import type { OnApplicationBootstrap } from '@nestjs/common';
 import type { Pool } from 'pg';
 import type { ApiConfig } from '../config.js';
@@ -177,6 +184,63 @@ export class ProfileService implements OnApplicationBootstrap {
     throw new Error('could not mint a payment handle after eight attempts');
   }
 
+  /**
+   * Change it, once, to something nobody has ever held.
+   *
+   * A HANDLE IS STILL NEVER REISSUED TO SOMEBODY ELSE, and that rule is what
+   * makes this safe to offer rather than what it fights. 039's trigger
+   * releases the old one into `handle_history` and refuses it to any OTHER
+   * user id — so a customer changing theirs frees NOTHING for anybody: a
+   * payment link posted in a message thread last month goes on pointing at a
+   * handle only they have ever had. Without that, changing a handle would be
+   * a way to hand a stranger every payment already promised to you.
+   *
+   * THE SAME PERSON MAY TAKE THEIRS BACK, and the asymmetry is the point
+   * rather than a hole in it: every link pointing at that handle pays the
+   * same person either way, so refusing would make one mistyped change
+   * permanent for no benefit at all.
+   *
+   * The PIN is asked for because the change is still consequential and
+   * reaches every link somebody has already shared — not because it moves
+   * money, which it does not.
+   *
+   * Normalised before it is checked, because a handle arrives typed from a
+   * message: the leading `@` somebody pastes with it, and the capitals a
+   * phone keyboard adds to the first letter, are not mistakes to refuse.
+   */
+  async choose(userUuid: string, requested: string): Promise<ProfileView> {
+    const handle = requested.trim().replace(/^@+/, '').toLowerCase();
+
+    // The same shape 039 enforces, checked here so a customer gets a sentence
+    // rather than a constraint violation. The database is still what decides
+    // — this is a message, not the rule.
+    if (!/^[a-z0-9](?:[a-z0-9_]{1,18})[a-z0-9]$/.test(handle)) {
+      throw new BadRequestException({ error: 'handle_invalid' });
+    }
+
+    try {
+      const updated = await this.pool.query<{ handle: string }>(
+        `UPDATE users SET handle = $2 WHERE uuid = $1 RETURNING handle`,
+        [userUuid, handle],
+      );
+      const claimed = updated.rows[0]?.handle;
+      if (claimed === undefined) throw new BadRequestException({ error: 'handle_invalid' });
+      return this.#view(claimed);
+    } catch (error) {
+      if (error instanceof BadRequestException) throw error;
+      /*
+       * TAKEN COVERS BOTH — held by somebody now, and held by somebody once.
+       * The live unique index raises one and 039's trigger raises the other,
+       * both as `unique_violation`, and they mean the same thing to the
+       * person typing: pick another. Distinguishing them would also say
+       * whether a handle once belonged to a real customer, which is a fact
+       * about somebody else.
+       */
+      if (isUniqueViolation(error)) throw new ConflictException({ error: 'handle_taken' });
+      throw error;
+    }
+  }
+
   #view(handle: string): ProfileView {
     // `appBaseUrl` is the customer-facing origin and is CONFIGURATION, never a
     // request header — the same rule password reset links follow. A link built
@@ -194,6 +258,15 @@ export class ProfileService implements OnApplicationBootstrap {
     }
     return { handle, link: `${origin}/pay/${handle}` };
   }
+}
+
+/** Postgres 23505. Raised by the live unique index AND by 039's trigger,
+ *  which uses the same SQLSTATE deliberately — a handle held once and a
+ *  handle held now are the same answer to the person typing. */
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === 'object' && error !== null && (error as { code?: string }).code === '23505'
+  );
 }
 
 function describe(error: unknown): string {

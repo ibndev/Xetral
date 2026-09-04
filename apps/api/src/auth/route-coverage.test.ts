@@ -244,6 +244,7 @@ describe('the privileged surface is declared as privileged', () => {
       'POST /v1/admin/data-requests/:id/resolve (compliance)',
       'POST /v1/admin/disputes/:id/resolve (dispute_reviewer)',
       'POST /v1/admin/errors/:fingerprint/resolve (admin)',
+      'POST /v1/admin/errors/resolve-all (admin)',
       'POST /v1/admin/giftcards/:id/clawback (giftcard_reviewer)',
       'POST /v1/admin/giftcards/:id/reveal (giftcard_reviewer)',
       'POST /v1/admin/giftcards/:id/review (giftcard_reviewer)',

@@ -1190,6 +1190,20 @@ export class AdminController {
   ): Promise<{ resolved: boolean }> {
     return { resolved: await this.errors.resolve(fingerprint) };
   }
+
+  /**
+   * Clear the list in one action.
+   *
+   * It cannot collide with `errors/:fingerprint/resolve`, which is a segment
+   * longer. What matters is the COUNT it returns: an operator who clears
+   * twenty failures and is told "20" knows the screen was not simply stale,
+   * and one told "0" knows somebody else got there first.
+   */
+  @Post('errors/resolve-all')
+  @HttpCode(200)
+  async errorResolveAll(): Promise<{ resolved: number }> {
+    return { resolved: await this.errors.resolveAll() };
+  }
 }
 
 function invalid(issues: readonly { path: PropertyKey[] }[]): BadRequestException {

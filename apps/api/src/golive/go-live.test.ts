@@ -98,11 +98,35 @@ function settingKeys(): Set<string> {
   return found;
 }
 
-/** Every credential slot, as `provider.name`. */
+/**
+ * Every credential slot, as `provider.name`, from EVERY migration.
+ *
+ * It read 026's seed alone, which was true when 026 was the only file that
+ * wrote this table and stopped being true the moment a later migration added
+ * one: 042 added both Bitnob v2 credentials, 044 added Paystack's, 048 added
+ * Brevo's, and NONE of the four was visible to this guard in either
+ * direction. So the two secrets that authorise every Bitnob call and the one
+ * that authorises the DEFAULT naira funding rail were simply absent from the
+ * checklist an operator works through before taking money.
+ *
+ * That is the `settingKeys()` lesson exactly — nineteen keys of fifty-four,
+ * from reading one file — repeated one function further down.
+ *
+ * Scoped to the INSERT for the reason that one is: these files are full of
+ * parenthesised prose, and an unscoped tuple match sweeps in sentences.
+ */
 function credentialSlots(): Set<string> {
   const found = new Set<string>();
-  for (const match of CREDENTIAL_SEED.matchAll(/\(\s*'([a-z]+)',\s*'([a-z_]+)',/g)) {
-    found.add(`${match[1] as string}.${match[2] as string}`);
+  for (const sql of MIGRATIONS) {
+    for (const statement of sql.matchAll(
+      /INSERT INTO provider_credential_slots[\s\S]*?(?=\nINSERT INTO |\nUPDATE |\nCOMMIT|$)/g,
+    )) {
+      for (const row of (statement[0] as string).matchAll(
+        /^\s*\('([a-z]+)'\s*,\s*'([a-z_]+)'\s*,/gm,
+      )) {
+        found.add(`${row[1] as string}.${row[2] as string}`);
+      }
+    }
   }
   return found;
 }
@@ -114,6 +138,10 @@ describe('the go-live checklist covers what the system actually needs', () => {
     // whole file exists to prevent, one level up.
     expect(CONFIG).toContain("required(env, 'DATABASE_URL')");
     expect(CREDENTIAL_SEED).toContain('provider_credential_slots');
+    // A slot from a MIGRATION rather than from the seed, so the reader above
+    // cannot narrow back to one file and still pass. 044 adds this one;
+    // 026's seed has never mentioned Paystack.
+    expect(credentialSlots()).toContain('paystack.secret_key');
     expect(MIGRATIONS.length).toBeGreaterThan(30);
     expect(MIGRATIONS.filter((s) => s.includes('INSERT INTO platform_settings')).length)
       .toBeGreaterThan(10);

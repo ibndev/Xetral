@@ -327,6 +327,10 @@ function PaymentLink() {
   const styles = useStyles();
   const colors = useTheme();
   const profile = useLoad(() => client.profile(), [client]);
+  const [editing, setEditing] = useState(false);
+  const [handle, setHandle] = useState('');
+  const [pin, setPin] = useState('');
+  const { busy, error, code, run } = useSubmit();
 
   return (
     <Panel title="Your payment link" subtitle="Share it and anyone can pay you">
@@ -378,6 +382,68 @@ function PaymentLink() {
           <Text style={styles.hint}>
             Yours permanently. It is never reissued to anybody else.
           </Text>
+
+          {/*
+            THE OLD HANDLE IS NOT FREED, and the copy says so before the
+            field rather than after the mistake. 039 refuses a released
+            handle to anybody else, so a link already shared goes on pointing
+            at a handle only this customer has ever had, instead of quietly
+            starting to pay a stranger.
+          */}
+          {!editing && (
+            <Button
+              label="Change my handle"
+              quiet
+              onPress={() => {
+                setHandle(profile.data?.handle ?? '');
+                setEditing(true);
+              }}
+            />
+          )}
+
+          {editing && (
+            <View style={{ gap: space.sm, marginTop: space.sm }}>
+              <Field
+                label="New handle"
+                value={handle}
+                onChangeText={setHandle}
+                autoCapitalize="none"
+                autoCorrect={false}
+                spellCheck={false}
+                placeholder="olawale"
+                hint="3–20 characters: letters, numbers and underscores. Links using your old handle stop working, and nobody else can ever take it — you can change back to it."
+              />
+              <Field
+                label="Transaction PIN"
+                value={pin}
+                onChangeText={setPin}
+                secureTextEntry
+                keyboardType="number-pad"
+              />
+              <Button
+                label="Save handle"
+                busy={busy}
+                onPress={() => {
+                  void run(async () => {
+                    await client.chooseHandle(handle, pin);
+                    setPin('');
+                    setEditing(false);
+                    profile.reload();
+                    return undefined;
+                  });
+                }}
+              />
+              <Button
+                label="Cancel"
+                quiet
+                onPress={() => {
+                  setEditing(false);
+                  setPin('');
+                }}
+              />
+              <FormError error={error} code={code} />
+            </View>
+          )}
         </>
       )}
 

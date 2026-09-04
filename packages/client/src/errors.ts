@@ -215,6 +215,18 @@ const API_ERROR_CODES = [
   'not_recoverable',
 
   /*
+   * PAYMENT HANDLES.
+   *
+   * `handle_taken` is deliberately one answer to two questions — somebody
+   * holds it now, and somebody held it once. 039 never reissues a handle, so
+   * both mean "pick another"; distinguishing them would say whether a
+   * particular handle once belonged to a real customer, which is a fact about
+   * somebody else.
+   */
+  'handle_taken',
+  'handle_invalid',
+
+  /*
    * NAIRA FUNDING.
    *
    * `profile_incomplete` is what a customer sees when the platform cannot

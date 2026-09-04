@@ -35,6 +35,36 @@ export interface XetralCountry {
   readonly payout_method?: string;
 }
 
+/**
+ * NIGERIA, KNOWN LOCALLY, SO THE FIRST PAINT IS NOT EMPTY.
+ *
+ * `/v1/countries` decides what may be signed up from — that is 040's whole
+ * argument, and this constant does not change it. What it fixes is the gap
+ * before the answer arrives: the signup form's country control renders its
+ * flag and its dialling code from the selected option, and until the fetch
+ * resolved there WAS no option, so the field showed a placeholder and an
+ * empty `+` on the screen every new customer opens. A Nigerian handset user
+ * was being asked to find their own country in a list that had not loaded.
+ *
+ * It is also what happens when the call FAILS. Before, an unreachable list
+ * left a form that could not be submitted at all; now it falls back to the
+ * country this platform was built for, and the server still refuses a
+ * registration naming a country it is not open in — the check that matters
+ * has not moved.
+ *
+ * The moment the real list arrives it replaces this entirely, including
+ * Nigeria's own row, so a dialling code corrected in the database is the one
+ * on screen.
+ */
+export const FALLBACK_COUNTRY: XetralCountry = {
+  code: 'NG',
+  name: 'Nigeria',
+  dial_code: '234',
+  currency: 'NGN',
+  enabled: true,
+  payout_method: 'bank',
+};
+
 export interface Balance {
   readonly currency: string;
   readonly spendable: string;
@@ -457,6 +487,27 @@ export class XetralClient {
    */
   async profile(): Promise<{ handle: string; link: string | null }> {
     return this.#get('/v1/auth/profile');
+  }
+
+  /**
+   * Change it.
+   *
+   * A handle is never reissued TO SOMEBODY ELSE, so the one being given up
+   * cannot be claimed by anybody — every link already pointing at it stays
+   * pointing at this customer. They may take it back themselves, which is
+   * safe for the same reason: it pays the same person either way.
+   *
+   * Takes the transaction PIN because the change reaches every link already
+   * shared, not because it moves money — it moves none.
+   *
+   * `handle_taken` covers both a handle somebody else holds now and one
+   * somebody else held once, which are the same answer to the person typing.
+   */
+  async chooseHandle(
+    handle: string,
+    pin: string,
+  ): Promise<{ handle: string; link: string | null }> {
+    return this.#post('/v1/auth/profile/handle', { handle, transaction_pin: pin });
   }
 
   /**

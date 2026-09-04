@@ -1,6 +1,8 @@
 'use client';
 
+import { useState } from 'react';
 import { useAdmin, useLoad } from '@/lib/hooks';
+import { messageFor } from '@/lib/errors';
 import { Icon } from '@/ui/icon';
 import { AdminError } from '../access';
 
@@ -23,6 +25,8 @@ import { AdminError } from '../access';
 export default function Diagnostics() {
   const admin = useAdmin();
   const report = useLoad(() => admin.fundingDiagnostics(), [admin]);
+  const [clearing, setClearing] = useState(false);
+  const [clearError, setClearError] = useState<string | undefined>();
 
   const failing = report.data?.checks.filter((c) => c.state === 'fail') ?? [];
 
@@ -65,6 +69,41 @@ export default function Diagnostics() {
             The exception&apos;s own words, for every 5xx this instance has
             served. Match the reference to the one on the screen.
           </p>
+          {/*
+            CLEARING IS ACKNOWLEDGING, and the label says so rather than
+            saying Delete. `error_events` is where the sentence behind a 500
+            lives and where the reference an operator reads off a customer's
+            screen resolves — a list that could really be emptied is one where
+            the evidence for the incident being investigated disappears at the
+            moment somebody tidies up. Anything still failing reopens itself
+            on its next occurrence, so this cannot hide a live fault.
+          */}
+          {report.data.failures.length > 0 && (
+            <div className="actions">
+              <button
+                type="button"
+                className="ghost"
+                disabled={clearing}
+                onClick={() => {
+                  setClearing(true);
+                  setClearError(undefined);
+                  void (async () => {
+                    try {
+                      await admin.clearFailures();
+                      report.reload();
+                    } catch (cause) {
+                      setClearError(messageFor(cause));
+                    } finally {
+                      setClearing(false);
+                    }
+                  })();
+                }}
+              >
+                {clearing ? 'Clearing…' : 'Clear the list'}
+              </button>
+            </div>
+          )}
+          {clearError !== undefined && <p className="error">{clearError}</p>}
           {report.data.failures.length === 0 && (
             <p className="empty">Nothing has failed. </p>
           )}

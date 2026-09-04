@@ -1415,6 +1415,20 @@ select {
 .input-affix { position: relative; display: flex; align-items: center; }
 .input-affix input { padding-right: 56px; }
 
+/* AN `@` IN FRONT OF A HANDLE FIELD. Leading, like the dialling code and
+   unlike `.input-affix`, whose padding is reserved on the right for the
+   password reveal. The symbol is decoration: it is not in the value, and the
+   server strips one a customer pastes anyway. */
+.handle-field { position: relative; display: flex; align-items: center; }
+.handle-field input { padding-left: 30px; }
+.handle-at {
+  position: absolute;
+  left: 14px;
+  z-index: 2;
+  color: var(--text-3);
+  pointer-events: none;
+}
+
 /* A DIALLING CODE IN FRONT OF A PHONE FIELD, not a second picker.
    The affix is on the LEFT here and the padding goes the other way — the
    `.input-affix` above is built for a trailing control (the password reveal),

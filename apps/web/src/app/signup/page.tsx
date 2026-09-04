@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import { FALLBACK_COUNTRY } from '@xetral/client';
 import type { XetralCountry } from '@xetral/client';
 import { resetXetral, xetral } from '@/lib/session';
 import { deviceFingerprint } from '@/lib/device';
@@ -68,7 +69,17 @@ export default function SignUp() {
    * before anybody is signed in, and `XetralClient` cannot be constructed
    * without a session.
    */
-  const [countries, setCountries] = useState<readonly XetralCountry[]>([]);
+  /*
+   * SEEDED WITH NIGERIA, not empty.
+   *
+   * The control below draws its flag and its dialling code from the SELECTED
+   * OPTION, so an empty list meant no flag and a bare `+` until the fetch
+   * came back — and nothing at all if it never did. Starting from
+   * `FALLBACK_COUNTRY` means the first paint is already correct for the
+   * customer this platform was built for, and the server's list replaces it
+   * whole the moment it arrives.
+   */
+  const [countries, setCountries] = useState<readonly XetralCountry[]>([FALLBACK_COUNTRY]);
   useEffect(() => {
     let live = true;
     void xetral()

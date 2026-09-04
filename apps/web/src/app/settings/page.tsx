@@ -6,6 +6,7 @@ import { Shell } from '@/ui/shell';
 import { FormError } from '@/ui/form-error';
 import { Icon } from '@/ui/icon';
 import { useLoad, useSubmit, useXetral } from '@/lib/hooks';
+import { messageFor } from '@/lib/errors';
 
 /**
  * The customer's own account.
@@ -29,6 +30,11 @@ export default function Settings() {
    */
   const profile = useLoad(() => client.profile(), [client]);
   const [copied, setCopied] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [handle, setHandle] = useState('');
+  const [pin, setPin] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [handleError, setHandleError] = useState<string | undefined>();
 
   return (
     <Shell>
@@ -78,6 +84,113 @@ export default function Settings() {
             <p className="hint">
               Yours permanently. It is never reissued to anybody else.
             </p>
+
+            {/*
+              THE OLD HANDLE IS NOT FREED, and the copy says so before the
+              field rather than after the mistake. 039 refuses a released
+              handle to anybody else, so a link already posted goes on
+              pointing at a handle only this customer has ever had, instead of
+              quietly starting to pay a stranger.
+            */}
+            {!editing && (
+              <div className="actions">
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => {
+                    setHandle(profile.data?.handle ?? '');
+                    setEditing(true);
+                  }}
+                >
+                  Change my handle
+                </button>
+              </div>
+            )}
+
+            {editing && (
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  setSaving(true);
+                  setHandleError(undefined);
+                  void (async () => {
+                    try {
+                      await client.chooseHandle(handle, pin);
+                      setPin('');
+                      setEditing(false);
+                      profile.reload();
+                    } catch (cause) {
+                      setHandleError(messageFor(cause));
+                    } finally {
+                      setSaving(false);
+                    }
+                  })();
+                }}
+              >
+                <div className="field">
+                  <label htmlFor="handle">New handle</label>
+                  {/*
+                    The `@` is DRAWN, not typed, and it is not part of the
+                    value. `.input-affix` is built for a TRAILING control —
+                    the password reveal — so reusing it here would put the
+                    symbol on top of the text; `.handle-field` is its leading
+                    twin, the same shape `.input-affix.dial` takes for a
+                    dialling code. A pasted `@` is still accepted: the server
+                    strips one before it checks anything.
+                  */}
+                  <div className="handle-field">
+                    <span className="handle-at" aria-hidden="true">@</span>
+                    <input
+                      id="handle"
+                      value={handle}
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      placeholder="olawale"
+                      onChange={(e) => setHandle(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <p className="hint">
+                    3–20 characters: letters, numbers and underscores. Links
+                    using your old handle stop working, and nobody else can
+                    ever take it — you can change back to it.
+                  </p>
+                </div>
+
+                <div className="field">
+                  <label htmlFor="handle-pin">Transaction PIN</label>
+                  <input
+                    id="handle-pin"
+                    type="password"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    value={pin}
+                    onChange={(e) => setPin(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="actions">
+                  <button type="submit" disabled={saving}>
+                    {saving ? 'Saving…' : 'Save handle'}
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => {
+                      setEditing(false);
+                      setHandleError(undefined);
+                      setPin('');
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+
+                {handleError !== undefined && <p className="error">{handleError}</p>}
+              </form>
+            )}
           </>
         )}
         <FormError error={profile.error} code={profile.code} />

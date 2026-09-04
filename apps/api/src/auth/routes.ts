@@ -131,6 +131,12 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // A customer's own handle. No PIN: it moves no money and is meant to be
       // shared, which is the opposite of a secret.
       .authenticated('GET', '/v1/auth/profile', { pin: false })
+      // CHANGING it does take one, and the asymmetry is the point: reading a
+      // handle is reading something meant to be posted publicly, while
+      // changing one reaches every link the customer has already shared —
+      // 039 never reissues a released handle to anybody else, so nobody can
+      // pick up what they put down.
+      .authenticated('POST', '/v1/auth/profile/handle', { pin: true })
 
       .authenticated('GET', '/v1/auth/devices', { pin: false })
       // Acting on it does. All three are reachable with a stolen access token,
@@ -445,6 +451,10 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // Acknowledging one takes no PIN — it moves no money and hides nothing,
       // because a recurrence reopens the fingerprint by itself.
       .staff('POST', '/v1/admin/errors/:fingerprint/resolve', { pin: false, role: 'admin' })
+      // Clearing the whole list. Same reasoning and the same absence of a
+      // PIN: it acknowledges, it does not delete, and anything still failing
+      // reopens itself on its next occurrence.
+      .staff('POST', '/v1/admin/errors/resolve-all', { pin: false, role: 'admin' })
 
       // Gift cards. Every one of these refuses with `gift_cards_disabled`
       // until GIFT_CARDS_ENABLED is set — the policy is declared regardless,

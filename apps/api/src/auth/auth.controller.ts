@@ -20,6 +20,7 @@ import { LoginRateLimitGuard, PasswordResetRateLimitGuard } from './login-rate-l
 import { countryFrom } from './sign-in-events.service.js';
 import {
   changePasswordSchema,
+  chooseHandleSchema,
   forgotPasswordSchema,
   loginSchema,
   registerSchema,
@@ -389,6 +390,33 @@ export class AuthController {
     const auth = request.auth;
     if (auth === undefined) throw new UnauthorizedException({ error: 'invalid_token' });
     return this.profile.mine(auth.sub);
+  }
+
+  /**
+   * Change it.
+   *
+   * PIN'd, and NOT because it moves money — it moves none. Because it
+   * reaches every link this customer has already published: 039 refuses a
+   * released handle to anybody else, so a stolen session cannot redirect
+   * their payments, but it CAN make every link they have shared stop
+   * resolving to a name.
+   */
+  @Post('profile/handle')
+  @HttpCode(200)
+  async profileHandle(
+    @Body() body: unknown,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<ProfileView> {
+    const auth = request.auth;
+    if (auth === undefined) throw new UnauthorizedException({ error: 'invalid_token' });
+    const parsed = chooseHandleSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException({
+        error: 'invalid_request',
+        fields: parsed.error.issues.map((i) => i.path.join('.')),
+      });
+    }
+    return this.profile.choose(auth.sub, parsed.data.handle);
   }
 
   @Post('totp/elevate')

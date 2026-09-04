@@ -1366,6 +1366,48 @@ export const CREDENTIALS: readonly Item[] = [
     flow: 'virtual numbers',
     ifMissed: 'the stored twin of `TWILIO_AUTH_TOKEN`; the database wins when both are set.',
   },
+  /*
+   * THE THREE BELOW WERE NEVER ON THIS LIST, and the reader is why.
+   *
+   * `credentialSlots()` in the test read 026's seed alone, so every slot a
+   * LATER migration added was invisible to the guard in both directions —
+   * and 042 added both Bitnob v2 credentials while 044 added Paystack's. So
+   * the two secrets that authorise every Bitnob call, and the one that
+   * authorises the DEFAULT naira funding rail, were absent from the
+   * checklist an operator works through before taking money. Exactly the
+   * `platform_settings` failure this file exists because of: one file read,
+   * a plausible answer, and the gap invisible.
+   */
+  {
+    name: 'bitnob.client_id',
+    kind: 'credential',
+    failure: 'refuses-the-first-request',
+    flow: 'cards, crypto, FX, the fallback naira rail',
+    ifMissed:
+      'travels in the clear and names the account. Without it every v2 ' +
+      'request is unsigned and answers 401 "Invalid HMAC signature", which ' +
+      'from inside the app is indistinguishable from a wrong key.',
+  },
+  {
+    name: 'bitnob.client_secret',
+    kind: 'credential',
+    failure: 'refuses-the-first-request',
+    flow: 'cards, crypto, FX, the fallback naira rail',
+    ifMissed:
+      'signs every request and is never transmitted. IT ALSO SELECTS THE ' +
+      'ENVIRONMENT — sandbox and production share one host — so a live ' +
+      'secret on staging is refused by the whoami guard rather than by a URL.',
+  },
+  {
+    name: 'paystack.secret_key',
+    kind: 'credential',
+    failure: 'refuses-the-first-request',
+    flow: 'naira funding, the DEFAULT rail',
+    ifMissed:
+      'ONE credential, not two: it authorises calls and verifies webhooks, ' +
+      'because Paystack signs an inbound event with the same key. Without ' +
+      'it no dedicated account can be opened and no deposit can be credited.',
+  },
   {
     name: 'brevo.api_key',
     kind: 'credential',
@@ -1374,6 +1416,17 @@ export const CREDENTIALS: readonly Item[] = [
     ifMissed:
       'enqueueing still succeeds and nothing sends. `available` is not '  +
       '`deliverable`.',
+  },
+  {
+    name: 'resend.api_key',
+    kind: 'credential',
+    failure: 'default-is-deliberate',
+    flow: 'email — retired',
+    ifMissed:
+      'RETIRED by 048. Email is sent through Brevo and nothing reads this. ' +
+      'The slot is kept rather than deleted so 026\'s rotation history — ' +
+      'who set a credential and when, never what — survives the provider it ' +
+      'belonged to. Filling it in changes nothing.',
   },
   {
     name: 'dojah.app_id',

@@ -124,3 +124,24 @@ export const totpCodeSchema = z.object({
 });
 
 export type TotpCodeRequest = z.infer<typeof totpCodeSchema>;
+
+/**
+ * Choosing a payment handle.
+ *
+ * Deliberately LOOSE on shape: the service normalises a pasted `@` and a
+ * phone keyboard's capital before testing the real pattern, and 039's CHECK
+ * is what finally decides. A strict regex here would refuse `@Olawale` — a
+ * handle copied from a message, which is the commonest way one is typed —
+ * with a field error rather than accepting what the customer plainly meant.
+ *
+ * `transaction_pin` is read by `AuthGuard`, not by this handler; it is named
+ * here so `.strict()` does not refuse the body carrying it.
+ */
+export const chooseHandleSchema = z
+  .object({
+    handle: z.string().trim().min(1).max(32),
+    transaction_pin: z.string().optional(),
+  })
+  .strict();
+
+export type ChooseHandleRequest = z.infer<typeof chooseHandleSchema>;
