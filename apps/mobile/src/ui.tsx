@@ -1,5 +1,7 @@
+import { useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
-import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Animated, Pressable, Text, TextInput, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { TextInputProps } from 'react-native';
 import { Link } from 'expo-router';
 import type { ApiErrorCode } from '@xetral/client';
@@ -316,5 +318,106 @@ export function Empty({ icon, title, hint }: {
         <Text style={[styles.hint, { textAlign: 'center', marginTop: 0 }]}>{hint}</Text>
       )}
     </View>
+  );
+}
+
+
+/**
+ * A short-lived message about something that just happened, over the screen.
+ *
+ * The web's `Toast`, in the shape a phone needs. Money moving is the one
+ * action where the outcome has to be unmistakable, and the inline line was
+ * under a form that resets itself while the keyboard is closing — so a
+ * customer could tap Send, look up, and have no idea whether ₦50,000 had
+ * gone.
+ *
+ * IT DOES NOT REPLACE THE INLINE MESSAGE, it sits over it. A toast carrying
+ * the only copy of a refusal is a refusal that vanishes after a few seconds
+ * and cannot be re-read — the worst possible property for the sentence
+ * explaining why somebody's money did not move.
+ *
+ * `pointerEvents="none"` so it can never swallow a tap meant for the button
+ * underneath it, which on this screen is the button that retries.
+ */
+export function Toast({
+  message,
+  tone,
+  onDone,
+}: {
+  readonly message: string | undefined;
+  readonly tone: 'ok' | 'bad';
+  /** Called when it retires itself, so the caller can clear the state behind
+   *  it — otherwise the same message can never be shown twice. */
+  readonly onDone?: () => void;
+}) {
+  const colors = useTheme();
+  const insets = useSafeAreaInsets();
+  const fade = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (message === undefined) return;
+    // A refusal is left longer than a success: a success confirms what the
+    // customer already believes happened, a refusal has to be read and acted
+    // on.
+    const life = tone === 'ok' ? 4500 : 7000;
+    fade.setValue(0);
+    Animated.timing(fade, { toValue: 1, duration: 220, useNativeDriver: true }).start();
+    const timer = setTimeout(() => {
+      Animated.timing(fade, { toValue: 0, duration: 200, useNativeDriver: true }).start(
+        () => onDone?.(),
+      );
+    }, life);
+    return () => clearTimeout(timer);
+  }, [message, tone, fade, onDone]);
+
+  if (message === undefined) return null;
+
+  const accent = tone === 'ok' ? colors.ok : colors.danger;
+
+  return (
+    <Animated.View
+      pointerEvents="none"
+      accessibilityLiveRegion="polite"
+      style={{
+        position: 'absolute',
+        left: space.md,
+        right: space.md,
+        bottom: insets.bottom + 88,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        padding: 13,
+        borderRadius: 14,
+        backgroundColor: colors.surface,
+        // The tone is a leading rule and the icon's colour, not a filled
+        // panel: a block of colour behind 14px text is a contrast problem in
+        // one theme or the other, and this has to be legible in both.
+        borderLeftWidth: 3,
+        borderLeftColor: accent,
+        opacity: fade,
+        transform: [{ translateY: fade.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) }],
+        elevation: 8,
+        shadowColor: '#000',
+        shadowOpacity: 0.18,
+        shadowRadius: 16,
+        shadowOffset: { width: 0, height: 8 },
+      }}
+    >
+      <Icon name={tone === 'ok' ? 'check' : 'alert'} size={18} color={accent} />
+      {/* Not `styles.label`: that is a form label — secondary colour, and a
+          top margin that would push this off centre inside the row. A toast
+          is the primary sentence on the screen while it is up. */}
+      <Text
+        style={{
+          flex: 1,
+          color: colors.text,
+          fontFamily: font.sansSemi,
+          fontSize: 14,
+          lineHeight: 19,
+        }}
+      >
+        {message}
+      </Text>
+    </Animated.View>
   );
 }

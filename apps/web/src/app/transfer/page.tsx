@@ -9,6 +9,12 @@ import { FormError } from '@/ui/form-error';
 import { Icon } from '@/ui/icon';
 import { Select } from '@/ui/select';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/lib/hooks';
+import { Toast } from '@/ui/toast';
+
+/** Zero, written the way this currency writes it — "0.00" for naira,
+ *  "0.000000" for USDT. The API sends major units, so the string differs. */
+const isZero = (amount: string): boolean => /^-?0(\.0+)?$/.test(amount);
+
 
 /**
  * `useSearchParams` suspends, so the screen it is read on must sit inside a
@@ -73,7 +79,7 @@ function Transfer() {
    * hooks carry the code alongside the message, which is what `FormError`
    * needs to offer the next step.
    */
-  const { busy, error, code, done, run } = useSubmit();
+  const { busy, error, code, done, run, clear } = useSubmit();
 
   /**
    * One key per attempt at THIS transfer, generated when the form is first
@@ -410,6 +416,16 @@ function Transfer() {
 
           <FormError error={error} code={code} />
           {done !== undefined && <p className="ok">{done}</p>}
+
+          {/*
+            OVER the form as well as in it. The form resets itself on a
+            success and the keyboard is closing at the same moment, so the
+            line above is easy to miss on a handset — and "did my ₦50,000 go?"
+            is the one question this product must never leave open. The inline
+            copy stays, so a refusal can still be re-read after this has gone.
+          */}
+          <Toast message={done} tone="ok" onDone={clear} />
+          <Toast message={error} tone="bad" onDone={clear} />
         </form>
       </Shell>
     );
@@ -532,13 +548,31 @@ function Transfer() {
             options={offered.map((code) => ({
               value: code,
               label: code,
-              // What is actually behind the choice, so a customer picking a
-              // currency they hold none of learns it here rather than from
-              // `insufficient_funds` after typing an amount.
-              ...(held.has(code) ? { hint: formatAmount(held.get(code) ?? '0', code) } : {}),
+              // ALWAYS a figure, including a zero. Omitting the hint for a
+              // currency with no balance made "you have none of this" look
+              // identical to "we did not say" — and now that every currency
+              // is offered rather than filtered, that difference is the whole
+              // information the picker carries.
+              hint: formatAmount(held.get(code) ?? '0', code),
             }))}
           />
         </label>
+
+        {/*
+          THE WAY OUT, on the screen where the dead end is.
+          
+          Sending cedis from a naira balance is the ordinary cross-border
+          case, and it needs a conversion first. Without this line the
+          customer picks GHS, types an amount, proves a PIN and is told
+          `insufficient_funds` — a refusal that is true and says nothing
+          about what to do.
+        */}
+        {isZero(held.get(currency) ?? '0') && (
+          <p className="hint">
+            You have no {currency}.{' '}
+            <Link href="/fx">Convert some first</Link>, then come back.
+          </p>
+        )}
 
         <label>
           Amount
@@ -578,6 +612,9 @@ function Transfer() {
 
         <FormError error={error} code={code} />
         {done !== undefined && <p className="ok">{done}</p>}
+
+        <Toast message={done} tone="ok" onDone={clear} />
+        <Toast message={error} tone="bad" onDone={clear} />
       </form>
     </Shell>
   );

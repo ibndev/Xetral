@@ -461,6 +461,38 @@ export interface AdminRecoveryRecord {
   readonly created_at: string;
 }
 
+/**
+ * What the platform has earned, and why it might be nothing.
+ *
+ * Amounts are MINOR UNITS as strings, like every amount that crosses this
+ * boundary — `formatMinor`, never `formatAmount`, on the screen.
+ */
+export interface AdminEarningsLine {
+  readonly currency: string;
+  readonly fees_minor: string;
+  readonly fx_spread_minor: string;
+  /** Collected for a revenue authority and owed onward. NOT earnings — 032's
+   *  whole argument is that tax is a liability, and a fee figure read without
+   *  this beside it reads as including it. */
+  readonly tax_payable_minor: string;
+}
+
+export interface AdminPublishedPair {
+  readonly base: string;
+  readonly quote: string;
+  readonly spread_basis_points: number;
+}
+
+export interface AdminEarnings {
+  readonly lines: readonly AdminEarningsLine[];
+  /** 0 means every transfer is free, which is the shipped default. */
+  readonly transfer_fee_basis_points: number;
+  /** Empty means no conversion can happen at all — an unpublished pair is
+   *  refused rather than quoted from a default — so the spread column is
+   *  necessarily zero. */
+  readonly published_pairs: readonly AdminPublishedPair[];
+}
+
 export interface AdminFundingDiagnosis {
   /** Which rail opens the NEXT account. Accounts already issued keep working
    *  at whoever issued them, so this is not a claim about them. */
@@ -857,6 +889,11 @@ export class AdminClient {
   /** Whether anything is actually being sent. Carries no message body. */
   async notifications(): Promise<AdminNotifications> {
     return this.#get<AdminNotifications>('/v1/admin/notifications');
+  }
+
+  /** What the platform has earned, and why it might be nothing. */
+  async earnings(): Promise<AdminEarnings> {
+    return this.#get<AdminEarnings>('/v1/admin/earnings');
   }
 
   async fundingDiagnostics(): Promise<AdminFundingDiagnosis> {

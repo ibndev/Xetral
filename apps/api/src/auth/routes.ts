@@ -448,6 +448,10 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // message describes how the platform is built, and the smallest
       // audience that can act on it is the right one.
       .staff('GET', '/v1/admin/errors', { pin: false, role: 'admin' })
+      // What the platform has earned, and why it might be nothing. `finance`
+      // — it is the same audience that sets the fee and publishes a spread,
+      // and the figures are the business's own rather than any customer's.
+      .staff('GET', '/v1/admin/earnings', { pin: false, role: 'finance' })
       // Acknowledging one takes no PIN — it moves no money and hides nothing,
       // because a recurrence reopens the fingerprint by itself.
       .staff('POST', '/v1/admin/errors/:fingerprint/resolve', { pin: false, role: 'admin' })

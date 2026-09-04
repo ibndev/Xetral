@@ -3,16 +3,20 @@ import { Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { exponentFor, formatAmount, isValidAmount, sendableFor } from '@xetral/client';
 import { Shell } from '@/shell';
-import { Button, Done, Field, FormError, Loading, Panel } from '@/ui';
+import { Button, Done, Field, FormError, Loading, Panel, Toast } from '@/ui';
 import { Select } from '@/select';
 import { Icon } from '@/icon';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/hooks';
 import { useStyles } from '@/theme';
 
+/** Zero, written the way this currency writes it — "0.00" for naira,
+ *  "0.000000" for USDT. The API sends major units, so the string differs. */
+const isZero = (amount: string): boolean => /^-?0(\.0+)?$/.test(amount);
+
 export default function Transfer() {
   const client = useXetral();
   const styles = useStyles();
-  const { busy, error, code, done, run } = useSubmit();
+  const { busy, error, code, done, run, clear } = useSubmit();
 
   /**
    * One key per attempt at THIS transfer, fixed when the screen mounts.
@@ -201,7 +205,23 @@ export default function Transfer() {
    */
   if (stage === 'confirm') {
     return (
-      <Shell back="/wallet" title="Confirm">
+      <Shell
+        back="/wallet"
+        title="Confirm"
+        /*
+          OVER the screen, not inside the scroll. The form resets itself on a
+          success and the keyboard is closing at the same moment, so the
+          inline line is easy to miss — and "did my ₦50,000 go?" is the one
+          question this product must never leave open. The inline copy stays,
+          so a refusal can still be re-read after this has gone.
+        */
+        overlay={
+          <>
+            <Toast message={done} tone="ok" onDone={clear} />
+            <Toast message={error} tone="bad" onDone={clear} />
+          </>
+        }
+      >
         <Panel title="Confirm" subtitle="Check this before you approve it">
           {/* For a XETRAL transfer, echoed exactly as typed rather than
               resolved to a name: resolving would be a lookup that says which
@@ -315,7 +335,23 @@ export default function Transfer() {
   }
 
   return (
-    <Shell back="/wallet" title="Send money">
+    <Shell
+      back="/wallet"
+      title="Send money"
+      /*
+        OVER the screen, not inside the scroll. The form resets itself on a
+        success and the keyboard is closing at the same moment, so the inline
+        line is easy to miss — and "did my ₦50,000 go?" is the one question
+        this product must never leave open. The inline copy stays, so a
+        refusal can still be re-read after this has gone.
+      */
+      overlay={
+        <>
+          <Toast message={done} tone="ok" onDone={clear} />
+          <Toast message={error} tone="bad" onDone={clear} />
+        </>
+      }
+    >
       <Panel
         title="Send money"
         subtitle={
@@ -418,12 +454,28 @@ export default function Transfer() {
           options={offered.map((code) => ({
             value: code,
             label: code,
-            // What is actually behind the choice, so picking a currency they
-            // hold none of is answered here rather than by `insufficient_funds`
-            // after an amount and a PIN.
-            ...(held.has(code) ? { hint: formatAmount(held.get(code) ?? '0', code) } : {}),
+            // ALWAYS a figure, including a zero. Omitting the hint for a
+            // currency with no balance made "you have none of this" look
+            // identical to "we did not say" — and now that every currency is
+            // offered rather than filtered, that difference is the whole
+            // information the picker carries.
+            hint: formatAmount(held.get(code) ?? '0', code),
           }))}
         />
+
+        {/*
+          THE WAY OUT, on the screen where the dead end is. Sending cedis
+          from a naira balance is the ordinary cross-border case and it needs
+          a conversion first; without this the customer types an amount,
+          proves a PIN and is told `insufficient_funds` — true, and silent
+          about what to do.
+        */}
+        {isZero(held.get(currency) ?? '0') && (
+          <Text style={styles.hint}>
+            You have no {currency}. Convert some on the Convert screen first,
+            then come back.
+          </Text>
+        )}
 
         <Field
           label="Amount"

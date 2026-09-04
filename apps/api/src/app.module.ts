@@ -97,6 +97,7 @@ import { ProviderHealthService, watched } from './observability/provider-health.
 import { ReadinessService } from './golive/readiness.service.js';
 import { PayoutReconciliationService } from './payouts/payout-reconciliation.service.js';
 import { RecoveryService } from './admin/recovery.service.js';
+import { EarningsService } from './admin/earnings.service.js';
 import { FundingDiagnosticsService } from './funding/funding-diagnostics.service.js';
 import { MetricsService } from './observability/metrics.service.js';
 import { MetricsController } from './observability/metrics.controller.js';
@@ -1127,6 +1128,7 @@ export class AppModule {
         ReadinessService,
         FundingDiagnosticsService,
         RecoveryService,
+        EarningsService,
         MetricsService,
         ErrorAlertService,
         ErrorAlertLifecycle,

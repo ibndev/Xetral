@@ -120,19 +120,24 @@ export const TRANSFER_CURRENCIES = ['NGN', 'GHS', 'KES', 'USD', 'USDT', 'USDC'] 
 export type TransferCurrency = (typeof TRANSFER_CURRENCIES)[number];
 
 /**
- * Which of those a particular customer is offered.
+ * Which of those a particular customer is offered — ordered, not filtered.
  *
- * ANOTHER COUNTRY'S LOCAL CURRENCY IS NOISE, and worse than noise: a Nigerian
- * shown GHS and KES in a picker has two options that will answer
- * `insufficient_funds` and one that will not, with nothing on the screen
- * saying which is which. So the local currencies are filtered to the
- * customer's own — plus any they actually hold, because money can arrive in a
- * currency somebody cannot send from and it must still be sendable once it is
- * theirs.
+ * IT USED TO FILTER, and the reasoning was that another country's local
+ * currency is noise: a Nigerian shown GHS and KES has two options that answer
+ * `insufficient_funds` and one that does not, with nothing on screen saying
+ * which. The problem with that answer is what it made impossible — sending
+ * somebody cedis is the ordinary cross-border case this platform exists for,
+ * and hiding the currency meant the only route to it was to work out for
+ * yourself that Convert comes first.
  *
- * The dollar and the stablecoins are offered to everybody: they are what
- * cross-border payment on this platform is made of, and they belong to no
- * country.
+ * So every transfer currency is offered and the ORDER carries the
+ * information the filter used to: the customer's own first, then what they
+ * actually hold, then the rest. The screens show the balance beside each —
+ * including a zero — so "I have none of this" is read off the picker rather
+ * than off a refusal, and they can convert into it and come back.
+ *
+ * Still `readonly TransferCurrency[]`, so a caller cannot be handed a code
+ * the API would refuse.
  */
 const LOCAL_CURRENCIES: readonly string[] = ['NGN', 'GHS', 'KES'];
 
@@ -141,11 +146,18 @@ export function sendableFor(
   held: readonly string[] = [],
 ): readonly TransferCurrency[] {
   const holds = new Set(held);
-  return TRANSFER_CURRENCIES.filter((code) => {
-    if (!LOCAL_CURRENCIES.includes(code)) return true;
-    // Their own country's, or one they are actually holding.
-    return code === home || holds.has(code);
-  });
+  // Lower sorts first. Their own country's money is what they will pick most
+  // of the time; a currency they hold is the next most likely; a local
+  // currency they neither hold nor live in is the one needing a conversion,
+  // so it sits at the bottom rather than being absent.
+  const rank = (code: string): number => {
+    if (code === home) return 0;
+    if (holds.has(code)) return 1;
+    return LOCAL_CURRENCIES.includes(code) ? 3 : 2;
+  };
+  return [...TRANSFER_CURRENCIES].sort(
+    (a, b) => rank(a) - rank(b) || TRANSFER_CURRENCIES.indexOf(a) - TRANSFER_CURRENCIES.indexOf(b),
+  );
 }
 
 /**

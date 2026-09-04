@@ -81,6 +81,7 @@ export function Shell({
   title,
   back,
   scroll = true,
+  overlay,
 }: {
   readonly children: ReactNode;
   readonly title?: string;
@@ -88,6 +89,17 @@ export function Shell({
   readonly back?: string;
   /** Off for a screen that scrolls its own list. */
   readonly scroll?: boolean;
+  /**
+   * DRAWN OVER THE CONTENT, not inside it — for a `Toast`.
+   *
+   * It has to live here rather than on the screen, because a screen's
+   * children go inside a ScrollView: an absolutely positioned toast placed
+   * among them anchors to the scrolled content and slides away with it, which
+   * is the one thing a confirmation that money moved must not do. As a
+   * sibling of the ScrollView it stays put, and it sits BELOW the tab bar in
+   * the tree so a message can never cover the navigation.
+   */
+  readonly overlay?: ReactNode;
 }) {
   const styles = useStyles();
   const colors = useTheme();
@@ -205,6 +217,8 @@ export function Shell({
       ) : (
         <View style={{ flex: 1 }}>{body}</View>
       )}
+
+      {overlay}
 
       <View
         style={{

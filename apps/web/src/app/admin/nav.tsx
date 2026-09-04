@@ -61,6 +61,9 @@ export const GROUPS: readonly Group[] = [
       // money we took and did not deliver.
       { href: '/admin/recovery', label: 'Recovery', icon: 'swap' },
       { href: '/admin/tax', label: 'Tax', icon: 'receipt' },
+      // What the platform has earned. Beside Tax, and distinct from it: Tax
+      // is what is owed onward, this is what was kept.
+      { href: '/admin/earnings', label: 'Earnings', icon: 'trend' },
       { href: '/admin/prices', label: 'Prices', icon: 'trend' },
       { href: '/admin/giftcards', label: 'Gift cards', icon: 'gift' },
     ],

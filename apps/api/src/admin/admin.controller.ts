@@ -28,6 +28,7 @@ import { KycService } from '../kyc/kyc.service.js';
 import { ErrorRecorder } from '../observability/error-recorder.service.js';
 import { ReadinessService, type Readiness } from '../golive/readiness.service.js';
 import { RecoveryService, type HeldMoney, type RecoveryRecord } from './recovery.service.js';
+import { EarningsService, type EarningsReport } from './earnings.service.js';
 import {
   FundingDiagnosticsService,
   type FundingDiagnosis,
@@ -230,6 +231,7 @@ export class AdminController {
     @Inject(CardService) private readonly cards: CardService,
     @Inject(KycService) private readonly kyc: KycService,
     @Inject(ErrorRecorder) private readonly errors: ErrorRecorder,
+    @Inject(EarningsService) private readonly earnings: EarningsService,
     @Inject(ReadinessService) private readonly readinessService: ReadinessService,
     @Inject(FundingDiagnosticsService)
     private readonly diagnostics: FundingDiagnosticsService,
@@ -1199,6 +1201,19 @@ export class AdminController {
    * twenty failures and is told "20" knows the screen was not simply stale,
    * and one told "0" knows somebody else got there first.
    */
+  /**
+   * WHAT THE PLATFORM HAS EARNED, and why it might be nothing.
+   *
+   * Both revenue accounts have been posted to correctly since Phase 1 and
+   * nothing ever rendered either figure — so "we are earning nothing" and
+   * "the fee is set to zero, which is the shipped default" looked identical
+   * from every screen an operator had. This answers both in one response.
+   */
+  @Get('earnings')
+  async earningsReport(): Promise<EarningsReport> {
+    return this.earnings.report();
+  }
+
   @Post('errors/resolve-all')
   @HttpCode(200)
   async errorResolveAll(): Promise<{ resolved: number }> {

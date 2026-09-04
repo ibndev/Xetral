@@ -2860,3 +2860,66 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
   line-height: 1.45;
   color: var(--ok);
 }
+
+/* ═══════════════════════════ toast ═══════════════════════════ */
+/*
+ * OVER the page, not in it. It confirms money moving, on a phone, at the
+ * moment the keyboard is closing — the one time an inline line of text is
+ * easiest to miss. It never carries the ONLY copy of a message: the inline
+ * one stays, so a refusal can be re-read after this has gone.
+ *
+ * Bottom rather than top: a thumb is already there, and the top of a handset
+ * is where the status bar and the browser chrome live.
+ */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(88px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(440px, calc(100vw - 32px));
+  padding: 13px 16px;
+  border-radius: var(--r-md);
+  background: var(--surface);
+  border: 1px solid var(--edge);
+  color: var(--text);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .18), 0 2px 6px rgba(0, 0, 0, .08);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.4;
+  animation: toast-in 220ms cubic-bezier(.2, .8, .3, 1);
+}
+
+/* The tone is a leading rule and the icon's colour, not a filled panel: a
+   full-width block of colour behind text at 14px is a contrast problem in
+   one theme or the other, and this has to be legible in both. */
+/* AFTER the `border` shorthand above, deliberately: the shorthand resets all
+   four sides, so a tone rule written before it is silently overwritten —
+   `button-specificity.test.ts` exists because of exactly that shape. */
+.toast.ok  { border-left: 3px solid var(--ok); }
+.toast.bad { border-left: 3px solid var(--danger); }
+.toast.ok  .toast-icon { color: var(--ok); }
+.toast.bad .toast-icon { color: var(--danger); }
+
+.toast-icon { display: flex; flex-shrink: 0; }
+.toast-text { min-width: 0; }
+
+.toast.leaving { animation: toast-out 200ms ease-in forwards; }
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translate(-50%, 12px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+@keyframes toast-out {
+  from { opacity: 1; transform: translate(-50%, 0); }
+  to   { opacity: 0; transform: translate(-50%, 8px); }
+}
+
+/* Somebody who asked for less motion still gets the message — it appears and
+   disappears without travelling. */
+@media (prefers-reduced-motion: reduce) {
+  .toast, .toast.leaving { animation: none; }
+}
