@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
 import {
   BadRequestException,
+  ServiceUnavailableException,
   Controller,
   Get,
   Module,
@@ -53,6 +54,24 @@ class FailingController {
   @Get('bad-request')
   badRequest(): never {
     throw new BadRequestException({ error: 'invalid_request' });
+  }
+
+  /**
+   * A HANDLER THAT CATCHES WHAT IT CANNOT CLASSIFY AND NAMES A CODE ANYWAY.
+   *
+   * The shape `FundingService.accountFor` uses, and the reason it needs a
+   * test: giving the customer a code their app understands means throwing a
+   * Nest exception, and a Nest exception's own message is "Service
+   * Unavailable". Recorded as-is, the row that should say what happened says
+   * nothing instead — the wrapper would destroy the evidence it exists to
+   * make findable.
+   */
+  @Get('wrapped')
+  wrapped(): never {
+    throw new ServiceUnavailableException(
+      { error: 'account_issue_unavailable' },
+      { cause: new TypeError('the underlying thing that actually broke') },
+    );
   }
 
   @Get('fine')
@@ -146,6 +165,54 @@ describe('what the filter records', () => {
       route: '/probe/throws',
     });
     expect(await countFor(fingerprint)).toBeGreaterThanOrEqual(1);
+
+    /*
+     * AND THE REFERENCE ON THE SCREEN FINDS THE ROW THAT EXPLAINS IT.
+     *
+     * This is the join that did not exist, and its absence is what made every
+     * failure in this platform indistinguishable from every other. The row has
+     * carried the exception's own sentence since 015; the person looking at
+     * the screen had six words that fit any 500 ever served. Neither half was
+     * missing — nothing connected them.
+     *
+     * Asserted against the SAME reference the response carried, because a
+     * test that merely checked the column was non-empty would pass on a
+     * recorder that wrote a fresh one of its own.
+     */
+    const recorded = await pool.query<{ last_reference: string | null; message: string }>(
+      `SELECT last_reference, message FROM error_events WHERE fingerprint = $1`,
+      [fingerprint],
+    );
+    expect(recorded.rows[0]?.last_reference).toBe(res.body.reference);
+    expect(recorded.rows[0]?.message).toContain('the probe exploded');
+  });
+
+  it('RECORDS THE CAUSE, not the wrapper that named a code for the customer', async () => {
+    /*
+     * Both halves matter and they pull in opposite directions.
+     *
+     * The CUSTOMER must get a code their app can turn into real words, which
+     * means the service catches an unclassifiable failure and rethrows it as
+     * something typed. The OPERATOR must get the sentence that says what
+     * actually broke — and that is exactly what the rethrow discards unless
+     * the original is carried as `cause` and the filter unwraps it.
+     *
+     * Without this test the wrapper looks correct in review and quietly turns
+     * every classified 5xx into a row reading "Service Unavailable".
+     */
+    const res = await request(app.getHttpServer()).get('/probe/wrapped');
+    expect(res.status).toBe(503);
+    expect(res.body.error).toBe('account_issue_unavailable');
+    expect(res.body.reference).toMatch(/^[0-9a-f]{6}$/);
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    const row = await pool.query<{ message: string; last_reference: string | null }>(
+      `SELECT message, last_reference FROM error_events
+        WHERE route = '/probe/wrapped' ORDER BY last_seen_at DESC LIMIT 1`,
+    );
+    expect(row.rows[0]?.message).toContain('the underlying thing that actually broke');
+    expect(row.rows[0]?.last_reference).toBe(res.body.reference);
   });
 
   it('does NOT record a 404', async () => {

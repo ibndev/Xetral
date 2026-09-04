@@ -2291,6 +2291,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/043_bank_payouts.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/044_paystack_funding.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/045_card_fee_split.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/046_payout_provider.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/047_error_reference.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -2336,6 +2337,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/043_bank_payouts.test.s
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/044_paystack_funding.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/045_card_fee_split.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/046_payout_provider.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/047_error_reference.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

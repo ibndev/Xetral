@@ -58,8 +58,28 @@ export class ErrorRecordingFilter implements ExceptionFilter {
     const reference = status >= 500 ? randomBytes(3).toString('hex') : undefined;
 
     if (status >= 500) {
+      /*
+       * THE CAUSE, WHERE THERE IS ONE, AND THIS IS LOAD-BEARING.
+       *
+       * A service that catches an unclassifiable failure and rethrows it as
+       * `ServiceUnavailableException` so the customer gets a code their app
+       * understands is doing the right thing — and it would destroy the only
+       * record of what actually happened, because what reaches here is then a
+       * Nest exception whose message is "Service Unavailable". `error_events`
+       * would fill with rows that say nothing, which is the failure this
+       * whole area exists to end.
+       *
+       * So the ORIGINAL is preferred whenever a handler passed one through as
+       * `cause`. The wrapper's own name is kept alongside it, because "which
+       * layer decided this was unavailable" is worth a word.
+       */
+      const cause = exception instanceof Error ? exception.cause : undefined;
       const message =
-        exception instanceof Error ? `${exception.name}: ${exception.message}` : String(exception);
+        cause instanceof Error
+          ? `${exception instanceof Error ? exception.name : 'Error'} <- ${cause.name}: ${cause.message}`
+          : exception instanceof Error
+            ? `${exception.name}: ${exception.message}`
+            : String(exception);
 
       // The reference FIRST, because this is the line somebody greps for with
       // six characters read off a screen or pasted into a report.
@@ -71,8 +91,11 @@ export class ErrorRecordingFilter implements ExceptionFilter {
       // sentence tells you a query failed and never which query; this is the
       // half that says where. It is a log, not a response body — nothing here
       // reaches a caller.
-      if (exception instanceof Error && exception.stack !== undefined) {
-        this.#logger.error(`[${reference}] ${exception.stack}`);
+      // The CAUSE's stack, where there is one: the wrapper's stack ends at
+      // the catch that made it and says nothing about where the failure was.
+      const stack = cause instanceof Error ? cause.stack : (exception as Error).stack;
+      if (typeof stack === 'string') {
+        this.#logger.error(`[${reference}] ${stack}`);
       }
 
       // NOT awaited. An exception filter that waits on a database write adds
@@ -83,6 +106,10 @@ export class ErrorRecordingFilter implements ExceptionFilter {
         message,
         route: routeOf(request),
         statusCode: status,
+        // The third place the reference goes, and the one that makes it
+        // answerable: the number read off a screen finds the row carrying the
+        // exception's own sentence.
+        ...(reference === undefined ? {} : { reference }),
       });
     }
 

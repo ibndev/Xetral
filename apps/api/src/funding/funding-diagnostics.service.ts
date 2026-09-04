@@ -59,9 +59,33 @@ export interface DiagnosticCheck {
   readonly detail: string;
 }
 
+/**
+ * A failure this deployment has actually had, in the exception's own words.
+ *
+ * `error_events` has carried these since 015 and NOTHING EVER RENDERED THEM.
+ * So the sentence explaining a 500 was in the database the whole time and the
+ * only way to read it was a psql prompt — which is why "Something went wrong"
+ * was, in practice, the entire diagnostic surface of this platform.
+ *
+ * `reference` is what makes one answerable: the six characters a person read
+ * off their screen name the row that says what they hit.
+ */
+export interface RecentFailure {
+  readonly route: string | null;
+  readonly status: number | null;
+  /** The exception's own sentence. Staff-only, for the reason every provider
+   *  refusal here is: it names our tables and our integrations. */
+  readonly message: string;
+  readonly occurrences: string;
+  readonly lastSeen: string;
+  readonly reference: string | null;
+}
+
 export interface FundingDiagnosis {
   readonly rail: string;
   readonly checks: readonly DiagnosticCheck[];
+  /** Most recent first. Empty is the good answer. */
+  readonly failures: readonly RecentFailure[];
 }
 
 @Injectable()
@@ -95,11 +119,58 @@ export class FundingDiagnosticsService {
         state: 'skip',
         detail: `Skipped: the active rail is '${rail}', not paystack.`,
       });
-      return { rail, checks };
+      return { rail, checks, failures: await this.#recentFailures() };
     }
 
     checks.push(...(await this.#paystackChecks()));
-    return { rail, checks };
+    return { rail, checks, failures: await this.#recentFailures() };
+  }
+
+  /**
+   * What has actually been failing, in the exception's own words.
+   *
+   * NOT a Paystack question, and it lives here rather than on its own screen
+   * because this is where somebody arrives holding a reference and a
+   * complaint. The checks above answer "is the rail configured correctly?";
+   * this answers "and what actually threw?", which no amount of configuration
+   * checking can reach — a null column, a constraint, a typo in a SQL string.
+   * Every one of those has happened in this codebase and every one presented
+   * as the same sentence.
+   */
+  async #recentFailures(): Promise<readonly RecentFailure[]> {
+    try {
+      const rows = await this.pool.query<{
+        route: string | null;
+        status_code: number | null;
+        message: string;
+        occurrences: string;
+        last_seen_at: Date;
+        last_reference: string | null;
+      }>(
+        `SELECT route, status_code, message, occurrences::text AS occurrences,
+                last_seen_at, last_reference
+           FROM errors_open
+          ORDER BY last_seen_at DESC
+          LIMIT 20`,
+      );
+      return rows.rows.map((row) => ({
+        route: row.route,
+        status: row.status_code,
+        message: row.message,
+        occurrences: row.occurrences,
+        lastSeen: row.last_seen_at.toISOString(),
+        reference: row.last_reference,
+      }));
+    } catch (error) {
+      /*
+       * SWALLOWED, because 047 adds `last_reference` and this page is the
+       * first thing an operator opens on a deployment whose schema is behind.
+       * A diagnostics screen that 500s over a migration it exists to tell you
+       * about is the joke writing itself.
+       */
+      this.#logger.warn(`could not read recent failures: ${String(error)}`);
+      return [];
+    }
   }
 
   /* ------------------------------------------------------------------ */

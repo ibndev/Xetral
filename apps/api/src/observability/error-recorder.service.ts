@@ -74,6 +74,22 @@ export interface RecordableError {
   readonly route?: string;
   readonly statusCode?: number;
   readonly severity?: ErrorSeverity;
+  /**
+   * The six hex characters the caller was shown for THIS occurrence.
+   *
+   * WHAT IT CONNECTS. Every 5xx has been recorded here since 015 —
+   * fingerprinted, counted, with the exception's own sentence in `message` —
+   * and the only thing any person ever saw was "Something went wrong. Please
+   * try again.", which is true of every 500 there has ever been. So the report
+   * and the row explaining it were both present and nothing joined them: the
+   * reporter could not say which failure they hit, and whoever opened the
+   * table could not say which row the reporter meant.
+   *
+   * Optional, because a caller that has no reference is a real state: rows
+   * written before 047 carry none, and `record_error` will not blank one that
+   * is already there.
+   */
+  readonly reference?: string;
 }
 
 /** Long enough to identify a failure, short enough not to be a log. */
@@ -130,12 +146,13 @@ export class ErrorRecorder {
     try {
       const fingerprint = fingerprintOf({ message: error.message, ...(error.route === undefined ? {} : { route: error.route }) });
 
-      await this.pool.query(`SELECT record_error($1, $2::error_severity, $3, $4, $5)`, [
+      await this.pool.query(`SELECT record_error($1, $2::error_severity, $3, $4, $5, $6)`, [
         fingerprint,
         error.severity ?? 'error',
         truncate(error.message),
         error.route ?? null,
         error.statusCode ?? null,
+        error.reference ?? null,
       ]);
     } catch (cause) {
       // Logged and dropped. There is nowhere else for this to go, and the one
@@ -150,7 +167,8 @@ export class ErrorRecorder {
   async open(limit = 50): Promise<readonly Record<string, unknown>[]> {
     const result = await this.pool.query(
       `SELECT fingerprint, severity::text AS severity, message, route, status_code,
-              occurrences::text AS occurrences, first_seen_at, last_seen_at, alerted_at
+              occurrences::text AS occurrences, first_seen_at, last_seen_at, alerted_at,
+              last_reference
          FROM errors_open LIMIT $1`,
       [limit],
     );

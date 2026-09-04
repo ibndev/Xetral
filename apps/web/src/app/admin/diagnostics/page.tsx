@@ -47,6 +47,46 @@ export default function Diagnostics() {
         )}
       </div>
 
+      {/*
+        WHAT ACTUALLY THREW, and this is the half no configuration check can
+        reach. The checks below answer "is the rail set up correctly"; a null
+        column, a constraint or a typo in a SQL string passes every one of
+        them and still answers 500. Every one of those has happened in this
+        codebase, and every one presented to a person as the same sentence.
+
+        These rows have existed since 015 and nothing rendered them. The
+        reference is what makes one answerable: the six characters off
+        somebody's screen name the row that says what they hit.
+      */}
+      {report.data !== undefined && (
+        <div className="panel">
+          <h2>Recent failures</h2>
+          <p className="lead">
+            The exception&apos;s own words, for every 5xx this instance has
+            served. Match the reference to the one on the screen.
+          </p>
+          {report.data.failures.length === 0 && (
+            <p className="empty">Nothing has failed. </p>
+          )}
+          {report.data.failures.map((failure, index) => (
+            <div className="row" key={`${failure.route}-${index}`}>
+              <span style={{ minWidth: 0 }}>
+                <span className="mono">
+                  {failure.status} {failure.route ?? 'unmatched'}
+                </span>
+                <div className="cell-sub">{failure.message}</div>
+              </span>
+              <span className="muted nowrap">
+                {failure.reference === null ? null : (
+                  <span className="mono">{failure.reference} · </span>
+                )}
+                {failure.occurrences}×
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
       {report.data?.checks.map((check) => (
         <div className="panel" key={check.name}>
           <div className="row">

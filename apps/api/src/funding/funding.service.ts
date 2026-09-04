@@ -1,6 +1,7 @@
 import {
   ConflictException,
   ForbiddenException,
+  HttpException,
   Inject,
   Injectable,
   Logger,
@@ -101,7 +102,60 @@ export class FundingService {
     return existing === undefined ? undefined : toAccountView(existing);
   }
 
+  /**
+   * NOTHING LEAVES THIS METHOD AS A BARE 500.
+   *
+   * THE FAILURE THIS EXISTS FOR. Every KNOWN way of failing below is caught
+   * and given a code a client can turn into real words — a provider refusal,
+   * a contract change, an outage, a missing migration. What was left over is
+   * everything nobody thought of: a null column, a constraint, an `ON
+   * CONFLICT` naming an index that is not there, a typo in a SQL string. Each
+   * of those is invisible to the compiler and to every unit test, each has
+   * happened in this codebase, and each reached the customer as "Something
+   * went wrong" on the one screen they opened in order to be paid.
+   *
+   * So the outer catch does two things the inner ones cannot. It writes the
+   * exception AND ITS STACK to the log under a sentence naming this flow, so
+   * the row `error_events` already records is findable rather than merely
+   * present. And it answers `account_issue_unavailable`, which both apps
+   * already render as "we could not open your account just now" — true of an
+   * unknown failure, and better than a sentence which is true of every
+   * failure there has ever been.
+   *
+   * It deliberately does NOT swallow an HttpException: those are the answers
+   * above, already correct, and re-wrapping them would replace a specific
+   * refusal with a vague one.
+   *
+   * AND IT CARRIES THE ORIGINAL AS `cause`, which is not a detail. Without
+   * it this catch would be a REGRESSION against its own purpose: the
+   * exception filter records whatever reaches it, so replacing a
+   * `TypeError: cannot read properties of null` with a
+   * `ServiceUnavailableException` would write "Service Unavailable" into
+   * `error_events` — turning the one row that says what happened into
+   * another row that says nothing. The filter unwraps it.
+   */
   async accountFor(userUuid: string): Promise<VirtualAccountView> {
+    try {
+      return await this.#openAccount(userUuid);
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+
+      this.#logger.error(
+        `OPENING A NAIRA ACCOUNT THREW SOMETHING THIS SERVICE DOES NOT CLASSIFY, ` +
+          `which is why the customer saw a generic failure: ` +
+          `${error instanceof Error ? `${error.name}: ${error.message}` : String(error)}`,
+      );
+      if (error instanceof Error && error.stack !== undefined) {
+        this.#logger.error(error.stack);
+      }
+      throw new ServiceUnavailableException(
+        { error: 'account_issue_unavailable' },
+        { cause: error },
+      );
+    }
+  }
+
+  async #openAccount(userUuid: string): Promise<VirtualAccountView> {
     const userId = await this.#activeUserId(userUuid);
 
     const existing = await this.#accountOf(userId);

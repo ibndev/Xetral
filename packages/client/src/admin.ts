@@ -404,11 +404,30 @@ export interface AdminDiagnosticCheck {
   readonly detail: string;
 }
 
+/**
+ * A failure the deployment has actually had, in the exception's own words.
+ *
+ * These have been recorded since 015 and nothing ever rendered them, so the
+ * sentence explaining a 500 was in the database the whole time and only psql
+ * could read it. `reference` joins it to the six characters somebody read off
+ * their screen.
+ */
+export interface AdminRecentFailure {
+  readonly route: string | null;
+  readonly status: number | null;
+  readonly message: string;
+  readonly occurrences: string;
+  readonly lastSeen: string;
+  readonly reference: string | null;
+}
+
 export interface AdminFundingDiagnosis {
   /** Which rail opens the NEXT account. Accounts already issued keep working
    *  at whoever issued them, so this is not a claim about them. */
   readonly rail: string;
   readonly checks: readonly AdminDiagnosticCheck[];
+  /** Most recent first. Empty is the good answer. */
+  readonly failures: readonly AdminRecentFailure[];
 }
 
 /**

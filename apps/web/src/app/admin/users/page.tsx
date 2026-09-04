@@ -92,23 +92,29 @@ export default function Users() {
               {users.data.map((user) => (
                 <tr key={user.id}>
                   {/*
-                    THE NAME LEADS AND THE ADDRESS IS UNDER IT. This column was
-                    an email address alone, which is the identifier support has
-                    LEAST often: a customer on the phone gives a name, and
-                    somebody reporting a payment link gives a handle. Both are
-                    here now, and both are searchable.
+                    THE NAME LEADS AND THE ADDRESS IS UNDER IT, ONCE.
+                    
+                    This column was an email address alone — the identifier
+                    support has LEAST often, since a customer on the phone
+                    gives a name and somebody reporting a payment link gives a
+                    handle. The first fix put the name on top and the address
+                    beneath, and on an account with no name that printed the
+                    SAME address twice, which reads as a rendering bug.
 
-                    `full_name` is what the customer typed about themselves —
-                    never the verified name, which only a reviewer's reading of
-                    a document establishes.
+                    So the second line carries only what the first is not
+                    already saying. `full_name` is what the customer typed
+                    about themselves — never the verified name, which only a
+                    reviewer reading a document establishes.
                   */}
                   <td>
                     <Link href={`/admin/users/${user.id}`}>
                       {user.full_name ?? user.email ?? 'Customer'}
                     </Link>
                     <div className="cell-sub">
-                      {user.email}
-                      {user.handle === null ? null : ` · @${user.handle}`}
+                      {[user.full_name === null ? null : user.email,
+                        user.handle === null ? null : `@${user.handle}`]
+                        .filter((part) => part !== null && part !== '')
+                        .join(' · ')}
                     </div>
                   </td>
                   <td className="mono nowrap">
