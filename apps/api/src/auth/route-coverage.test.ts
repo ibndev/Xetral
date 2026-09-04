@@ -190,8 +190,17 @@ describe('the privileged surface is declared as privileged', () => {
       // What is currently failing. `admin` because an error message describes
       // how the platform is built.
       'GET /v1/admin/errors (admin)',
+      // Why opening a naira account is failing. `admin` rather than
+      // `support`, and for readiness's reason: it relays the PROVIDER'S own
+      // refusal, which names our integration.
+      'GET /v1/admin/funding/diagnostics (admin)',
       'GET /v1/admin/giftcards/queue (giftcard_reviewer)',
       'GET /v1/admin/kyc (compliance)',
+      // Whether anything is actually being sent. `support`, because this is
+      // the screen somebody opens when a customer says a reset link never
+      // arrived — and it carries no message body: 012 seals every payload and
+      // erases it on send.
+      'GET /v1/admin/notifications (support)',
       'GET /v1/admin/overview (support)',
       'GET /v1/admin/prices (finance)',
       // The compliance queue, on the role that already reviews identity.
@@ -214,6 +223,10 @@ describe('the privileged surface is declared as privileged', () => {
       'GET /v1/admin/tax (finance)',
       'GET /v1/admin/users (support)',
       'GET /v1/admin/users/:id (support)',
+      // What actually happened in one account. `support`, the same role as
+      // the customer record it belongs to — and the alternative to giving
+      // them this route was giving them psql.
+      'GET /v1/admin/users/:id/transactions (support)',
       // Acknowledging a failure. No PIN: it hides nothing, because a
       // recurrence reopens the fingerprint by itself.
       // Upholding a dispute pays money out of our own account, so it takes a

@@ -27,6 +27,10 @@ import { CardService } from '../cards/card.service.js';
 import { KycService } from '../kyc/kyc.service.js';
 import { ErrorRecorder } from '../observability/error-recorder.service.js';
 import { ReadinessService, type Readiness } from '../golive/readiness.service.js';
+import {
+  FundingDiagnosticsService,
+  type FundingDiagnosis,
+} from '../funding/funding-diagnostics.service.js';
 import { kycReviewSchema } from '../kyc/dto.js';
 import { webhookEndpoints } from '../settings/webhook-endpoints.js';
 import { API_CONFIG } from '../tokens.js';
@@ -51,6 +55,23 @@ const statusSchema = z.object({
 const attributeSchema = z.object({
   user_id: z.string().uuid(),
   reason: z.string().trim().min(3).max(500),
+});
+
+/**
+ * The filters a support screen may apply to somebody's transactions.
+ *
+ * `kind` is left as a bounded STRING rather than an enum of the eighteen
+ * entry kinds, and that is deliberate: the enum lives in Postgres, a new kind
+ * arrives with a migration, and a list here would silently stop offering it —
+ * the drift `EntryKind` has already produced twice in this codebase. The
+ * value is a query PARAMETER either way, so an unknown one matches nothing
+ * rather than reaching the SQL.
+ */
+const userTransactionsQuery = z.object({
+  currency: z.string().trim().min(3).max(8).optional(),
+  kind: z.string().trim().min(2).max(40).optional(),
+  before: z.string().regex(/^[0-9]+$/).optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
 });
 
 const settingSchema = z.object({
@@ -187,6 +208,8 @@ export class AdminController {
     @Inject(KycService) private readonly kyc: KycService,
     @Inject(ErrorRecorder) private readonly errors: ErrorRecorder,
     @Inject(ReadinessService) private readonly readinessService: ReadinessService,
+    @Inject(FundingDiagnosticsService)
+    private readonly diagnostics: FundingDiagnosticsService,
   ) {}
 
   /* ------------------------------ overview ----------------------------- */
@@ -226,6 +249,41 @@ export class AdminController {
     return this.readinessService.report();
   }
 
+  /**
+   * WHY OPENING A NAIRA ACCOUNT IS FAILING, in sentences.
+   *
+   * `readiness` asks whether a value is SET. Every reason this flow refuses
+   * survives that: a key from the other Paystack domain is set, a
+   * `preferred_bank` slug the business is not approved for is set, and a
+   * dedicated-account product that was never enabled needs no setting at all.
+   * So the whole class of "we configured everything and Activate Account
+   * throws" was invisible from here, and the only place the answer existed
+   * was a log line written at the moment somebody pressed the button.
+   *
+   * Reads only. It opens no account, so it is safe to press repeatedly during
+   * an incident — and it relays the PROVIDER'S OWN sentence, which is the
+   * part worth having and the part a customer must never see.
+   */
+  @Get('funding/diagnostics')
+  async fundingDiagnostics(): Promise<FundingDiagnosis> {
+    return this.diagnostics.diagnose();
+  }
+
+  /**
+   * Whether anything is actually being sent.
+   *
+   * The failure this answers is silent by construction: with the worker
+   * interval unset, rows accumulate, the API keeps saying "check your email",
+   * and nothing errors — writing the row succeeded.
+   *
+   * Carries no message body. A rendered reset email contains a live bearer
+   * token, which is why 012 seals every payload and erases it on send.
+   */
+  @Get('notifications')
+  async notifications(): Promise<Record<string, unknown>> {
+    return this.admin.notifications();
+  }
+
   /* -------------------------------- users ------------------------------ */
 
   @Get('users')
@@ -246,6 +304,40 @@ export class AdminController {
   @Get('users/:id')
   async user(@Param('id') id: string): Promise<Record<string, unknown>> {
     return this.admin.user(id);
+  }
+
+  /**
+   * What actually happened in this account.
+   *
+   * Support had balances, devices, cards and status changes — everything
+   * ABOUT an account and nothing that happened IN it — so the commonest
+   * question they are asked could only be answered from a psql prompt.
+   *
+   * The filters are validated against a closed shape rather than passed
+   * through: `kind` reaches a query about somebody's money, and a schema is
+   * what makes "anything the client sent" impossible to write here.
+   */
+  @Get('users/:id/transactions')
+  async userTransactions(
+    @Param('id') id: string,
+    @Query() query: unknown,
+  ): Promise<{ transactions: readonly unknown[] }> {
+    const parsed = userTransactionsQuery.safeParse(query);
+    if (!parsed.success) {
+      throw new BadRequestException({
+        error: 'invalid_request',
+        fields: parsed.error.issues.map((i) => i.path.join('.')),
+      });
+    }
+    const { currency, kind, before, limit } = parsed.data;
+    return {
+      transactions: await this.admin.userTransactions(id, {
+        ...(currency === undefined ? {} : { currency }),
+        ...(kind === undefined ? {} : { kind }),
+        ...(before === undefined ? {} : { before }),
+        limit: limit ?? 50,
+      }),
+    };
   }
 
   /**

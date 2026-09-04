@@ -95,6 +95,7 @@ import { NotificationService } from './notifications/notification.service.js';
 import { ErrorRecorder } from './observability/error-recorder.service.js';
 import { ProviderHealthService, watched } from './observability/provider-health.service.js';
 import { ReadinessService } from './golive/readiness.service.js';
+import { FundingDiagnosticsService } from './funding/funding-diagnostics.service.js';
 import { MetricsService } from './observability/metrics.service.js';
 import { MetricsController } from './observability/metrics.controller.js';
 import { ErrorRecordingFilter } from './observability/error.filter.js';
@@ -1100,6 +1101,7 @@ export class AppModule {
         ErrorRecorder,
         ProviderHealthService,
         ReadinessService,
+        FundingDiagnosticsService,
         MetricsService,
         ErrorAlertService,
         ErrorAlertLifecycle,

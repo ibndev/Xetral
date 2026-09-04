@@ -40,6 +40,43 @@ export interface AdminUser {
   readonly status: string;
   readonly kyc_status: string | null;
   readonly created_at: string;
+  /*
+   * WHAT THE ACCOUNT ITSELF HOLDS, which this list did not carry at all.
+   *
+   * It showed an email address, a status and a date, so a support agent with
+   * a name and a phone number on a call had nothing to search and nothing to
+   * recognise. NOT the verified name: `users.full_name` is what somebody
+   * typed about themselves and `kyc_submissions.full_name` is what a reviewer
+   * read off a document — 040 keeps them apart, and only the second may reach
+   * a money decision.
+   */
+  readonly full_name: string | null;
+  readonly phone: string | null;
+  readonly handle: string | null;
+}
+
+/**
+ * One posting on a customer's account, as an operator sees it.
+ *
+ * WIDER THAN THE CUSTOMER'S OWN HISTORY: it includes `customer_pending`,
+ * which is where a card authorization or a gift card hold sits, and which is
+ * what a "missing" balance usually turns out to be.
+ *
+ * `amount_minor` is a STRING in minor units, like every amount that crosses
+ * this boundary — a naira balance past 2^53 is not a number.
+ */
+export interface AdminUserTransaction {
+  readonly posting_id: string;
+  readonly entry_id: string;
+  readonly kind: string;
+  readonly description: string | null;
+  readonly occurred_at: string;
+  /** `customer_wallet`, `customer_pending` or `customer_card`. */
+  readonly account_kind: string;
+  readonly amount_minor: string;
+  readonly currency: string;
+  /** From `entry_status`, so it cannot disagree with the postings. */
+  readonly status: string;
 }
 
 export interface AdminUserDetail {
@@ -352,6 +389,70 @@ export interface AdminReadiness {
   };
 }
 
+/**
+ * One question asked of the naira rail, and its answer.
+ *
+ * `detail` may quote the PROVIDER'S OWN sentence, which is the part worth
+ * having and the part a customer must never see — every route that produces
+ * one is `staff()`. It never carries a credential: the API has no endpoint
+ * that returns one, so this type could not be filled with one even if a field
+ * were added.
+ */
+export interface AdminDiagnosticCheck {
+  readonly name: string;
+  readonly state: 'pass' | 'fail' | 'warn' | 'skip';
+  readonly detail: string;
+}
+
+export interface AdminFundingDiagnosis {
+  /** Which rail opens the NEXT account. Accounts already issued keep working
+   *  at whoever issued them, so this is not a claim about them. */
+  readonly rail: string;
+  readonly checks: readonly AdminDiagnosticCheck[];
+}
+
+/**
+ * The outbox, as an operator sees it.
+ *
+ * THERE IS DELIBERATELY NO FIELD HERE THAT COULD HOLD A MESSAGE. A rendered
+ * password reset carries a live bearer token, which is why 012 seals every
+ * payload and erases it the moment the message is sent — so this type could
+ * not carry one even if somebody added the field.
+ */
+export interface AdminNotifications {
+  /** What is waiting, per class and kind. `oldest` is the half that matters:
+   *  a queue of three that has been three since Tuesday is a queue nobody is
+   *  working. */
+  readonly backlog: readonly {
+    readonly class: string;
+    readonly kind: string;
+    readonly waiting: string;
+    readonly oldest: string | null;
+    readonly worst_attempts: number;
+  }[];
+  /** Given up on. On staging that is every address outside the allowlist; in
+   *  production it is a real provider refusal. */
+  readonly abandoned: readonly {
+    readonly id: string;
+    readonly kind: string;
+    readonly class: string;
+    readonly recipient: string;
+    readonly attempts: number;
+    readonly last_error: string | null;
+    readonly created_at: string;
+  }[];
+  readonly recent: readonly {
+    readonly id: string;
+    readonly kind: string;
+    readonly class: string;
+    readonly recipient: string;
+    readonly status: string;
+    readonly provider: string | null;
+    readonly sent_at: string | null;
+    readonly created_at: string;
+  }[];
+}
+
 export interface AdminProviderHealth {
   readonly degraded: readonly {
     readonly provider: string;
@@ -621,6 +722,53 @@ export class AdminClient {
    */
   async readiness(): Promise<AdminReadiness> {
     return this.#get<AdminReadiness>('/v1/admin/readiness');
+  }
+
+  /**
+   * Why opening a naira account is failing, in sentences.
+   *
+   * Distinct from `readiness`, which asks whether a value is SET. Every
+   * reason this flow refuses survives that check: a key from the other
+   * Paystack domain is set, a `preferred_bank` slug the business is not
+   * approved for is set, and a dedicated-account product that was never
+   * enabled needs no setting at all.
+   */
+  /**
+   * Everything that happened in one customer's account.
+   *
+   * Keyset paginated on `posting_id`: pass the last row's id as `before` for
+   * the next page. `OFFSET` shifts under an active account and produces
+   * duplicates and gaps, which on a support screen reads as money appearing
+   * and disappearing.
+   */
+  async userTransactions(
+    id: string,
+    options: {
+      readonly currency?: string;
+      readonly kind?: string;
+      readonly before?: string;
+      readonly limit?: number;
+    } = {},
+  ): Promise<readonly AdminUserTransaction[]> {
+    const query = new URLSearchParams();
+    if (options.currency !== undefined) query.set('currency', options.currency);
+    if (options.kind !== undefined) query.set('kind', options.kind);
+    if (options.before !== undefined) query.set('before', options.before);
+    query.set('limit', String(options.limit ?? 50));
+
+    const body = await this.#get<{ transactions: AdminUserTransaction[] }>(
+      `/v1/admin/users/${encodeURIComponent(id)}/transactions?${query.toString()}`,
+    );
+    return body.transactions;
+  }
+
+  /** Whether anything is actually being sent. Carries no message body. */
+  async notifications(): Promise<AdminNotifications> {
+    return this.#get<AdminNotifications>('/v1/admin/notifications');
+  }
+
+  async fundingDiagnostics(): Promise<AdminFundingDiagnosis> {
+    return this.#get<AdminFundingDiagnosis>('/v1/admin/funding/diagnostics');
   }
 
   /* -------------------------------- pricing ----------------------------- */

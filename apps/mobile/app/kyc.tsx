@@ -168,10 +168,7 @@ function Submitted({ status }: { readonly status: KycStatus }) {
         <Text style={styles.amount}>•••••••{status.bvn_last4}</Text>
       </View>
       {status.status === 'pending' && (
-        <Text style={styles.hint}>
-          Reviews are done by a person, not automatically. You can keep using your
-          wallet meanwhile.
-        </Text>
+        <Text style={styles.hint}>We&apos;ll notify you when review is completed</Text>
       )}
       {status.rejection_reason !== null && (
         <Text style={[styles.error, { marginTop: space.md }]}>{status.rejection_reason}</Text>
@@ -183,10 +180,11 @@ function Submitted({ status }: { readonly status: KycStatus }) {
 /**
  * What this customer's verification currently allows.
  *
- * A ZERO IS A REAL LIMIT and is shown as one. An unverified account may move
- * no crypto at all, because a chain transaction is the single movement nobody
- * can recall — and saying "not available yet" is more honest than hiding the
- * row and letting somebody find out at the moment they try.
+ * SHOWN AS A STATE, NOT AS A FIGURE — the same wording as the web screen, and
+ * the same reasoning. Four ceilings printed on a page about identity read as a
+ * price list, and the only thing a customer can do about any of them is the
+ * button already there. `GET /v1/kyc/limits` still answers the figures and the
+ * ledger precondition still enforces them; this is the wording on one screen.
  */
 function Limits() {
   const client = useXetral();
@@ -197,22 +195,21 @@ function Limits() {
 
   const TIERS = ['Registered', 'Verified', 'Enhanced'];
 
+  // Tier 0 is the only unverified state; everything above it was granted by a
+  // person reading a document. So the two words divide exactly where the
+  // Verify button does.
+  const verified = data.tier > 0;
+
   return (
     <Panel title="Your daily limits" subtitle={TIERS[data.tier] ?? `Tier ${data.tier}`}>
       {data.limits.map((limit) => (
         <View key={limit.currency} style={styles.row}>
           <Text style={[styles.muted, { flex: 1 }]}>{limit.currency}</Text>
-          <Text style={styles.amount}>
-            {/* A regex, not `=== '0'`: the API sends major units, so a zero
-                ceiling arrives as "0.00" for naira and "0.00000000" for BTC. */}
-            {/^0(\.0+)?$/.test(limit.daily_limit)
-              ? 'not available yet'
-              : limit.daily_limit}
-          </Text>
+          <Text style={{ color: colors.text }}>{verified ? 'Unlimited' : 'Limited'}</Text>
         </View>
       ))}
       <Text style={[styles.hint, { color: colors.text3 }]}>
-        Verifying your identity raises every one of these.
+        Verifying your identity lifts these.
       </Text>
     </Panel>
   );

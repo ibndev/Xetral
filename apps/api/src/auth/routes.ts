@@ -282,9 +282,37 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // every credential that is absent, which is a map of where this
       // deployment is soft.
       .staff('GET', '/v1/admin/readiness', { pin: false, role: 'admin' })
+      /*
+       * WHY THE NAIRA RAIL GETS ITS OWN DIAGNOSTIC, when `readiness` already
+       * reports configuration: readiness asks whether a value is SET, and
+       * every one of these can be set and still wrong. A key from the other
+       * Paystack domain, a `preferred_bank` slug the business is not approved
+       * for and a product that was never enabled all pass a "is it set?"
+       * check and refuse every customer.
+       *
+       * A READ, so it can be pressed repeatedly during an incident: it opens
+       * no account and writes nothing. `pin: false` for the same reason a
+       * bank lookup takes no PIN — nothing is destroyed by asking, and the
+       * operator most likely to press it is one already looking at a refusal.
+       */
+      .staff('GET', '/v1/admin/funding/diagnostics', { pin: false, role: 'admin' })
+      /*
+       * `support`, because this is the screen somebody opens when a customer
+       * says a reset link never arrived — and it carries no message body:
+       * 012 seals every payload and erases it on send, precisely so a queue
+       * of pending mail is not a list of live account-takeover links.
+       */
+      .staff('GET', '/v1/admin/notifications', { pin: false, role: 'support' })
 
       .staff('GET', '/v1/admin/users', { pin: false, role: 'support' })
       .staff('GET', '/v1/admin/users/:id', { pin: false, role: 'support' })
+      /*
+       * `support`, the same role as the customer record it belongs to. It is
+       * a READ of money that has already moved, which is what somebody
+       * answering "my transfer did not arrive" is looking at — and the
+       * alternative to giving them this route was giving them psql.
+       */
+      .staff('GET', '/v1/admin/users/:id/transactions', { pin: false, role: 'support' })
       // Freezing an account stops a customer's money moving. An operator who
       // walked away from an unlocked laptop should not have left that behind.
       .staff('POST', '/v1/admin/users/:id/status', { pin: true, role: 'compliance' })

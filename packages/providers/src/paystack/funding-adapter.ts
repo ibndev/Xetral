@@ -1,6 +1,10 @@
 import { z } from 'zod';
-import { ProviderContractError, ProviderRejectedError } from '../ports/errors.js';
-import { PAYSTACK_ENDPOINTS, type PaystackClient } from './client.js';
+import {
+  ProviderContractError,
+  ProviderPendingError,
+  ProviderRejectedError,
+} from '../ports/errors.js';
+import { PAYSTACK_ENDPOINTS, isStaleCustomerRefusal, type PaystackClient } from './client.js';
 import type {
   CreateVirtualAccountRequest,
   FundingPort,
@@ -44,12 +48,26 @@ const customerResponse = z.object({
   }),
 });
 
+/*
+ * `account_number` IS OPTIONAL HERE, AND THAT IS NOT LAXITY.
+ *
+ * Paystack assigns a NUBAN ASYNCHRONOUSLY. `POST /dedicated_account` succeeds
+ * and answers a customer record whose account is not yet attached; the number
+ * arrives moments later, on the `dedicatedaccount.assign.success` webhook or
+ * on the next read. Requiring it here turned that ordinary, documented case
+ * into `ProviderContractError` — which this service reports as "their API has
+ * changed, waiting will not fix it", the opposite of the truth.
+ *
+ * So the schema accepts the shape they actually send, and the ABSENCE of a
+ * number is decided one level up, where the answer is "check back in a
+ * moment" rather than "something is broken".
+ */
 const dedicatedAccountResponse = z.object({
   data: z.object({
-    id: z.union([z.string(), z.number()]),
-    account_number: z.string().min(1),
-    account_name: z.string().min(1),
-    bank: z.object({ name: z.string().min(1) }),
+    id: z.union([z.string(), z.number()]).optional(),
+    account_number: z.string().min(1).optional(),
+    account_name: z.string().min(1).optional(),
+    bank: z.object({ name: z.string().min(1) }).optional(),
     active: z.boolean().optional(),
     currency: z.string().optional(),
   }),
@@ -66,6 +84,18 @@ const dedicatedAccountListResponse = z.object({
     }),
   ),
 });
+
+/**
+ * WHAT A TEST INTEGRATION ISSUES, AND THE ONLY THING IT WILL ISSUE.
+ *
+ * Paystack's test domain has one NUBAN provider. Naming `wema-bank` on a
+ * `sk_test_…` key is refused with a message about the bank, which reads as a
+ * wrong SETTING — and an operator who then "corrects" the setting has broken
+ * the live configuration in order to fix the test one. The key already says
+ * which environment this is, so the adapter answers it rather than asking
+ * somebody to keep two settings in step.
+ */
+const TEST_PREFERRED_BANK = 'test-bank';
 
 const transactionListResponse = z.object({
   data: z.array(
@@ -142,8 +172,21 @@ export class PaystackFundingAdapter implements FundingPort {
       );
     }
 
-    const customerCode = await this.#customerCode(request);
+    return this.#issue(request, await this.#customerCode(request), true);
+  }
 
+  /**
+   * One attempt at issuing, with ONE retry reserved for a stale customer code.
+   *
+   * `mayRetry` is what stops that being a loop: a second domain refusal after
+   * we have already minted a fresh customer is a real refusal about the
+   * credential, not about the code, and asking a third time would hide it.
+   */
+  async #issue(
+    request: CreateVirtualAccountRequest,
+    customerCode: string,
+    mayRetry: boolean,
+  ): Promise<VirtualAccount> {
     /*
      * ALREADY ISSUED? ASK BEFORE CREATING.
      *
@@ -157,35 +200,102 @@ export class PaystackFundingAdapter implements FundingPort {
     const existing = await this.#existingAccount(customerCode);
     if (existing !== undefined) return existing;
 
-    // Resolved PER CALL, so an operator who changes it during an incident is
-    // not waiting on a deploy — the rule 009 states, and the reason the
-    // credential resolver has the same shape.
-    const preferredBank =
+    const preferredBank = await this.#bankToAskFor();
+
+    let payload: unknown;
+    try {
+      payload = await this.#client.request(
+        'POST',
+        PAYSTACK_ENDPOINTS.createDedicatedAccount,
+        {
+          customer: customerCode,
+          ...(preferredBank === undefined ? {} : { preferred_bank: preferredBank }),
+        },
+      );
+    } catch (error) {
+      /*
+       * A CODE FROM THE OTHER DOMAIN IS DISCARDED AND THE CUSTOMER REMADE.
+       *
+       * This is the failure a deployment meets the day it swaps test keys for
+       * live ones, and it looks exactly like a bad credential: every customer
+       * who had already been through the flow is refused, for ever, while a
+       * brand-new customer works. The stored code is what is invalid, not the
+       * key — so the answer is to mint a fresh customer rather than to tell
+       * an operator their live key is wrong.
+       *
+       * Only once, and only for this refusal.
+       */
+      if (
+        mayRetry &&
+        error instanceof ProviderRejectedError &&
+        isStaleCustomerRefusal(error.message)
+      ) {
+        return this.#issue(request, await this.#createCustomer(request), false);
+      }
+      throw error;
+    }
+
+    const account = this.#toAccount(payload, customerCode);
+    if (account !== undefined) return account;
+
+    /*
+     * CREATED, NOT YET ASSIGNED.
+     *
+     * Paystack accepted the request and has not attached a number yet. That
+     * is not a failure and must not be reported as one: `account_issue_pending`
+     * is a code the apps already render as "your account is being opened,
+     * check back in a moment", and the next call to this method finds the
+     * account through the look-before-create above.
+     *
+     * Deliberately NOT polled here. A request holding a connection open while
+     * a provider finishes an asynchronous job is how one slow afternoon at
+     * Paystack becomes an exhausted pool, and the customer is on a screen
+     * they can refresh.
+     */
+    throw new ProviderPendingError(
+      PROVIDER,
+      'Paystack accepted the request and has not attached an account number yet. ' +
+        'It is assigned asynchronously and usually lands within a minute.',
+    );
+  }
+
+  /**
+   * The `preferred_bank` to send, or undefined to send none.
+   *
+   * On a TEST key this is always `test-bank`, whatever the setting says — see
+   * `TEST_PREFERRED_BANK`. On a live key it is the operator's setting,
+   * resolved PER CALL so a change during an incident does not wait on a
+   * deploy; the rule 009 states, and the reason the credential resolver has
+   * the same shape.
+   */
+  async #bankToAskFor(): Promise<string | undefined> {
+    if (await this.#client.isTestKey()) return TEST_PREFERRED_BANK;
+
+    const configured =
       typeof this.#preferredBank === 'function'
         ? await this.#preferredBank()
         : this.#preferredBank;
 
-    const payload = await this.#client.request(
-      'POST',
-      PAYSTACK_ENDPOINTS.createDedicatedAccount,
-      {
-        customer: customerCode,
-        ...(preferredBank === undefined || preferredBank === ''
-          ? {}
-          : { preferred_bank: preferredBank }),
-      },
-    );
-
-    return this.#toAccount(payload, customerCode);
+    return configured === undefined || configured === '' ? undefined : configured;
   }
 
   async getVirtualAccount(providerAccountId: string): Promise<VirtualAccount> {
-    return this.#toAccount(
+    const account = this.#toAccount(
       await this.#client.request(
         'GET',
         PAYSTACK_ENDPOINTS.getDedicatedAccount(providerAccountId),
       ),
     );
+    if (account === undefined) {
+      // A re-read of an account we hold an id for that comes back with no
+      // number is a real inconsistency, not the pending case: the id exists
+      // because a number once did.
+      throw new ProviderContractError(
+        PROVIDER,
+        `dedicated account ${providerAccountId} came back with no account number`,
+      );
+    }
+    return account;
   }
 
   /**
@@ -240,7 +350,12 @@ export class PaystackFundingAdapter implements FundingPort {
   async #customerCode(request: CreateVirtualAccountRequest): Promise<string> {
     const known = request.customer.providerCustomerId;
     if (known !== undefined && known !== '') return known;
+    return this.#createCustomer(request);
+  }
 
+  /** Creates one unconditionally. Separate so the stale-code path can remake
+   *  a customer whose stored code belongs to the other Paystack domain. */
+  async #createCustomer(request: CreateVirtualAccountRequest): Promise<string> {
     const payload = await this.#client.request('POST', PAYSTACK_ENDPOINTS.createCustomer, {
       email: request.customer.email,
       first_name: request.customer.firstName,
@@ -297,7 +412,8 @@ export class PaystackFundingAdapter implements FundingPort {
     };
   }
 
-  #toAccount(payload: unknown, customerCode?: string): VirtualAccount {
+  /** The account, or undefined when Paystack has not attached a number yet. */
+  #toAccount(payload: unknown, customerCode?: string): VirtualAccount | undefined {
     const parsed = dedicatedAccountResponse.safeParse(payload);
     if (!parsed.success) {
       throw new ProviderContractError(
@@ -307,6 +423,14 @@ export class PaystackFundingAdapter implements FundingPort {
       );
     }
     const account = parsed.data.data;
+    if (
+      account.account_number === undefined ||
+      account.account_name === undefined ||
+      account.bank === undefined ||
+      account.id === undefined
+    ) {
+      return undefined;
+    }
     return {
       provider: PROVIDER,
       providerAccountId: String(account.id),

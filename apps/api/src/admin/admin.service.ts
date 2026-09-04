@@ -106,8 +106,30 @@ export class AdminService {
     const params: unknown[] = [];
 
     if (options.search !== undefined && options.search !== '') {
-      params.push(`%${options.search.toLowerCase()}%`);
-      clauses.push(`lower(u.email) LIKE $${params.length}`);
+      /*
+       * FOUR IDENTIFIERS, BECAUSE SUPPORT IS NOT HANDED AN EMAIL ADDRESS.
+       *
+       * This matched the email alone. A customer on the phone gives a name and
+       * the number they are calling from; somebody reporting a payment link
+       * gives a handle. None of those found anybody, so the screen answered
+       * "No customers match that" to a search for a customer who was right
+       * there — which reads as the account having been deleted.
+       *
+       * The phone is normalised to E.164 server-side, so a caller reading out
+       * "0803…" would not match the stored `+234803…`. A trailing-digits match
+       * covers both without asking whoever is searching to know that.
+       */
+      const term = options.search.toLowerCase().trim();
+      params.push(`%${term}%`);
+      const like = `$${params.length}`;
+      params.push(`%${term.replace(/[^0-9]/g, '')}`);
+      const digits = `$${params.length}`;
+      clauses.push(
+        `(lower(u.email) LIKE ${like}
+          OR lower(u.full_name) LIKE ${like}
+          OR lower(u.handle) LIKE ${like}
+          OR (${digits} <> '%' AND u.phone LIKE ${digits}))`,
+      );
     }
     if (options.status !== undefined) {
       params.push(options.status);
@@ -129,6 +151,7 @@ export class AdminService {
     const rows = await this.pool.query<UserSummary & { row_id: string }>(
       // nosemgrep: semgrep.no-interpolated-sql
       `SELECT u.id::text AS row_id, u.uuid AS id, u.email, u.status, u.created_at,
+              u.full_name, u.phone, u.handle,
               (SELECT k.status::text FROM kyc_submissions k
                 WHERE k.user_id = u.id ORDER BY k.id DESC LIMIT 1) AS kyc_status
          FROM users u
@@ -151,7 +174,22 @@ export class AdminService {
     const [profile, balances, devices, statusHistory, tierHistory, tierLimits, cards] =
       await Promise.all([
       this.pool.query(
+        /*
+         * TWO NAMES AND TWO PHONE NUMBERS, KEPT APART ON PURPOSE.
+         *
+         * `users.full_name` is what somebody typed about themselves and is
+         * used to greet them; `kyc_submissions.full_name` is what a reviewer
+         * read off a document, and it is the only one any money decision may
+         * read. 040 records that rule, and collapsing them here would put the
+         * unverified one in front of an operator deciding something.
+         *
+         * The account's own columns were simply absent, which is why this
+         * screen showed an email address and nothing else for every customer
+         * who had not submitted identity documents.
+         */
         `SELECT u.uuid AS id, u.email, u.status, u.created_at, u.kyc_tier,
+                u.full_name AS account_name, u.phone AS account_phone,
+                u.handle, u.country,
                 k.status::text AS kyc_status, k.full_name, k.bvn_last4, k.phone
            FROM users u
            LEFT JOIN kyc_submissions k
@@ -311,6 +349,81 @@ export class AdminService {
   }
 
   /**
+   * EVERY POSTING THAT TOUCHED THIS CUSTOMER, filtered.
+   *
+   * THE GAP THIS CLOSES. Support could see balances, devices, cards, status
+   * changes and tier changes — everything ABOUT an account and nothing that
+   * happened IN it. So the commonest question there is ("they say a transfer
+   * did not arrive") could be answered only by asking the customer to read
+   * their own screen back, or by a psql prompt.
+   *
+   * WIDER THAN THE CUSTOMER'S OWN HISTORY, deliberately, and this is the
+   * difference from `LedgerService.history`. That shows one currency and only
+   * the `customer_wallet` leg, because a customer wants a statement. An
+   * operator is looking at the whole account: money held in `customer_pending`
+   * against a card authorization or a gift card hold is exactly what a
+   * "missing" balance turns out to be, and a view that hid it would send
+   * somebody looking for a bug in the ledger.
+   *
+   * READ FROM POSTINGS, never from entry metadata — the rule 027 states for
+   * the monitoring rules and for the same reason: a view assembled from a key
+   * some flow remembered to set stops working silently the first time a new
+   * flow forgets.
+   *
+   * KEYSET PAGINATED on the posting id. `OFFSET` shifts under an active
+   * account and produces duplicates and gaps, which on a support screen reads
+   * as money appearing and disappearing.
+   */
+  async userTransactions(
+    uuid: string,
+    options: {
+      readonly currency?: string;
+      readonly kind?: string;
+      readonly limit: number;
+      readonly before?: string;
+    },
+  ): Promise<readonly Record<string, unknown>[]> {
+    const found = await this.pool.query<{ id: string }>(`SELECT id FROM users WHERE uuid = $1`, [
+      uuid,
+    ]);
+    const row = found.rows[0];
+    if (row === undefined) throw new NotFoundException({ error: 'user_not_found' });
+
+    /*
+     * Every filter is a PARAMETER, including the optional ones — `NULL means
+     * everything` rather than a clause built by hand. One query serves the
+     * filtered and unfiltered cases, so there is no combination of filters
+     * that runs SQL nobody has read.
+     */
+    const rows = await this.pool.query(
+      `SELECT p.id::text AS posting_id, e.uuid AS entry_id, e.kind::text AS kind,
+              e.description, e.occurred_at,
+              a.kind::text AS account_kind,
+              p.amount_minor::text AS amount_minor, p.currency,
+              s.status
+         FROM postings p
+         JOIN accounts a        ON a.id = p.account_id
+         JOIN journal_entries e ON e.id = p.journal_entry_id
+         JOIN entry_status s    ON s.id = e.id
+        WHERE a.owner_id = $1::bigint
+          AND a.owner_type = 'user'
+          AND ($2::text IS NULL OR p.currency = $2)
+          AND ($3::text IS NULL OR e.kind::text = $3)
+          AND ($4::bigint IS NULL OR p.id < $4::bigint)
+        ORDER BY p.id DESC
+        LIMIT $5`,
+      [
+        row.id,
+        options.currency ?? null,
+        options.kind ?? null,
+        options.before ?? null,
+        Math.min(Math.max(options.limit, 1), 200),
+      ],
+    );
+    return rows.rows as Record<string, unknown>[];
+  }
+
+  /**
    * Freezes, unfreezes or closes an account.
    *
    * `users.status` is checked on every money path and nothing could change it
@@ -392,6 +505,57 @@ export class AdminService {
 
     this.#logger.warn(`user ${uuid}: ${row.status} -> ${to} by ${actorUuid} (${reason})`);
     return { id: uuid, status: to };
+  }
+
+  /* ---------------------------- notifications -------------------------- */
+
+  /**
+   * WHETHER ANYTHING IS ACTUALLY BEING SENT.
+   *
+   * THE FAILURE THIS EXISTS FOR is named in 012 and in the go-live list and
+   * had nowhere to be seen: with `NOTIFICATION_INTERVAL_SECONDS` unset, rows
+   * accumulate in the outbox, the API keeps answering "check your email", and
+   * NOTHING ERRORS — because writing the row succeeded. A password reset that
+   * is never sent is a customer locked out of their own money, and the only
+   * evidence was a table nobody could look at without psql.
+   *
+   * THREE QUESTIONS, NOT ONE. What is waiting (and how long the oldest has
+   * been waiting, because a queue of three that has been three since Tuesday
+   * is a queue nobody is working); what was given up on, which on staging is
+   * every address outside the allowlist and in production is a real provider
+   * refusal; and what went out, so "did they get it?" has an answer.
+   *
+   * NO BODY, EVER. `payload_sealed` is sealed precisely because a rendered
+   * reset email carries a live bearer token, and a sent message has had its
+   * body erased. This returns the recipient, the kind and the state — never a
+   * column that could hold the message.
+   */
+  async notifications(): Promise<Record<string, unknown>> {
+    const [backlog, abandoned, recent] = await Promise.all([
+      this.pool.query(
+        `SELECT class::text, kind::text, waiting::text, oldest, worst_attempts
+           FROM notification_backlog ORDER BY class, kind`,
+      ),
+      this.pool.query(
+        `SELECT id::text, kind::text, class::text, recipient, attempts,
+                last_error, created_at
+           FROM notifications_abandoned LIMIT 50`,
+      ),
+      // Straight from the table rather than a view, because "what went out"
+      // is not an alert and 012 only built views for the two that are.
+      this.pool.query(
+        `SELECT id::text, kind::text, class::text, recipient, status::text,
+                provider, sent_at, created_at
+           FROM notification_outbox
+          ORDER BY id DESC LIMIT 50`,
+      ),
+    ]);
+
+    return {
+      backlog: backlog.rows,
+      abandoned: abandoned.rows,
+      recent: recent.rows,
+    };
   }
 
   /* ------------------------------ suspense ----------------------------- */

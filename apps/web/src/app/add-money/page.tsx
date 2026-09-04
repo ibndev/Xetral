@@ -125,10 +125,6 @@ export default function AddMoney() {
               </button>
             </div>
 
-            <p className="hint">
-              You can receive up to {'\u20A6'}50,000 a day straight away.
-            </p>
-
             <FormError error={issueError} code={issueCode} />
           </div>
         )}

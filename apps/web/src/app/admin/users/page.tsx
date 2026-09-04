@@ -9,7 +9,10 @@ import { Select } from '@/ui/select';
 /**
  * Finding a customer.
  *
- * Search is a server-side `LIKE` on the email, and there is deliberately no
+ * Search matches the name, the email, the phone number or the handle —
+ * server-side, in one query. It was the email alone, which is the identifier
+ * support has LEAST often: a customer on the phone gives a name and the
+ * number they are calling from. There is deliberately no
  * "list everyone" default beyond the most recent page: an operations screen
  * that renders the whole customer table is a screen that puts the whole
  * customer table into a browser cache, a screenshot and a support ticket.
@@ -33,7 +36,7 @@ export default function Users() {
   return (
     <div className="panel">
       <h1>Customers</h1>
-      <h2>Fifty most recent, or search by email</h2>
+      <h2>Fifty most recent, or search by name, email, phone or handle</h2>
 
       <form
         className="actions"
@@ -45,7 +48,7 @@ export default function Users() {
       >
         <input
           style={{ flex: '1 1 220px', marginTop: 0 }}
-          placeholder="Email"
+          placeholder="Name, email, phone or @handle"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -78,7 +81,8 @@ export default function Users() {
           <table>
             <thead>
               <tr>
-                <th>Email</th>
+                <th>Customer</th>
+                <th>Phone</th>
                 <th>Status</th>
                 <th>Identity</th>
                 <th>Joined</th>
@@ -87,8 +91,28 @@ export default function Users() {
             <tbody>
               {users.data.map((user) => (
                 <tr key={user.id}>
+                  {/*
+                    THE NAME LEADS AND THE ADDRESS IS UNDER IT. This column was
+                    an email address alone, which is the identifier support has
+                    LEAST often: a customer on the phone gives a name, and
+                    somebody reporting a payment link gives a handle. Both are
+                    here now, and both are searchable.
+
+                    `full_name` is what the customer typed about themselves —
+                    never the verified name, which only a reviewer's reading of
+                    a document establishes.
+                  */}
                   <td>
-                    <Link href={`/admin/users/${user.id}`}>{user.email}</Link>
+                    <Link href={`/admin/users/${user.id}`}>
+                      {user.full_name ?? user.email ?? 'Customer'}
+                    </Link>
+                    <div className="cell-sub">
+                      {user.email}
+                      {user.handle === null ? null : ` · @${user.handle}`}
+                    </div>
+                  </td>
+                  <td className="mono nowrap">
+                    {user.phone ?? <span className="muted">—</span>}
                   </td>
                   <td>
                     <span

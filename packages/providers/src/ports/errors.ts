@@ -59,6 +59,30 @@ export class ProviderTimeoutError extends ProviderError {
 }
 
 /**
+ * THE PROVIDER ACCEPTED IT AND HAS NOT FINISHED, and that is neither a
+ * success nor a failure.
+ *
+ * Distinct from every other error here, and the distinction is the whole
+ * point. A timeout means we do not know whether they acted. Unavailable means
+ * we could not ask. A contract error means their API has changed. This one
+ * means they answered, in full, to say the work is in progress — which is a
+ * NORMAL outcome for an operation somebody designed to be asynchronous.
+ *
+ * The case that forced it: Paystack assigns a dedicated account number after
+ * answering the request that asked for one. Modelled as any of the above, a
+ * customer opening an account is told something is broken; modelled as
+ * success, the adapter has to invent an account number it was not given.
+ * Neither is true, and the caller's correct behaviour — say "in a moment" and
+ * look again — is available only if the state has a name.
+ *
+ * Retryable: asking again is exactly right, and the operation it describes is
+ * one the provider is already idempotent about by construction.
+ */
+export class ProviderPendingError extends ProviderError {
+  readonly retryable = true;
+}
+
+/**
  * The provider replied with something the adapter cannot parse.
  *
  * Not retryable: the same request produces the same unparseable reply. It means

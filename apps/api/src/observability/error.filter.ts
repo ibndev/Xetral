@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { Catch, HttpException, Inject, Logger } from '@nestjs/common';
 import type { ArgumentsHost, ExceptionFilter } from '@nestjs/common';
 import type { Request, Response } from 'express';
@@ -18,6 +19,25 @@ import { ErrorRecorder } from './error-recorder.service.js';
  * make did not work, and somebody has to know. So does anything that is not an
  * HttpException at all — a TypeError, a failed query, an unhandled rejection —
  * because reaching here means nothing in the codebase expected it.
+ *
+ * EVERY 5xx CARRIES A REFERENCE, and that is what makes one reportable.
+ *
+ * THE FAILURE THIS EXISTS FOR. The body of a 500 is `{ error:
+ * 'internal_error' }` and nothing else — correct, because a body that
+ * described the exception would be an information leak added by the thing
+ * meant to help. The consequence is that "Something went wrong. Please try
+ * again." is the whole of what anybody can see, on the screen AND in the
+ * report that reaches whoever could fix it. Two unrelated endpoints failing
+ * for two unrelated reasons produce the identical sentence, so the first
+ * question — WHICH failure is this? — cannot be answered at all, and the
+ * available next step is to guess.
+ *
+ * A reference is six hex characters minted here, put in the body, and written
+ * into the same log line as the exception. It says nothing about our tables,
+ * our providers or our schema, so it is safe on a customer's screen; and it
+ * turns an unsearchable sentence into one `grep` against the deployment's
+ * logs. Not an id anything stores: it identifies THIS response, and
+ * `error_events` already fingerprints the underlying bug.
  */
 @Catch()
 export class ErrorRecordingFilter implements ExceptionFilter {
@@ -32,11 +52,28 @@ export class ErrorRecordingFilter implements ExceptionFilter {
 
     const status = exception instanceof HttpException ? exception.getStatus() : 500;
 
+    // Only for a 5xx. A 4xx already names itself — `invalid_pin` is not a
+    // mystery anybody needs a reference to look up — and minting one for every
+    // wrong PIN would put a meaningless token on a screen that is working.
+    const reference = status >= 500 ? randomBytes(3).toString('hex') : undefined;
+
     if (status >= 500) {
       const message =
         exception instanceof Error ? `${exception.name}: ${exception.message}` : String(exception);
 
-      this.#logger.error(`${request.method} ${routeOf(request)} -> ${status}: ${message}`);
+      // The reference FIRST, because this is the line somebody greps for with
+      // six characters read off a screen or pasted into a report.
+      this.#logger.error(
+        `[${reference}] ${request.method} ${routeOf(request)} -> ${status}: ${message}`,
+      );
+
+      // The stack too, and only for a 5xx. A 500 whose log line is one
+      // sentence tells you a query failed and never which query; this is the
+      // half that says where. It is a log, not a response body — nothing here
+      // reaches a caller.
+      if (exception instanceof Error && exception.stack !== undefined) {
+        this.#logger.error(`[${reference}] ${exception.stack}`);
+      }
 
       // NOT awaited. An exception filter that waits on a database write adds
       // the recorder's latency to every failed request, and if the database is
@@ -56,10 +93,25 @@ export class ErrorRecordingFilter implements ExceptionFilter {
     if (response.headersSent) return;
 
     if (exception instanceof HttpException) {
-      response.status(status).json(exception.getResponse());
+      const body = exception.getResponse();
+      // A 4xx passes through untouched. A 5xx gains the reference — merged
+      // into an object body, and replacing a string one, because Nest's
+      // default `getResponse()` for a bare `InternalServerErrorException` is
+      // a string and a caller parsing `{ error }` learns nothing from it.
+      if (reference === undefined) {
+        response.status(status).json(body);
+        return;
+      }
+      response
+        .status(status)
+        .json(
+          typeof body === 'object' && body !== null
+            ? { ...(body as Record<string, unknown>), reference }
+            : { error: 'internal_error', reference },
+        );
       return;
     }
-    response.status(500).json({ error: 'internal_error' });
+    response.status(500).json({ error: 'internal_error', reference });
   }
 }
 

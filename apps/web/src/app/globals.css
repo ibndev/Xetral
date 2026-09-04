@@ -2825,3 +2825,18 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
   .account-line { flex-wrap: wrap; }
   .account-holder { flex: 1 0 100%; }
 }
+
+/*
+ * A SECOND LINE INSIDE A TABLE CELL.
+ *
+ * The customers table leads with a name and carries the email address and
+ * handle beneath it, because those are three identifiers for one person and
+ * three columns for them is a table nobody can read on a laptop. Muted and a
+ * size down, so the row still scans as one line with detail under it rather
+ * than as two rows.
+ */
+.cell-sub {
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: var(--text-3);
+}

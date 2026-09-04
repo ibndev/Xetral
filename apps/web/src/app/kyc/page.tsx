@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { formatAmount } from '@xetral/client';
 import type { KycLimits, KycStatus } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { FormError } from '@/ui/form-error';
@@ -186,10 +185,7 @@ function Submitted({ status }: { status: KycStatus }) {
         </div>
 
         {status.status === 'pending' && (
-          <p className="hint">
-            Reviews are done by a person, not automatically. You can keep using
-            your wallet in the meantime.
-          </p>
+          <p className="hint">We&apos;ll notify you when review is completed</p>
         )}
 
         <Limits />
@@ -215,10 +211,18 @@ function Submitted({ status }: { status: KycStatus }) {
  * by hitting it, and a refusal with no explanation of what would change is
  * what turns a control into a support ticket.
  *
- * A ZERO IS A REAL LIMIT and is shown as one. An unverified account may move
- * no crypto at all, because a chain transaction is the single movement nobody
- * can recall — and saying "not available yet" is more honest than hiding the
- * row and letting somebody find out at the moment they try.
+ * SHOWN AS A STATE, NOT AS A FIGURE, and that is a deliberate reversal.
+ *
+ * It used to print each ceiling — "₦50,000.00 a day", "0.00000000 a day" —
+ * which reads as a price list on a screen whose subject is identity, and
+ * invites the customer to compare four numbers when the only thing they can
+ * DO about any of them is the one button already on the page. Worse, the
+ * crypto row rendered a real zero as "not available yet", so an unverified
+ * customer met a list in which some rows were amounts and one was a sentence.
+ *
+ * The figures have not gone anywhere: `GET /v1/kyc/limits` still answers them
+ * and the ledger precondition still enforces them, so nothing about what is
+ * ALLOWED changed here. This is the wording on one screen.
  */
 function Limits() {
   const client = useXetral();
@@ -226,6 +230,11 @@ function Limits() {
   if (data === undefined) return null;
 
   const TIERS = ['Registered', 'Verified', 'Enhanced'];
+
+  // TIER 0 IS THE ONLY UNVERIFIED STATE. Everything above it was granted by a
+  // person reading a document, so the two words divide exactly where the
+  // Verify button does — which is what makes them answerable by pressing it.
+  const verified = data.tier > 0;
 
   return (
     <div className="card">
@@ -236,25 +245,11 @@ function Limits() {
       {data.limits.map((limit) => (
         <div className="row" key={limit.currency}>
           <span className="muted">{limit.currency}</span>
-          <span className="mono">
-            {/*
-              A regex, not `=== '0'`: the API sends major units, so a zero
-              ceiling arrives as "0.00" for naira and "0.00000000" for BTC.
-              Comparing against a bare '0' would render the "no crypto without
-              an identity" limit as an ordinary allowance of nothing.
-            */}
-            {/^0(\.0+)?$/.test(limit.daily_limit) ? (
-              'not available yet'
-            ) : (
-              <>{formatAmount(limit.daily_limit, limit.currency)} a day</>
-            )}
-          </span>
+          <span>{verified ? 'Unlimited' : 'Limited'}</span>
         </div>
       ))}
       {data.next_tier === 1 && (
-        <p className="hint">
-          Verifying raises every limit here, and unlocks a dollar card.
-        </p>
+        <p className="hint">Verifying lifts these, and unlocks a dollar card.</p>
       )}
     </div>
   );

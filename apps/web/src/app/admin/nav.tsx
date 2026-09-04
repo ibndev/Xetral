@@ -75,8 +75,16 @@ export const GROUPS: readonly Group[] = [
       // screen that works before the second factor exists. Hiding it behind
       // the thing it configures is the loop it was written to break.
       { href: '/admin/security', label: 'Your authenticator', icon: 'shield' },
+      // Whether anything is actually being sent. The failure it answers is
+      // silent by construction: with the worker interval unset the outbox
+      // fills, the API keeps saying "check your email", and nothing errors.
+      { href: '/admin/notifications', label: 'Notifications', icon: 'bell' },
       { href: '/admin/audit', label: 'Audit', icon: 'clock' },
       { href: '/admin/readiness', label: 'Readiness', icon: 'check' },
+      // Beside Readiness, and distinct from it: Readiness asks whether a
+      // value is SET, and every reason the naira rail refuses survives that
+      // question. This one ASKS the provider.
+      { href: '/admin/diagnostics', label: 'Diagnostics', icon: 'alert' },
     ],
   },
 ];

@@ -24,6 +24,29 @@ import type { ApiErrorCode } from './errors.js';
 export function messageFor(error: unknown): string {
   if (!(error instanceof ApiError)) return 'Something went wrong. Please try again.';
 
+  return withReference(sentenceFor(error), error);
+}
+
+/**
+ * A REPORT THAT CAN BE ACTED ON, rather than one that can only be repeated.
+ *
+ * "Something went wrong. Please try again." is a true sentence about every
+ * 500 there has ever been, which makes it useless in exactly the moment it
+ * appears: two unrelated endpoints failing for two unrelated reasons say the
+ * identical thing, so nobody reading a screenshot can tell whether they are
+ * looking at one bug or two, and the only available next step is guessing.
+ *
+ * The reference is minted by the API for every 5xx and written into the same
+ * log line as the exception. It names nothing — not a table, not a provider,
+ * not a credential — so it is safe on a customer's screen, and it turns an
+ * unsearchable sentence into one grep. Appended only when the API sent one,
+ * so no wording changes for the refusals that already explain themselves.
+ */
+function withReference(sentence: string, error: ApiError): string {
+  return error.reference === undefined ? sentence : `${sentence} (reference ${error.reference})`;
+}
+
+function sentenceFor(error: ApiError): string {
   switch (error.code) {
     case 'invalid_credentials':
       return 'That email or password is not right.';

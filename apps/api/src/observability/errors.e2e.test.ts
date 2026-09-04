@@ -118,10 +118,25 @@ describe('what the filter records', () => {
   it('records an unhandled throw', async () => {
     const res = await request(app.getHttpServer()).get('/probe/throws');
     expect(res.status).toBe(500);
-    // The body says nothing about the exception. A 500 that started describing
-    // what threw would be an information leak added by the thing meant to
-    // help.
-    expect(res.body).toEqual({ error: 'internal_error' });
+    /*
+     * THE BODY IS A CODE AND A REFERENCE, AND NOTHING ELSE.
+     *
+     * It says nothing about the exception — a 500 that started describing
+     * what threw would be an information leak added by the thing meant to
+     * help — and the assertion is an exact match rather than a check for two
+     * keys, because the failure being guarded against is a field somebody
+     * adds later "just for debugging".
+     *
+     * The reference exists because "Something went wrong. Please try again."
+     * is a true sentence about every 500 there has ever been, which makes it
+     * useless in the moment it appears: two unrelated endpoints failing for
+     * two unrelated reasons say the identical thing, so nobody reading a
+     * report can tell whether they are looking at one bug or two. Six hex
+     * characters name nothing and turn that into one grep of the logs.
+     */
+    expect(Object.keys(res.body).sort()).toEqual(['error', 'reference']);
+    expect(res.body.error).toBe('internal_error');
+    expect(res.body.reference).toMatch(/^[0-9a-f]{6}$/);
 
     // Recording is deliberately not awaited by the filter, so give it a beat.
     await new Promise((resolve) => setTimeout(resolve, 300));

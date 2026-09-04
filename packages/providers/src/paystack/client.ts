@@ -62,6 +62,18 @@ export const PAYSTACK_ENDPOINTS = {
   validateCustomer: (code: string) => `/customer/${code}/identification`,
 
   createDedicatedAccount: '/dedicated_account',
+  /*
+   * WHICH NUBAN PROVIDERS THIS INTEGRATION MAY NAME.
+   *
+   * The single most useful call for an operator, and the one nothing made.
+   * `preferred_bank` is a SLUG — `wema-bank`, `titan-paystack`, `test-bank` —
+   * and a business is approved for a subset. Naming one outside that subset
+   * is refused with a message about the bank, which is indistinguishable on
+   * screen from "dedicated accounts are not enabled for you at all". This
+   * endpoint separates the two: it answers the list when the product is
+   * enabled, and refuses when it is not.
+   */
+  dedicatedAccountProviders: '/dedicated_account/available_providers',
   getDedicatedAccount: (id: string) => `/dedicated_account/${id}`,
   /*
    * `active` AND `currency` ARE REQUIRED, and omitting them is not a lenient
@@ -204,4 +216,56 @@ export class PaystackClient {
 
     return payload;
   }
+
+  /**
+   * Is the key in use a TEST key?
+   *
+   * WHY A CLIENT ANSWERS THIS AT ALL, when nothing else in this package cares
+   * which environment it is pointed at: Paystack's test and live integrations
+   * are not the same integration, and two things differ in ways that produce
+   * a refusal rather than a warning.
+   *
+   * A dedicated account on a TEST key is only ever issued at `test-bank`;
+   * naming `wema-bank` there is refused. And a customer code created on one
+   * domain is meaningless on the other — Paystack answers "Customer code is
+   * invalid for your live domain" — so a stored code has to be discarded when
+   * the key it was created under is replaced.
+   *
+   * Read from the key's own prefix rather than from a setting, because the
+   * key IS the environment: `sk_test_…` and `sk_live_…`. A separate
+   * "environment" setting would be a second copy of that fact, and the copy
+   * that drifts is the one that turns a working configuration into a refusal
+   * nobody can explain.
+   */
+  async isTestKey(): Promise<boolean> {
+    const key = typeof this.#secretKey === 'string' ? this.#secretKey : await this.#secretKey();
+    return key !== undefined && key.startsWith('sk_test');
+  }
+}
+
+/**
+ * Does this refusal mean "that customer code belongs to the other domain"?
+ *
+ * PAYSTACK'S TEST AND LIVE DOMAINS DO NOT SHARE CUSTOMERS. A code minted
+ * while a `sk_test_…` key was in use is rejected the moment a `sk_live_…` key
+ * replaces it, and the refusal is a sentence rather than a code — so the only
+ * way to recognise it is to read the message.
+ *
+ * The consequence if nobody does: a deployment that was set up on test keys
+ * and then given live ones refuses to open an account for every customer who
+ * had already been through the flow, for ever, with a message an operator
+ * reads as "Paystack is rejecting our key". Which it is — for one customer's
+ * stored code, not for the credential.
+ *
+ * Matched loosely on purpose: the exact sentence is theirs to change, and the
+ * cost of a false positive is one extra customer record, while the cost of a
+ * miss is a customer who can never be paid.
+ */
+export function isStaleCustomerRefusal(message: string): boolean {
+  const text = message.toLowerCase();
+  return (
+    text.includes('invalid for your live domain') ||
+    text.includes('invalid for your test domain') ||
+    (text.includes('customer') && text.includes('domain'))
+  );
 }

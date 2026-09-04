@@ -12,6 +12,7 @@ import type { Pool } from 'pg';
 import { LedgerService } from '@xetral/ledger';
 import {
   ProviderContractError,
+  ProviderPendingError,
   ProviderRejectedError,
   ProviderTimeoutError,
   ProviderUnavailableError,
@@ -139,6 +140,25 @@ export class FundingService {
         idempotencyKey: `xetral-va-${userId}-NGN`,
       });
     } catch (error) {
+      /*
+       * ACCEPTED AND NOT FINISHED IS NOT A FAILURE.
+       *
+       * Paystack attaches a dedicated account number ASYNCHRONOUSLY: the
+       * create succeeds and the NUBAN lands moments later. Reported as an
+       * outage the customer is told something is broken on the one screen
+       * they opened in order to be paid; `account_issue_pending` is a code
+       * both apps already render as "being opened, check back in a moment",
+       * and the look-before-create in the adapter finds the account on the
+       * next attempt.
+       */
+      if (error instanceof ProviderPendingError) {
+        this.#logger.log(
+          `the funding rail accepted the account request and has not attached a number ` +
+            `yet: ${error.message}`,
+        );
+        throw new ServiceUnavailableException({ error: 'account_issue_pending' });
+      }
+
       if (error instanceof ProviderTimeoutError) {
         // We do not know whether an account was created. Asking again is safe
         // BECAUSE the request carried an idempotency key; inventing one here

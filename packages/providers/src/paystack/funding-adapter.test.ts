@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { PaystackFundingAdapter } from './funding-adapter.js';
 import { PaystackClient, type PaystackFetch } from './client.js';
-import { ProviderRejectedError } from '../ports/errors.js';
+import { ProviderPendingError, ProviderRejectedError } from '../ports/errors.js';
 import type { CreateVirtualAccountRequest } from '../ports/funding.js';
 
 interface Call {
@@ -12,9 +12,28 @@ interface Call {
   readonly auth: string | undefined;
 }
 
+/*
+ * THE KEY DECIDES THE DOMAIN, so these fixtures have to say which they are.
+ *
+ * A `sk_test_…` key means the test domain, whose only NUBAN provider is
+ * `test-bank` — naming `wema-bank` there is refused. So the adapter overrides
+ * the setting on a test key, and a suite whose subject is the SETTING has to
+ * run on a live-shaped one or it is asserting the override instead.
+ *
+ * Which is exactly what happened here the moment the override landed: three
+ * assertions about `paystack_preferred_bank` went red, correctly, because
+ * they were passing a live bank slug under a test key — the configuration
+ * this change exists to refuse.
+ */
+const LIVE_KEY = 'sk_live_key';
+const TEST_KEY = 'sk_test_key';
+
 function adapterWith(
   responses: readonly unknown[],
-  options: { preferredBank?: string | (() => Promise<string | undefined>) } = {},
+  options: {
+    preferredBank?: string | (() => Promise<string | undefined>);
+    secretKey?: string;
+  } = {},
 ): { adapter: PaystackFundingAdapter; calls: Call[] } {
   const calls: Call[] = [];
   let i = 0;
@@ -33,7 +52,7 @@ function adapterWith(
   };
   const client = new PaystackClient({
     baseUrl: 'https://api.paystack.test',
-    secretKey: 'sk_test_key',
+    secretKey: options.secretKey ?? LIVE_KEY,
     fetch,
   });
   return {
@@ -103,7 +122,7 @@ describe('opening an account for somebody who has not been verified', () => {
     // bad key.
     const { adapter, calls } = adapterWith([CUSTOMER_CREATED, NO_ACCOUNTS, ACCOUNT_CREATED]);
     await adapter.createVirtualAccount(NEW_CUSTOMER);
-    expect(calls[0]?.auth).toBe('Bearer sk_test_key');
+    expect(calls[0]?.auth).toBe(`Bearer ${LIVE_KEY}`);
   });
 
   it('reuses a customer the platform already has, rather than making a second', async () => {
@@ -168,6 +187,100 @@ describe('opening an account for somebody who has not been verified', () => {
     const without = adapterWith([CUSTOMER_CREATED, NO_ACCOUNTS, ACCOUNT_CREATED]);
     await without.adapter.createVirtualAccount(NEW_CUSTOMER);
     expect(without.calls[2]?.body).toEqual({ customer: 'CUS_abc' });
+  });
+});
+
+describe('the key decides the domain', () => {
+  it('OVERRIDES THE SETTING TO test-bank ON A TEST KEY', async () => {
+    /*
+     * Paystack's test domain has exactly one NUBAN provider. Naming
+     * `wema-bank` there is refused with a message about the BANK, which reads
+     * as a wrong setting — and an operator who then "corrects" the setting has
+     * broken the live configuration in order to fix the test one.
+     *
+     * The key already says which environment this is, so nobody has to keep
+     * two settings in step.
+     */
+    const { adapter, calls } = adapterWith([CUSTOMER_CREATED, NO_ACCOUNTS, ACCOUNT_CREATED], {
+      secretKey: TEST_KEY,
+      preferredBank: 'wema-bank',
+    });
+    await adapter.createVirtualAccount(NEW_CUSTOMER);
+    const create = calls.find((c) => c.path === '/dedicated_account' && c.method === 'POST');
+    expect((create?.body as { preferred_bank?: string }).preferred_bank).toBe('test-bank');
+  });
+
+  it('DISCARDS A CUSTOMER CODE FROM THE OTHER DOMAIN AND REMAKES THE CUSTOMER', async () => {
+    /*
+     * THE FAILURE THIS IS FOR is the one a deployment meets the day it swaps
+     * test keys for live ones. A customer code minted on the test domain is
+     * rejected by the live domain — "Customer code is invalid for your live
+     * domain" — so every customer who had already been through this flow is
+     * refused for ever, while a brand-new customer works. From inside the app
+     * that is indistinguishable from a bad credential, and the credential is
+     * what somebody then replaces.
+     */
+    const { adapter, calls } = adapterWith(
+      [
+        NO_ACCOUNTS,
+        // Their refusal: a 200 carrying `status: false`.
+        { status: false, message: 'Customer code is invalid for your live domain' },
+        CUSTOMER_CREATED,
+        NO_ACCOUNTS,
+        ACCOUNT_CREATED,
+      ],
+      { preferredBank: 'wema-bank' },
+    );
+
+    const account = await adapter.createVirtualAccount({
+      ...NEW_CUSTOMER,
+      customer: { ...NEW_CUSTOMER.customer, providerCustomerId: 'CUS_from_test_domain' },
+    });
+
+    expect(account.accountNumber).toBe(ACCOUNT_CREATED.data.account_number);
+    // A customer was CREATED, which is the whole point: the stored code was
+    // discarded rather than the credential being blamed.
+    expect(calls.some((c) => c.path === '/customer' && c.method === 'POST')).toBe(true);
+  });
+
+  it('does not loop: a second domain refusal is thrown', async () => {
+    // A refusal that survives a fresh customer is about the credential, not
+    // about the code. Retrying again would hide it behind an endless series
+    // of new Paystack customer records.
+    const { adapter } = adapterWith([
+      NO_ACCOUNTS,
+      { status: false, message: 'Customer code is invalid for your live domain' },
+      CUSTOMER_CREATED,
+      NO_ACCOUNTS,
+      { status: false, message: 'Customer code is invalid for your live domain' },
+    ]);
+
+    await expect(
+      adapter.createVirtualAccount({
+        ...NEW_CUSTOMER,
+        customer: { ...NEW_CUSTOMER.customer, providerCustomerId: 'CUS_stale' },
+      }),
+    ).rejects.toThrow(ProviderRejectedError);
+  });
+});
+
+describe('an account Paystack has not attached a number to yet', () => {
+  it('IS PENDING, NOT A BROKEN CONTRACT', async () => {
+    /*
+     * Paystack assigns a NUBAN asynchronously: the create succeeds and the
+     * number lands moments later. The schema used to require
+     * `account_number`, so that ordinary, documented case raised
+     * `ProviderContractError` — which the service reports as "their API has
+     * changed, waiting will not fix it". The opposite of the truth, on the
+     * screen a customer opened in order to be paid.
+     */
+    const { adapter } = adapterWith([
+      CUSTOMER_CREATED,
+      NO_ACCOUNTS,
+      { status: true, data: { customer: { customer_code: 'CUS_abc' } } },
+    ]);
+
+    await expect(adapter.createVirtualAccount(NEW_CUSTOMER)).rejects.toThrow(ProviderPendingError);
   });
 });
 

@@ -128,9 +128,6 @@ export default function AddMoney() {
                 })
               }
             />
-            <Text style={styles.hint}>
-              You can receive up to {'\u20A6'}50,000 a day straight away.
-            </Text>
             <FormError error={issueError} code={issueCode} />
           </View>
         )}

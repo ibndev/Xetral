@@ -301,6 +301,23 @@ export class ApiError extends Error {
      *  because those bodies carry PINs and card codes. */
     readonly fields: readonly string[] = [],
     readonly detail?: string,
+    /**
+     * Six hex characters identifying THE RESPONSE, minted by the API's
+     * exception filter and written into the same log line as the exception.
+     *
+     * WHY A CLIENT CARRIES ONE. A 500 answers `internal_error` and nothing
+     * else, deliberately — a body describing the exception would leak our
+     * tables. The cost is that every unrelated failure produces the identical
+     * sentence on screen, so the first question anybody asks about a report
+     * ("which failure was this?") has no answer, and two different bugs are
+     * indistinguishable from one flaky one.
+     *
+     * The reference says nothing about our schema, our providers or our
+     * credentials, so it is safe in front of a customer; and it turns an
+     * unsearchable sentence into one grep of the deployment's logs. Present
+     * only on a 5xx.
+     */
+    readonly reference?: string,
   ) {
     super(`${code}${detail === undefined ? '' : `: ${detail}`}`);
     this.name = 'ApiError';
@@ -384,7 +401,14 @@ export function toApiError(status: number, body: unknown): ApiError {
     : [];
   const detail = typeof record['detail'] === 'string' ? record['detail'] : undefined;
 
-  return new ApiError(code, status, fields, detail);
+  // Shape-checked like everything else here rather than trusted: this is read
+  // straight onto a screen, so a proxy or an error page must not be able to
+  // put a sentence of its own where six hex characters belong.
+  const claimed = record['reference'];
+  const reference =
+    typeof claimed === 'string' && /^[0-9a-f]{6}$/.test(claimed) ? claimed : undefined;
+
+  return new ApiError(code, status, fields, detail, reference);
 }
 
 /** The codes, for a test that checks the API cannot emit one the client
