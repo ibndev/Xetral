@@ -19,6 +19,7 @@ import type {
 import { money } from '@xetral/shared';
 import type { Currency } from '@xetral/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { PayoutReconciliationService } from './payout-reconciliation.service.js';
 import { AppModule } from '../app.module.js';
 import type { ApiConfig } from '../config.js';
 import { systemClock } from '../tokens.js';
@@ -438,6 +439,81 @@ describe('when the provider does not answer', () => {
     const balance = await nairaBalance(customer);
     expect(balance.spendable).toBe('10000.00');
     expect(balance.pending).toBe('0.00');
+  });
+});
+
+describe('the sweep that gives held money back', () => {
+  /*
+   * THE FAILURE THIS SUITE EXISTS FOR, reported by a customer sending money to
+   * their own bank account: the balance went down and nothing arrived.
+   *
+   * The test above it is correct and was not enough. A timeout leaving the
+   * money HELD is right at that moment and unacceptable to leave for ever —
+   * and `payout.service.ts` said "the reconciliation sweep ASKS" about a sweep
+   * that had never been written. Purchases had one, deposits had one, both
+   * crypto flows had one. Bank payouts did not, so `reserved` was a terminal
+   * state in practice: the books balanced, drift reported nothing, and the
+   * only thing that could see it was a view that COUNTS.
+   */
+  it('REVERSES A PAYOUT THE PROVIDER NEVER GAVE AN ID FOR', async () => {
+    const customer = await onboard();
+    await fund(customer.userId, 1_000_000n);
+    port.sendAnswer = new ProviderTimeoutError('bitnob', 'no answer');
+
+    await pay(customer).expect(200);
+    expect((await nairaBalance(customer)).pending).toBe('5000.00');
+
+    /*
+     * NO PAYOUT ID MEANS NO PAYOUT, and that is what makes this reversal safe
+     * rather than a guess. A payout is quote → initialize → finalize and only
+     * the last moves money; without an id from `send()`, the call that could
+     * have paid somebody either never ran or never answered, so there is
+     * nothing at the provider to double up on.
+     */
+    const report = await app.get(PayoutReconciliationService).sweep();
+    expect(report.reversed).toBeGreaterThanOrEqual(1);
+
+    const after = await nairaBalance(customer);
+    expect(after.spendable).toBe('10000.00');
+    expect(after.pending).toBe('0.00');
+  });
+
+  it('SETTLES ONE THE PROVIDER CONFIRMS, rather than handing the money back', async () => {
+    // The other half, and the one a blind "refund anything held for an hour"
+    // would get catastrophically wrong: a bank transfer cannot be recalled, so
+    // reversing a payout that DID leave pays the customer twice out of our own
+    // money. The sweep asks, and does only what it is told.
+    const customer = await onboard();
+    await fund(customer.userId, 1_000_000n);
+    port.sendAnswer = { providerPayoutId: 'po_settled', state: 'sent' };
+    port.statusAnswer = { providerPayoutId: 'po_settled', state: 'completed' };
+
+    await pay(customer).expect(200);
+
+    const report = await app.get(PayoutReconciliationService).sweep();
+    expect(report.reversed + report.stillPending).toBeGreaterThanOrEqual(0);
+
+    const after = await nairaBalance(customer);
+    // Spent, not returned: out of the wallet and out of pending.
+    expect(after.spendable).toBe('5000.00');
+    expect(after.pending).toBe('0.00');
+  });
+
+  it('LEAVES ONE THE PROVIDER STILL CALLS PENDING, however old it is', async () => {
+    // Age is not evidence. A sweep that decided on the clock would be the
+    // blind auto-reversal in slow motion.
+    const customer = await onboard();
+    await fund(customer.userId, 1_000_000n);
+    port.sendAnswer = { providerPayoutId: 'po_pending', state: 'sent' };
+    port.statusAnswer = { providerPayoutId: 'po_pending', state: 'sent' };
+
+    await pay(customer).expect(200);
+    await app.get(PayoutReconciliationService).sweep();
+
+    // Still sent, still not returned. `bank_payouts_stuck` and the recovery
+    // screen are what a person uses on this one.
+    const after = await nairaBalance(customer);
+    expect(after.spendable).toBe('5000.00');
   });
 });
 

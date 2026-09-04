@@ -201,6 +201,15 @@ export interface ApiConfig {
    * row a second old is almost certainly still in flight in a request handler
    * that is about to settle it. Sweeping it now races that handler for no gain.
    */
+  /**
+   * How often to resolve a bank payout the provider never answered for.
+   *
+   * ITS ABSENCE IS WHY A CUSTOMER'S MONEY SAT IN `customer_pending`. Every
+   * other held-money flow has a sweep; payouts did not, so a timed-out
+   * transfer stayed `reserved` for ever with the balance down and nothing
+   * arriving. On exactly one instance.
+   */
+  readonly payoutReconcileIntervalSeconds: number | undefined;
   readonly reconcileGraceSeconds: number | undefined;
   /**
    * After this long, a still-unresolved purchase is escalated to a human.
@@ -806,6 +815,7 @@ export function loadConfig(env: Env): ApiConfig {
     reconcileIntervalSeconds: optionalInteger(env, 'RECONCILE_INTERVAL_SECONDS'),
     // Zero is meaningful here — "sweep with no grace at all" — so this cannot
     // reuse optionalInteger, which treats zero as invalid.
+    payoutReconcileIntervalSeconds: optionalInteger(env, 'PAYOUT_RECONCILE_INTERVAL_SECONDS'),
     reconcileGraceSeconds: optionalWholeNumber(env, 'RECONCILE_GRACE_SECONDS'),
     // Zero means "escalate anything still held", which is a legitimate, if
     // very loud, setting — so whole numbers rather than positive ones.

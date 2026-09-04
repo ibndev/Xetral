@@ -106,7 +106,11 @@ export function testApiConfig(databaseUrl: string, overrides: Partial<ApiConfig>
     // No grace either — a test that had to wait two minutes for a row to become
     // eligible is a test nobody runs. Zero rather than undefined, which would
     // fall back to the production default.
-    reconcileGraceSeconds: 0,
+    // Off in tests: a suite drives `sweep()` directly rather than waiting on a
+  // timer, and a timer running against a shared database would resolve rows
+  // another suite is asserting on.
+  payoutReconcileIntervalSeconds: undefined,
+  reconcileGraceSeconds: 0,
     reconcileStaleSeconds: undefined,
     // OFF by default here too, so the suite that asserts every gift card route
     // refuses gets the production default rather than a test-only one. The

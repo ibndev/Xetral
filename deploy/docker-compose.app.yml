@@ -34,6 +34,7 @@ services:
       METRICS_TOKEN: '${METRICS_TOKEN:-}'
       RECONCILE_INTERVAL_SECONDS: ''
       DEPOSIT_RECONCILE_INTERVAL_SECONDS: ''
+      PAYOUT_RECONCILE_INTERVAL_SECONDS: ''
       CRYPTO_RECONCILE_INTERVAL_SECONDS: ''
       CRYPTO_DEPOSIT_RECONCILE_INTERVAL_SECONDS: ''
       GIFTCARD_RELEASE_INTERVAL_SECONDS: ''
@@ -89,6 +90,13 @@ services:
       # compliance queue is simply empty — which looks exactly like a quiet
       # week. A default means it runs unless somebody deliberately blanks it.
       RISK_MONITOR_INTERVAL_SECONDS: '${RISK_MONITOR_INTERVAL_SECONDS:-900}'
+      # AND THIS ONE HAS A DEFAULT FOR THE SAME REASON, learned the hard way.
+      # Without it a bank payout the provider never answered for stays
+      # `reserved` for ever: the customer's balance is DOWN, nothing arrives at
+      # their bank, and every other check stays green because the books balance
+      # perfectly. A default means it runs unless somebody deliberately blanks
+      # it, which is the right way round for a sweep that hands money back.
+      PAYOUT_RECONCILE_INTERVAL_SECONDS: '${PAYOUT_RECONCILE_INTERVAL_SECONDS:-300}'
       METRICS_TOKEN: '${METRICS_TOKEN:-}'
     deploy:
       replicas: 1

@@ -258,6 +258,19 @@ export const WORKERS: readonly Item[] = [
       'judgement about your support cover, not a technical constant.',
   },
   {
+    name: 'PAYOUT_RECONCILE_INTERVAL_SECONDS',
+    kind: 'env',
+    failure: 'silent',
+    singleInstance: true,
+    flow: 'bank payouts',
+    ifMissed:
+      'a bank payout the provider never answered for stays reserved for ever: ' +
+      'the money sits in customer_pending, the balance is DOWN, nothing ' +
+      'arrives, and every other check stays green because the books balance ' +
+      'perfectly. This is not hypothetical — it happened, and the sweep did ' +
+      'not exist to catch it.',
+  },
+  {
     name: 'DEPOSIT_RECONCILE_INTERVAL_SECONDS',
     kind: 'env',
     failure: 'silent',

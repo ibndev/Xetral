@@ -95,6 +95,7 @@ import { NotificationService } from './notifications/notification.service.js';
 import { ErrorRecorder } from './observability/error-recorder.service.js';
 import { ProviderHealthService, watched } from './observability/provider-health.service.js';
 import { ReadinessService } from './golive/readiness.service.js';
+import { PayoutReconciliationService } from './payouts/payout-reconciliation.service.js';
 import { FundingDiagnosticsService } from './funding/funding-diagnostics.service.js';
 import { MetricsService } from './observability/metrics.service.js';
 import { MetricsController } from './observability/metrics.controller.js';
@@ -771,6 +772,26 @@ export class ReconciliationLifecycle implements OnApplicationBootstrap {
   }
 }
 
+/**
+ * Starts the payout sweep — the only thing that gives a customer back money
+ * held against a bank transfer the provider never answered for.
+ *
+ * Without it a timed-out payout stays `reserved` for ever: the balance is
+ * down, nothing arrives, the books balance perfectly and every other check
+ * stays green.
+ */
+@Injectable()
+export class PayoutReconciliationLifecycle implements OnApplicationBootstrap {
+  constructor(
+    @Inject(PayoutReconciliationService)
+    private readonly payouts: PayoutReconciliationService,
+  ) {}
+
+  onApplicationBootstrap(): void {
+    this.payouts.start();
+  }
+}
+
 /** Starts the deposit reconciliation sweep — the only thing that notices a
  *  webhook that never arrived. */
 @Injectable()
@@ -1098,6 +1119,8 @@ export class AppModule {
         CryptoLifecycle,
         DepositReconciliationService,
         DepositLifecycle,
+        PayoutReconciliationService,
+        PayoutReconciliationLifecycle,
         ErrorRecorder,
         ProviderHealthService,
         ReadinessService,
