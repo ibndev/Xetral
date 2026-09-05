@@ -169,6 +169,24 @@ const listQuery = z.object({
   before: z.string().regex(/^[0-9]+$/).optional(),
 });
 
+/**
+ * A rate, as a person says it.
+ *
+ * `quote_per_base` is a DECIMAL STRING — "1650.00" — never a number. By the
+ * time a decimal is a JS number the precision is already gone, which is the
+ * rule `fromMajor()` follows and the reason this crosses the wire as text.
+ * The regex is the same shape the column's CHECK enforces, so a value that
+ * passes here cannot be refused by the database for its form.
+ */
+const publishFxRateSchema = z
+  .object({
+    base_currency: z.string().trim().regex(/^[A-Z]{3,5}$/),
+    quote_currency: z.string().trim().regex(/^[A-Z]{3,5}$/),
+    quote_per_base: z.string().trim().regex(/^[0-9]+(\.[0-9]+)?$/),
+    transaction_pin: z.string().optional(),
+  })
+  .strict();
+
 const publishFxSchema = z.object({
   base_currency: z.string().trim().length(3).toUpperCase(),
   quote_currency: z.string().trim().length(3).toUpperCase(),
@@ -976,6 +994,51 @@ export class AdminController {
       ...(ip === undefined ? {} : { ip }),
     });
     return published;
+  }
+
+  /**
+   * Publishes what a currency is worth, in the direction stated.
+   *
+   * `prices/fx` publishes a MARGIN and this publishes the RATE. Separate
+   * endpoints because they are separate decisions and separate rows: a pair
+   * can have a margin and no rate of ours, which is right where a provider
+   * quotes it and refuses every customer where none does —
+   * `fx_pairs_priced_without_a_rate` is what shows the difference.
+   */
+  @Post('prices/fx-rate')
+  @HttpCode(201)
+  async publishFxRate(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: unknown,
+  ): Promise<unknown> {
+    const parsed = publishFxRateSchema.safeParse(body);
+    if (!parsed.success) throw invalid(parsed.error.issues);
+
+    const actor = claims(request).sub;
+    const published = await this.pricing.publishFxRate(actor, parsed.data);
+
+    const ip = ipOf(request);
+    await this.audit.record({
+      actorId: actor,
+      action: 'price.publish',
+      subjectType: 'price',
+      subjectId: String(published['uuid']),
+      detail: {
+        kind: 'fx_rate',
+        pair: `${parsed.data.base_currency}/${parsed.data.quote_currency}`,
+        // The typed figure rather than the ratio: it is what an operator can
+        // check a log line against.
+        quote_per_base: parsed.data.quote_per_base,
+      },
+      ...(ip === undefined ? {} : { ip }),
+    });
+    return published;
+  }
+
+  /** Every live rate, with the spread that goes with it. */
+  @Get('prices/fx-rates')
+  async fxRates(): Promise<{ rates: readonly Record<string, unknown>[] }> {
+    return { rates: await this.pricing.fxRates() };
   }
 
   /** Publishes a gift card rate for one brand, country, type and band. */

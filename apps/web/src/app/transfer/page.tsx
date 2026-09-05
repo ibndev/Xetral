@@ -76,7 +76,16 @@ function Transfer() {
    * number in?" would be an endpoint that says which numbers belong to
    * customers, one request at a time.
    */
-  const [recipientDial, setRecipientDial] = useState('');
+  /*
+   * THE COUNTRY CODE, NOT THE DIALLING CODE, is what this holds.
+   *
+   * They are not interchangeable: the United States and Canada share +1, so
+   * a picker keyed on the dialling code has two entries with one value and
+   * `find()` returns whichever came first — the customer selects Canada and
+   * the screen says United States. The country code is unique by definition
+   * and the dialling code is read off it.
+   */
+  const [recipientCountry, setRecipientCountryCode] = useState('');
   const [recipientPhone, setRecipientPhone] = useState('');
   const [bankCode, setBankCode] = useState('');
   const [accountNumber, setAccountNumber] = useState('');
@@ -196,8 +205,24 @@ function Transfer() {
    * dial code IS the country, it is a fact about the number rather than about
    * the person, and it is true before the recipient has even signed up.
    */
-  const recipientCountry = countries.data?.find((c) => c.dial_code === recipientDial);
-  const recipientCurrency = recipientCountry?.currency;
+  /*
+   * THEIR OWN COUNTRY UNTIL THEY SAY OTHERWISE.
+   *
+   * The picker opened on a placeholder — "+—", no flag — so the commonest
+   * payment on the platform, somebody paying a neighbour, began by asking the
+   * customer to find their own country in a list. Most payments are domestic;
+   * the default should be the one most people need and the picker is right
+   * there for everybody else.
+   *
+   * Resolved rather than stored so it follows the session the moment it
+   * loads: seeding the state with `session.data?.country` would capture
+   * whatever was there on the first render, which is `undefined`.
+   */
+  const recipientPlace =
+    countries.data?.find(
+      (c) => c.code === (recipientCountry === '' ? session.data?.country : recipientCountry),
+    );
+  const recipientCurrency = recipientPlace?.currency;
   const homeCurrency = session.data?.home_currency ?? 'NGN';
 
   /*
@@ -235,7 +260,10 @@ function Transfer() {
    * somebody OUTSIDE Xetral pays a customer, and it resolves to the same
    * person their number does.
    */
-  const payee = arrivedWith !== '' ? recipient : e164(recipientDial, recipientPhone);
+  const payee =
+    arrivedWith !== ''
+      ? recipient
+      : e164(recipientPlace?.dial_code ?? '', recipientPhone);
 
   const converting =
     destination === 'xetral' &&
@@ -497,10 +525,10 @@ function Transfer() {
                 <span className="muted">To</span>
                 <span className="mono">{payee}</span>
               </div>
-              {recipientCountry !== undefined && (
+              {recipientPlace !== undefined && (
                 <div className="row">
                   <span className="muted">In</span>
-                  <span>{recipientCountry.name}</span>
+                  <span>{recipientPlace.name}</span>
                 </div>
               )}
             </>
@@ -691,18 +719,17 @@ function Transfer() {
                 <Select
                   compact
                   labelledBy="recipient-country-label"
-                  value={recipientDial}
-                  onChange={setRecipientDial}
+                  value={recipientPlace?.code ?? ''}
+                  onChange={setRecipientCountryCode}
                   placeholder="+—"
-                  renderMark={(dial) => (
-                    <CountryMark
-                      country={countries.data?.find((c) => c.dial_code === dial)?.code ?? ''}
-                      size={18}
-                    />
+                  renderMark={(code) => <CountryMark country={code} size={18} />}
+                  renderTrigger={(code) => (
+                    <span className="dial-digits">
+                      +{countries.data?.find((c) => c.code === code)?.dial_code ?? ''}
+                    </span>
                   )}
-                  renderTrigger={(dial) => <span className="dial-digits">+{dial}</span>}
                   options={(countries.data ?? []).map((c) => ({
-                    value: c.dial_code,
+                    value: c.code,
                     label: c.name,
                     hint: c.currency,
                   }))}
@@ -720,9 +747,9 @@ function Transfer() {
               />
             </div>
             <p className="hint">
-              {recipientCountry === undefined
+              {recipientPlace === undefined
                 ? 'Choose the country their number is in.'
-                : `Going to ${recipientCountry.name} — they receive ${recipientCountry.currency}.`}
+                : `Going to ${recipientPlace.name} — they receive ${recipientPlace.currency}.`}
             </p>
           </div>
         </>

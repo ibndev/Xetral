@@ -37,6 +37,7 @@ export const CURRENCIES = {
   EUR: { exponent: 2, symbol: '€', name: 'Euro', kind: 'fiat' },
   GHS: { exponent: 2, symbol: '₵', name: 'Ghanaian Cedi', kind: 'fiat' },
   KES: { exponent: 2, symbol: 'KSh', name: 'Kenyan Shilling', kind: 'fiat' },
+  CAD: { exponent: 2, symbol: 'CA$', name: 'Canadian Dollar', kind: 'fiat' },
 
   /**
    * Zero-exponent. Not offered to customers — present so that any code

@@ -77,8 +77,23 @@ export const BREVO_ENDPOINTS = {
 const RETRYABLE_CODES = new Set(['too_many_requests', 'internal_error', 'unavailable']);
 
 export interface BrevoAdapterOptions {
-  /** The v3 API key. Brevo's are prefixed `xkeysib-`. */
-  readonly apiKey: string;
+  /**
+   * The v3 API key. Brevo's are prefixed `xkeysib-`.
+   *
+   * A STRING OR A FUNCTION, and the function is what makes a key pasted into
+   * the dashboard reach this adapter. 026's rule is that the database is
+   * authoritative and the environment is the fallback; an adapter built once
+   * at boot from a string can only ever hold what the environment had, so an
+   * operator who pasted a key saw the dashboard report it as set while every
+   * message went on failing. The Bitnob and Paystack ports were joined to the
+   * credential store for exactly this reason and the mailer was left behind —
+   * which is worse, because the flow it breaks is password reset, and a
+   * customer who cannot reset a password cannot reach their own money.
+   *
+   * Resolved PER SEND, so a rotation takes effect in five seconds rather than
+   * at the next restart.
+   */
+  readonly apiKey: string | (() => Promise<string | undefined>);
   /**
    * `Xetral <no-reply@xetral.com>` — the same format the rest of this
    * codebase uses, split into Brevo's `{ name, email }` at the wire.
@@ -98,7 +113,7 @@ export interface BrevoAdapterOptions {
 export class BrevoNotificationAdapter implements NotificationPort {
   readonly provider = PROVIDER;
 
-  readonly #apiKey: string;
+  readonly #apiKey: string | (() => Promise<string | undefined>);
   readonly #from: string;
   readonly #replyTo: string | undefined;
   readonly #baseUrl: string;
@@ -115,6 +130,25 @@ export class BrevoNotificationAdapter implements NotificationPort {
   }
 
   async send(message: NotificationMessage): Promise<NotificationReceipt> {
+    /*
+     * RESOLVED HERE, NOT IN THE CONSTRUCTOR. See `apiKey` above: this is what
+     * lets a key pasted into `/admin/credentials` be the one that sends.
+     *
+     * An ABSENT key is a configuration fault rather than a Brevo outage, so
+     * it is thrown as one — `ProviderRejectedError` is not retryable, and
+     * retrying a send with no credential for six hours would fill the outbox
+     * with attempts that cannot succeed and bury the messages that can.
+     */
+    const apiKey = typeof this.#apiKey === 'string' ? this.#apiKey : await this.#apiKey();
+    if (apiKey === undefined || apiKey === '') {
+      throw new ProviderRejectedError(
+        PROVIDER,
+        'no Brevo API key is set. Paste one at /admin/credentials, or set ' +
+          'BREVO_API_KEY. Nothing can be sent until then.',
+        'no_api_key',
+      );
+    }
+
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.#timeoutMs);
 
@@ -125,7 +159,7 @@ export class BrevoNotificationAdapter implements NotificationPort {
         signal: controller.signal,
         headers: {
           // NOT a bearer token. See the header comment.
-          'api-key': this.#apiKey,
+          'api-key': apiKey,
           'content-type': 'application/json',
           accept: 'application/json',
         },

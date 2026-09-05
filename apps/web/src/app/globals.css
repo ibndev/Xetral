@@ -1433,7 +1433,7 @@ select {
    The affix is on the LEFT here and the padding goes the other way — the
    `.input-affix` above is built for a trailing control (the password reveal),
    and reusing it unchanged would put "+234" on top of the digits. */
-.input-affix.dial input { padding-right: 15px; padding-left: 104px; }
+.input-affix.dial input { padding-right: 15px; padding-left: 122px; }
 
 /*
  * THE DIALLING CODE IS THE COUNTRY PICKER, and there is no longer a second
@@ -1451,11 +1451,16 @@ select {
   left: 6px;
   z-index: 2;
 }
+/* ROOM BETWEEN THE THREE THINGS IN IT. The trigger holds a flag, a dialling
+   code and a chevron, and at 6px of trailing padding with a 5px gap the code
+   and the chevron sat on top of each other and both against the hairline —
+   it read as one crowded glyph rather than as a control. The input's left
+   padding above is widened by the same amount, or the digits start under it. */
 .dial-select .xselect-trigger {
   width: auto;
   min-height: 42px;
-  padding: 0 6px 0 10px;
-  gap: 5px;
+  padding: 0 12px 0 12px;
+  gap: 9px;
   background: transparent;
   border-color: transparent;
 }
@@ -1464,11 +1469,32 @@ select {
 .dial-select::after {
   content: '';
   position: absolute;
-  right: -1px;
+  /* Clear of the chevron rather than touching it. At -1px the divider read as
+     part of the chevron and the whole affix as one smudge. */
+  right: -5px;
   top: 9px;
   bottom: 9px;
   width: 1px;
   background: var(--line-strong);
+}
+
+/*
+ * THE LIST IS WIDER THAN THE TRIGGER THAT OPENS IT.
+ *
+ * `.xselect-list` stretches `left: 0; right: 0` — the trigger's width — which
+ * is right for a full-width select and wrong for this one: the trigger is
+ * sized to "+234", so the menu was about sixty pixels across and every
+ * country name was clipped to "Gh", "Ke", "Nig", "Un Sta". A customer was
+ * being asked to pick a country from its first two letters.
+ *
+ * `right: auto` releases the stretch and `min-width` gives it enough room for
+ * the longest name here; `max-width` keeps it inside a 320px handset, where
+ * an unbounded menu would push the page sideways.
+ */
+.dial-select .xselect-list {
+  right: auto;
+  min-width: 232px;
+  max-width: min(288px, calc(100vw - 48px));
 }
 .dial-code {
   position: absolute;

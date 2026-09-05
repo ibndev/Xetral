@@ -19,6 +19,7 @@ import type { Currency, Money } from '@xetral/shared';
 import { API_CONFIG, DATABASE, FX_PORT, LEDGER } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
 import type { ConvertBody, FxQuoteBody } from './dto.js';
+import { PublishedRateService } from './published-rate.service.js';
 import { AffordabilityService } from '../wallet/affordability.service.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { SpendingLimitService } from '../wallet/spending-limits.service.js';
@@ -91,7 +92,23 @@ export class FxService {
     @Inject(AffordabilityService) private readonly affordability: AffordabilityService,
     @Inject(SettingsService) private readonly settings: SettingsService,
     @Inject(SpendingLimitService) private readonly limits: SpendingLimitService,
+    @Inject(PublishedRateService) private readonly published: PublishedRateService,
   ) {}
+
+  /**
+   * OUR RATE IF WE HAVE PUBLISHED ONE, otherwise the provider's.
+   *
+   * The order is the decision. A pair we price is a pair we are the
+   * counterparty for — there is nobody to ask — and a pair we have not priced
+   * is one a provider quotes, exactly as before. Reversing this would let a
+   * provider's number override a price an operator deliberately set, which is
+   * the opposite of what publishing one means.
+   */
+  async #rateFor(from: Currency, to: Currency): Promise<{ rate: FxRate; ours: boolean }> {
+    const ours = await this.published.rateFor(from, to);
+    if (ours !== undefined) return { rate: ours, ours: true };
+    return { rate: await this.port.rate(from, to), ours: false };
+  }
 
   async quote(body: FxQuoteBody): Promise<FxQuoteView> {
     await this.settings.assertServiceEnabled('fx');
@@ -109,7 +126,7 @@ export class FxService {
       });
     }
 
-    const rate = await this.port.rate(from, to);
+    const { rate } = await this.#rateFor(from, to);
     const converted = this.#convert(amount, rate, policy.spread_basis_points);
 
     return {
@@ -196,7 +213,7 @@ export class FxService {
     // AffordabilityService for why this is not the forbidden pre-check.
     await this.affordability.assertWalletCanCover(userId, amount);
 
-    const rate = await this.port.rate(from, to);
+    const { rate, ours } = await this.#rateFor(from, to);
     const converted = this.#convert(amount, rate, policy.spread_basis_points);
 
     if (body.min_received !== undefined) {
@@ -214,10 +231,28 @@ export class FxService {
 
     const reference = referenceFor(userUuid, body.idempotency_key);
 
-    // The provider FIRST. A swap we cannot fund is a refusal the customer can
-    // be told about; a ledger entry for a swap that never happened is a lie
-    // that reconciliation has to unpick later.
-    let execution;
+    /*
+     * THE PROVIDER FIRST — WHERE THERE IS ONE.
+     *
+     * A swap we cannot fund is a refusal the customer can be told about; a
+     * ledger entry for a swap that never happened is a lie reconciliation has
+     * to unpick later. That ordering is unchanged for every pair a provider
+     * quotes.
+     *
+     * A PAIR WE PRICED HAS NO PROVIDER TO ASK. Publishing a rate is the
+     * decision to be the counterparty: the swap is settled out of our own
+     * float in both currencies, which is exactly what the postings below
+     * already do. Calling `port.convert` here would ask Bitnob to execute an
+     * NGN→GHS trade it does not offer, and the refusal would arrive as
+     * `fx_failed` on the one corridor an operator had just gone to the
+     * trouble of pricing.
+     *
+     * The fill is then the quote, because we are the one filling it.
+     */
+    let execution: { filledQuoteMinor: bigint } | undefined;
+    if (ours) {
+      execution = { filledQuoteMinor: converted.quoteMinor };
+    } else {
     try {
       execution = await this.port.convert(from, to, amount, reference);
     } catch (error) {
@@ -231,6 +266,7 @@ export class FxService {
         throw new ConflictException({ error: 'fx_outcome_unknown', reference });
       }
       throw new UnprocessableEntityException({ error: 'fx_failed', detail: describe(error) });
+    }
     }
 
     // Believe the numbers over the label: the provider says what it actually

@@ -41,7 +41,7 @@ DECLARE stray TEXT;
 BEGIN
     SELECT string_agg(DISTINCT code || '->' || currency, ', ') INTO stray
       FROM countries
-     WHERE currency NOT IN ('NGN','USD','GBP','EUR','GHS','KES','JPY','BTC','USDT','USDC');
+     WHERE currency NOT IN ('NGN','USD','GBP','EUR','GHS','KES','CAD','JPY','BTC','USDT','USDC');
     IF stray IS NOT NULL THEN
         RAISE EXCEPTION
             'TEST FAILED 2: these countries name a currency the money registry '

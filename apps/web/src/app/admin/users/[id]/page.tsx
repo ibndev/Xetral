@@ -67,15 +67,23 @@ export default function UserDetail({ params }: { params: Promise<{ id: string }>
           no name to confirm, no number to check against the one calling them,
           and no handle to match a payment link against.
 
-          `account_name` is what the customer typed about themselves.
-          `full_name` below it is what a reviewer read off a document, and it
-          is the only one any money decision may read — 040 keeps them apart,
-          so this page shows both and labels which is which.
+          TWO NAMES, AND ONLY WHEN THEY ARE BOTH WORTH READING. `account_name`
+          is what the customer typed about themselves; `full_name` is what a
+          reviewer read off a document, and 040 keeps them apart because it is
+          the only one a money decision may read.
+
+          Once a document HAS been read, the typed name is noise on this page:
+          an operator confirming who they are speaking to wants the verified
+          one, and a second row saying "not set" underneath it is a gap that
+          reads as missing information rather than as superseded. So the typed
+          name is shown only while there is no verified one to replace it.
         */}
-        <div className="row">
-          <span className="muted">Name on the account</span>
-          <span>{profile['account_name'] ?? <span className="muted">not set</span>}</span>
-        </div>
+        {profile['full_name'] === undefined || profile['full_name'] === null ? (
+          <div className="row">
+            <span className="muted">Name on the account</span>
+            <span>{profile['account_name'] ?? <span className="muted">not set</span>}</span>
+          </div>
+        ) : null}
         {profile['full_name'] !== undefined && profile['full_name'] !== null && (
           <div className="row">
             <span className="muted">Verified name</span>

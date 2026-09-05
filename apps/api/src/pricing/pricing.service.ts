@@ -7,7 +7,9 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import type { Pool } from 'pg';
+import type { Currency } from '@xetral/shared';
 import { DATABASE } from '../tokens.js';
+import { PublishedRateService } from '../fx/published-rate.service.js';
 
 /**
  * Publishing a price.
@@ -91,6 +93,80 @@ export class PricingService {
    * does not publish the other, and an operator who forgets the reverse finds
    * out from `published_prices` rather than from a customer.
    */
+  /**
+   * THE RATE ITSELF, which nothing could set before.
+   *
+   * `publishFxSpread` publishes a MARGIN; this publishes what a cedi is
+   * worth. See 053's header for why the two are separate and what publishing
+   * a rate commits us to — where one exists, Xetral is the counterparty and
+   * settles the swap out of its own float rather than asking a provider.
+   *
+   * The operator types a DECIMAL STRING — "1650.00", how a person says a rate
+   * and the only form they can check — and `ratioFor` turns it into the ratio
+   * of integers the ledger uses, scaled by each currency's own exponent. That
+   * conversion lives in ONE place for the reason `bitnob/amounts.ts` does: a
+   * second copy inline is how a rate ends up wrong by a power of ten in the
+   * one pair nobody tests.
+   */
+  async publishFxRate(
+    reviewerUuid: string,
+    input: {
+      readonly base_currency: string;
+      readonly quote_currency: string;
+      readonly quote_per_base: string;
+    },
+  ): Promise<Record<string, unknown>> {
+    const { numerator, denominator } = PublishedRateService.ratioFor(
+      input.quote_per_base,
+      input.base_currency as Currency,
+      input.quote_currency as Currency,
+    );
+
+    try {
+      const inserted = await this.pool.query(
+        `INSERT INTO fx_published_rates
+           (base_currency, quote_currency, numerator, denominator, quote_per_base, created_by)
+         VALUES ($1, $2, $3::bigint, $4::bigint, $5, (SELECT id FROM users WHERE uuid = $6))
+         RETURNING uuid, base_currency, quote_currency, numerator::text AS numerator,
+                   denominator::text AS denominator, quote_per_base, effective_from`,
+        [
+          input.base_currency,
+          input.quote_currency,
+          numerator.toString(),
+          denominator.toString(),
+          input.quote_per_base,
+          reviewerUuid,
+        ],
+      );
+      this.#logger.log(
+        `fx rate published: 1 ${input.base_currency} = ${input.quote_per_base} ` +
+          `${input.quote_currency}`,
+      );
+      return inserted.rows[0] as Record<string, unknown>;
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        // ONE LIVE RATE PER DIRECTION. Retire the current one first — a rate
+        // is append-only so every past quote stays checkable, which is the
+        // rule gift card rate cards already follow.
+        throw new ConflictException({ error: 'price_already_published' });
+      }
+      throw error;
+    }
+  }
+
+  /** Every live rate, with the spread that goes with it. */
+  async fxRates(): Promise<readonly Record<string, unknown>[]> {
+    try {
+      const rows = await this.pool.query(`SELECT * FROM published_fx_rates`);
+      return rows.rows as Record<string, unknown>[];
+    } catch {
+      // A deployment that has not applied 053. The screen renders empty and
+      // its own prose says what to do, rather than the whole prices page
+      // failing over a table one panel needs.
+      return [];
+    }
+  }
+
   async publishFxSpread(
     reviewerUuid: string,
     input: {

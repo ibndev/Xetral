@@ -100,6 +100,35 @@ export function e164(dialCode: string, national: string): string {
   return digits === '' || code === '' ? '' : `+${code}${digits}`;
 }
 
+/**
+ * A PHONE NUMBER AS SOMEBODY WOULD READ IT ALOUD, without the country.
+ *
+ * `users.phone` is E.164 — `+2348031234567` — which is the one shape the
+ * server can match on and the wrong shape to show a customer their own
+ * number in. A Nigerian says "0803 123 4567" and a Ghanaian says "055 …";
+ * neither reads their own country code back to themselves, and a screen that
+ * shows one invites them to send it to somebody who then types it whole.
+ *
+ * The dialling code comes OFF and the national trunk zero does not go back
+ * on: what is shown is the significant digits, grouped, which is what fits on
+ * a line and what somebody recognises.
+ *
+ * IT IS FOR DISPLAY ONLY. Anything that resolves a recipient uses the E.164
+ * string — see `e164()` — because a national number has no country in it and
+ * matching on one across borders would pay a stranger who shares the digits.
+ */
+export function nationalPhone(phone: string | null | undefined, dialCode?: string): string {
+  if (phone === null || phone === undefined || phone === '') return '';
+  const digits = phone.replace(/[^0-9]/g, '');
+  const code = (dialCode ?? '').replace(/[^0-9]/g, '');
+  const national = code !== '' && digits.startsWith(code) ? digits.slice(code.length) : digits;
+  // Grouped in threes from the left, which is how a mobile number is written
+  // across all three of this platform's countries. Not `Intl`: that formats
+  // NUMBERS, and a phone number is a string of digits that happens to look
+  // like one.
+  return (national.match(/.{1,3}/g) ?? []).join(' ');
+}
+
 export interface Balance {
   readonly currency: string;
   readonly spendable: string;

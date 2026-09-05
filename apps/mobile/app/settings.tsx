@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Pressable, Share, Switch, Text, View } from 'react-native';
 import { router } from 'expo-router';
+import { nationalPhone } from '@xetral/client';
 import type { DataRequest } from '@xetral/client';
 import { Shell } from '@/shell';
 import { Button, Done, Field, FormError, Loading, Panel } from '@/ui';
@@ -331,6 +332,10 @@ function PaymentLink() {
   // screen resolves a recipient by, so reading it from anywhere else would be
   // a second source for the one string a sender has to type.
   const session = useLoad(() => client.currentSession(), [client]);
+  // Their own country, so the number can be shown without the dialling code
+  // they never read back to themselves.
+  const countries = useLoad(() => client.session.countries(), [client]);
+  const here = countries.data?.find((c) => c.code === session.data?.country);
   const [editing, setEditing] = useState(false);
   const [handle, setHandle] = useState('');
   const [pin, setPin] = useState('');
@@ -340,22 +345,25 @@ function PaymentLink() {
     /*
       TWO WAYS TO BE PAID, AND THEY ARE FOR DIFFERENT PEOPLE.
 
-      The panel offered one — a link — and called itself "Your payment link",
-      which names the mechanism rather than what it does. A Xetral customer
-      paying another does not need a URL at all: they type a phone number,
-      which is what the Send screen now takes and the one thing everybody
-      already knows about everybody they pay. The link is the answer to the
-      other question — being paid by somebody not on Xetral, in another
-      country, out of a message thread.
+      A Xetral customer paying another does not need a URL: they type a phone
+      number, which is what the Send screen takes. The link is the answer to
+      the other question — being paid by somebody NOT on Xetral, out of a
+      message thread.
+
+      THE HANDLE IS GONE FROM THIS SCREEN. It is still what the link resolves
+      through, and 039 still never reissues one; as a thing to SHOW a customer
+      it was a third identifier beside two that already work, and the one
+      nobody outside this product would recognise.
     */
-    <Panel title="Receive payment globally" subtitle="Two ways for anyone to pay you">
+    <Panel title="Request payment" subtitle="Accept payment globally with your payment link">
       {profile.loading && <Loading />}
 
       {profile.data !== undefined && (
         <>
-          {/* THE NUMBER FIRST, because it is what most payments will use. It
-              is already on the session, so there is nothing to fetch and
-              nothing that can be out of step with what a sender types. */}
+          {/* THE NUMBER FIRST, shown the way its owner would read it aloud —
+              dialling code off, digits grouped. What is SHARED is the whole
+              E.164 string: a national number has no country in it, so a
+              sender abroad pasting one would be addressing nobody. */}
           <View
             style={{
               marginTop: space.sm,
@@ -366,7 +374,7 @@ function PaymentLink() {
             }}
           >
             <Text style={[styles.amount, { fontSize: 20 }]} selectable>
-              {session.data?.phone ?? '—'}
+              {nationalPhone(session.data?.phone, here?.dial_code) || '—'}
             </Text>
             <Text style={styles.muted}>Xetral to Xetral user</Text>
           </View>
@@ -378,9 +386,8 @@ function PaymentLink() {
             onPress={() => {
               const number = session.data?.phone;
               if (number === null || number === undefined) return;
-              // Silent on failure, like the link below: a dismissed share
-              // sheet rejects on iOS, which is a customer changing their mind
-              // rather than an error.
+              // Silent on failure: a dismissed share sheet rejects on iOS,
+              // which is a customer changing their mind rather than an error.
               void Share.share({ message: number }).catch(() => undefined);
             }}
           />
@@ -397,31 +404,25 @@ function PaymentLink() {
               gap: 4,
             }}
           >
-            <Text style={[styles.amount, { fontSize: 20 }]} selectable>
-              @{profile.data.handle}
-            </Text>
-            {profile.data.link !== null && (
-              <Text style={styles.muted} selectable>
+            {profile.data.link === null ? (
+              <Text style={styles.muted}>
+                No link yet — this deployment has no public address set.
+              </Text>
+            ) : (
+              <Text style={[styles.amount, { fontSize: 15 }]} selectable>
                 {profile.data.link}
               </Text>
             )}
           </View>
 
-          {/*
-            SHARE WHAT THERE IS. With no APP_BASE_URL the server sends no
-            link, and sharing an empty message — or a relative path — puts
-            something into a WhatsApp thread that nobody can open. The handle
-            works on its own, typed into the Send screen.
-          */}
           <Button
-            label={profile.data.link === null ? 'Share my handle' : 'Share my link'}
+            label="Share payment link"
             icon="send"
+            disabled={profile.data.link === null}
             onPress={() => {
-              const message = profile.data?.link ?? `@${profile.data?.handle ?? ''}`;
-              // Failure is silent on purpose: the link is on screen and
-              // selectable, and a dismissed share sheet rejects on iOS —
-              // which is a customer changing their mind, not an error.
-              void Share.share({ message }).catch(() => undefined);
+              const link = profile.data?.link;
+              if (link === null || link === undefined) return;
+              void Share.share({ message: link }).catch(() => undefined);
             }}
           />
 

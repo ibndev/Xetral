@@ -153,7 +153,7 @@ export default function SignUp() {
       >
       <View style={styles.card}>
         <Text style={styles.h1}>Create your account</Text>
-        <Text style={styles.h2}>A Xetral wallet takes a minute</Text>
+        <Text style={styles.h2}>Send &amp; receive payments across borders</Text>
 
         <View style={{ flexDirection: 'row', gap: space.md }}>
           <View style={{ flex: 1 }}>

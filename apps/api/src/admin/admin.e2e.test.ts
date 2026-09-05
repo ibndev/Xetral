@@ -240,8 +240,12 @@ describe('opening an account', () => {
         email: `closed-${randomUUID()}@example.ng`,
         password: PASSWORD,
         full_name: 'E2E Test Person',
-        // Seeded, and deliberately closed.
-        country: 'GB',
+        // Seeded, and deliberately closed. It was 'GB' until 055 opened the
+        // United Kingdom — which is why this names the country rather than
+        // asking the database for one that happens to be shut: a test whose
+        // subject is chosen at runtime passes on an empty table and proves
+        // nothing.
+        country: 'US',
         phone: String(8400000000 + Math.floor(Math.random() * 99999999)),
         device: { fingerprint: `fp-${randomUUID()}`, platform: 'web' },
       });

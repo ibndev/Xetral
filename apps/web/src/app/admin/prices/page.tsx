@@ -24,6 +24,10 @@ import { Select } from '@/ui/select';
 export default function Prices() {
   const admin = useAdmin();
   const prices = useLoad(() => admin.prices(), [admin]);
+  // Its own load rather than a field on `prices()`: 053 is a later migration,
+  // and a deployment without it should render this panel empty rather than
+  // fail the whole screen over a table one panel needs.
+  const rates = useLoad(() => admin.fxRates(), [admin]);
   const [pin, setPin] = useState('');
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
@@ -34,6 +38,7 @@ export default function Prices() {
     try {
       await work();
       prices.reload();
+      rates.reload();
       setPin('');
     } catch (caught) {
       setError(messageFor(caught));
@@ -99,6 +104,76 @@ export default function Prices() {
 
       <PublishFx pin={pin} busy={busy} onPublish={act} />
       <PublishRate pin={pin} busy={busy} onPublish={act} />
+
+      <PublishFxRate pin={pin} busy={busy} onPublish={act} />
+
+      {/*
+        WHAT A CURRENCY IS WORTH, which nothing could set before.
+
+        `fx_spread_policies` — the panel below — publishes a MARGIN, and the
+        RATE has always come from the provider. For NGN→USD that is right:
+        there is a market, Bitnob quotes it, and a number typed here would
+        drift from the one the swap executes at. FOR NGN→GHS THERE IS NO SUCH
+        PROVIDER, so the pair could be given a margin, look published, and
+        refuse every customer — on exactly the corridor this platform exists
+        for.
+
+        Publishing a rate is therefore also a decision to be the counterparty:
+        the swap settles out of our own float in both currencies rather than
+        through a provider.
+      */}
+      <div className="panel">
+        <h2>Exchange rates</h2>
+        <p className="lead">
+          What we sell a currency for, in the direction stated. A pair with a
+          rate here is one we quote ourselves; a pair with none is quoted by
+          the provider.
+        </p>
+        {(rates.data?.length ?? 0) === 0 && (
+          <p className="empty">
+            No rate is published. Every pair is quoted by the provider, which
+            refuses any corridor it does not cover.
+          </p>
+        )}
+        {(rates.data?.length ?? 0) > 0 && (
+          <div className="scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Pair</th>
+                  <th>Rate</th>
+                  <th>Our margin</th>
+                  <th>Published by</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(rates.data ?? []).map((row) => (
+                  <tr key={row.uuid}>
+                    <td>
+                      {row.base_currency}&rarr;{row.quote_currency}
+                    </td>
+                    <td className="mono">
+                      1 {row.base_currency} = {row.quote_per_base} {row.quote_currency}
+                    </td>
+                    <td>
+                      {row.spread_basis_points === null ? (
+                        // A rate with no margin is not a zero margin: it is a
+                        // pair somebody priced and did not finish pricing,
+                        // and a quote against it will be refused for want of
+                        // a policy rather than for want of a rate.
+                        <span className="badge warn">no spread published</span>
+                      ) : (
+                        `${(row.spread_basis_points / 100).toFixed(2)}%`
+                      )}
+                    </td>
+                    <td>{row.created_by ?? <em>at a prompt</em>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       <div className="panel">
         <h2>FX spreads</h2>
@@ -424,5 +499,99 @@ function Retire({
         Retire
       </button>
     </span>
+  );
+}
+
+/**
+ * Publishing what a currency is worth.
+ *
+ * THE OPERATOR TYPES A DECIMAL, because that is how a person says a rate and
+ * the only form they can check: "1 NGN = 0.0078 GHS". The ratio of integers
+ * the ledger actually uses is derived from it server-side, scaled by each
+ * currency's own exponent — a rate built on an assumed two decimal places
+ * would be wrong by a power of ten in exactly the pairs nobody tests.
+ *
+ * IT CROSSES THE WIRE AS A STRING and is never parsed to a number here. By
+ * the time a decimal is a JS number the precision is already gone, which is
+ * the rule `fromMajor()` follows.
+ *
+ * EACH DIRECTION IS PUBLISHED SEPARATELY. NGN→GHS says nothing about GHS→NGN,
+ * and an operator who publishes one and assumes the other has a corridor that
+ * works one way and refuses the other with nothing on screen saying so.
+ */
+function PublishFxRate({
+  pin,
+  busy,
+  onPublish,
+}: {
+  pin: string;
+  busy: boolean;
+  onPublish: (work: () => Promise<unknown>) => Promise<void>;
+}) {
+  const admin = useAdmin();
+  const [base, setBase] = useState('NGN');
+  const [quote, setQuote] = useState('GHS');
+  const [rate, setRate] = useState('');
+
+  return (
+    <form
+      className="panel"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void onPublish(() =>
+          admin.publishFxRate(
+            { base_currency: base, quote_currency: quote, quote_per_base: rate },
+            pin,
+          ),
+        );
+      }}
+    >
+      <h2>Publish an exchange rate</h2>
+      <p className="lead">
+        Set what a currency is worth where no provider quotes the pair. A rate
+        here makes us the counterparty: the swap settles out of our own float
+        in both currencies.
+      </p>
+      <div className="field-row two">
+        <label>
+          From
+          <input
+            value={base}
+            onChange={(e) => setBase(e.target.value.toUpperCase())}
+            maxLength={5}
+            required
+          />
+        </label>
+        <label>
+          To
+          <input
+            value={quote}
+            onChange={(e) => setQuote(e.target.value.toUpperCase())}
+            maxLength={5}
+            required
+          />
+        </label>
+      </div>
+      <label>
+        1 {base || '—'} buys how many {quote || '—'}?
+        <input
+          inputMode="decimal"
+          placeholder="0.0078"
+          value={rate}
+          // Digits and ONE dot. Anything else is refused by the schema and by
+          // the column's CHECK, and letting it be typed only moves the
+          // refusal to after the PIN.
+          onChange={(e) => setRate(e.target.value.replace(/[^0-9.]/g, ''))}
+          required
+        />
+        <span className="hint">
+          As many decimal places as it takes — 0.0078 is a legitimate rate in
+          the direction where one unit buys very little.
+        </span>
+      </label>
+      <button type="submit" disabled={busy || pin === '' || rate === ''}>
+        {busy ? 'Publishing…' : 'Publish rate'}
+      </button>
+    </form>
   );
 }

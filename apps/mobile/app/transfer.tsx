@@ -41,7 +41,13 @@ export default function Transfer() {
    * differently for a number that belongs to a customer, which is a way to
    * enumerate the customer base one request at a time.
    */
-  const [recipientDial, setRecipientDial] = useState('');
+  /*
+   * THE COUNTRY CODE, NOT THE DIALLING CODE. They are not interchangeable:
+   * the United States and Canada share +1, so a picker keyed on the dialling
+   * code has two entries with one value and `find()` returns whichever came
+   * first — the customer selects Canada and the screen says United States.
+   */
+  const [recipientCountry, setRecipientCountryCode] = useState('');
   const [recipientPhone, setRecipientPhone] = useState('');
 
   /*
@@ -150,15 +156,25 @@ export default function Transfer() {
    * Ghanaian wallet is cedis — so that side has no picker and the rail
    * decides. Xetral-to-Xetral is the international half and keeps the choice.
    */
-  const recipientCountry = countries.data?.find((c) => c.dial_code === recipientDial);
-  const recipientCurrency = recipientCountry?.currency;
+  /*
+   * THEIR OWN COUNTRY UNTIL THEY SAY OTHERWISE. The picker opened on a
+   * placeholder, so the commonest payment on the platform — somebody paying a
+   * neighbour — began by asking the customer to find their own country in a
+   * list. Resolved rather than seeded into state so it follows the session
+   * the moment it loads.
+   */
+  const recipientPlace = countries.data?.find(
+    (c) => c.code === (recipientCountry === '' ? session.data?.country : recipientCountry),
+  );
+  const recipientCurrency = recipientPlace?.currency;
   const homeCurrency = session.data?.home_currency ?? 'NGN';
   const sendCurrency = destination === 'bank' ? homeCurrency : currency;
 
   /* Arrived from a payment link? Then the recipient is already named and must
    * not be asked for again — a link names one Xetral customer, which is what
    * 039 built it for. Everybody else pays by number. */
-  const payee = recipient !== '' ? recipient : e164(recipientDial, recipientPhone);
+  const payee =
+    recipient !== '' ? recipient : e164(recipientPlace?.dial_code ?? '', recipientPhone);
 
   const converting =
     destination === 'xetral' &&
@@ -306,10 +322,10 @@ export default function Transfer() {
                 <Text style={styles.muted}>To</Text>
                 <Text style={styles.amount}>{payee}</Text>
               </View>
-              {recipientCountry !== undefined && (
+              {recipientPlace !== undefined && (
                 <View style={styles.row}>
                   <Text style={styles.muted}>In</Text>
-                  <Text style={styles.amount}>{recipientCountry.name}</Text>
+                  <Text style={styles.amount}>{recipientPlace.name}</Text>
                 </View>
               )}
             </>
@@ -560,22 +576,17 @@ export default function Transfer() {
                 <Select
                   label="Country"
                   variant="pill"
-                  value={recipientDial}
-                  onChange={setRecipientDial}
+                  value={recipientPlace?.code ?? ''}
+                  onChange={setRecipientCountryCode}
                   placeholder="+—"
-                  renderMark={(dial) => (
-                    <CountryMark
-                      country={
-                        (countries.data ?? []).find((c) => c.dial_code === dial)?.code ?? ''
-                      }
-                      size={18}
-                    />
-                  )}
-                  renderTrigger={(dial) => (
-                    <Text style={[styles.amount, { color: colors.text }]}>+{dial}</Text>
+                  renderMark={(code) => <CountryMark country={code} size={18} />}
+                  renderTrigger={(code) => (
+                    <Text style={[styles.amount, { color: colors.text }]}>
+                      +{(countries.data ?? []).find((c) => c.code === code)?.dial_code ?? ''}
+                    </Text>
                   )}
                   options={(countries.data ?? []).map((c) => ({
-                    value: c.dial_code,
+                    value: c.code,
                     label: c.name,
                     hint: c.currency,
                   }))}
@@ -591,9 +602,9 @@ export default function Transfer() {
               />
             </View>
             <Text style={styles.hint}>
-              {recipientCountry === undefined
+              {recipientPlace === undefined
                 ? 'Choose the country their number is in.'
-                : `Going to ${recipientCountry.name} — they receive ${recipientCountry.currency}.`}
+                : `Going to ${recipientPlace.name} — they receive ${recipientPlace.currency}.`}
             </Text>
           </View>
         )}

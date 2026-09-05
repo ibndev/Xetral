@@ -7,6 +7,7 @@ import { FormError } from '@/ui/form-error';
 import { Icon } from '@/ui/icon';
 import { useLoad, useSubmit, useXetral } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
+import { nationalPhone } from '@xetral/client';
 
 /**
  * The customer's own account.
@@ -37,6 +38,12 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [handleError, setHandleError] = useState<string | undefined>();
 
+  // The customer's own country, so their number can be shown without the
+  // dialling code they never read back to themselves. The list is the same
+  // one the signup and send screens use.
+  const countries = useLoad(() => client.session.countries(), [client]);
+  const here = countries.data?.find((c) => c.code === session.data?.country);
+
   return (
     <Shell>
 
@@ -44,33 +51,42 @@ export default function Settings() {
         TWO WAYS TO BE PAID, AND THEY ARE FOR DIFFERENT PEOPLE.
 
         The panel offered one — a link — and called itself "Your payment
-        link", which is a name for the mechanism rather than for what it does.
-        A Xetral customer paying another Xetral customer does not need a URL
-        at all: they type a phone number, which is the identifier the Send
-        screen now takes and the one thing everybody already knows about
-        everybody they pay.
+        link", which names the mechanism rather than what it does. A Xetral
+        customer paying another does not need a URL at all: they type a phone
+        number, which is what the Send screen takes and the one thing
+        everybody already knows about everybody they pay.
 
-        The link stays and is the answer to the other question — being paid by
-        somebody who is NOT on Xetral, in another country, from a message
-        thread. Both are on this panel because "how do I get paid?" is one
-        question with two answers depending on who is paying.
+        The link is the answer to the other question — being paid by somebody
+        NOT on Xetral, in another country, out of a message thread.
+
+        THE HANDLE IS GONE FROM THIS SCREEN. It is still what the link
+        resolves through and 039 still never reissues one, but as a thing to
+        SHOW a customer it was a third identifier next to two that already
+        work, and the one nobody outside this product would recognise.
       */}
       <div className="card">
-        <h1>Receive payment globally</h1>
-        <h2>Two ways for anyone to pay you</h2>
+        <h1>Request payment</h1>
+        <h2>Accept payment globally with your payment link</h2>
 
         {profile.loading && <p className="spinner">Loading…</p>}
         {profile.data !== undefined && (
           <>
             {/*
-              THE NUMBER FIRST, because it is the one most payments will use.
-              It is already on the session — the Send screen resolves a
-              recipient by it — so there is nothing to fetch and nothing that
-              can be out of step with what a sender types.
+              THE NUMBER FIRST, because it is the one most payments will use,
+              and shown the way its owner would read it aloud — the dialling
+              code off and the digits grouped. Nobody reads their own country
+              code back to themselves.
+
+              WHAT IS COPIED IS THE WHOLE E.164 STRING, not what is displayed.
+              A national number has no country in it, so a sender in another
+              country pasting one would be addressing nobody — the display is
+              for recognition and the clipboard is for use.
             */}
             <div className="balance">
               <div>
-                <div className="amount mono">{session.data?.phone ?? '—'}</div>
+                <div className="amount mono">
+                  {nationalPhone(session.data?.phone, here?.dial_code) || '—'}
+                </div>
                 <div className="pending">Xetral to Xetral user</div>
               </div>
             </div>
@@ -95,36 +111,40 @@ export default function Settings() {
             <div className="row" style={{ marginTop: 18 }}>
               <span className="muted">Or a link, for anyone not on Xetral</span>
             </div>
+            {/*
+              THE LINK ITSELF, and only when there is one. With no
+              APP_BASE_URL the server sends none, and offering to copy one
+              anyway would put a string in the clipboard that nobody it is
+              sent to can open — worse than an absent link, because they find
+              out from whoever failed to pay them.
+            */}
             <div className="balance">
-              <div>
-                <div className="amount mono">@{profile.data.handle}</div>
-                {profile.data.link !== null && (
-                  <div className="pending">{profile.data.link}</div>
+              <div style={{ minWidth: 0 }}>
+                {profile.data.link === null ? (
+                  <div className="pending">
+                    No link yet — this deployment has no public address set.
+                  </div>
+                ) : (
+                  <div className="amount mono" style={{ fontSize: 15, wordBreak: 'break-all' }}>
+                    {profile.data.link}
+                  </div>
                 )}
               </div>
             </div>
-            {/*
-              COPY WHAT THERE IS. With no APP_BASE_URL the server sends no
-              link, and offering to copy one anyway would put a string in the
-              customer's clipboard that nobody they send it to can open. The
-              handle works on its own — it is typed into the Send screen — so
-              that is what the button copies.
-            */}
             <div className="actions">
               <button
                 type="button"
+                disabled={profile.data.link === null}
                 onClick={() => {
-                  const text = profile.data?.link ?? `@${profile.data?.handle ?? ''}`;
+                  const text = profile.data?.link ?? '';
+                  if (text === '') return;
                   void navigator.clipboard
                     ?.writeText(text)
                     .then(() => setCopied(true))
-                    // A clipboard a browser refused is not an error worth a
-                    // banner — the link is on screen and can be selected.
                     .catch(() => undefined);
                 }}
               >
-                <Icon name="copy" size={16} />{' '}
-                {copied ? 'Copied' : profile.data.link === null ? 'Copy my handle' : 'Copy my link'}
+                <Icon name="copy" size={16} /> {copied ? 'Copied' : 'Copy payment link'}
               </button>
             </div>
             <p className="hint">

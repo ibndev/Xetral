@@ -206,6 +206,9 @@ describe('the privileged surface is declared as privileged', () => {
       'GET /v1/admin/notifications (support)',
       'GET /v1/admin/overview (support)',
       'GET /v1/admin/prices (finance)',
+      // What a currency is WORTH, as against `prices` above which lists the
+      // margins. Two rows, two decisions.
+      'GET /v1/admin/prices/fx-rates (finance)',
       // The compliance queue, on the role that already reviews identity.
       // Provider health. `support` — see routes.ts.
       'GET /v1/admin/providers (support)',
@@ -256,6 +259,7 @@ describe('the privileged surface is declared as privileged', () => {
       // in the application ever wrote either price table before this.
       'POST /v1/admin/prices/:id/retire (finance)',
       'POST /v1/admin/prices/fx (finance)',
+      'POST /v1/admin/prices/fx-rate (finance)',
       // Giving held money back. `finance` rather than `support`: it moves
       // money, and the role that answers the phone should not be the role
       // that can post a reversal.

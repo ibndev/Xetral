@@ -319,6 +319,29 @@ export interface AdminDataRequest {
   readonly overdue: boolean;
 }
 
+/**
+ * A rate we set ourselves, and the margin that goes with it.
+ *
+ * `quote_per_base` is what the operator typed — "1650.00", major units of the
+ * quote currency for one major unit of the base. A STRING, because by the
+ * time a decimal is a JS number the precision is already gone; the ratio the
+ * ledger actually uses is derived from it server-side.
+ *
+ * `spread_basis_points` is null when the pair has a rate and no margin
+ * published — a real and visible state rather than a zero margin.
+ */
+export interface AdminFxRate {
+  readonly uuid: string;
+  readonly base_currency: string;
+  readonly quote_currency: string;
+  readonly numerator: string;
+  readonly denominator: string;
+  readonly quote_per_base: string;
+  readonly effective_from: string;
+  readonly spread_basis_points: number | null;
+  readonly created_by: string | null;
+}
+
 export interface AdminPrices {
   /** Live only: what a customer will be quoted today. */
   readonly prices: readonly {
@@ -932,6 +955,40 @@ export class AdminClient {
    * "minor units per major unit" collapses in one of the two directions, so
    * each is priced on its own.
    */
+  /**
+   * Publishes WHAT A CURRENCY IS WORTH, in the direction stated.
+   *
+   * `publishFxSpread` above publishes the MARGIN; this publishes the rate the
+   * margin is taken off. They are separate because they are separate
+   * decisions: a pair can have a margin and no rate of ours, which is correct
+   * where a provider quotes it and refuses every customer where none does.
+   *
+   * PUBLISHING A RATE MAKES US THE COUNTERPARTY for that pair — the swap is
+   * settled out of our own float in both currencies rather than through a
+   * provider, because there is no provider quoting a corridor we had to price
+   * ourselves.
+   */
+  async publishFxRate(
+    input: {
+      readonly base_currency: string;
+      readonly quote_currency: string;
+      /** MAJOR units of the quote currency per one MAJOR unit of the base,
+       *  as a decimal STRING: "1650.00". Never a number. */
+      readonly quote_per_base: string;
+    },
+    pin: string,
+  ): Promise<Record<string, unknown>> {
+    return this.#post('/v1/admin/prices/fx-rate', { ...input, transaction_pin: pin });
+  }
+
+  /** Every live rate, with the spread that goes with it. */
+  async fxRates(): Promise<readonly AdminFxRate[]> {
+    const body = await this.#get<{ rates: readonly AdminFxRate[] }>(
+      '/v1/admin/prices/fx-rates',
+    );
+    return body.rates;
+  }
+
   async publishFxSpread(
     input: {
       readonly base_currency: string;

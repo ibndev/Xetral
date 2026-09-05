@@ -97,6 +97,7 @@ import { ProviderHealthService, watched } from './observability/provider-health.
 import { ReadinessService } from './golive/readiness.service.js';
 import { PayoutReconciliationService } from './payouts/payout-reconciliation.service.js';
 import { RecoveryService } from './admin/recovery.service.js';
+import { PublishedRateService } from './fx/published-rate.service.js';
 import { EarningsService } from './admin/earnings.service.js';
 import { FundingDiagnosticsService } from './funding/funding-diagnostics.service.js';
 import { MetricsService } from './observability/metrics.service.js';
@@ -672,21 +673,61 @@ export function createFxPort(
  * Absent means: the outbox still accepts rows, nothing drains them, and the
  * routes that depend on email refuse up front.
  */
-export function createNotificationPort(config: ApiConfig): NotificationPort | undefined {
+/**
+ * THE MAILER, AND THE KEY IT READS.
+ *
+ * WHAT WAS WRONG. This required `BREVO_API_KEY` in the ENVIRONMENT and
+ * returned `undefined` without it — so on a deployment whose key had been
+ * pasted into `/admin/credentials`, the port did not exist at all. The
+ * dashboard reported the credential as set, `deliverable` answered false, and
+ * `/password/forgot` refused every request with "Password resets are
+ * unavailable right now."
+ *
+ * That is 026's rule broken in the one place it costs the most. The Bitnob
+ * and Paystack ports were joined to the credential store precisely because an
+ * adapter built once at boot can only hold what the environment had; the
+ * mailer was left behind, and the flow it breaks is the one a customer uses
+ * when they cannot get into their account at all.
+ *
+ * SO THE KEY IS A FUNCTION and the port EXISTS whenever a sender address is
+ * configured. The absent-key case moved from "there is no mailer" — a
+ * decision made at boot and unchangeable until a restart — to a refusal at
+ * send time that names where to paste one. `NOTIFICATION_FROM` stays a
+ * boot-time requirement because it is not a secret and has no credential
+ * slot: there is nowhere else it could come from.
+ */
+export function createNotificationPort(
+  config: ApiConfig,
+  credentials?: ProviderCredentialService,
+): NotificationPort | undefined {
   const { brevoApiKey, notificationFrom } = config;
   const logger = new Logger('Notifications');
 
-  if (brevoApiKey === undefined || notificationFrom === undefined) {
+  if (notificationFrom === undefined) {
     logger.warn(
-      'BREVO_API_KEY or NOTIFICATION_FROM is not set: NO EMAIL WILL BE SENT. Password ' +
-        'reset is unavailable, and customers will not be told when a new device signs ' +
-        'into their account.',
+      'NOTIFICATION_FROM is not set: NO EMAIL WILL BE SENT. Password reset is ' +
+        'unavailable, and customers will not be told when a new device signs into ' +
+        'their account. It is an address rather than a secret, so it has no ' +
+        'credential slot and must be set in the environment.',
     );
     return undefined;
   }
 
+  if (brevoApiKey === undefined && credentials === undefined) {
+    // Only reachable from a caller that passes no store — the tests, and the
+    // go-live readiness check. A port with no way at all to find a key would
+    // throw on every send, so saying so and returning nothing is honest.
+    logger.warn('BREVO_API_KEY is not set and no credential store was supplied.');
+    return undefined;
+  }
+
   return new BrevoNotificationAdapter({
-    apiKey: brevoApiKey,
+    // Asked for on every send, so a key pasted during an incident is the one
+    // that sends five seconds later rather than after a restart.
+    apiKey:
+      credentials === undefined
+        ? (brevoApiKey as string)
+        : () => credentials.secretFor('brevo', 'api_key', brevoApiKey),
     from: notificationFrom,
     ...(config.notificationReplyTo === undefined
       ? {}
@@ -1078,7 +1119,8 @@ export class AppModule {
         {
           provide: NOTIFICATION_PORT,
           useFactory: (health: ProviderHealthService, credentials: ProviderCredentialService) => {
-            const port = options.notificationPort ?? createNotificationPort(options.config);
+            const port =
+              options.notificationPort ?? createNotificationPort(options.config, credentials);
             return port === undefined ? undefined : watched(port, 'brevo', health);
           },
           inject: [ProviderHealthService, ProviderCredentialService],
@@ -1129,6 +1171,7 @@ export class AppModule {
         FundingDiagnosticsService,
         RecoveryService,
         EarningsService,
+        PublishedRateService,
         MetricsService,
         ErrorAlertService,
         ErrorAlertLifecycle,

@@ -161,7 +161,7 @@ export default function SignUp() {
 
       <div className="auth-head animate-in d1">
         <h1>Create your account</h1>
-        <p>Naira, dollars, and everything in between</p>
+        <p>Send &amp; receive payments across borders</p>
       </div>
 
       <form className="auth-card animate-in d2" onSubmit={submit}>

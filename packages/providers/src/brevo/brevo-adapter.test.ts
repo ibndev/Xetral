@@ -150,3 +150,52 @@ describe('what it does with a refusal', () => {
     await expect(adapter.send(MESSAGE)).rejects.toBeInstanceOf(ProviderContractError);
   });
 });
+
+/**
+ * A KEY THAT ARRIVES AFTER BOOT.
+ *
+ * The adapter used to take a string, so it could only ever hold what the
+ * environment had at construction — and a key pasted into
+ * `/admin/credentials` was reported as set by the dashboard while every send
+ * went on failing. Password reset was the flow that broke, which is the one a
+ * customer reaches for when they cannot get into their account at all.
+ */
+describe('the API key is resolved per send', () => {
+  it('asks for the key on every send, so a rotation takes effect', async () => {
+    const keys = ['xkeysib-first', 'xkeysib-second'];
+    const seen: string[] = [];
+    const adapter = new BrevoNotificationAdapter({
+      apiKey: () => Promise.resolve(keys.shift()),
+      from: 'Xetral <no-reply@xetral.test>',
+      fetch: (_url, init) => {
+        seen.push(String((init?.headers as Record<string, string>)['api-key']));
+        return Promise.resolve(
+          new Response(JSON.stringify({ messageId: 'm1' }), { status: 201 }),
+        );
+      },
+    });
+
+    await adapter.send(MESSAGE);
+    await adapter.send(MESSAGE);
+
+    // The SECOND send used the SECOND key. A constructor-captured string
+    // would have sent the first one twice, which is exactly what a rotation
+    // during an incident must not do.
+    expect(seen).toEqual(['xkeysib-first', 'xkeysib-second']);
+  });
+
+  it('refuses rather than retries when there is no key at all', async () => {
+    const adapter = new BrevoNotificationAdapter({
+      apiKey: () => Promise.resolve(undefined),
+      from: 'Xetral <no-reply@xetral.test>',
+      fetch: () => {
+        throw new Error('should not have been called');
+      },
+    });
+
+    // NOT retryable. A missing credential is a configuration fault, and
+    // retrying for six hours would fill the outbox with attempts that cannot
+    // succeed and bury the messages that can.
+    await expect(adapter.send(MESSAGE)).rejects.toMatchObject({ retryable: false });
+  });
+});

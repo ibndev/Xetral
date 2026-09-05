@@ -55,7 +55,33 @@ const LOCKOUT_MINUTES = 15;
  * money. The transaction PIN is still demanded on every acting request inside
  * the window, so this shortens the second factor's reach and never the PIN's.
  */
-const ELEVATION_MINUTES = 10;
+/**
+ * HOW LONG AN ELEVATED SESSION MAY SIT IDLE, not how long it may live.
+ *
+ * It was measured from the moment a code was entered — an egg timer — so an
+ * operator was asked again ten minutes later regardless of what they were
+ * doing, mid-form, on a screen they had been using continuously. Ten minutes
+ * is about how long one real piece of work takes, which is why the observed
+ * behaviour was "it asks every time".
+ *
+ * The window SLIDES now: every elevated action refreshes it, so this is a
+ * measure of idleness. 014's argument stands unchanged — a code per action
+ * refuses a reviewer on their second approval and the end of that is a shared
+ * authenticator on a desk — and this is the same argument with the right
+ * unit.
+ */
+const IDLE_MINUTES = 10;
+
+/**
+ * AND A CEILING, because a window that only slides is one a tab left open can
+ * hold for ever by polling.
+ *
+ * Measured from `totp_first_verified_at`, which does not move. Eight hours is
+ * a working day: an operator who has been elevated since this morning proves
+ * possession of the authenticator again, and one who stepped out for lunch
+ * does not.
+ */
+const MAX_ELEVATION_HOURS = 8;
 
 export interface TotpEnrolment {
   /** Shown once, on screen, and never returned again. */
@@ -153,7 +179,10 @@ export class StaffTotpService {
       [userUuid],
     );
     await this.pool.query(
-      `UPDATE auth_sessions SET totp_verified_at = now()
+      // BOTH, because this starts a new run of elevation: the idle window
+      // begins now and so does the ceiling. Setting only the first would let
+      // an operator re-elevate for ever against a ceiling that never moved.
+      `UPDATE auth_sessions SET totp_verified_at = now(), totp_first_verified_at = now()
         WHERE uuid = $1 AND revoked_at IS NULL`,
       [sessionUuid],
     );
@@ -217,7 +246,10 @@ export class StaffTotpService {
     // — an operator whose access is withdrawn mid-incident does not keep a
     // standing authorisation because they happened to have verified recently.
     await this.pool.query(
-      `UPDATE auth_sessions SET totp_verified_at = now()
+      // BOTH, because this starts a new run of elevation: the idle window
+      // begins now and so does the ceiling. Setting only the first would let
+      // an operator re-elevate for ever against a ceiling that never moved.
+      `UPDATE auth_sessions SET totp_verified_at = now(), totp_first_verified_at = now()
         WHERE uuid = $1 AND revoked_at IS NULL`,
       [sessionUuid],
     );
@@ -267,7 +299,10 @@ export class StaffTotpService {
     );
     // On the SESSION, so revoking the session revokes the elevation with it.
     await this.pool.query(
-      `UPDATE auth_sessions SET totp_verified_at = now()
+      // BOTH, because this starts a new run of elevation: the idle window
+      // begins now and so does the ceiling. Setting only the first would let
+      // an operator re-elevate for ever against a ceiling that never moved.
+      `UPDATE auth_sessions SET totp_verified_at = now(), totp_first_verified_at = now()
         WHERE uuid = $1 AND revoked_at IS NULL`,
       [sessionUuid],
     );
@@ -297,12 +332,34 @@ export class StaffTotpService {
    * gift card hold period on the database clock.
    */
   async #isElevated(sessionUuid: string): Promise<boolean> {
+    /*
+     * ONE STATEMENT THAT CHECKS AND SLIDES, not a read then a write.
+     *
+     * Two statements would be a check followed by a use of the thing checked,
+     * and between them the window can lapse — so an action would be admitted
+     * against a window that had already closed. An UPDATE ... RETURNING is
+     * atomic and answers the question by doing the thing.
+     *
+     * TWO CONDITIONS, and they are different questions. The idle window says
+     * "you have been working"; the ceiling says "not for ever". Falling
+     * outside either means the next action asks for a code, and neither is
+     * refreshed by asking — `elevate()` is what restarts both.
+     *
+     * The DATABASE clock decides, never ours: an instance with a skewed clock
+     * must not be able to extend its own elevation, which is the reasoning
+     * that put the gift card hold period on the database clock too.
+     */
     const result = await this.pool.query<{ elevated: boolean }>(
-      `SELECT (totp_verified_at IS NOT NULL
-               AND totp_verified_at > now() - make_interval(mins => $2::int)) AS elevated
-         FROM auth_sessions
-        WHERE uuid = $1 AND revoked_at IS NULL`,
-      [sessionUuid, ELEVATION_MINUTES],
+      `UPDATE auth_sessions
+          SET totp_verified_at = now()
+        WHERE uuid = $1
+          AND revoked_at IS NULL
+          AND totp_verified_at IS NOT NULL
+          AND totp_verified_at > now() - make_interval(mins => $2::int)
+          AND COALESCE(totp_first_verified_at, totp_verified_at)
+              > now() - make_interval(hours => $3::int)
+       RETURNING TRUE AS elevated`,
+      [sessionUuid, IDLE_MINUTES, MAX_ELEVATION_HOURS],
     );
     return result.rows[0]?.elevated === true;
   }

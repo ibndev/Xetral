@@ -281,6 +281,12 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       .staff('GET', '/v1/admin/providers', { pin: false, role: 'support' })
       .staff('GET', '/v1/admin/prices', { pin: false, role: 'finance' })
       .staff('POST', '/v1/admin/prices/fx', { pin: true, role: 'finance' })
+      // THE RATE ITSELF, which nothing could set before — `prices/fx` above
+      // publishes a MARGIN. Same role and the same PIN: publishing a rate is
+      // deciding what a customer is quoted, and where no provider quotes the
+      // pair it is also deciding that we are the counterparty.
+      .staff('POST', '/v1/admin/prices/fx-rate', { pin: true, role: 'finance' })
+      .staff('GET', '/v1/admin/prices/fx-rates', { pin: false, role: 'finance' })
       .staff('POST', '/v1/admin/prices/giftcard', { pin: true, role: 'finance' })
       .staff('POST', '/v1/admin/prices/:id/retire', { pin: true, role: 'finance' })
       .staff('GET', '/v1/admin/stuck', { pin: false, role: 'support' })
