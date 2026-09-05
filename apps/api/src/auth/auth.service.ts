@@ -651,8 +651,17 @@ export class AuthService {
     payout_method: string | null;
     handle: string | null;
   }> {
-    const [core, handle] = await Promise.all([this.#core(userUuid), this.#handle(userUuid)]);
-    return { ...core, handle };
+    const [core, placement, handle] = await Promise.all([
+      this.#core(userUuid),
+      this.#placement(userUuid),
+      this.#handle(userUuid),
+    ]);
+    const { kyc_name: kycName, ...where } = placement;
+    // The typed name wins and the verified one is the fallback, so a customer
+    // is greeted from their first second and a customer who typed nothing is
+    // still greeted once a reviewer has read a document.
+    const named = core.full_name === null ? nameOf(kycName) : core;
+    return { ...core, ...named, ...where, handle };
   }
 
   /**
@@ -664,93 +673,51 @@ export class AuthService {
    * refusal decide — because being told to create a PIN you already have is a
    * dead end, while being allowed to try is at worst one extra refusal that
    * already carries a link to the right place.
+   *
+   * THE COUNTRY IS NOT READ HERE, AND THAT SPLIT IS THE WHOLE POINT OF THIS
+   * METHOD. It was: `u.country` and a join to `countries` were added to this
+   * query when the product was personalised per country, and `countries`
+   * arrives in migration 040 while `payout_method` arrives in 046. On a
+   * deployment behind either, the query throws and the catch below returns
+   * every field as null — so a customer whose phone number we hold was shown
+   * a Request payment panel reading "—", and their name fell back to "there".
+   *
+   * That is the SAME failure this method's comment already recorded about
+   * `handle` and 039, reintroduced one migration later by adding a newer
+   * column to the query that must never fail. So the split is now structural:
+   * what is read here depends only on `users` and `transaction_pins`, which
+   * have existed since 002, and everything newer is read separately and is
+   * allowed to be missing.
    */
   async #core(userUuid: string): Promise<{
     first_name: string | null;
     full_name: string | null;
     phone: string | null;
     has_pin: boolean | null;
-    country: string | null;
-    home_currency: string | null;
-    country_name: string | null;
-    payout_method: string | null;
   }> {
     try {
       const result = await this.pool.query<{
         full_name: string | null;
         phone: string | null;
         has_pin: boolean;
-        country: string | null;
-        home_currency: string | null;
-        country_name: string | null;
-        payout_method: string | null;
       }>(
-        /*
-         * `users.full_name` FIRST, then the verified one.
-         *
-         * Both are here and the order is the decision. The signup name is what
-         * somebody typed about themselves and exists from the first second of
-         * the account; the KYC name is what a reviewer read off a document and
-         * arrives days later, if at all. For a GREETING the typed one is both
-         * earlier and more likely to be what they are actually called.
-         *
-         * No money decision reads either of these. Anything that turns on who
-         * somebody legally is reads `kyc_submissions` directly.
-         */
-        `SELECT COALESCE(
-                  u.full_name,
-                  (SELECT k.full_name FROM kyc_submissions k
-                    WHERE k.user_id = u.id ORDER BY k.created_at DESC LIMIT 1)
-                ) AS full_name,
+        `SELECT u.full_name,
                 u.phone,
-                (p.user_id IS NOT NULL) AS has_pin,
-                u.country,
-                c.currency AS home_currency,
-                c.name AS country_name,
-                c.payout_method
+                (p.user_id IS NOT NULL) AS has_pin
            FROM users u
            LEFT JOIN transaction_pins p ON p.user_id = u.id
-           LEFT JOIN countries c ON c.code = u.country
           WHERE u.uuid = $1`,
         [userUuid],
       );
       const row = result.rows[0];
       if (row === undefined) {
-        return {
-          first_name: null,
-          full_name: null,
-          phone: null,
-          has_pin: null,
-          country: null,
-          home_currency: null,
-          country_name: null,
-          payout_method: null,
-        };
+        return { first_name: null, full_name: null, phone: null, has_pin: null };
       }
 
-      const full = row.full_name?.trim();
       return {
-        // The first token. Nigerian names are commonly three parts and the
-        // first is the one somebody is called.
-        first_name: full === undefined || full === '' ? null : (full.split(/\s+/)[0] ?? null),
-        /*
-         * THE WHOLE NAME AND THE PHONE, so the verification form does not ask
-         * again for what signup already took.
-         *
-         * A customer arriving at KYC has already typed both; asking a second
-         * time is how a "quick check" becomes a five-field form somebody
-         * abandons. Neither is a claim about identity — `users.full_name` is
-         * what somebody typed ABOUT THEMSELVES and no money decision reads it
-         * — so this prefills a box the customer can still correct, and the
-         * reviewer still reads the name off the document.
-         */
-        full_name: full === undefined || full === '' ? null : full,
+        ...nameOf(row.full_name),
         phone: row.phone,
         has_pin: row.has_pin,
-        country: row.country,
-        home_currency: row.home_currency,
-        country_name: row.country_name,
-        payout_method: row.payout_method,
       };
     } catch (error: unknown) {
       // LOUD. The previous version swallowed this and returned an answer, and
@@ -759,11 +726,71 @@ export class AuthService {
         `could not read the profile for ${userUuid}: ${describe(error)}. ` +
           `Reporting the PIN state as UNKNOWN rather than guessing.`,
       );
+      return { first_name: null, full_name: null, phone: null, has_pin: null };
+    }
+  }
+
+  /**
+   * Where the customer is, and what that means for the product.
+   *
+   * Everything here arrives in a migration later than the one the greeting
+   * depends on — `users.country` and `countries` in 040, `payout_method` in
+   * 046 — so it is read on its own and its absence costs only the
+   * personalisation. A deployment behind those migrations shows a customer
+   * their name, their phone number and their PIN state, and falls back to the
+   * platform default for the rest.
+   *
+   * The KYC name is here rather than in `#core` for the same reason:
+   * `kyc_submissions` arrives in 009, which is later than `users`. It is a
+   * FALLBACK for the greeting — `users.full_name` is what somebody typed about
+   * themselves and exists from the first second of the account, while this is
+   * what a reviewer read off a document days later. No money decision reads
+   * either; anything turning on who somebody legally is reads
+   * `kyc_submissions` directly.
+   */
+  async #placement(userUuid: string): Promise<{
+    kyc_name: string | null;
+    country: string | null;
+    home_currency: string | null;
+    country_name: string | null;
+    payout_method: string | null;
+  }> {
+    try {
+      const result = await this.pool.query<{
+        kyc_name: string | null;
+        country: string | null;
+        home_currency: string | null;
+        country_name: string | null;
+        payout_method: string | null;
+      }>(
+        `SELECT (SELECT k.full_name FROM kyc_submissions k
+                  WHERE k.user_id = u.id ORDER BY k.created_at DESC LIMIT 1) AS kyc_name,
+                u.country,
+                c.currency AS home_currency,
+                c.name AS country_name,
+                c.payout_method
+           FROM users u
+           LEFT JOIN countries c ON c.code = u.country
+          WHERE u.uuid = $1`,
+        [userUuid],
+      );
+      const row = result.rows[0];
       return {
-        first_name: null,
-        full_name: null,
-        phone: null,
-        has_pin: null,
+        kyc_name: row?.kyc_name ?? null,
+        country: row?.country ?? null,
+        home_currency: row?.home_currency ?? null,
+        country_name: row?.country_name ?? null,
+        payout_method: row?.payout_method ?? null,
+      };
+    } catch (error: unknown) {
+      this.#logger.warn(
+        `could not place ${userUuid}: ${describe(error)}. ` +
+          `If this says a column or table does not exist, apply ` +
+          `packages/ledger/sql/040_countries.sql and 046_payout_provider.sql. ` +
+          `The name, phone and PIN state are unaffected.`,
+      );
+      return {
+        kyc_name: null,
         country: null,
         home_currency: null,
         country_name: null,
@@ -818,6 +845,19 @@ export class AuthService {
       expires_in: this.config.accessTokenTtlSeconds,
     };
   }
+}
+
+/**
+ * A name, split into what to greet somebody by and what to prefill a form with.
+ *
+ * The first token, because Nigerian names are commonly three parts and the
+ * first is the one somebody is called. Empty and whitespace-only are the same
+ * as absent: a greeting reading "Hi ," is worse than "Hi there".
+ */
+function nameOf(value: string | null): { first_name: string | null; full_name: string | null } {
+  const full = value?.trim();
+  if (full === undefined || full === '') return { first_name: null, full_name: null };
+  return { first_name: full.split(/\s+/)[0] ?? null, full_name: full };
 }
 
 /** Postgres 23505. Distinguishing it from a real failure is what turns a

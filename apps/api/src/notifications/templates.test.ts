@@ -22,7 +22,7 @@ const ALL_KINDS: readonly NotificationKind[] = [
 function example(kind: NotificationKind, injected: string): NotificationRequest {
   switch (kind) {
     case 'password_reset':
-      return { kind, resetUrl: `https://app.xetral.test/reset?t=${injected}`, expiresInMinutes: 30 };
+      return { kind, code: injected, expiresInMinutes: 30 };
     case 'password_changed':
       return { kind, at: injected };
     case 'new_device':
@@ -92,16 +92,22 @@ describe('escaping', () => {
     }
   });
 
-  it('still escapes when the value lands inside an href', () => {
-    // The one position where escaping the text is not enough on its own: a
-    // quote inside an attribute value ends the attribute.
-    const { html } = render({
-      kind: 'password_reset',
-      resetUrl: `https://app.xetral.test/reset?t=a"onmouseover="alert(1)`,
-      expiresInMinutes: 30,
-    });
-    expect(html).not.toContain('onmouseover="alert');
-    expect(html).toContain('&quot;onmouseover=&quot;');
+  it('a reset email carries no link at all', () => {
+    /*
+     * THE SHAPE A PHISHING MESSAGE COPIES IS A RESET EMAIL WITH A BUTTON IN
+     * IT. This one carries six digits the customer types into the app they
+     * already have open, so there is nothing to click and nothing to teach
+     * them to click — and no href for an interpolated value to escape out of,
+     * which is the position where escaping the text is not enough on its own.
+     */
+    const { html, text } = render({ kind: 'password_reset', code: '483921', expiresInMinutes: 30 });
+    expect(html).not.toContain('<a ');
+    expect(html).not.toContain('href');
+    expect(text).not.toContain('http');
+    // And the code really is in both parts: a security email that arrives
+    // blank in a text-only client is a customer locked out.
+    expect(html).toContain('483921');
+    expect(text).toContain('483921');
   });
 });
 
@@ -145,11 +151,7 @@ describe('what the templates deliberately do NOT say', () => {
     // Telling somebody to change their password inside an email they did not
     // request is how a phishing reflex gets trained. The reset template says
     // the opposite: ignore this and nothing has changed.
-    const { text } = render({
-      kind: 'password_reset',
-      resetUrl: 'https://app.xetral.test/reset?t=abc',
-      expiresInMinutes: 30,
-    });
+    const { text } = render({ kind: 'password_reset', code: '483921', expiresInMinutes: 30 });
     expect(text).toContain('your password has not changed');
   });
 });

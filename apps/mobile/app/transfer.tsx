@@ -564,34 +564,24 @@ export default function Transfer() {
           <View>
             <Text style={styles.label}>Recipient&apos;s phone number</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <View
-                style={{
-                  justifyContent: 'center',
-                  minHeight: 50,
-                  paddingHorizontal: 4,
-                  borderRadius: radius.md,
-                  backgroundColor: colors.field,
-                }}
-              >
-                <Select
-                  label="Country"
-                  variant="pill"
-                  value={recipientPlace?.code ?? ''}
-                  onChange={setRecipientCountryCode}
-                  placeholder="+—"
-                  renderMark={(code) => <CountryMark country={code} size={18} />}
-                  renderTrigger={(code) => (
-                    <Text style={[styles.amount, { color: colors.text }]}>
-                      +{(countries.data ?? []).find((c) => c.code === code)?.dial_code ?? ''}
-                    </Text>
-                  )}
-                  options={(countries.data ?? []).map((c) => ({
-                    value: c.code,
-                    label: c.name,
-                    hint: c.currency,
-                  }))}
-                />
-              </View>
+              <Select
+                label="Country"
+                variant="dial"
+                value={recipientPlace?.code ?? ''}
+                onChange={setRecipientCountryCode}
+                placeholder="+—"
+                renderMark={(code) => <CountryMark country={code} size={18} />}
+                renderTrigger={(code) => (
+                  <Text style={[styles.amount, { color: colors.text }]}>
+                    +{(countries.data ?? []).find((c) => c.code === code)?.dial_code ?? ''}
+                  </Text>
+                )}
+                options={(countries.data ?? []).map((c) => ({
+                  value: c.code,
+                  label: c.name,
+                  hint: c.currency,
+                }))}
+              />
               <TextInput
                 style={[styles.input, { flex: 1 }]}
                 value={recipientPhone}

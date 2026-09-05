@@ -101,6 +101,29 @@ export function apiUrl(): string {
   return configured.replace(/\/+$/, '');
 }
 
+/**
+ * The address a BROWSER reaches this deployment at, derived from the API's.
+ *
+ * The phone talks to `app.xetral.com/api/x` — a proxy inside the web app, not
+ * an API hostname — so the origin a payment link should carry is the same host
+ * with that suffix removed. Deriving it is what stops the handset needing a
+ * second address to be told about: a preview APK's addresses are compiled in,
+ * so every extra one is another thing that can be wrong in a build nobody can
+ * correct without a reinstall.
+ *
+ * It is only a FALLBACK. When the API has been told its own `APP_BASE_URL`
+ * that answer wins, because an operator naming a canonical origin has said
+ * which one a shared link should carry.
+ */
+export function webOrigin(): string {
+  try {
+    const url = new URL(apiUrl());
+    return url.origin;
+  } catch {
+    return '';
+  }
+}
+
 let cached: { session: Session; client: XetralClient } | undefined;
 
 /**

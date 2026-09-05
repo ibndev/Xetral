@@ -129,6 +129,51 @@ export function nationalPhone(phone: string | null | undefined, dialCode?: strin
   return (national.match(/.{1,3}/g) ?? []).join(' ');
 }
 
+/**
+ * A NUMBER AS SOMEBODY WOULD PASTE IT TO PAY YOU, country and all.
+ *
+ * The opposite choice from `nationalPhone`, and both are right where they are
+ * used. A customer reading their OWN number recognises the national form; a
+ * customer SHARING it is handing it to somebody who may be in another
+ * country, and a national number has no country in it. So Request payment
+ * shows the whole thing, grouped so it can be read back over a phone call.
+ */
+export function displayPhone(phone: string | null | undefined): string {
+  if (phone === null || phone === undefined || phone === '') return '';
+  const digits = phone.replace(/[^0-9]/g, '');
+  if (digits === '') return '';
+  // Grouped from the RIGHT, so the country code is whatever is left over at
+  // the front — `+234 803 123 4567`, `+1 416 555 0132`. Grouping from the
+  // left would split a three-digit country code away from nothing and put
+  // `+2348 031 23…` on screen.
+  const groups: string[] = [];
+  let rest = digits;
+  while (rest.length > 3) {
+    groups.unshift(rest.slice(-3));
+    rest = rest.slice(0, -3);
+  }
+  return `+${[rest, ...groups].join(' ')}`;
+}
+
+/**
+ * The payment link, built the same way on both sides.
+ *
+ * The API builds it when it has been told its own address, and each app falls
+ * back to this with the origin it is already running on. That fallback is the
+ * whole point: `APP_BASE_URL` being unset used to put "No link yet — this
+ * deployment has no public address set" on the screen a customer opens in
+ * order to ASK TO BE PAID. That sentence is an operator's problem printed
+ * where a customer is standing, and every app already knows an origin that
+ * works.
+ *
+ * The `+` goes, because a link is pasted into places that treat one as a
+ * space. An E.164 number without it is still the whole number, country code
+ * first.
+ */
+export function paymentLinkFor(origin: string, phone: string): string {
+  return `${origin.replace(/\/+$/, '')}/pay/${phone.replace(/^\+/, '')}`;
+}
+
 export interface Balance {
   readonly currency: string;
   readonly spendable: string;
@@ -551,41 +596,20 @@ export class XetralClient {
      */
     country_name: string | null;
     payout_method: string | null;
-    /** Their own payment handle, or null until `profile()` mints one. */
-    handle: string | null;
   }> {
     return this.#get('/v1/auth/session');
   }
 
   /**
-   * The customer's own payment handle and the link built from it.
+   * The customer's own number and the payment link built from it.
    *
-   * Mints one on the first call and returns the same one after that, so it is
-   * safe to call whenever a screen wants to show the link.
+   * `link` is null when the API has not been told its own address, and a
+   * caller should fall back to `paymentLinkFor(origin, phone)` with the
+   * origin it is already running on rather than showing nothing — a customer
+   * asking to be paid must never be handed an explanation instead of a link.
    */
-  async profile(): Promise<{ handle: string; link: string | null }> {
+  async profile(): Promise<{ phone: string | null; link: string | null }> {
     return this.#get('/v1/auth/profile');
-  }
-
-  /**
-   * Change it.
-   *
-   * A handle is never reissued TO SOMEBODY ELSE, so the one being given up
-   * cannot be claimed by anybody — every link already pointing at it stays
-   * pointing at this customer. They may take it back themselves, which is
-   * safe for the same reason: it pays the same person either way.
-   *
-   * Takes the transaction PIN because the change reaches every link already
-   * shared, not because it moves money — it moves none.
-   *
-   * `handle_taken` covers both a handle somebody else holds now and one
-   * somebody else held once, which are the same answer to the person typing.
-   */
-  async chooseHandle(
-    handle: string,
-    pin: string,
-  ): Promise<{ handle: string; link: string | null }> {
-    return this.#post('/v1/auth/profile/handle', { handle, transaction_pin: pin });
   }
 
   /**

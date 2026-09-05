@@ -340,6 +340,15 @@ export interface AdminFxRate {
   readonly effective_from: string;
   readonly spread_basis_points: number | null;
   readonly created_by: string | null;
+  /**
+   * `operator` or `reference_feed`. Optional because a client can be talking
+   * to an API that predates 057, and a screen that crashed on a missing field
+   * would break during a rolling deploy rather than degrade.
+   */
+  readonly source?: string;
+  /** How long since it was published, in whole seconds. The thing that goes
+   *  wrong when a feed stops is that the number on screen stays plausible. */
+  readonly age_seconds?: string | number;
 }
 
 export interface AdminPrices {
@@ -987,6 +996,23 @@ export class AdminClient {
       '/v1/admin/prices/fx-rates',
     );
     return body.rates;
+  }
+
+  /**
+   * FETCH EVERY RATE FROM THE REFERENCE FEED, NOW.
+   *
+   * The worker does this on a schedule; this is the button for the afternoon
+   * the market moves. It will not touch a rate a person published — a
+   * deliberate price outranks a market one — and it writes nothing for a pair
+   * whose price has not changed.
+   */
+  async refreshFxRates(pin: string): Promise<{
+    readonly published: number;
+    readonly unchanged: number;
+    readonly operatorHeld: number;
+    readonly failed: number;
+  }> {
+    return this.#post('/v1/admin/prices/fx-refresh', { transaction_pin: pin });
   }
 
   async publishFxSpread(

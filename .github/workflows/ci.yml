@@ -141,6 +141,8 @@ jobs:
             -f packages/ledger/sql/053_published_fx_rates.sql \
             -f packages/ledger/sql/054_elevation_window.sql \
             -f packages/ledger/sql/055_uk_and_canada.sql \
+            -f packages/ledger/sql/056_reset_codes.sql \
+            -f packages/ledger/sql/057_reference_rates.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       - name: Ledger and identity invariants
@@ -204,6 +206,8 @@ jobs:
                    packages/ledger/sql/053_published_fx_rates.test.sql \
                    packages/ledger/sql/054_elevation_window.test.sql \
                    packages/ledger/sql/055_uk_and_canada.test.sql \
+                   packages/ledger/sql/056_reset_codes.test.sql \
+                   packages/ledger/sql/057_reference_rates.test.sql \
                    packages/ledger/sql/099_least_privilege.test.sql; do
             echo "== $f"
             psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \

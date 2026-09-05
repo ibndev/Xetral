@@ -53,9 +53,11 @@ export function Select({
    * `field` is a labelled input in a form. `pill` is a compact control that
    * sits INSIDE a card header — the currency selector on the balance card —
    * where a full-width field with a label above it would be a second heading.
-   * The sheet is identical either way; only the trigger differs.
+   * `dial` is a pill sized down further, for the dialling code IN FRONT OF a
+   * phone number, where every pixel it takes is a digit pushed off a handset.
+   * The sheet is identical in all three; only the trigger differs.
    */
-  readonly variant?: 'field' | 'pill';
+  readonly variant?: 'field' | 'pill' | 'dial';
   /** An optional badge before the label, on the trigger and in the sheet. */
   readonly renderMark?: (value: string) => React.ReactNode;
   /** What the TRIGGER shows, when that is not the option's label. The dialling
@@ -97,7 +99,8 @@ export function Select({
     setOpen(false);
   }
 
-  const pill = variant === 'pill';
+  const dial = variant === 'dial';
+  const pill = variant === 'pill' || dial;
 
   return (
     <View style={pill ? undefined : { alignSelf: 'stretch' }}>
@@ -117,12 +120,19 @@ export function Select({
             ? {
                 flexDirection: 'row',
                 alignItems: 'center',
-                gap: 6,
-                paddingLeft: 12,
-                paddingRight: 10,
-                height: 40,
-                borderRadius: radius.pill,
-                backgroundColor: colors.surface2,
+                /*
+                 * THE DIAL VARIANT IS THE SAME CONTROL, NARROWER. Measured on
+                 * the web, the equivalent affix was 109px wide with two
+                 * pixels between it and the first digit — a third of a 320px
+                 * field spent on a country code, and an `8` that looked like
+                 * it was underneath the picker. These are the same reductions.
+                 */
+                gap: dial ? 5 : 6,
+                paddingLeft: dial ? 8 : 12,
+                paddingRight: dial ? 6 : 10,
+                height: dial ? 42 : 40,
+                borderRadius: dial ? radius.md : radius.pill,
+                backgroundColor: dial ? colors.field : colors.surface2,
               }
             : {
                 ...styles.input,
@@ -148,7 +158,7 @@ export function Select({
           {selected?.label ?? placeholder}
         </Text>
         )}
-        <Icon name="chevronDown" size={18} color={colors.text3} />
+        <Icon name="chevronDown" size={dial ? 15 : 18} color={colors.text3} />
       </Pressable>
 
       <Modal

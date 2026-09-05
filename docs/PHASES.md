@@ -24,6 +24,7 @@ shipped, that is called out explicitly.
 | 13 — Closing the audit's findings | ✅ | all four tiers landed |
 | 14 — Bitnob v2, and paying a bank | ✅ | Bitnob credentials to go live |
 | 15 — Funding without KYC, KYC before a card | ✅ | Paystack credentials to go live |
+| 16 — One identifier, a code to get back in, a price that keeps itself | ✅ | ExchangeRate-API key to go live |
 
 All eleven phases are built, a **pre-deployment audit** (Phase 12) closed what
 building them phase by phase had left between the phases, and **Phase 13** is
@@ -1693,3 +1694,127 @@ webhooks, because Paystack signs with the same key), apply migrations 044 and
 `paystack_preferred_bank`, and set `card_issuance_provider_cost_cents` to what
 the issuer actually bills — the shipped default is $1 against a $2 price, and
 both are rows an operator reviews.
+
+---
+
+## Phase 16 — One identifier, a code to get back in, and a price that keeps itself ✅
+
+Not a feature list. Four things a customer could see were wrong, and each one
+turned out to be a rule in the wrong place rather than a bug in a screen.
+
+| File | What it is |
+|---|---|
+| `apps/api/src/auth/auth.service.ts` | the session read, split so a newer migration cannot take out the name and phone |
+| `apps/api/src/auth/profile.service.ts` | the payment link, built from the phone number |
+| `packages/ledger/sql/056_reset_codes.sql` | a reset is a code, and what makes six digits safe |
+| `packages/ledger/sql/057_reference_rates.sql` | where a rate came from, and noticing when a feed stops |
+| `packages/providers/src/exchangerate/` | the reference feed behind a port of its own |
+| `apps/api/src/fx/rate-feed.service.ts` | the sweep that keeps every corridor priced |
+| `apps/web/src/ui/keyboard-aware.tsx` | the keyboard, and the fixed bar that ignores it |
+
+### The Request payment panel showed an em dash
+
+`describeSession` reads the customer's name, phone and PIN state, and at some
+point `u.country` and a join to `countries` were added to that one query.
+`countries` arrives in 040 and `payout_method` in 046, so on a database behind
+either, the query throws — and the catch returns EVERY FIELD AS NULL.
+
+1. **The comment above that method already recorded this exact failure**, about
+   `handle` and 039, and it happened again one migration later because the
+   protection was a paragraph rather than a shape. The split is structural now:
+   `#core` reads only `users` and `transaction_pins`, which have existed since
+   002, and everything newer is a separate query that is allowed to fail.
+2. **A missing migration must cost only what depends on it.** A deployment
+   behind 040 now shows the customer their name, their number and their PIN
+   state and falls back to the platform default for the personalisation.
+
+### The identifier is the phone number
+
+3. **A HANDLE WAS A SECOND NAME FOR THE SAME PERSON.** Minted from the email
+   address, changeable once, and the only identifier a customer had to be
+   taught — while every screen already knew their number. Two identifiers for
+   one account is two things to get wrong, for no capability the number does
+   not have. `POST /v1/auth/profile/handle` is gone, and so are
+   `handle_taken`, `handle_invalid` and the screens that used them.
+4. **A link already in the world still resolves.** `payLinkTarget` unwraps
+   `/pay/<segment>` first and reads all digits as a number and anything else as
+   a handle, because nobody re-reads a link they have already sent.
+5. **THE LINK DROPS THE `+`**, because a plus in a URL is a space to enough
+   software that a shared link arrives broken. Both readers put it back, and
+   `payment-link.test.ts` asserts all three halves — the generator, the landing
+   page and the parser — because a template string in one workspace and a
+   directory name in another are what the `/pay` 404 was made of.
+6. **AND THE LINK NO LONGER NEEDS `APP_BASE_URL` TO EXIST.** Unset, the API
+   returns none and each app fills it in from the origin it is already running
+   on. "No link yet — this deployment has no public address set" was an
+   operator's problem printed where a customer was standing, on the screen they
+   opened in order to ask to be paid.
+
+### A reset is a code
+
+7. **A LINK NEEDS AN ADDRESS, AND THAT TOOK THE FLOW DOWN.** With
+   `APP_BASE_URL` unset the service refused before it did anything —
+   "Password resets are unavailable right now. Contact support." — on the one
+   path whose premise is that a customer has nothing left to contact support
+   WITH. A code needs no address, and on a phone it does not send somebody out
+   to a browser and back.
+8. **SIX DIGITS IS A MILLION POSSIBILITIES, and three things pay for that.**
+   The stored hash is an HMAC keyed by a secret that is not in the database —
+   an unkeyed digest of a six-digit code IS the code to anybody holding a dump.
+   The attempt ceiling is a COLUMN, because an attacker's loop outlives a pod
+   restart. And the code is presented WITH the identifier, so a guess is
+   against one account rather than against all of them at once.
+9. **THE CEILING IS CHARGED AGAINST THE LIVE CODES, not the row a guess
+   matched** — a wrong guess matches no row, so a per-row counter can never be
+   incremented by the attack it exists to stop. That is why it is a second
+   database function rather than an argument to the first.
+10. **Running out of attempts is SAID OUT LOUD**, unlike the three refusals
+    013 collapses into one. Those must stay indistinguishable because they tell
+    a prober whether a guess was real; this one tells an attacker what they
+    already know and tells the customer the only thing that helps: ask again.
+
+### A price that keeps itself current
+
+11. **053 GAVE AN OPERATOR A FORM AND THAT WAS THE WHOLE MECHANISM.** Eight
+    fiat currencies is fifty-six numbers to retype, every day, or every
+    corridor quotes a price from whenever somebody last had time — and the
+    failure is silent, because the quote succeeds at the wrong number.
+12. **A REFERENCE RATE IS NOT AN FX QUOTE**, so it is a port of its own.
+    `FxPort` quotes a price we can DEAL at and then executes the swap; this
+    one answers what the market says and can do nothing at all.
+13. **A RATE A PERSON PUBLISHED IS NEVER OVERWRITTEN**, which is what `source`
+    is for — and `prices_without_an_author` excludes feed rates by that source
+    rather than by their absent author, or it would fill with fifty-six entries
+    a day until nobody read it.
+14. **THE FEED'S OWN FAILURE IS THE THING NOTHING ELSE CAN SEE.** A key that
+    expires, a quota exhausted, an interval unset on the one instance that had
+    it — none of them error. The rows stay, the screen renders, and customers
+    are quoted whatever it last said. `stale_reference_rates` exists for that
+    and the prices screen shows every rate's age.
+15. **The rate is a decimal string at a FIXED six places**, which is what makes
+    two syncs comparable as text — and comparing is what decides whether
+    anything is republished at all. A varying width would make `1650.1` and
+    `1650.100000` look like a price change.
+
+### The keyboard covered the field
+
+16. **TWO CAUSES ON THE WEB THAT LOOK LIKE ONE.** `.tabbar` is fixed to the
+    LAYOUT viewport, which a keyboard does not change, so it stays where the
+    bottom of the screen used to be — over the middle of the page. No amount of
+    scrolling moves it. The second is that a browser's own scroll-into-view
+    leaves a field flush against the keyboard with its hint and its error
+    underneath.
+17. **ON ANDROID THE HANDLING DID NOTHING AT ALL.** `behavior={... : undefined}`
+    relies entirely on `adjustResize`, and under the edge-to-edge Android 15
+    enforces the platform draws behind the keyboard and leaves the app to
+    handle the inset. `height` is safe under both, because
+    `KeyboardAvoidingView` measures the OVERLAP rather than the keyboard.
+18. **Both fixes live where they cannot be forgotten** — the root layout on the
+    web, `Shell` on the phone — and a test in each app fails the build on a
+    screen that brings its own scroll region without them.
+
+**Before this goes live, an operator must:** apply migrations 056 and 057
+(**056 contains an `ALTER TYPE` that must run outside a transaction**), paste
+an ExchangeRate-API key at `/admin/credentials`, and set
+`FX_RATE_SYNC_INTERVAL_SECONDS` on exactly one instance — a day is the natural
+value, because the feed itself refreshes daily.

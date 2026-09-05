@@ -139,7 +139,19 @@ export default function SignUp() {
      */
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: colors.bg }}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      /*
+        `height` ON ANDROID, not nothing. It was `undefined`, which relies
+        entirely on the window being resized by `adjustResize` — and under the
+        edge-to-edge Android 15 enforces, the platform draws behind the
+        keyboard and leaves the app to handle the inset. On these three
+        screens, which are outside `Shell`, that meant the keyboard sat over
+        the password field.
+
+        Both behaviours are computed from the OVERLAP with the keyboard, so
+        where the window HAS been resized this adds nothing rather than
+        doubling up.
+      */
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView
         keyboardShouldPersistTaps="handled"
@@ -208,36 +220,26 @@ export default function SignUp() {
         */}
         <Text style={styles.label}>Phone number</Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <View
-            style={{
-              justifyContent: 'center',
-              minHeight: 50,
-              paddingHorizontal: 4,
-              borderRadius: radius.md,
-              backgroundColor: colors.field,
-            }}
-          >
-            <Select
-              label="Country"
-              variant="pill"
-              value={country}
-              onChange={setCountry}
-              placeholder="+—"
-              renderMark={(code) => <CountryMark country={code} size={18} />}
-              renderTrigger={(code) => (
-                <Text style={[styles.amount, { color: colors.text }]}>
-                  +{countries.find((c) => c.code === code)?.dial_code ?? ''}
-                </Text>
-              )}
-              options={countries.map((c) => ({
-                value: c.code,
-                label: c.name,
-                // What their money will be in — the consequence of this
-                // choice, and the only one visible from the form.
-                hint: c.currency,
-              }))}
-            />
-          </View>
+          <Select
+            label="Country"
+            variant="dial"
+            value={country}
+            onChange={setCountry}
+            placeholder="+—"
+            renderMark={(code) => <CountryMark country={code} size={18} />}
+            renderTrigger={(code) => (
+              <Text style={[styles.amount, { color: colors.text }]}>
+                +{countries.find((c) => c.code === code)?.dial_code ?? ''}
+              </Text>
+            )}
+            options={countries.map((c) => ({
+              value: c.code,
+              label: c.name,
+              // What their money will be in — the consequence of this
+              // choice, and the only one visible from the form.
+              hint: c.currency,
+            }))}
+          />
           <TextInput
             style={[styles.input, { flex: 1 }]}
             value={phone}

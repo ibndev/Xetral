@@ -1415,25 +1415,53 @@ select {
 .input-affix { position: relative; display: flex; align-items: center; }
 .input-affix input { padding-right: 56px; }
 
-/* AN `@` IN FRONT OF A HANDLE FIELD. Leading, like the dialling code and
-   unlike `.input-affix`, whose padding is reserved on the right for the
-   password reveal. The symbol is decoration: it is not in the value, and the
-   server strips one a customer pastes anyway. */
-.handle-field { position: relative; display: flex; align-items: center; }
-.handle-field input { padding-left: 30px; }
-.handle-at {
-  position: absolute;
-  left: 14px;
-  z-index: 2;
-  color: var(--text-3);
-  pointer-events: none;
-}
-
 /* A DIALLING CODE IN FRONT OF A PHONE FIELD, not a second picker.
    The affix is on the LEFT here and the padding goes the other way — the
    `.input-affix` above is built for a trailing control (the password reveal),
    and reusing it unchanged would put "+234" on top of the digits. */
-.input-affix.dial input { padding-right: 15px; padding-left: 122px; }
+/*
+ * THE DIGITS SIT AFTER THE PICKER, laid out — never under it, padded around.
+ *
+ * It was absolute positioning plus a hand-set `padding-left`, and MEASURED IN
+ * A BROWSER the trigger ended 115px into the field, the divider sat at 120px
+ * and the padding was 122px: TWO PIXELS between the hairline and the first
+ * digit, which is what made an `8` look like it was under the control. Any of
+ * those three numbers changing — a longer dialling code, a different font, a
+ * tweak to a gap — moves the collision back, and none of them is visible from
+ * the others.
+ *
+ * So the wrapper is a ROW and carries the field's own appearance; the input
+ * inside is transparent and borderless and simply takes the rest of the
+ * space. There is no width to keep in step, so the overlap cannot come back.
+ */
+.input-affix.dial {
+  gap: 10px;
+  padding: 0 15px 0 6px;
+  background: var(--field);
+  border: 1px solid var(--edge-strong);
+  border-radius: var(--r);
+}
+.input-affix.dial:hover { border-color: var(--edge-hover); }
+/* The ring is on the WRAPPER, because the thing a customer is focusing is the
+   whole field. On the input alone it drew a rectangle around the digits and
+   left the picker outside it, which reads as two controls. */
+.input-affix.dial:focus-within {
+  border-color: var(--link);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--link) 14%, transparent);
+}
+.input-affix.dial input {
+  flex: 1;
+  min-width: 0;
+  padding: 11px 0;
+  /* 48 + the wrapper's own 1px border either side = the 50px every other
+     field is, so a phone field does not sit two pixels taller than the one
+     above it. */
+  min-height: 48px;
+  background: transparent;
+  border: 0;
+}
+.input-affix.dial input:hover,
+.input-affix.dial input:focus { border: 0; box-shadow: none; }
 
 /*
  * THE DIALLING CODE IS THE COUNTRY PICKER, and there is no longer a second
@@ -1447,30 +1475,47 @@ select {
  * country's name in front of a phone number pushes the digits off a handset.
  */
 .dial-select {
-  position: absolute;
-  left: 6px;
+  /* IN FLOW, not absolute. See `.input-affix.dial` above: the row is what
+     keeps the digits clear of this control. */
+  flex: none;
+  position: relative;
   z-index: 2;
 }
-/* ROOM BETWEEN THE THREE THINGS IN IT. The trigger holds a flag, a dialling
-   code and a chevron, and at 6px of trailing padding with a 5px gap the code
-   and the chevron sat on top of each other and both against the hairline —
-   it read as one crowded glyph rather than as a control. The input's left
-   padding above is widened by the same amount, or the digits start under it. */
+/*
+ * NARROW ENOUGH TO BE AN AFFIX, WITH THE DIGITS CLEAR OF IT.
+ *
+ * MEASURED IN A BROWSER, twice, because both faults here are arithmetic
+ * nobody can do by reading. The trigger was 109px wide and its right edge
+ * landed 115px into the field; the divider then sat at 120px and the input's
+ * left padding was 122px — TWO PIXELS between the hairline and the first
+ * digit, which is what made an `8` look like it was under the control. And
+ * 109px of affix on a 320px handset is a third of the field spent on a
+ * country code.
+ *
+ * So the padding either side, the gaps and the chevron all come down. The
+ * numbers below are one arrangement: change any of them and re-measure, or
+ * the digits go back under the divider.
+ */
 .dial-select .xselect-trigger {
   width: auto;
-  min-height: 42px;
-  padding: 0 12px 0 12px;
-  gap: 9px;
+  min-height: 40px;
+  padding: 0 6px 0 8px;
+  gap: 6px;
   background: transparent;
   border-color: transparent;
 }
+/* The chevron's size is a PROP on the component, so it is scaled here rather
+   than passed differently — the same `<Select>` is a full-width field
+   elsewhere, where 18px is right. */
+.dial-select .xselect-trigger > svg { width: 15px; height: 15px; }
 /* A hairline BETWEEN the picker and the digits, so the two read as one field
    with two parts rather than as a control floating over an input. */
 .dial-select::after {
   content: '';
   position: absolute;
-  /* Clear of the chevron rather than touching it. At -1px the divider read as
-     part of the chevron and the whole affix as one smudge. */
+  /* Halfway into the row's gap, so it is clear of the chevron on one side and
+     the digits on the other. At -1px the divider read as part of the chevron
+     and the whole affix as one smudge. */
   right: -5px;
   top: 9px;
   bottom: 9px;
@@ -1534,7 +1579,7 @@ fieldset { border: 0; padding: 0; margin: 0; }
   display: flex;
   align-items: center;
   gap: 13px;
-  padding: 13px 0;
+  padding: 12px 0;
   border-bottom: 1px solid var(--line);
   transition: background var(--t-fast) var(--ease);
 }
@@ -2949,3 +2994,52 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
 @media (prefers-reduced-motion: reduce) {
   .toast, .toast.leaving { animation: none; }
 }
+
+/*
+ * REQUEST PAYMENT — a value somebody has to READ, then copy.
+ *
+ * Compact deliberately: this sits under the account section on Add Money and
+ * was previously a full-height panel with two balance-sized figures in it,
+ * which made the screen's actual subject scroll off. A label, the value, and
+ * the button that copies it — three lines, no box inside a box.
+ *
+ * `word-break` on the link and not on the number: a payment link is long
+ * enough to overflow a 320px handset and a phone number is not, and breaking
+ * digits mid-number is how somebody reads one back wrongly.
+ */
+.copy-row { display: flex; flex-direction: column; gap: 6px; padding: 12px 0; }
+.copy-row + .copy-row { border-top: 1px solid var(--line); }
+.copy-label { font-size: 13px; color: var(--text-2); }
+.copy-value {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0.01em;
+  /* Selectable, because the clipboard API is refused often enough — an
+     insecure origin, a browser setting — that the value on screen has to be
+     the fallback rather than decoration. */
+  user-select: text;
+}
+.copy-value.link { font-size: 14px; word-break: break-all; }
+.copy-row button { align-self: flex-start; }
+
+/*
+ * WHILE THE KEYBOARD IS UP.
+ *
+ * `.tabbar` is `position: fixed; bottom: 0`, and a fixed element is positioned
+ * against the LAYOUT viewport — which an on-screen keyboard does not change.
+ * So the bar stays where the bottom of the screen used to be, which with the
+ * keyboard up is somewhere in the middle of the page, directly over the field
+ * being typed into. Scrolling cannot fix that, because the bar scrolls with
+ * nothing.
+ *
+ * `data-keyboard` is stamped on the root by `KeyboardAware`, from the VISUAL
+ * viewport's height — see that file for why the threshold is a fifth of the
+ * screen rather than any change at all.
+ *
+ * The page's bottom padding goes with it: it exists to keep content clear of
+ * a bar that is no longer there, and leaving 96px of empty space under the
+ * last field is what makes a short form look like it has scrolled wrong.
+ */
+:root[data-keyboard='open'] .tabbar { display: none; }
+:root[data-keyboard='open'] .shell { padding-bottom: 24px; }

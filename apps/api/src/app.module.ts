@@ -105,8 +105,8 @@ import { MetricsController } from './observability/metrics.controller.js';
 import { ErrorRecordingFilter } from './observability/error.filter.js';
 import { ErrorAlertService } from './observability/error-alert.service.js';
 import { NotificationWorker } from './notifications/notification.worker.js';
-import { BrevoNotificationAdapter } from '@xetral/providers';
-import type { NotificationPort } from '@xetral/providers';
+import { BrevoNotificationAdapter, ExchangeRateAdapter } from '@xetral/providers';
+import type { NotificationPort, ReferenceRatePort } from '@xetral/providers';
 import { LoginRateLimitGuard, PasswordResetRateLimitGuard } from './auth/login-rate-limit.guard.js';
 import { RequestRateLimiter } from './auth/request-rate-limit.service.js';
 import { AdminDisputeController, DisputeController } from './disputes/dispute.controller.js';
@@ -114,6 +114,7 @@ import { DisputeService } from './disputes/dispute.service.js';
 import { RetentionService } from './retention/retention.service.js';
 import { BalanceReconciliationService } from './reconciliation/balance-reconciliation.service.js';
 import { MonitoringService } from './risk/monitoring.service.js';
+import { RateFeedService } from './fx/rate-feed.service.js';
 import { CaseService } from './risk/case.service.js';
 import {
   InMemoryRateLimitStore,
@@ -136,6 +137,7 @@ import {
   FX_PORT,
   LEDGER,
   NOTIFICATION_PORT,
+  REFERENCE_RATE_PORT,
   PROVIDER_BALANCE_PORT,
   RATE_LIMIT_STORE,
   ROUTE_POLICY,
@@ -169,6 +171,8 @@ export interface AppModuleOptions {
   readonly fxPort?: FxPort;
   /** Overridden in tests so the outbox can be drained without a live Resend. */
   readonly notificationPort?: NotificationPort;
+  /** Swapped in by the tests, which must not reach a live rate feed. */
+  readonly referenceRatePort?: ReferenceRatePort;
 }
 
 /**
@@ -736,6 +740,32 @@ export function createNotificationPort(
 }
 
 /**
+ * The reference rate feed, or nothing.
+ *
+ * ALWAYS CONSTRUCTED, because the key is a function. 026's rule: the database
+ * is authoritative and the environment is the fallback, so an adapter built
+ * from a string at boot can only ever hold what the environment had — and an
+ * operator who pasted a key would watch the dashboard report it as set while
+ * every sync went on failing. The absent-key case is a refusal at call time
+ * that names where to paste one, not a port that does not exist.
+ *
+ * IT IS NOT A KILL SWITCH. What decides whether rates are fetched at all is
+ * `FX_RATE_SYNC_INTERVAL_SECONDS`, set on exactly one instance — the shape
+ * every other worker here uses.
+ */
+export function createReferenceRatePort(
+  config: ApiConfig,
+  credentials?: ProviderCredentialService,
+): ReferenceRatePort {
+  return new ExchangeRateAdapter({
+    apiKey:
+      credentials === undefined
+        ? (config.exchangeRateApiKey ?? '')
+        : () => credentials.secretFor('exchangerate', 'api_key', config.exchangeRateApiKey),
+  });
+}
+
+/**
  * Chooses the rate-limit backend, and says out loud when it picks the one that
  * only works on a single box.
  *
@@ -934,6 +964,23 @@ export class MonitoringLifecycle implements OnApplicationBootstrap {
 }
 
 /**
+ * Starts the reference rate refresh.
+ *
+ * Its own lifecycle, like every other, and for this one the reason is
+ * specific: a deployment that publishes its rates by hand is legitimate, so
+ * this must be switchable off on its own without touching a sweep that
+ * something else depends on.
+ */
+@Injectable()
+export class RateFeedLifecycle implements OnApplicationBootstrap {
+  constructor(@Inject(RateFeedService) private readonly rates: RateFeedService) {}
+
+  onApplicationBootstrap(): void {
+    this.rates.start();
+  }
+}
+
+/**
  * Starts the retention sweep.
  *
  * Its own lifecycle rather than sharing one, for the same reason every other
@@ -1117,6 +1164,16 @@ export class AppModule {
           inject: [ProviderHealthService, ProviderCredentialService],
         },
         {
+          provide: REFERENCE_RATE_PORT,
+          useFactory: (health: ProviderHealthService, credentials: ProviderCredentialService) =>
+            watched(
+              options.referenceRatePort ?? createReferenceRatePort(options.config, credentials),
+              'exchangerate',
+              health,
+            ),
+          inject: [ProviderHealthService, ProviderCredentialService],
+        },
+        {
           provide: NOTIFICATION_PORT,
           useFactory: (health: ProviderHealthService, credentials: ProviderCredentialService) => {
             const port =
@@ -1195,9 +1252,11 @@ export class AppModule {
         RetentionLifecycle,
         BalanceReconciliationService,
         MonitoringService,
+        RateFeedService,
         CaseService,
         BalanceReconciliationLifecycle,
         MonitoringLifecycle,
+        RateFeedLifecycle,
         PasswordResetService,
 
         // Registered globally, so it runs for every route including one whose

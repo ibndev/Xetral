@@ -3,52 +3,69 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 /**
- * THE RESET EMAIL'S LINK POINTS AT A PAGE THAT EXISTS.
+ * A RESET IS A CODE, AND NOTHING MAY QUIETLY GO BACK TO BEING A LINK.
  *
- * `PasswordResetService.#resetUrl` builds `${APP_BASE_URL}/<segment>?token=…`
- * and the page that answers it is a DIRECTORY NAME in another workspace.
- * Nothing compares those two: one is a string literal in the API, the other is
- * a folder on disk in the web app, and no compiler has an opinion about either.
+ * It used to be a link, and the link needed an address: with `APP_BASE_URL`
+ * unset the service refused before it did anything — "Password resets are
+ * unavailable right now. Contact support." — on the one flow whose premise is
+ * that a customer has nothing left to contact support WITH. A deployment value
+ * nobody set took away the way back into an account holding somebody's money.
  *
- * That is not hypothetical here. `ProfileService` built `${appBaseUrl}/pay/…`,
- * both apps showed the link with a Copy button and told the customer it was
- * safe to post publicly, and `apps/web` had no `/pay` route at all — every one
- * of those links answered 404 for the whole life of the feature. This is the
- * same contract in the flow where breaking it means a customer who has
- * forgotten their password has no way back to their money.
- *
- * The query parameter is checked too: the page reads `token`, and a link
- * carrying `t` would render the "this link is missing its token" state for a
- * link that is perfectly good.
+ * This file used to check the other direction: that the link the API built
+ * named a page this app serves, because one was a string literal in the API
+ * and the other a folder on disk here, and no compiler has an opinion about
+ * either. That contract is gone with the link, and the risk that replaced it
+ * is somebody reintroducing a URL — so this asserts the ABSENCE, in both
+ * workspaces at once. There is nothing else that could.
  */
 
 const HERE = new URL('.', import.meta.url).pathname;
-const SERVICE = join(HERE, '..', '..', '..', 'api', 'src', 'auth', 'password-reset.service.ts');
+const API = join(HERE, '..', '..', '..', 'api', 'src');
+const SERVICE = join(API, 'auth', 'password-reset.service.ts');
+const TEMPLATES = join(API, 'notifications', 'templates.ts');
 
-describe('the password reset link', () => {
-  it('names a route this app actually serves', () => {
+describe('the password reset code', () => {
+  it('the service builds no link and needs no address', () => {
     const source = readFileSync(SERVICE, 'utf8');
-    const built = /\$\{base\}\/([a-z-]+)\?token=/.exec(source);
-    expect(built, 'the reset URL is no longer built the way this test reads it').not.toBeNull();
-
-    const segment = built?.[1] ?? '';
     expect(
-      existsSync(join(HERE, segment, 'page.tsx')),
-      `the reset email links to /${segment} and apps/web has no such page — ` +
-        'a customer who forgot their password would land on a 404',
-    ).toBe(true);
+      /\/reset-password\?/.test(source),
+      'the reset service is building a link again — it needs APP_BASE_URL, which is what ' +
+        'made this flow refuse on a deployment that had never been told its own hostname',
+    ).toBe(false);
+    expect(
+      source.includes('appBaseUrl'),
+      'the reset service reads appBaseUrl again, so an unset one can refuse the flow',
+    ).toBe(false);
   });
 
-  it('uses the query parameter the page reads', () => {
-    const service = readFileSync(SERVICE, 'utf8');
-    const built = /\$\{base\}\/([a-z-]+)\?([a-z_]+)=/.exec(service);
-    const segment = built?.[1] ?? '';
-    const parameter = built?.[2] ?? '';
+  it('the email carries the code and nothing to click', () => {
+    const templates = readFileSync(TEMPLATES, 'utf8');
+    const block = templates.slice(
+      templates.indexOf("case 'password_reset':"),
+      templates.indexOf("case 'password_changed':"),
+    );
+    expect(block.length).toBeGreaterThan(0);
+    expect(block.includes('request.code'), 'the reset template no longer renders the code').toBe(
+      true,
+    );
+    // A button in a reset email is the exact shape a phishing message copies,
+    // and it is also the thing that needs a hostname.
+    expect(block.includes('href'), 'the reset email has a link in it again').toBe(false);
+  });
 
-    const page = readFileSync(join(HERE, segment, 'page.tsx'), 'utf8');
+  it('there is no link-based page left to land on', () => {
     expect(
-      page.includes(`params.get('${parameter}')`),
-      `the email sends ?${parameter}= and the page does not read it`,
-    ).toBe(true);
+      existsSync(join(HERE, 'reset-password', 'page.tsx')),
+      'the link-based reset page is back; a customer following an old email would be given ' +
+        'a form asking for a token nothing issues',
+    ).toBe(false);
+  });
+
+  it('the screen that finishes a reset asks for the code', () => {
+    // `/forgot` is BOTH steps now — ask, then enter the code — because the
+    // second step has nothing to arrive from. A customer stays on one page.
+    const page = readFileSync(join(HERE, 'forgot', 'page.tsx'), 'utf8');
+    expect(page.includes('resetPassword('), '/forgot cannot finish a reset').toBe(true);
+    expect(page.toLowerCase().includes('code'), '/forgot has no code box').toBe(true);
   });
 });

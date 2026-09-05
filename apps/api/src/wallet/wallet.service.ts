@@ -619,7 +619,19 @@ export class WalletService {
    * accounts and carries no contact detail — so resolving a link cannot be
    * turned into a way to read the address behind it.
    */
-  async #recipientByIdentifier(identifier: string): Promise<{ id: string }> {
+  async #recipientByIdentifier(raw: string): Promise<{ id: string }> {
+    /*
+     * A PAYMENT LINK NOW CARRIES A PHONE NUMBER, and a link somebody shared
+     * last year still carries a handle.
+     *
+     * The identifier of an account is the phone number, so
+     * `https://app.xetral.com/pay/2348031234567` is what this product
+     * generates. Unwrapping the link FIRST is what lets one segment be read
+     * two ways: all digits is a number, anything else is a handle from a link
+     * already in the world — which must go on paying the same person, because
+     * nobody re-reads a link they have already sent.
+     */
+    const identifier = payLinkTarget(raw);
     const handle = handleIn(identifier);
     if (handle !== undefined) {
       const byHandle = await this.pool.query<{ id: string }>(
@@ -716,7 +728,33 @@ export function handleIn(raw: string): string | undefined {
   }
 
   const handle = value.toLowerCase();
+  // ALL DIGITS IS A PHONE NUMBER, NOT A HANDLE, and the handle pattern accepts
+  // one — `2348031234567` matches it exactly. Without this, every link this
+  // product now generates would be looked up in `payable_handles`, miss, and
+  // answer "no such recipient" for a customer whose number is right there in
+  // the link.
+  if (/^[0-9]+$/.test(handle)) return undefined;
   return /^[a-z0-9](?:[a-z0-9_]{1,18})[a-z0-9]$/.test(handle) ? handle : undefined;
+}
+
+/**
+ * Whatever was pasted, with a payment link unwrapped to the thing it names.
+ *
+ * A link carries the number without its `+`, because a plus in a URL is a
+ * space to half the software that will touch it. Putting it back is what
+ * makes the unwrapped value an E.164 number again, so the phone match below
+ * sees the same string every other screen sends.
+ *
+ * Anything that is not a payment link is returned UNCHANGED — an email, a
+ * bare number, an `@handle` — because this function's only job is the
+ * wrapper.
+ */
+export function payLinkTarget(raw: string): string {
+  const value = raw.trim();
+  const asUrl = value.match(/^(?:https?:\/\/)?[^\s/]+\/pay\/([^/?#\s]+)/i);
+  const segment = asUrl?.[1];
+  if (segment === undefined) return value;
+  return /^[0-9]{7,15}$/.test(segment) ? `+${segment}` : value;
 }
 
 function negate<C extends Currency>(amount: Money<C>): Money<C> {

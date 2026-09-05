@@ -111,7 +111,24 @@ export const forgotPasswordSchema = z.object({
  * @xetral/identity, and a second looser copy here is how the two drift.
  */
 export const resetPasswordSchema = z.object({
-  token: z.string().min(1).max(512),
+  /*
+   * THE ADDRESS AS WELL AS THE CODE, and the pair is what makes six digits
+   * safe. A code alone would be a guess against EVERY account at once — a
+   * million tries lands somewhere — where a code next to one identifier is a
+   * guess against one, under an attempt ceiling.
+   *
+   * It is the same field `/forgot` takes, so a customer who typed a phone
+   * number there is not asked for an email here.
+   */
+  identifier: z.string().trim().min(3).max(255),
+  /*
+   * Deliberately not `regex(/^[0-9]{6}$/)`. A code arrives out of an email
+   * with a space in the middle, or with the invisible characters a mail
+   * client wraps a line in; the service strips non-digits before it hashes,
+   * so a customer who pasted "483 921" is not refused for their mail client's
+   * formatting. The real shape is decided where the hash is computed.
+   */
+  code: z.string().trim().min(1).max(32),
   new_password: z.string().min(1).max(512),
 });
 
@@ -125,23 +142,3 @@ export const totpCodeSchema = z.object({
 
 export type TotpCodeRequest = z.infer<typeof totpCodeSchema>;
 
-/**
- * Choosing a payment handle.
- *
- * Deliberately LOOSE on shape: the service normalises a pasted `@` and a
- * phone keyboard's capital before testing the real pattern, and 039's CHECK
- * is what finally decides. A strict regex here would refuse `@Olawale` — a
- * handle copied from a message, which is the commonest way one is typed —
- * with a field error rather than accepting what the customer plainly meant.
- *
- * `transaction_pin` is read by `AuthGuard`, not by this handler; it is named
- * here so `.strict()` does not refuse the body carrying it.
- */
-export const chooseHandleSchema = z
-  .object({
-    handle: z.string().trim().min(1).max(32),
-    transaction_pin: z.string().optional(),
-  })
-  .strict();
-
-export type ChooseHandleRequest = z.infer<typeof chooseHandleSchema>;

@@ -107,10 +107,10 @@ export class Session {
   }
 
   /**
-   * ASK FOR A RESET LINK. Answers nothing about the address.
+   * ASK FOR A RESET CODE. Answers nothing about the address.
    *
    * The API returns 204 for every well-formed identifier, real or not, and
-   * mints and hashes a token either way so the two paths do not differ in
+   * mints and hashes a code either way so the two paths do not differ in
    * timing. This method therefore resolves on success and CANNOT tell a caller
    * whether an account exists — a screen that branched on that would turn any
    * address list into a customer list, which is the whole point of the
@@ -132,18 +132,23 @@ export class Session {
   }
 
   /**
-   * Finish a reset with the token from the email.
+   * Finish a reset with the six-digit code from the email.
+   *
+   * THE IDENTIFIER GOES BACK UP WITH IT, and that pair is what makes a short
+   * code safe: a code alone would be a guess against every account at once,
+   * where a code beside one address is a guess against one, under a ceiling
+   * of five. Pass the same identifier that was given to `forgotPassword`.
    *
    * ISSUES NO SESSION, deliberately, and this method returns nothing for that
-   * reason: a leaked link grants a password that can be used, not an
+   * reason: a leaked code grants a password that can be used, not an
    * immediately live session. The customer signs in afterwards, which is also
    * what proves the reset worked.
    */
-  async resetPassword(token: string, newPassword: string): Promise<void> {
+  async resetPassword(identifier: string, code: string, newPassword: string): Promise<void> {
     const response = await this.#fetch(`${this.#baseUrl}/v1/auth/password/reset`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ token, new_password: newPassword }),
+      body: JSON.stringify({ identifier, code, new_password: newPassword }),
     });
     if (!response.ok) {
       throw toApiError(response.status, await response.json().catch(() => undefined));

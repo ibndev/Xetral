@@ -128,15 +128,11 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
        * start a work session is how a shared authenticator ends up on a desk.
        */
       .authenticated('POST', '/v1/auth/totp/elevate', { pin: false })
-      // A customer's own handle. No PIN: it moves no money and is meant to be
-      // shared, which is the opposite of a secret.
+      // A customer's own payment link. No PIN: it moves no money and is meant
+      // to be shared, which is the opposite of a secret. There is no route
+      // that CHANGES it — the link is the account's phone number, and that is
+      // changed by changing the number rather than by a text box.
       .authenticated('GET', '/v1/auth/profile', { pin: false })
-      // CHANGING it does take one, and the asymmetry is the point: reading a
-      // handle is reading something meant to be posted publicly, while
-      // changing one reaches every link the customer has already shared —
-      // 039 never reissues a released handle to anybody else, so nobody can
-      // pick up what they put down.
-      .authenticated('POST', '/v1/auth/profile/handle', { pin: true })
 
       .authenticated('GET', '/v1/auth/devices', { pin: false })
       // Acting on it does. All three are reachable with a stolen access token,
@@ -287,6 +283,11 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // pair it is also deciding that we are the counterparty.
       .staff('POST', '/v1/admin/prices/fx-rate', { pin: true, role: 'finance' })
       .staff('GET', '/v1/admin/prices/fx-rates', { pin: false, role: 'finance' })
+      // FETCH THEM NOW, rather than waiting for the worker's next pass. Same
+      // role and the same PIN as publishing one by hand, because that is what
+      // it does: every corridor the feed answers for is repriced, and what a
+      // customer is quoted changes on the next request.
+      .staff('POST', '/v1/admin/prices/fx-refresh', { pin: true, role: 'finance' })
       .staff('POST', '/v1/admin/prices/giftcard', { pin: true, role: 'finance' })
       .staff('POST', '/v1/admin/prices/:id/retire', { pin: true, role: 'finance' })
       .staff('GET', '/v1/admin/stuck', { pin: false, role: 'support' })

@@ -102,6 +102,7 @@ export function testApiConfig(databaseUrl: string, overrides: Partial<ApiConfig>
     // monitoring e2e calls `sweep()` directly, which is also how a reader can
     // tell the assertion is about the rules rather than about the schedule.
     riskMonitorIntervalSeconds: undefined,
+    fxRateSyncIntervalSeconds: undefined,
     reconcileIntervalSeconds: undefined,
     // No grace either — a test that had to wait two minutes for a row to become
     // eligible is a test nobody runs. Zero rather than undefined, which would
@@ -139,6 +140,7 @@ export function testApiConfig(databaseUrl: string, overrides: Partial<ApiConfig>
       perIp: { max: 1000, windowSeconds: 3600 },
     },
     brevoApiKey: undefined,
+    exchangeRateApiKey: undefined,
     notificationFrom: undefined,
     notificationReplyTo: undefined,
     notificationIntervalSeconds: undefined,

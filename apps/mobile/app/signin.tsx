@@ -54,7 +54,19 @@ export default function SignIn() {
       style={{ flex: 1, backgroundColor: colors.bg }}
       // The password field is the lowest thing on the screen and the keyboard
       // covers it on a short handset otherwise.
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      /*
+        `height` ON ANDROID, not nothing. It was `undefined`, which relies
+        entirely on the window being resized by `adjustResize` — and under the
+        edge-to-edge Android 15 enforces, the platform draws behind the
+        keyboard and leaves the app to handle the inset. On these three
+        screens, which are outside `Shell`, that meant the keyboard sat over
+        the password field.
+
+        Both behaviours are computed from the OVERLAP with the keyboard, so
+        where the window HAS been resized this adds nothing rather than
+        doubling up.
+      */
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView
         keyboardShouldPersistTaps="handled"

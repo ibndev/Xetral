@@ -1,9 +1,10 @@
-import { Text, View } from 'react-native';
-import { formatAmount } from '@xetral/client';
+import { Share, Text, View } from 'react-native';
+import { displayPhone, formatAmount, paymentLinkFor } from '@xetral/client';
 import type { Deposit } from '@xetral/client';
 import { Shell } from '@/shell';
 import { Button, FormError, Loading, Panel } from '@/ui';
 import { useLoad, useSubmit, useXetral } from '@/hooks';
+import { webOrigin } from '@/session';
 import { font, radius, space, useStyles, useTheme } from '@/theme';
 
 /**
@@ -207,6 +208,8 @@ export default function AddMoney() {
         <FormError error={account.error} code={account.code} />
       </Panel>
 
+      <RequestPayment />
+
       {/*
         MONEY RECEIVED, ONLY WHEN THERE IS SOME. It was a second panel with an
         empty state on a screen whose job is to get money IN, so the commonest
@@ -241,5 +244,104 @@ export default function AddMoney() {
         </Panel>
       )}
     </Shell>
+  );
+}
+
+/**
+ * REQUEST PAYMENT — its own section, under the account, on the screen whose
+ * whole subject is money arriving.
+ *
+ * It was on the settings screen, filed under the account beside the
+ * transaction PIN, which is where somebody goes to CHANGE something rather
+ * than where they go when they need to be paid.
+ *
+ * SHARE RATHER THAN COPY, on the phone. A clipboard copy is the web's answer
+ * because a browser has nowhere to send a link; a handset has a share sheet
+ * that puts it straight into the message somebody was about to type, which is
+ * where these actually go. The value is on screen and selectable either way,
+ * because a Copy button beside an em dash is a button that copies nothing.
+ */
+function RequestPayment() {
+  const client = useXetral();
+  const styles = useStyles();
+  const colors = useTheme();
+  const profile = useLoad(() => client.profile(), [client]);
+
+  const phone = profile.data?.phone ?? null;
+  /*
+   * THE ORIGIN THIS BUILD ALREADY TALKS TO, as the fallback for a link the API
+   * could not build.
+   *
+   * With `APP_BASE_URL` unset the server returns no link, and this panel used
+   * to print "No link yet — this deployment has no public address set." to a
+   * customer, on the screen they opened in order to ASK TO BE PAID. That is an
+   * operator's problem rendered where a customer is standing, and the address
+   * was already compiled into the app. Configuration still WINS when it is
+   * set: an operator naming a canonical origin has said which one a shared
+   * link should carry.
+   */
+  const link =
+    profile.data?.link ??
+    (phone !== null && webOrigin() !== '' ? paymentLinkFor(webOrigin(), phone) : null);
+
+  const box = {
+    marginTop: space.xs,
+    paddingVertical: space.sm,
+    paddingHorizontal: space.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface2,
+  } as const;
+
+  return (
+    <Panel title="Request payment">
+      {profile.loading && <Loading />}
+
+      {profile.data !== undefined && (
+        <>
+          <Text style={styles.muted}>My Xetral number</Text>
+          {/* THE WHOLE NUMBER, country code and all, because this one is for
+              SHARING: a national number has no country in it, so a sender
+              abroad pasting one would be addressing nobody. */}
+          <View style={box}>
+            <Text style={[styles.amount, { fontSize: 18 }]} selectable>
+              {displayPhone(phone) || 'Not set'}
+            </Text>
+          </View>
+          <Button
+            label="Copy my number"
+            icon="copy"
+            quiet
+            disabled={phone === null}
+            onPress={() => {
+              if (phone === null) return;
+              // Silent on failure: a dismissed share sheet rejects on iOS,
+              // which is somebody changing their mind rather than an error.
+              void Share.share({ message: phone }).catch(() => undefined);
+            }}
+          />
+
+          <Text style={[styles.muted, { marginTop: space.sm }]}>
+            Share your link to accept payment globally.
+          </Text>
+          <View style={box}>
+            <Text style={[styles.amount, { fontSize: 14 }]} selectable>
+              {link ?? 'Not set'}
+            </Text>
+          </View>
+          <Button
+            label="Copy payment link"
+            icon="copy"
+            quiet
+            disabled={link === null}
+            onPress={() => {
+              if (link === null) return;
+              void Share.share({ message: link }).catch(() => undefined);
+            }}
+          />
+        </>
+      )}
+
+      <FormError error={profile.error} code={profile.code} />
+    </Panel>
   );
 }

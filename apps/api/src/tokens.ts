@@ -35,6 +35,10 @@ export const FX_PORT = Symbol('FX_PORT');
 /** Email. Undefined when no provider is configured, which disables password
  *  reset — there is no other way to prove control of an address. */
 export const NOTIFICATION_PORT = Symbol('NOTIFICATION_PORT');
+/** WHAT A CURRENCY IS WORTH, according to somebody who cannot deal in it.
+ *  Separate from `FX_PORT`, which quotes a price we can execute against — see
+ *  `ports/reference-rate.ts` for why the two must not be one. */
+export const REFERENCE_RATE_PORT = Symbol('REFERENCE_RATE_PORT');
 export const CLOCK = Symbol('CLOCK');
 
 /** Injected rather than read from Date.now() so expiry and rate-limit windows

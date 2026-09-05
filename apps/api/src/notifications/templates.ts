@@ -34,8 +34,20 @@ export type NotificationClass = 'security' | 'transactional';
 export type NotificationRequest =
   | {
       readonly kind: 'password_reset';
-      /** Carries the one-time token. Never logged — see `redaction.ts`. */
-      readonly resetUrl: string;
+      /**
+       * THE SIX-DIGIT CODE ITSELF, not a link.
+       *
+       * A link needs an address this deployment has been told about, and an
+       * unset `APP_BASE_URL` used to refuse the whole flow — on the one path
+       * whose premise is that the customer has nothing left. A code needs no
+       * address, and on a handset it does not send somebody out to a browser
+       * and back.
+       *
+       * It is a live credential for the minutes it lasts. Never logged — see
+       * `redaction.ts` — and the outbox body is sealed and erased on delivery,
+       * which is 012's rule and matters here more than anywhere.
+       */
+      readonly code: string;
       readonly expiresInMinutes: number;
     }
   | { readonly kind: 'password_changed'; readonly at: string }
@@ -283,9 +295,6 @@ ${escapeHtml(footer ?? 'You are receiving this because of activity on your Xetra
 </body></html>`;
 }
 
-const button = (href: string, label: string): string =>
-  `<p style="margin:22px 0;"><a href="${escapeHtml(href)}" style="display:inline-block;background:#101114;color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:9px;font-weight:600;font-size:15px;">${escapeHtml(label)}</a></p>`;
-
 /** The line every security email ends on. Naming the action a customer should
  *  take is what makes the alert useful; "if this was not you, ignore this
  *  message" is what makes it decorative. */
@@ -297,17 +306,28 @@ export function render(request: NotificationRequest): RenderedNotification {
   switch (request.kind) {
     case 'password_reset':
       return {
-        subject: 'Reset your Xetral password',
+        subject: `${request.code} is your Xetral password reset code`,
         text:
-          `Use the link below to set a new password. It expires in ` +
-          `${request.expiresInMinutes} minutes and can only be used once.\n\n` +
-          `${request.resetUrl}\n\n` +
+          `Enter this code in the Xetral app to set a new password:\n\n` +
+          `${request.code}\n\n` +
+          `It expires in ${request.expiresInMinutes} minutes and can only be used once.\n\n` +
           `If you did not ask to reset your password, you can ignore this email — ` +
           `your password has not changed.`,
         html: shell(
           'Reset your password',
-          h`<p style="margin:0 0 8px;">Use the button below to set a new password. It expires in ${request.expiresInMinutes} minutes and can only be used once.</p>` +
-            button(request.resetUrl, 'Set a new password') +
+          h`<p style="margin:0 0 12px;">Enter this code in the Xetral app to set a new password.</p>` +
+            /*
+             * THE CODE IS THE MESSAGE, so it is set large, spaced and
+             * selectable rather than dropped into a sentence. Somebody is
+             * reading six digits off one screen and typing them into another,
+             * often on the same phone, and the thing that makes that work is
+             * being able to find them at a glance.
+             *
+             * No `button()`: there is nothing to click, and a button in a
+             * reset email is exactly the shape a phishing message copies.
+             */
+            h`<p style="margin:0 0 14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:32px;font-weight:700;letter-spacing:6px;color:#101318;">${request.code}</p>` +
+            h`<p style="margin:0 0 12px;">It expires in ${request.expiresInMinutes} minutes and can only be used once.</p>` +
             h`<p style="margin:0;font-size:13px;color:#7c8089;">If you did not ask to reset your password, you can ignore this email — your password has not changed.</p>`,
           // Deliberately NOT the standard security footer. Telling somebody to
           // change their password in an email that they did not request a

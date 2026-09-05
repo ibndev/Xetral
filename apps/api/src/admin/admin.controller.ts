@@ -19,6 +19,8 @@ import { SettingsService } from '../settings/settings.service.js';
 import { ConsentService } from '../consent/consent.service.js';
 import { DataRightsService } from '../datarights/data-rights.service.js';
 import { PricingService } from '../pricing/pricing.service.js';
+import { RateFeedService } from '../fx/rate-feed.service.js';
+import type { RateSyncReport } from '../fx/rate-feed.service.js';
 import { ProviderHealthService } from '../observability/provider-health.service.js';
 import { ProviderCredentialService } from '../settings/provider-credentials.service.js';
 import { MonitoringService } from '../risk/monitoring.service.js';
@@ -241,6 +243,7 @@ export class AdminController {
     @Inject(ConsentService) private readonly consentService: ConsentService,
     @Inject(DataRightsService) private readonly rights: DataRightsService,
     @Inject(PricingService) private readonly pricing: PricingService,
+    @Inject(RateFeedService) private readonly rateFeed: RateFeedService,
     @Inject(ProviderHealthService) private readonly providerHealth: ProviderHealthService,
     @Inject(ProviderCredentialService)
     private readonly credentialStore: ProviderCredentialService,
@@ -1039,6 +1042,25 @@ export class AdminController {
   @Get('prices/fx-rates')
   async fxRates(): Promise<{ rates: readonly Record<string, unknown>[] }> {
     return { rates: await this.pricing.fxRates() };
+  }
+
+  /**
+   * FETCH EVERY RATE FROM THE FEED, NOW.
+   *
+   * The worker does this on a schedule; this is the button for the afternoon
+   * the market moves and nobody wants to wait for it. It writes exactly what
+   * the worker writes — a retirement and a new row per pair that changed —
+   * and it will not touch a rate a person published, because a deliberate
+   * price outranks a market one.
+   *
+   * A PIN, like publishing one by hand, because it IS publishing: every
+   * corridor the feed answers for is repriced and the next customer is quoted
+   * the new number.
+   */
+  @Post('prices/fx-refresh')
+  @HttpCode(200)
+  async refreshFxRates(): Promise<RateSyncReport> {
+    return this.rateFeed.sync();
   }
 
   /** Publishes a gift card rate for one brand, country, type and band. */

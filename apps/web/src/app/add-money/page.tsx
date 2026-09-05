@@ -1,6 +1,7 @@
 'use client';
 
-import { formatAmount } from '@xetral/client';
+import { useEffect, useState } from 'react';
+import { displayPhone, formatAmount, paymentLinkFor } from '@xetral/client';
 import type { Deposit } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { FormError } from '@/ui/form-error';
@@ -73,6 +74,49 @@ export default function AddMoney() {
   const usesMobileMoney = funding.includes('mobile_money');
 
   const has = account.data != null;
+
+  /*
+   * REQUEST PAYMENT LIVES HERE, on the screen whose whole subject is money
+   * arriving. It was on the settings page — filed under the account, next to
+   * the transaction PIN — which is where somebody goes to CHANGE something,
+   * not where they go when they need to be paid.
+   */
+  const profile = useLoad(() => client.profile(), [client]);
+  const [copiedPhone, setCopiedPhone] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+
+  /*
+   * THE ORIGIN THIS PAGE IS ALREADY BEING SERVED FROM, as the fallback for a
+   * link the API could not build.
+   *
+   * With `APP_BASE_URL` unset the server returns no link and this panel used
+   * to print "No link yet — this deployment has no public address set." to a
+   * customer, on the screen they opened in order to ASK TO BE PAID. That is
+   * an operator's problem rendered where a customer is standing, and the
+   * information needed to fix it was in the browser's address bar the whole
+   * time.
+   *
+   * Read in an effect rather than during render, because `window` does not
+   * exist on the server and a value that differs between the two is a
+   * hydration mismatch. Configuration still WINS when it is set — an operator
+   * who has named a canonical origin has said which one a shared link should
+   * carry.
+   */
+  const [origin, setOrigin] = useState('');
+  useEffect(() => setOrigin(window.location.origin), []);
+  const phone = profile.data?.phone ?? null;
+  const link =
+    profile.data?.link ?? (phone !== null && origin !== '' ? paymentLinkFor(origin, phone) : null);
+
+  function copy(text: string, mark: (v: boolean) => void): void {
+    if (text === '') return;
+    void navigator.clipboard
+      ?.writeText(text)
+      // A clipboard the browser refused is not worth a banner — the value is
+      // on screen and can be selected.
+      .then(() => mark(true))
+      .catch(() => undefined);
+  }
 
   return (
     <Shell>
@@ -235,6 +279,60 @@ export default function AddMoney() {
         {/* Anything that is NOT the verification gate. A provider outage or a
             signed-out session is a different problem and needs its own words. */}
         <FormError error={account.error} code={account.code} />
+      </div>
+
+      {/*
+        REQUEST PAYMENT — ITS OWN SECTION, not a row inside the account box.
+
+        Two ways to be paid, for two different people. A Xetral customer
+        paying another types a phone number, which is the one thing everybody
+        already knows about everybody they pay. The link is the answer to the
+        other question — being paid by somebody NOT on Xetral, in another
+        country, out of a message thread.
+
+        BOTH VALUES ARE ON SCREEN, ABOVE THEIR BUTTONS. A Copy button beside
+        an em dash is a button that copies nothing and says nothing about why;
+        what is shown is what is copied, so a customer can read it back over a
+        phone call when the clipboard is not the answer.
+      */}
+      <div className="card">
+        <div className="section-head">
+          <h2>Request payment</h2>
+        </div>
+
+        <div className="copy-row">
+          <span className="copy-label">My Xetral number</span>
+          {/*
+            THE WHOLE NUMBER, country code and all, because this one is for
+            SHARING. `nationalPhone` is right where somebody reads their own
+            number back to themselves; here it would hand a sender abroad a
+            string with no country in it.
+          */}
+          <div className="copy-value mono">{displayPhone(phone) || 'Not set'}</div>
+          <button
+            type="button"
+            className="ghost small"
+            disabled={phone === null}
+            onClick={() => copy(phone ?? '', setCopiedPhone)}
+          >
+            <Icon name="copy" size={15} /> {copiedPhone ? 'Copied' : 'Copy my number'}
+          </button>
+        </div>
+
+        <div className="copy-row">
+          <span className="copy-label">Share your link to accept payment globally.</span>
+          <div className="copy-value mono link">{link ?? 'Not set'}</div>
+          <button
+            type="button"
+            className="ghost small"
+            disabled={link === null}
+            onClick={() => copy(link ?? '', setCopiedLink)}
+          >
+            <Icon name="copy" size={15} /> {copiedLink ? 'Copied' : 'Copy payment link'}
+          </button>
+        </div>
+
+        <FormError error={profile.error} code={profile.code} />
       </div>
 
       {/*

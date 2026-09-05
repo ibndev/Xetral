@@ -552,6 +552,31 @@ export const PROVIDERS: readonly Item[] = [
       'an inbox nothing would reach.',
   },
   {
+    name: 'EXCHANGERATE_API_KEY',
+    kind: 'env',
+    failure: 'silent',
+    flow: 'FX pricing',
+    ifMissed:
+      'THE FEED DOES NOTHING AND NOTHING ERRORS. Every corridor goes on ' +
+      'quoting whatever was last published by hand, which on a fresh ' +
+      'deployment is nothing at all — and an unpublished pair is refused ' +
+      'rather than quoted from a default. The credential store is ' +
+      'authoritative and this is the fallback.',
+  },
+  {
+    name: 'FX_RATE_SYNC_INTERVAL_SECONDS',
+    kind: 'env',
+    failure: 'silent',
+    singleInstance: true,
+    flow: 'FX pricing',
+    ifMissed:
+      'RATES ARE NEVER REFRESHED. Not an error and not always wrong — a ' +
+      'deployment that publishes its rates by hand is legitimate — but if ' +
+      'nobody is, customers are quoted a price from whenever somebody last ' +
+      'had time. `stale_reference_rates` is what sees it. A day is the ' +
+      'natural value: the feed itself refreshes once a day.',
+  },
+  {
     name: 'NOTIFICATION_FROM',
     kind: 'env',
     failure: 'silent',
@@ -1416,6 +1441,17 @@ export const CREDENTIALS: readonly Item[] = [
     ifMissed:
       'enqueueing still succeeds and nothing sends. `available` is not '  +
       '`deliverable`.',
+  },
+  {
+    name: 'exchangerate.api_key',
+    kind: 'credential',
+    failure: 'silent',
+    flow: 'FX pricing',
+    ifMissed:
+      'the sync worker does nothing and says so. Rates stay at whatever was ' +
+      'last published by hand — no error anywhere, just an old number quoted ' +
+      'to customers. Free-tier keys have a request quota, which is why this ' +
+      'is replaceable without a deploy.',
   },
   {
     name: 'resend.api_key',

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
-import { Animated, Pressable, ScrollView, Text, View } from 'react-native';
+import { Animated, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Link, router, usePathname } from 'expo-router';
 import { Icon } from '@/icon';
@@ -206,17 +206,44 @@ export function Shell({
         <ThemeToggle />
       </View>
 
-      {scroll ? (
-        <ScrollView
-          style={{ flex: 1 }}
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ paddingBottom: space.xxl }}
-        >
-          {body}
-        </ScrollView>
-      ) : (
-        <View style={{ flex: 1 }}>{body}</View>
-      )}
+      {/*
+        THE KEYBOARD MUST NOT COVER THE FIELD BEING TYPED IN.
+        
+        Here rather than on each screen, for the reason the entrance animation
+        is: a fix a screen has to remember to apply is a fix some screen will
+        not have. Every signed-in screen in this app goes through `Shell`.
+        
+        `padding` ON iOS AND `height` ON ANDROID, and both are computed from
+        the OVERLAP between this view's frame and the keyboard rather than
+        from the keyboard's height. That is what makes it correct under either
+        Android behaviour: where the window has already been resized by
+        `adjustResize` the frame no longer overlaps and this adds nothing,
+        and where it has not — which is what edge-to-edge on Android 15
+        brought — the frame is shortened by exactly the amount that was
+        covered. Adding the keyboard's height unconditionally would double up
+        in the first case and leave a gap the size of a keyboard under the
+        content.
+        
+        Shortening the ScrollView is also what makes the field VISIBLE rather
+        than merely reachable: with a correct visible rect, both platforms
+        scroll a newly focused TextInput into it themselves.
+      */}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        {scroll ? (
+          <ScrollView
+            style={{ flex: 1 }}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={{ paddingBottom: space.xxl }}
+          >
+            {body}
+          </ScrollView>
+        ) : (
+          <View style={{ flex: 1 }}>{body}</View>
+        )}
+      </KeyboardAvoidingView>
 
       {overlay}
 

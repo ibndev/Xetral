@@ -4,8 +4,8 @@ import {
   WeakPasswordError,
   assertPasswordPolicy,
   hashPassword,
-  hashPasswordResetToken,
-  issuePasswordResetToken,
+  hashPasswordResetCode,
+  issuePasswordResetCode,
 } from '@xetral/identity';
 import type { PasswordResetOutcome } from '@xetral/identity';
 import { API_CONFIG, DATABASE } from '../tokens.js';
@@ -36,6 +36,24 @@ import { NotificationService } from '../notifications/notification.service.js';
 const INVALID_GRANT = { error: 'invalid_grant' } as const;
 const WEAK_PASSWORD = { error: 'weak_password' } as const;
 const RESET_UNAVAILABLE = { error: 'password_reset_unavailable' } as const;
+const TOO_MANY_ATTEMPTS = { error: 'reset_code_attempts' } as const;
+
+/**
+ * HOW MANY WRONG CODES BEFORE EVERY LIVE ONE IS BURNT.
+ *
+ * Five, which is the number the transaction PIN already uses — the same
+ * judgement about how many times a real person mistypes six digits, and one a
+ * customer has met before. Against a million values it leaves an attacker a
+ * one-in-two-hundred-thousand chance per issued code, and asking for another
+ * costs them the per-identifier rate limit on `/forgot`.
+ *
+ * A CONSTANT RATHER THAN A SETTING, deliberately. A `platform_settings` row is
+ * for an operational decision somebody takes under pressure — a fee, a kill
+ * switch — and the pressure here always points one way: a customer is locked
+ * out and on the phone. This is the number that makes a short code safe at
+ * all, and it should take a release to change.
+ */
+const MAX_CODE_ATTEMPTS = 5;
 
 interface ResetTargetRow {
   id: string;
@@ -71,10 +89,14 @@ export class PasswordResetService {
       throw new ServiceUnavailableException(RESET_UNAVAILABLE);
     }
 
-    // Minted BEFORE the lookup and unconditionally. Doing this work only when
-    // an account exists is the timing difference the whole design is trying to
-    // avoid — and it is the version somebody writes when tidying up.
-    const issued = issuePasswordResetToken();
+    /*
+     * A CODE IS MINTED BEFORE THE LOOKUP AND UNCONDITIONALLY, against a
+     * placeholder id. Doing this work only when an account exists is the
+     * timing difference the whole design is trying to avoid — and it is
+     * exactly the version somebody writes when tidying up. It is re-minted
+     * against the real id below, because the id is part of what is signed.
+     */
+    let issued = issuePasswordResetCode('0', this.config.accessTokenKeyring.current.secret);
 
     const client = await this.pool.connect();
     try {
@@ -90,6 +112,8 @@ export class PasswordResetService {
         return;
       }
 
+      issued = issuePasswordResetCode(user.id, this.config.accessTokenKeyring.current.secret);
+
       await client.query(
         `INSERT INTO password_reset_tokens (user_id, token_hash, requested_ip, expires_at)
          VALUES ($1::bigint, $2, $3, now() + make_interval(mins => $4::int))`,
@@ -99,14 +123,14 @@ export class PasswordResetService {
       await this.notifications.enqueue(client, {
         userId: user.id,
         recipient: user.email,
-        // Keyed on the TOKEN HASH, not on the user or the minute. Two requests
-        // seconds apart are two different reset links and both must be sent —
-        // the customer may only ever see one of the emails. Keying on the user
-        // would silently drop the second.
+        // Keyed on the CODE'S HASH, not on the user or the minute. Two
+        // requests seconds apart are two different codes and both must be
+        // sent — the customer may only ever see one of the emails. Keying on
+        // the user would silently drop the second.
         idempotencyKey: `password_reset:${issued.hash}`,
         request: {
           kind: 'password_reset',
-          resetUrl: this.#resetUrl(issued.token),
+          code: issued.code,
           expiresInMinutes: this.config.passwordResetTtlMinutes,
         },
       });
@@ -123,11 +147,16 @@ export class PasswordResetService {
   /**
    * Finish a reset.
    *
-   * The password policy is checked BEFORE the token is spent. A customer whose
-   * new password is too short should get another go with the link they are
+   * TAKES THE IDENTIFIER AS WELL AS THE CODE, and that pair is what makes six
+   * digits safe. A code on its own would be a guess against every account at
+   * once — a million tries lands somewhere — where a code beside one
+   * identifier is a guess against one account, under a ceiling.
+   *
+   * The password policy is checked BEFORE the code is spent. A customer whose
+   * new password is too short should get another go with the code they are
    * holding, rather than having it consumed by a request that changed nothing.
    */
-  async reset(token: string, newPassword: string): Promise<void> {
+  async reset(identifier: string, code: string, newPassword: string): Promise<void> {
     try {
       assertPasswordPolicy(newPassword);
     } catch (error) {
@@ -139,23 +168,64 @@ export class PasswordResetService {
 
     const passwordHash = await hashPassword(newPassword);
 
-    // Everything else — spending the token, killing the sibling tokens,
-    // setting the credential, revoking every session — happens inside
-    // `consume_password_reset_token`, in one transaction. See the header of
-    // 013_password_reset.sql for why that is not service code.
+    const client = await this.pool.connect();
+    let user: ResetTargetRow | undefined;
+    try {
+      user = await this.#findTarget(client, identifier);
+    } finally {
+      client.release();
+    }
+
+    if (user === undefined) {
+      // THE SAME REFUSAL AS A WRONG CODE. Answering differently for an address
+      // with no account would turn this endpoint into the account-enumeration
+      // oracle that `/forgot` goes to such lengths not to be.
+      this.#logger.warn('password reset presented for an address with no account');
+      throw new UnauthorizedException(INVALID_GRANT);
+    }
+
+    /*
+     * NON-DIGITS STRIPPED BEFORE HASHING. A code arrives out of an email with
+     * a space in the middle, or carrying whatever a mail client wrapped the
+     * line in. Refusing that is refusing a customer for their mail client's
+     * formatting, on the flow they reach when they have nothing else left.
+     */
+    const digits = code.replace(/[^0-9]/g, '');
+
+    // Everything else — spending the code, counting the guess, killing the
+    // sibling codes, setting the credential, revoking every session — happens
+    // inside `consume_password_reset_code`, in one transaction. See the header
+    // of 056_reset_codes.sql for why that is not service code.
     const result = await this.pool.query<{
       out_outcome: PasswordResetOutcome;
       out_user_id: string | null;
-    }>(`SELECT out_outcome, out_user_id FROM consume_password_reset_token($1, $2)`, [
-      hashPasswordResetToken(token),
+    }>(`SELECT out_outcome, out_user_id FROM consume_password_reset_code($1::bigint, $2, $3, $4)`, [
+      user.id,
+      hashPasswordResetCode(user.id, digits, this.config.accessTokenKeyring.current.secret),
       passwordHash,
+      MAX_CODE_ATTEMPTS,
     ]);
 
     const row = result.rows[0];
+    if (row?.out_outcome === 'too_many_attempts') {
+      /*
+       * SAID OUT LOUD, unlike the other three refusals.
+       *
+       * "Expired" and "never existed" must stay indistinguishable, because
+       * telling somebody which way their guess failed tells them whether it
+       * was ever real. This one tells an attacker only what they already know
+       * — they have been guessing — and tells the REAL customer the one thing
+       * that gets them out of the loop: ask for a new code, because retyping
+       * this one will never work again.
+       */
+      this.#logger.warn('password reset refused: the attempt ceiling was reached');
+      throw new UnauthorizedException(TOO_MANY_ATTEMPTS);
+    }
+
     if (row === undefined || row.out_outcome !== 'consumed') {
-      // ONE response for all three failures. Distinguishing "expired" from
-      // "never existed" would tell a prober which of their guesses was a real
-      // token, which is the only information they were missing.
+      // ONE response for the rest. Distinguishing "expired" from "never
+      // existed" would tell a prober which of their guesses was a real code,
+      // which is the only information they were missing.
       this.#logger.warn(`password reset refused: ${row?.out_outcome ?? 'no result'}`);
       throw new UnauthorizedException(INVALID_GRANT);
     }
@@ -197,19 +267,15 @@ export class PasswordResetService {
    * locked-out customer to check an inbox nothing was ever going to arrive in.
    * Found by booting the built bundle and calling it, which is the fifth time
    * that has been the thing that found something here.
+   *
+   * IT NO LONGER ASKS FOR `APP_BASE_URL`, and that is the point of the whole
+   * change. A link needs an address; a CODE does not. This condition refusing
+   * on an unset deployment value is what put "Password resets are unavailable
+   * right now. Contact support." in front of customers — on the one flow whose
+   * entire premise is that they have nothing left to contact support with.
    */
   get available(): boolean {
-    return this.notifications.deliverable && this.config.appBaseUrl !== undefined;
-  }
-
-  #resetUrl(token: string): string {
-    // The origin comes from configuration and NEVER from a request header. A
-    // `Host` or `X-Forwarded-Host` an attacker controls would turn our own
-    // reset email into a credential harvester carrying our branding — the
-    // classic host-header poisoning attack, and this flow is its textbook
-    // target.
-    const base = this.config.appBaseUrl ?? '';
-    return `${base}/reset-password?token=${encodeURIComponent(token)}`;
+    return this.notifications.deliverable;
   }
 
   async #findTarget(client: PoolClient, identifier: string): Promise<ResetTargetRow | undefined> {

@@ -20,7 +20,6 @@ import { LoginRateLimitGuard, PasswordResetRateLimitGuard } from './login-rate-l
 import { countryFrom } from './sign-in-events.service.js';
 import {
   changePasswordSchema,
-  chooseHandleSchema,
   forgotPasswordSchema,
   loginSchema,
   registerSchema,
@@ -292,7 +291,7 @@ export class AuthController {
    *
    * 204 with no body: there is no session here. The customer signs in with the
    * password they just set, which is also what proves the reset worked. Issuing
-   * a token pair from this endpoint would mean a leaked reset link grants an
+   * a token pair from this endpoint would mean a leaked code grants an
    * immediate live session rather than merely a password that can be used —
    * and every session on the account was just revoked for that same reason.
    */
@@ -307,7 +306,7 @@ export class AuthController {
         fields: parsed.error.issues.map((issue) => issue.path.join('.')),
       });
     }
-    await this.resets.reset(parsed.data.token, parsed.data.new_password);
+    await this.resets.reset(parsed.data.identifier, parsed.data.code, parsed.data.new_password);
   }
 
   /**
@@ -377,46 +376,18 @@ export class AuthController {
    * invite it to cache a countdown that the next revocation makes a lie.
    */
   /**
-   * The customer's own payment handle and link.
+   * The customer's own payment link.
    *
-   * A GET that WRITES on its first call, which is worth naming: it mints a
-   * handle if there is none. That is idempotent — the second call returns the
-   * same one — so it is safe to repeat, and minting at registration instead
-   * would put a uniqueness retry inside the one transaction that must not
-   * fail.
+   * A PURE READ. It used to mint an `@handle` on its first call — a GET that
+   * wrote — and there is nothing to mint any more: the link is built from the
+   * phone number the account already has, which is the one identifier this
+   * product uses.
    */
   @Get('profile')
   async profileMine(@Req() request: AuthenticatedRequest): Promise<ProfileView> {
     const auth = request.auth;
     if (auth === undefined) throw new UnauthorizedException({ error: 'invalid_token' });
     return this.profile.mine(auth.sub);
-  }
-
-  /**
-   * Change it.
-   *
-   * PIN'd, and NOT because it moves money — it moves none. Because it
-   * reaches every link this customer has already published: 039 refuses a
-   * released handle to anybody else, so a stolen session cannot redirect
-   * their payments, but it CAN make every link they have shared stop
-   * resolving to a name.
-   */
-  @Post('profile/handle')
-  @HttpCode(200)
-  async profileHandle(
-    @Body() body: unknown,
-    @Req() request: AuthenticatedRequest,
-  ): Promise<ProfileView> {
-    const auth = request.auth;
-    if (auth === undefined) throw new UnauthorizedException({ error: 'invalid_token' });
-    const parsed = chooseHandleSchema.safeParse(body);
-    if (!parsed.success) {
-      throw new BadRequestException({
-        error: 'invalid_request',
-        fields: parsed.error.issues.map((i) => i.path.join('.')),
-      });
-    }
-    return this.profile.choose(auth.sub, parsed.data.handle);
   }
 
   @Post('totp/elevate')

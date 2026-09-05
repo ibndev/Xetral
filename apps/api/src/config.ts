@@ -346,6 +346,18 @@ export interface ApiConfig {
    * loudly for that reason.
    */
   readonly riskMonitorIntervalSeconds: number | undefined;
+  /**
+   * How often reference rates are refreshed, on exactly ONE instance.
+   *
+   * Unset means never, and that is a real deployment: rates published by hand
+   * are still rates. What it must not be is unset by accident, because the
+   * symptom is a corridor quoting a price from whenever somebody last had
+   * time — no error, no failed request, just an old number.
+   *
+   * A DAY is the natural value: the free tier of the feed refreshes once a
+   * day, so a shorter interval spends quota to be told the same thing.
+   */
+  readonly fxRateSyncIntervalSeconds: number | undefined;
 
   readonly requestRateLimit: {
     readonly windowSeconds: number;
@@ -371,6 +383,15 @@ export interface ApiConfig {
    * records about the retired Bitnob v1 credential.
    */
   readonly brevoApiKey: string | undefined;
+  /**
+   * ExchangeRate-API's v6 key, which keeps every FX corridor priced.
+   *
+   * The FALLBACK, as 026 requires: the credential store is authoritative and
+   * this is what is read before anything has been pasted into it. Without
+   * either, the sync worker does nothing and says so — and rates stay at
+   * whatever was last published by hand, which is not an error anywhere.
+   */
+  readonly exchangeRateApiKey: string | undefined;
   readonly notificationFrom: string | undefined;
   readonly notificationReplyTo: string | undefined;
   /**
@@ -844,6 +865,7 @@ export function loadConfig(env: Env): ApiConfig {
     retentionIntervalSeconds: optionalInteger(env, 'RETENTION_INTERVAL_SECONDS'),
     balanceReconcileIntervalSeconds: optionalInteger(env, 'BALANCE_RECONCILE_INTERVAL_SECONDS'),
     riskMonitorIntervalSeconds: optionalInteger(env, 'RISK_MONITOR_INTERVAL_SECONDS'),
+    fxRateSyncIntervalSeconds: optionalInteger(env, 'FX_RATE_SYNC_INTERVAL_SECONDS'),
     requestRateLimit: {
       windowSeconds: integer(env, 'REQUEST_RATE_LIMIT_WINDOW_SECONDS', 60),
       // Generous, because an unauthenticated request has only an address to
@@ -878,6 +900,7 @@ export function loadConfig(env: Env): ApiConfig {
       },
     },
     brevoApiKey: optional(env, 'BREVO_API_KEY'),
+    exchangeRateApiKey: optional(env, 'EXCHANGERATE_API_KEY'),
     notificationFrom: optional(env, 'NOTIFICATION_FROM'),
     notificationReplyTo: optional(env, 'NOTIFICATION_REPLY_TO'),
     notificationIntervalSeconds: optionalInteger(env, 'NOTIFICATION_INTERVAL_SECONDS'),

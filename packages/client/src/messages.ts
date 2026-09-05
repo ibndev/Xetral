@@ -109,10 +109,6 @@ function sentenceFor(error: ApiError): string {
       return 'That device is not on your account.';
     case 'account_not_active':
       return 'This account cannot make transactions right now.';
-    case 'feature_unavailable':
-      // Names the product, not the schema. A customer cannot act on a missing
-      // migration and should not be asked to try again at one.
-      return 'That part of Xetral is not switched on yet. We are on it.';
     case 'country_not_supported':
       // One sentence for "no such country" and "not open there", because the
       // API answers the same for both.
@@ -231,8 +227,14 @@ function sentenceFor(error: ApiError): string {
       return 'Too many attempts. Wait fifteen minutes and try again.';
     case 'password_reset_unavailable':
       // NOT user-fixable, and the words must not send somebody round a loop
-      // that cannot end. Nothing they type changes this.
+      // that cannot end. Nothing they type changes this. It now means one
+      // thing only — no email provider is configured — because a reset is a
+      // CODE and no longer needs this deployment to know its own address.
       return 'Password resets are unavailable right now. Contact support.';
+    case 'reset_code_attempts':
+      // Names the way out. "Invalid code" would be true and would leave
+      // somebody retyping a code that can never work again.
+      return 'Too many incorrect codes. Ask for a new one and try again.';
     case 'current_pin_required':
       return 'Enter your current PIN to change it.';
     case 'account_closed':
@@ -300,10 +302,6 @@ function sentenceFor(error: ApiError): string {
       return 'Recovery is not available on this deployment yet — migration 049 has not been applied.';
     case 'not_recoverable':
       return 'That is no longer waiting to be recovered. Reload the queue.';
-    case 'handle_taken':
-      return 'That handle is not available. Try another.';
-    case 'handle_invalid':
-      return 'Handles are 3–20 characters: letters, numbers and underscores, starting and ending with a letter or number.';
 
     /* purchases */
     case 'purchase_failed':

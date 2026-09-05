@@ -6,6 +6,8 @@ import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
 import { AdminError } from '../access';
 import { Select } from '@/ui/select';
+import { Icon } from '@/ui/icon';
+import Link from 'next/link';
 
 /**
  * What a customer will be quoted, and the only place it can be set.
@@ -123,11 +125,35 @@ export default function Prices() {
         through a provider.
       */}
       <div className="panel">
-        <h2>Exchange rates</h2>
+        <div className="section-head">
+          <h2>Exchange rates</h2>
+          {/*
+            FETCH THEM NOW. The worker does this daily; this is the button for
+            the afternoon the market moves. It republishes only what changed
+            and never touches a rate a person published — a deliberate price
+            outranks a market one.
+          */}
+          <button
+            type="button"
+            className="ghost small"
+            disabled={busy}
+            onClick={() => {
+              // `act` reloads the table and clears the PIN, so the feedback
+              // is the ages resetting to minutes — which is the number that
+              // matters here anyway.
+              void act(() => admin.refreshFxRates(pin));
+            }}
+          >
+            <Icon name="swap" size={15} /> Refresh from the market
+          </button>
+        </div>
         <p className="lead">
           What we sell a currency for, in the direction stated. A pair with a
           rate here is one we quote ourselves; a pair with none is quoted by
-          the provider.
+          the provider. Rates marked automatic are refreshed from
+          ExchangeRate-API — paste its key at{' '}
+          <Link href="/admin/credentials">Credentials</Link> — and one you
+          publish by hand is never overwritten.
         </p>
         {(rates.data?.length ?? 0) === 0 && (
           <p className="empty">
@@ -144,6 +170,7 @@ export default function Prices() {
                   <th>Rate</th>
                   <th>Our margin</th>
                   <th>Published by</th>
+                  <th>Age</th>
                 </tr>
               </thead>
               <tbody>
@@ -166,7 +193,19 @@ export default function Prices() {
                         `${(row.spread_basis_points / 100).toFixed(2)}%`
                       )}
                     </td>
-                    <td>{row.created_by ?? <em>at a prompt</em>}</td>
+                    <td>
+                      {row.source === 'reference_feed' ? (
+                        <span className="badge">automatic</span>
+                      ) : (
+                        (row.created_by ?? <em>at a prompt</em>)
+                      )}
+                    </td>
+                    {/*
+                      HOW OLD, because the way this feature fails is that the
+                      feed stops and nothing errors: the rows stay, this table
+                      renders, and customers are quoted whatever it last said.
+                    */}
+                    <td className="mono">{ageOf(row.age_seconds)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -594,4 +633,21 @@ function PublishFxRate({
       </button>
     </form>
   );
+}
+
+/**
+ * How long ago, in words an operator can act on.
+ *
+ * The number that matters here is not the rate, it is its AGE — the way this
+ * feature fails is that the feed stops and nothing errors, so the table goes
+ * on rendering a plausible price from whenever it last worked. Whole days once
+ * it is past one, because "3 days" is a decision and "72h" is arithmetic.
+ */
+function ageOf(seconds: string | number | undefined): string {
+  if (seconds === undefined) return '—';
+  const value = typeof seconds === 'string' ? Number(seconds) : seconds;
+  if (!Number.isFinite(value)) return '—';
+  if (value < 3600) return `${Math.max(0, Math.round(value / 60))}m`;
+  if (value < 86_400) return `${Math.round(value / 3600)}h`;
+  return `${Math.round(value / 86_400)}d`;
 }

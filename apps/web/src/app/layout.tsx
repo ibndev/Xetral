@@ -4,6 +4,7 @@ import { headers } from 'next/headers';
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 import { LogoGradient } from '@/ui/logo';
+import { KeyboardAware } from '@/ui/keyboard-aware';
 
 /*
  * The three families from the approved design, SELF-HOSTED.
@@ -135,6 +136,13 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
           id in one document — is not necessary.
         */}
         <LogoGradient />
+        {/*
+          THE KEYBOARD MUST NOT COVER THE FIELD BEING TYPED IN. Here rather
+          than on each screen, for the reason the theme bootstrap is: a fix a
+          page has to remember to apply is a fix some page will not have. It
+          renders nothing.
+        */}
+        <KeyboardAware />
         {children}
       </body>
     </html>

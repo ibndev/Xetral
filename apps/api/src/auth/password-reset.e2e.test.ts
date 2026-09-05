@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
 import { ExpressAdapter } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
@@ -20,7 +20,7 @@ import { NotificationWorker } from '../notifications/notification.worker.js';
  *
  * The parts worth proving here are the ones no unit test can reach: that a
  * request for an unknown address is INDISTINGUISHABLE from one for a real
- * customer, that the token in the email actually works exactly once, and that
+ * customer, that the code in the email actually works exactly once, and that
  * using it ends every session that was open on the account.
  *
  * The email provider is a stand-in — this suite is about Xetral, not about
@@ -83,7 +83,7 @@ const login = async (identifier: string, password: string) =>
     });
 
 /** The reset link as the customer would receive it, read out of the outbox. */
-async function linkFor(userId: string): Promise<string> {
+async function codeFor(userId: string): Promise<string> {
   const row = await pool.query<{ payload_sealed: string }>(
     `SELECT payload_sealed FROM notification_outbox
       WHERE user_id = $1::bigint AND kind = 'password_reset' AND status = 'pending'
@@ -97,8 +97,11 @@ async function linkFor(userId: string): Promise<string> {
   if (keyring === undefined) throw new Error('the fixture has no keyring');
   const rendered = JSON.parse(open(sealed, keyring)) as { text: string };
 
-  const match = /https:\/\/\S+/.exec(rendered.text);
-  if (match === null) throw new Error(`no link in the email body: ${rendered.text}`);
+  // The six digits, out of the body the customer will read. Not a link: a
+  // reset is a code now, because a link needs an address this deployment may
+  // never have been told.
+  const match = /\b[0-9]{6}\b/.exec(rendered.text);
+  if (match === null) throw new Error(`no code in the email body: ${rendered.text}`);
   return match[0];
 }
 
@@ -115,8 +118,7 @@ async function idFor(userId: string): Promise<string> {
   return id;
 }
 
-const tokenFrom = (link: string): string =>
-  new URL(link).searchParams.get('token') ?? '';
+
 
 beforeAll(async () => {
   pool = new pg.Pool({ connectionString: DATABASE_URL, max: 6 });
@@ -143,7 +145,7 @@ afterAll(async () => {
 });
 
 describe('asking for a reset', () => {
-  it('answers 204 and queues a link for a real customer', async () => {
+  it('answers 204 and queues a code for a real customer', async () => {
     const { userId, email } = await seedCustomer();
 
     await request(app.getHttpServer())
@@ -151,8 +153,8 @@ describe('asking for a reset', () => {
       .send({ identifier: email })
       .expect(204);
 
-    const link = await linkFor(userId);
-    expect(link).toContain('/reset-password?token=');
+    const code = await codeFor(userId);
+    expect(code).toMatch(/^[0-9]{6}$/);
   });
 
   it('answers 204 for an address with NO account', async () => {
@@ -191,7 +193,7 @@ describe('asking for a reset', () => {
     expect(after.rows[0]?.n).toBe(before.rows[0]?.n);
   });
 
-  it('stores only a hash, never the token that was mailed', async () => {
+  it('stores only a hash, never the code that was mailed', async () => {
     const { userId } = await seedCustomer();
     const seeded = await pool.query<{ email: string }>(
       `SELECT email FROM users WHERE id = $1::bigint`,
@@ -202,7 +204,7 @@ describe('asking for a reset', () => {
       .send({ identifier: seeded.rows[0]?.email })
       .expect(204);
 
-    const token = tokenFrom(await linkFor(userId));
+    const code = await codeFor(userId);
     const stored = await pool.query<{ token_hash: string }>(
       `SELECT token_hash FROM password_reset_tokens WHERE user_id = $1::bigint`,
       [userId],
@@ -210,10 +212,14 @@ describe('asking for a reset', () => {
 
     expect(stored.rows).toHaveLength(1);
     expect(stored.rows[0]?.token_hash).toMatch(/^[0-9a-f]{64}$/);
-    expect(stored.rows[0]?.token_hash).not.toBe(token);
+    expect(stored.rows[0]?.token_hash).not.toBe(code);
+    // AND THE HASH IS KEYED. A plain digest of six digits IS the six digits to
+    // anybody holding a dump — a million SHA-256s is under a second — so the
+    // stored value must not be one.
+    expect(stored.rows[0]?.token_hash).not.toBe(createHash('sha256').update(code).digest('hex'));
   });
 
-  it('two requests produce two usable links, not one', async () => {
+  it('two requests produce two usable codes, not one', async () => {
     // Keyed on the token hash rather than on the customer. Keying on the user
     // would make the second request a replay and silently drop it — and the
     // customer may only ever see one of the two emails.
@@ -237,7 +243,7 @@ describe('asking for a reset', () => {
   });
 });
 
-describe('using the link', () => {
+describe('using the code', () => {
   it('sets the new password, and the old one stops working', async () => {
     const { userId, email } = await seedCustomer();
     await request(app.getHttpServer())
@@ -245,11 +251,11 @@ describe('using the link', () => {
       .send({ identifier: email })
       .expect(204);
 
-    const token = tokenFrom(await linkFor(userId));
+    const code = await codeFor(userId);
 
     await request(app.getHttpServer())
       .post('/v1/auth/password/reset')
-      .send({ token, new_password: NEW_PASSWORD })
+      .send({ identifier: email, code, new_password: NEW_PASSWORD })
       .expect(204);
 
     await login(email, NEW_PASSWORD).then((r) => expect(r.status).toBe(200));
@@ -257,7 +263,7 @@ describe('using the link', () => {
   });
 
   it('issues NO tokens', async () => {
-    // A leaked reset link must grant a password that can be used, not an
+    // A leaked reset code must grant a password that can be used, not an
     // immediate live session. Returning a token pair here would undo the
     // session revocation two tests below in the same breath.
     const { userId, email } = await seedCustomer();
@@ -268,7 +274,7 @@ describe('using the link', () => {
 
     const res = await request(app.getHttpServer())
       .post('/v1/auth/password/reset')
-      .send({ token: tokenFrom(await linkFor(userId)), new_password: NEW_PASSWORD });
+      .send({ identifier: email, code: await codeFor(userId), new_password: NEW_PASSWORD });
 
     expect(res.status).toBe(204);
     expect(res.text).toBe('');
@@ -297,7 +303,7 @@ describe('using the link', () => {
       .expect(204);
     await request(app.getHttpServer())
       .post('/v1/auth/password/reset')
-      .send({ token: tokenFrom(await linkFor(userId)), new_password: NEW_PASSWORD })
+      .send({ identifier: email, code: await codeFor(userId), new_password: NEW_PASSWORD })
       .expect(204);
 
     const live = await pool.query<{ n: string }>(
@@ -316,22 +322,22 @@ describe('using the link', () => {
     expect(refreshed.status).toBe(401);
   });
 
-  it('refuses the same token a second time', async () => {
+  it('refuses the same code a second time', async () => {
     const { userId, email } = await seedCustomer();
     await request(app.getHttpServer())
       .post('/v1/auth/password/forgot')
       .send({ identifier: email })
       .expect(204);
 
-    const token = tokenFrom(await linkFor(userId));
+    const code = await codeFor(userId);
     await request(app.getHttpServer())
       .post('/v1/auth/password/reset')
-      .send({ token, new_password: NEW_PASSWORD })
+      .send({ identifier: email, code, new_password: NEW_PASSWORD })
       .expect(204);
 
     const replay = await request(app.getHttpServer())
       .post('/v1/auth/password/reset')
-      .send({ token, new_password: 'a-third-password-entirely' });
+      .send({ identifier: email, code, new_password: 'a-third-password-entirely' });
 
     expect(replay.status).toBe(401);
     expect(replay.body.error).toBe('invalid_grant');
@@ -341,50 +347,88 @@ describe('using the link', () => {
     await login(email, NEW_PASSWORD).then((r) => expect(r.status).toBe(200));
   });
 
-  it('answers the same way for an unknown token as for a used one', async () => {
+  it('answers the same way for an unknown code as for a used one', async () => {
     const { userId, email } = await seedCustomer();
     await request(app.getHttpServer())
       .post('/v1/auth/password/forgot')
       .send({ identifier: email })
       .expect(204);
-    const token = tokenFrom(await linkFor(userId));
+    const code = await codeFor(userId);
     await request(app.getHttpServer())
       .post('/v1/auth/password/reset')
-      .send({ token, new_password: NEW_PASSWORD })
+      .send({ identifier: email, code, new_password: NEW_PASSWORD })
       .expect(204);
 
     const used = await request(app.getHttpServer())
       .post('/v1/auth/password/reset')
-      .send({ token, new_password: NEW_PASSWORD });
+      .send({ identifier: email, code, new_password: NEW_PASSWORD });
     const invented = await request(app.getHttpServer())
       .post('/v1/auth/password/reset')
-      .send({ token: 'not-a-real-token-at-all', new_password: NEW_PASSWORD });
+      .send({ identifier: email, code: '000000', new_password: NEW_PASSWORD });
 
     // Distinguishing them would tell a prober which of their guesses was a
-    // real token, which is the only thing they were missing.
+    // real code, which is the only thing they were missing.
     expect(invented.status).toBe(used.status);
     expect(invented.body).toEqual(used.body);
   });
 
-  it('does not spend the token on a password the policy refuses', async () => {
-    // Checked before the token is consumed, so a customer who picks something
-    // too short gets another go with the link they are holding.
+  it('burns every live code after five wrong ones, and says so', async () => {
+    /*
+     * THE CEILING IS WHAT MAKES SIX DIGITS SAFE AT ALL. A million values is a
+     * number an attacker walks through given enough requests, so the count is
+     * kept in a COLUMN — an attacker's loop outlives a pod restart and an
+     * in-process counter does not — and it is charged against the customer's
+     * LIVE CODES rather than against the row a guess matched, because a wrong
+     * guess matches no row at all.
+     */
+    const { email } = await seedCustomer();
+    await request(app.getHttpServer())
+      .post('/v1/auth/password/forgot')
+      .send({ identifier: email })
+      .expect(204);
+
+    for (let i = 0; i < 4; i++) {
+      const wrong = await request(app.getHttpServer())
+        .post('/v1/auth/password/reset')
+        .send({ identifier: email, code: '000001', new_password: NEW_PASSWORD });
+      expect(wrong.status).toBe(401);
+      expect(wrong.body.error).toBe('invalid_grant');
+    }
+
+    const fifth = await request(app.getHttpServer())
+      .post('/v1/auth/password/reset')
+      .send({ identifier: email, code: '000001', new_password: NEW_PASSWORD });
+    // SAID OUT LOUD, unlike the other refusals. It tells an attacker only what
+    // they already know, and tells the real customer the one thing that gets
+    // them out of the loop: ask for a new code.
+    expect(fifth.status).toBe(401);
+    expect(fifth.body.error).toBe('reset_code_attempts');
+
+    // AND THE PASSWORD DID NOT CHANGE. The ceiling must not be a way to lock
+    // somebody out of the account they are trying to recover — the old
+    // password still signs in until a right code is presented.
+    await login(email, PASSWORD).then((r) => expect(r.status).toBe(200));
+  });
+
+  it('does not spend the code on a password the policy refuses', async () => {
+    // Checked before the code is consumed, so a customer who picks something
+    // too short gets another go with the code they are holding.
     const { userId, email } = await seedCustomer();
     await request(app.getHttpServer())
       .post('/v1/auth/password/forgot')
       .send({ identifier: email })
       .expect(204);
 
-    const token = tokenFrom(await linkFor(userId));
+    const code = await codeFor(userId);
     const weak = await request(app.getHttpServer())
       .post('/v1/auth/password/reset')
-      .send({ token, new_password: 'short' });
+      .send({ identifier: email, code, new_password: 'short' });
     expect(weak.status).toBe(401);
     expect(weak.body.error).toBe('weak_password');
 
     await request(app.getHttpServer())
       .post('/v1/auth/password/reset')
-      .send({ token, new_password: NEW_PASSWORD })
+      .send({ identifier: email, code, new_password: NEW_PASSWORD })
       .expect(204);
 
     const consumed = await pool.query<{ n: string }>(

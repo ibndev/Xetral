@@ -44,6 +44,17 @@ const API_ERROR_CODES = [
      provider. NOT user-fixable: nothing the customer types changes it, and
      telling them to try again would send them round a loop that cannot end. */
   'password_reset_unavailable',
+  /*
+   * TOO MANY WRONG CODES, AND EVERY LIVE ONE IS NOW BURNT.
+   *
+   * Said out loud, unlike the three refusals the API collapses into
+   * `invalid_grant`. "Expired" and "never existed" must stay
+   * indistinguishable, because telling somebody which way their guess failed
+   * tells them whether it was ever real. This tells an attacker only that they
+   * have been guessing — which they know — and tells the real customer the one
+   * thing that gets them out of the loop: ask for a new code.
+   */
+  'reset_code_attempts',
 
   /* The staff second factor. `totp_required` and `invalid_totp` ARE
      user-fixable — the operator opens their authenticator and reads the
@@ -224,18 +235,6 @@ const API_ERROR_CODES = [
   'recovery_unavailable',
 
   /*
-   * PAYMENT HANDLES.
-   *
-   * `handle_taken` is deliberately one answer to two questions — somebody
-   * holds it now, and somebody held it once. 039 never reissues a handle, so
-   * both mean "pick another"; distinguishing them would say whether a
-   * particular handle once belonged to a real customer, which is a fact about
-   * somebody else.
-   */
-  'handle_taken',
-  'handle_invalid',
-
-  /*
    * NAIRA FUNDING.
    *
    * `profile_incomplete` is what a customer sees when the platform cannot
@@ -247,14 +246,6 @@ const API_ERROR_CODES = [
 
   /* gift cards */
   'gift_cards_disabled',
-  /*
-   * A part of the product this DEPLOYMENT does not have — a migration that has
-   * not been applied, rather than a switch somebody turned off. It exists
-   * because the alternative was an unhandled 500 rendering as "Something went
-   * wrong. Please try again.", which invites a customer to retry for ever at a
-   * schema that will not change on its own.
-   */
-  'feature_unavailable',
 
   /*
    * WHERE A CUSTOMER IS, AND WHAT THAT MEANS.

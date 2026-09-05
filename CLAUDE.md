@@ -665,6 +665,141 @@ Schema: `packages/ledger/sql/039_profile_handles.sql`.
   refusal — a customer filled in a recipient, an amount and a PIN box before
   being told the PIN box was never going to work.
 
+### One identifier, and the link made from it — non-obvious rules
+
+Schema: `packages/ledger/sql/039_profile_handles.sql` (the handle, now legacy).
+`apps/api/src/auth/profile.service.ts`, on the Add Money screen of both apps.
+
+- **THE IDENTIFIER IS THE PHONE NUMBER.** It was an `@handle`, minted from the
+  email address and changeable once — a second name for the same person, one
+  every screen already knew and one a customer had to be taught. Two
+  identifiers for one account is two things to get wrong for no capability the
+  number does not already have. There is no route that changes it: a number is
+  changed by changing the number on the account.
+- **A LINK ALREADY IN THE WORLD STILL RESOLVES.** `payLinkTarget` unwraps
+  `/pay/<segment>` FIRST, then reads all digits as a number and anything else
+  as a handle. Removing the handle branch would silently redirect every link
+  shared before the change, and nobody re-reads a link they have already sent.
+- **THE LINK DROPS THE `+`**, because a plus in a URL is a space to enough
+  software that a shared link breaks at the only moment it is used. Both
+  readers put it back — the landing page for a browser, `payLinkTarget` for a
+  paste — and `payment-link.test.ts` asserts all three halves, because a
+  template string in one workspace and a directory name in another are what
+  the `/pay` 404 was made of.
+- **AN UNSET `APP_BASE_URL` IS NOT A CUSTOMER-FACING ERROR.** The API returns
+  no link and each app fills it in from the origin it is already running on —
+  `paymentLinkFor(origin, phone)`, in `@xetral/client`. "No link yet — this
+  deployment has no public address set" was an operator's problem printed on
+  the screen somebody opened in order to ask to be paid.
+- **`displayPhone` SHARES AND `nationalPhone` RECOGNISES.** A customer reading
+  their own number wants the national form; a customer handing it to somebody
+  who may be abroad needs the country code, because a national number has none
+  in it.
+- **THE SESSION READ IS SPLIT BY MIGRATION AGE.** `#core` reads only `users`
+  and `transaction_pins`, which have existed since 002; the country
+  decoration is its own query and is allowed to fail. It was one query, and
+  adding `u.country` and a join to `countries` — 040, with `payout_method`
+  from 046 — meant a database behind either returned EVERY FIELD AS NULL, so
+  a customer whose number we hold was shown an em dash and greeted as
+  "there". That is the same failure this method's comment already recorded
+  about `handle` and 039, one migration later.
+
+### Getting back in — non-obvious rules
+
+Schema: `packages/ledger/sql/056_reset_codes.sql`, over 013.
+
+- **A RESET IS A CODE, NOT A LINK, and the reason is a deployment value.** A
+  link needs an address, so with `APP_BASE_URL` unset the service refused
+  before it did anything — on the one path whose premise is that the customer
+  has nothing left to contact support WITH. It is also the wrong shape on a
+  phone, where a link means leaving the app for a browser and hoping something
+  hands the session back.
+- **SIX DIGITS IS A MILLION POSSIBILITIES, AND THREE THINGS PAY FOR IT.** The
+  stored hash is an HMAC keyed by a secret that is not in the database — an
+  unkeyed digest of a six-digit code IS the code to anybody holding a dump.
+  The attempt ceiling is a COLUMN, because an attacker's loop outlives a pod
+  restart. And the code is presented WITH the identifier, so a guess is
+  against one account rather than against every account at once.
+- **THE CEILING IS CHARGED AGAINST THE LIVE CODES**, not against the row a
+  guess matched — a wrong guess matches NO row, so a per-row counter can never
+  be incremented by the attack it exists to stop. That is why
+  `consume_password_reset_code` is a second function rather than an argument
+  to 013's.
+- **The HMAC key is the access-token keyring's**, deliberately, and the
+  opposite decision from `KYC_BLIND_INDEX_KEY`. Rotating a blind index breaks
+  a permanent control; rotating this costs at worst one customer asking again,
+  because a code lives for minutes.
+- **`too_many_attempts` IS SAID OUT LOUD** and the other three refusals are
+  still one answer. Those must stay indistinguishable because they tell a
+  prober whether a guess was real; this one tells an attacker what they
+  already know and tells the customer the only thing that helps.
+- **The reset email carries NO LINK AT ALL.** A button in a reset email is the
+  exact shape a phishing message copies, and `templates.test.ts` asserts the
+  absence in both directions.
+
+### A price that keeps itself — non-obvious rules
+
+Schema: `packages/ledger/sql/057_reference_rates.sql`. Port in
+`packages/providers/src/ports/reference-rate.ts`, adapter in
+`packages/providers/src/exchangerate/`, sweep in
+`apps/api/src/fx/rate-feed.service.ts`.
+
+- **053 GAVE AN OPERATOR A FORM AND THAT WAS THE WHOLE MECHANISM.** Eight fiat
+  currencies is fifty-six numbers to retype, every day, or every corridor
+  quotes a price from whenever somebody last had time — and the failure is
+  silent, because the quote succeeds at the wrong number.
+- **A REFERENCE RATE IS NOT AN FX QUOTE**, so it is a port of its own.
+  `FxPort` quotes a price we can DEAL at and then executes the swap; a
+  reference feed says what the market says and can do nothing at all.
+- **A RATE A PERSON PUBLISHED IS NEVER OVERWRITTEN.** That is what `source`
+  is for, it is immutable by trigger, and `prices_without_an_author` excludes
+  feed rates BY SOURCE rather than by their absent author — otherwise that
+  queue fills with fifty-six entries a day until nobody reads it.
+- **THE FEED'S OWN FAILURE IS WHAT NOTHING ELSE CAN SEE.** An expired key, an
+  exhausted quota, an interval unset on the one instance that had it: none of
+  them error. The rows stay, the screen renders, and customers are quoted
+  whatever it last said. `stale_reference_rates` is the only thing that
+  notices, and the prices screen shows every rate's age.
+- **The rate is a decimal string at a FIXED six places.** That is what makes
+  two syncs comparable as TEXT, and comparing is what decides whether anything
+  is republished at all — a varying width would make `1650.1` and
+  `1650.100000` look like a price change. The RATIO that converts an amount is
+  built from that string by `ratioFor`, and has no float in it.
+- **A base that fails costs only its own pairs.** The sweep does not abort: the
+  cost of one base going unpriced is an old rate on those corridors, and the
+  cost of aborting is an old rate on all of them.
+- **Retire and publish IN ONE TRANSACTION.** Apart, a process dying in the gap
+  leaves a direction with NO live rate — and an unpublished pair is refused
+  rather than quoted from a default, so a failed price sync would stop a
+  corridor entirely rather than leave it stale.
+- **One call per BASE, not per pair.** These feeds meter requests, and asking
+  fifty-six times for what eight calls answer exhausts a free tier by lunch.
+
+### The keyboard, and what it covers — non-obvious rules
+
+`apps/web/src/ui/keyboard-aware.tsx`, `apps/mobile/src/shell.tsx`.
+
+- **ON THE WEB THERE ARE TWO CAUSES AND THEY LOOK LIKE ONE.** `.tabbar` is
+  `position: fixed; bottom: 0`, positioned against the LAYOUT viewport, which
+  an on-screen keyboard does not change — so it stays where the bottom of the
+  screen used to be, over the middle of the page. No amount of scrolling moves
+  it. The second is that a browser's own scroll-into-view leaves a field flush
+  against the keyboard with its hint and its error underneath.
+- **The document is stamped from the VISUAL viewport**, and the threshold is a
+  fifth of the screen: a URL bar collapsing moves that by tens of pixels on
+  every scroll, and treating it as a keyboard would hide the navigation while
+  somebody was reading.
+- **ON ANDROID THE HANDLING DID NOTHING AT ALL.**
+  `behavior={... ? 'padding' : undefined}` relies entirely on `adjustResize`,
+  and under the edge-to-edge Android 15 enforces the platform draws behind the
+  keyboard and leaves the app to handle the inset. `height` is safe under
+  both, because `KeyboardAvoidingView` measures the OVERLAP between its frame
+  and the keyboard rather than the keyboard's height — where the window has
+  already resized it adds nothing.
+- **Both fixes live where they cannot be forgotten** — the root layout on the
+  web, `Shell` on the phone — and a test in each app fails the build on a
+  screen that brings its own scroll region without them.
+
 ### Paying a bank, not just a Xetral account — non-obvious rules
 
 Schema: `packages/ledger/sql/043_bank_payouts.sql`. Port in
@@ -2300,6 +2435,8 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/052_reversal_receipt.sq
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/053_published_fx_rates.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/054_elevation_window.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/055_uk_and_canada.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/056_reset_codes.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/057_reference_rates.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -2354,6 +2491,8 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/052_reversal_receipt.te
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/053_published_fx_rates.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/054_elevation_window.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/055_uk_and_canada.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/056_reset_codes.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/057_reference_rates.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

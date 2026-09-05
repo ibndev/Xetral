@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomInt } from 'node:crypto';
 
 /**
  * Refresh token minting and hashing.
@@ -117,8 +117,70 @@ export function issuePasswordResetToken(): IssuedResetToken {
   return { token, hash: hashPasswordResetToken(token) };
 }
 
+/**
+ * A SIX-DIGIT RESET CODE, AND WHY IT IS HASHED WITH A KEY RATHER THAN PLAINLY.
+ *
+ * A reset used to be a LINK carrying 32 bytes of entropy, and a plain SHA-256
+ * of that is safe to store: there is nothing to guess. A code a customer
+ * retypes cannot be 32 bytes, and six digits is A MILLION POSSIBILITIES —
+ * which somebody holding a database dump exhausts in under a second. An
+ * unkeyed digest of a six-digit code IS the code.
+ *
+ * So it is an HMAC, keyed by a secret that is not in the database. A dump
+ * alone then says nothing, and the only way to test a guess is to present it
+ * to the API — where the attempt ceiling in 056 and the per-identifier rate
+ * limit are what make a million guesses impossible rather than merely slow.
+ *
+ * THE USER ID IS PART OF WHAT IS SIGNED, so one customer's code cannot be
+ * presented for another's account even if two are issued the same six digits,
+ * which at a million values happens routinely. `token_hash` is globally
+ * unique, and without the id two simultaneous resets could collide on the
+ * constraint and refuse a customer for a reason that is about somebody else.
+ *
+ * THE KEY IS THE ACCESS TOKEN KEYRING'S CURRENT KEY, with its own domain
+ * separator. That is a deliberate reuse rather than a new deployment variable
+ * nobody sets: `KYC_BLIND_INDEX_KEY` is kept separate because rotating it
+ * silently breaks a permanent index, and the opposite is true here — an
+ * outstanding code lives for minutes, so a rotation costs at worst one
+ * customer asking again.
+ */
+export interface IssuedResetCode {
+  /** Goes into the email and nowhere else. Never logged, never stored. */
+  readonly code: string;
+  /** Stored. The only half that touches the database. */
+  readonly hash: string;
+}
+
+export function hashPasswordResetCode(userId: string, code: string, key: Buffer): string {
+  return createHmac('sha256', key)
+    .update(`xetral:password-reset-code:${userId}:${code}`, 'utf8')
+    .digest('hex');
+}
+
+export function issuePasswordResetCode(userId: string, key: Buffer): IssuedResetCode {
+  /*
+   * `randomInt`, not `Math.random`. This is a credential: a predictable one
+   * lets somebody who knows when a reset was requested compute the code
+   * without ever seeing the email. `.semgrep/xetral.yml` refuses `Math.random`
+   * on this path, and is right to.
+   *
+   * Six digits WITH leading zeros preserved — `randomInt(0, 1e6)` padded — so
+   * the space really is a million rather than the 900,000 a 100000..999999
+   * range would give.
+   */
+  const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
+  return { code, hash: hashPasswordResetCode(userId, code, key) };
+}
+
 /** The outcomes of `consume_password_reset_token`, mirrored from the SQL enum.
  *
  *  To the CLIENT all three failures are one response, deliberately: telling
  *  somebody which way their token failed tells them whether it was ever real. */
-export type PasswordResetOutcome = 'consumed' | 'unknown_token' | 'already_used' | 'expired';
+export type PasswordResetOutcome =
+  | 'consumed'
+  | 'unknown_token'
+  | 'already_used'
+  | 'expired'
+  /** 056. The code was wrong once too often and every live code for that
+   *  customer has been burnt — the ceiling that makes six digits safe. */
+  | 'too_many_attempts';

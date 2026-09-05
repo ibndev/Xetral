@@ -260,6 +260,9 @@ describe('the privileged surface is declared as privileged', () => {
       'POST /v1/admin/prices/:id/retire (finance)',
       'POST /v1/admin/prices/fx (finance)',
       'POST /v1/admin/prices/fx-rate (finance)',
+      // Fetching every rate from the reference feed, now. Not a read: it
+      // republishes, so what customers are quoted changes.
+      'POST /v1/admin/prices/fx-refresh (finance)',
       // Giving held money back. `finance` rather than `support`: it moves
       // money, and the role that answers the phone should not be the role
       // that can post a reversal.
