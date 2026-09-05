@@ -1,13 +1,14 @@
 import { useState } from 'react';
-import { Text, View } from 'react-native';
+import { Text, TextInput, View } from 'react-native';
 import { router } from 'expo-router';
-import { exponentFor, formatAmount, isValidAmount, sendableFor } from '@xetral/client';
+import { e164, exponentFor, formatAmount, isValidAmount, sendableFor } from '@xetral/client';
 import { Shell } from '@/shell';
 import { Button, Done, Field, FormError, Loading, Panel, Toast } from '@/ui';
 import { Select } from '@/select';
 import { Icon } from '@/icon';
+import { CountryMark } from '@/currency-mark';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/hooks';
-import { useStyles } from '@/theme';
+import { radius, useStyles, useTheme } from '@/theme';
 
 /** Zero, written the way this currency writes it — "0.00" for naira,
  *  "0.000000" for USDT. The API sends major units, so the string differs. */
@@ -16,6 +17,7 @@ const isZero = (amount: string): boolean => /^-?0(\.0+)?$/.test(amount);
 export default function Transfer() {
   const client = useXetral();
   const styles = useStyles();
+  const colors = useTheme();
   const { busy, error, code, done, run, clear } = useSubmit();
 
   /**
@@ -28,6 +30,19 @@ export default function Transfer() {
   const attempt = useIdempotencyKey();
 
   const [recipient, setRecipient] = useState('');
+  /*
+   * THE RECIPIENT'S DIALLING CODE IS THE RECIPIENT'S COUNTRY.
+   *
+   * A Xetral-to-Xetral payment is addressed by phone number, and the picker
+   * in front of the field does two jobs: it builds the E.164 string the
+   * server stores, so a sender can type the number the way they have it
+   * saved; and it says WHERE THE MONEY IS GOING with no lookup at all. An
+   * endpoint answering "which country is this number in?" would answer
+   * differently for a number that belongs to a customer, which is a way to
+   * enumerate the customer base one request at a time.
+   */
+  const [recipientDial, setRecipientDial] = useState('');
+  const [recipientPhone, setRecipientPhone] = useState('');
 
   /*
    * WHERE THE MONEY IS GOING, and this is the half the screen was missing.
@@ -80,7 +95,6 @@ export default function Transfer() {
   const balances = useLoad(() => client.balances(), [client]);
   const held = new Map((balances.data ?? []).map((b) => [b.currency, b.spendable]));
 
-  const amountValid = amount === '' || isValidAmount(amount, exponentFor(currency));
 
   /*
    * THE PIN IS ASKED ABOUT BEFORE THE FORM, and WHO is asked before that.
@@ -128,6 +142,48 @@ export default function Transfer() {
     async () => (destination === 'bank' ? client.payoutBanks(homeCountry) : []),
     [client, destination, homeCountry],
   );
+
+  /*
+   * WHERE THE MONEY IS GOING, and what a local payout must be in.
+   *
+   * A local payout IS its currency — money to a Nigerian bank is naira, to a
+   * Ghanaian wallet is cedis — so that side has no picker and the rail
+   * decides. Xetral-to-Xetral is the international half and keeps the choice.
+   */
+  const recipientCountry = countries.data?.find((c) => c.dial_code === recipientDial);
+  const recipientCurrency = recipientCountry?.currency;
+  const homeCurrency = session.data?.home_currency ?? 'NGN';
+  const sendCurrency = destination === 'bank' ? homeCurrency : currency;
+
+  /* Arrived from a payment link? Then the recipient is already named and must
+   * not be asked for again — a link names one Xetral customer, which is what
+   * 039 built it for. Everybody else pays by number. */
+  const payee = recipient !== '' ? recipient : e164(recipientDial, recipientPhone);
+
+  const converting =
+    destination === 'xetral' &&
+    recipientCurrency !== undefined &&
+    recipientCurrency !== sendCurrency;
+
+  /*
+   * THE RATE AND THE FIGURE, from the server rather than from arithmetic here.
+   *
+   * `/v1/fx/quote` reads the same published policy the conversion itself
+   * will use, so what the customer sees is the rate they get. An unpublished
+   * pair is REFUSED rather than quoted from a default, and saying so before
+   * the PIN is far better than after it.
+   */
+  const quote = useLoad(async () => {
+    if (!converting || recipientCurrency === undefined) return undefined;
+    const forAmount =
+      amount === '' || !isValidAmount(amount, exponentFor(sendCurrency)) ? '1' : amount;
+    return client.fxQuote(sendCurrency, recipientCurrency, forAmount).catch(() => undefined);
+  }, [client, converting, recipientCurrency, sendCurrency, amount]);
+
+  // Against the currency actually being SENT. On the payout side there is no
+  // picker and the rail decides, so checking the picked one would count
+  // decimals for a currency this transfer is not in.
+  const amountValid = amount === '' || isValidAmount(amount, exponentFor(sendCurrency));
 
   async function lookUp(code: string, number: string): Promise<void> {
     // Ten digits is a NUBAN, which is where asking becomes useful rather than
@@ -245,15 +301,33 @@ export default function Transfer() {
               </View>
             </>
           ) : (
-            <View style={styles.row}>
-              <Text style={styles.muted}>To</Text>
-              <Text style={styles.amount}>{recipient}</Text>
-            </View>
+            <>
+              <View style={styles.row}>
+                <Text style={styles.muted}>To</Text>
+                <Text style={styles.amount}>{payee}</Text>
+              </View>
+              {recipientCountry !== undefined && (
+                <View style={styles.row}>
+                  <Text style={styles.muted}>In</Text>
+                  <Text style={styles.amount}>{recipientCountry.name}</Text>
+                </View>
+              )}
+            </>
           )}
           <View style={styles.row}>
             <Text style={styles.muted}>Amount</Text>
-            <Text style={styles.amount}>{formatAmount(amount || '0', currency)}</Text>
+            <Text style={styles.amount}>{formatAmount(amount || '0', sendCurrency)}</Text>
           </View>
+          {/* THE LAST PLACE THE CONVERSION CAN BE CHECKED. Nothing new — the
+              same quote, repeated where the decision is actually made. */}
+          {converting && quote.data !== undefined && (
+            <View style={styles.row}>
+              <Text style={styles.muted}>They receive</Text>
+              <Text style={styles.amount}>
+                {formatAmount(quote.data.receives, recipientCurrency ?? sendCurrency)}
+              </Text>
+            </View>
+          )}
 
           <Field
             label="Transaction PIN"
@@ -266,7 +340,7 @@ export default function Transfer() {
           />
 
           <Button
-            label={`Send ${formatAmount(amount || '0', currency)}`}
+            label={`Send ${formatAmount(amount || '0', sendCurrency)}`}
             busy={busy}
             disabled={pin === ''}
             onPress={() =>
@@ -279,7 +353,9 @@ export default function Transfer() {
                           bankCode,
                           accountNumber,
                           amount,
-                          currency,
+                          // THE LOCAL CURRENCY, not a picked one. There is no
+                          // picker on this side and the rail decides.
+                          currency: homeCurrency,
                           pin,
                           idempotencyKey: attempt.key,
                         })
@@ -290,13 +366,35 @@ export default function Transfer() {
                           fee: p.fee,
                           currency: p.currency,
                         }))
-                    : await client.transfer({
-                        recipient,
-                        amount,
-                        currency,
-                        pin,
-                        idempotencyKey: attempt.key,
-                      });
+                    : converting && recipientCurrency !== undefined
+                      ? /*
+                         * ACROSS CURRENCIES IS A REMITTANCE, NOT A TRANSFER.
+                         *
+                         * `remit` is ONE journal entry that converts and
+                         * delivers — Phase 10's shape, because
+                         * convert-then-send leaves a window where a crash
+                         * strands the money in a wallet the sender never
+                         * meant to hold. `transfer` here would have moved
+                         * naira into a Ghanaian's naira wallet, which is
+                         * money they cannot spend where they live.
+                         */
+                        await client
+                          .remit({
+                            from: sendCurrency,
+                            to: recipientCurrency,
+                            amount,
+                            recipient: payee,
+                            pin,
+                            idempotencyKey: attempt.key,
+                          })
+                          .then((t) => ({ amount: t.amount, fee: '0.00', currency: t.from }))
+                      : await client.transfer({
+                          recipient: payee,
+                          amount,
+                          currency: sendCurrency,
+                          pin,
+                          idempotencyKey: attempt.key,
+                        });
                 // The attempt is over, so the next Send is a new transfer and
                 // needs a new key — reusing this one would have the server
                 // replay this transfer and report success for money that
@@ -310,6 +408,7 @@ export default function Transfer() {
                 setStage('details');
                 setAmount('');
                 setRecipient('');
+                setRecipientPhone('');
                 setAccountNumber('');
                 setBeneficiary(undefined);
                 return `Sent ${formatAmount(result.amount, result.currency)}${
@@ -372,7 +471,7 @@ export default function Transfer() {
             { value: 'xetral', label: 'A Xetral account' },
             {
               value: 'bank',
-              label: mobileMoney ? 'A mobile money wallet' : 'A bank account',
+              label: mobileMoney ? 'A Momo account' : 'A bank account',
             },
           ]}
         />
@@ -380,7 +479,7 @@ export default function Transfer() {
         {destination === 'bank' ? (
           <>
             <Select
-              label={mobileMoney ? 'Mobile money provider' : 'Bank'}
+              label={mobileMoney ? 'Momo provider' : 'Bank'}
               // Paystack returns upwards of a hundred Nigerian banks; finding
               // one by flicking through an alphabetical sheet is the customer
               // doing the computer's work.
@@ -397,7 +496,7 @@ export default function Transfer() {
               }))}
             />
             <Field
-              label={mobileMoney ? 'Wallet number' : 'Account number'}
+              label={mobileMoney ? 'Momo number' : 'Account number'}
               inputMode="numeric"
               placeholder={mobileMoney ? '0244123456' : '0123456789'}
               autoCapitalize="none"
@@ -433,35 +532,120 @@ export default function Transfer() {
             )}
           </>
         ) : (
-          <Field
-            label="Who are you paying?"
-            // `url` on the link path so the keyboard offers a slash rather than
-            // an @ — but the API resolves all four shapes from this one field
-            // either way, so neither keyboard can produce something it refuses.
-            inputMode="text"
-            placeholder="@handle, email, phone or payment link"
-            autoCapitalize="none"
-            autoCorrect={false}
-            value={recipient}
-            onChangeText={setRecipient}
-          />
+          /*
+            THE PHONE NUMBER IS THE IDENTIFIER, and the picker in front of it
+            does two jobs: it builds the E.164 string the server stores, so a
+            customer can type the number the way they have it saved; and it
+            says which COUNTRY the money is going to, which is what the rate
+            line below reads. The second job is why it is a picker rather than
+            a parsed free-text field — parsing would be a guess about somebody
+            else's country, on a money path.
+
+            The list says "Ghana" and the trigger says "+233", the same
+            arrangement the signup form uses: a country's name in front of a
+            phone number pushes the digits off the screen.
+          */
+          <View>
+            <Text style={styles.label}>Recipient&apos;s phone number</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <View
+                style={{
+                  justifyContent: 'center',
+                  minHeight: 50,
+                  paddingHorizontal: 4,
+                  borderRadius: radius.md,
+                  backgroundColor: colors.field,
+                }}
+              >
+                <Select
+                  label="Country"
+                  variant="pill"
+                  value={recipientDial}
+                  onChange={setRecipientDial}
+                  placeholder="+—"
+                  renderMark={(dial) => (
+                    <CountryMark
+                      country={
+                        (countries.data ?? []).find((c) => c.dial_code === dial)?.code ?? ''
+                      }
+                      size={18}
+                    />
+                  )}
+                  renderTrigger={(dial) => (
+                    <Text style={[styles.amount, { color: colors.text }]}>+{dial}</Text>
+                  )}
+                  options={(countries.data ?? []).map((c) => ({
+                    value: c.dial_code,
+                    label: c.name,
+                    hint: c.currency,
+                  }))}
+                />
+              </View>
+              <TextInput
+                style={[styles.input, { flex: 1 }]}
+                value={recipientPhone}
+                onChangeText={(text) => setRecipientPhone(text.replace(/[^0-9]/g, ''))}
+                keyboardType="phone-pad"
+                placeholder="8031234567"
+                placeholderTextColor={colors.text3}
+              />
+            </View>
+            <Text style={styles.hint}>
+              {recipientCountry === undefined
+                ? 'Choose the country their number is in.'
+                : `Going to ${recipientCountry.name} — they receive ${recipientCountry.currency}.`}
+            </Text>
+          </View>
         )}
 
-        <Select
-          label="Currency"
-          value={currency}
-          onChange={setCurrency}
-          options={offered.map((code) => ({
-            value: code,
-            label: code,
-            // ALWAYS a figure, including a zero. Omitting the hint for a
-            // currency with no balance made "you have none of this" look
-            // identical to "we did not say" — and now that every currency is
-            // offered rather than filtered, that difference is the whole
-            // information the picker carries.
-            hint: formatAmount(held.get(code) ?? '0', code),
-          }))}
-        />
+        {/*
+          A CURRENCY PICKER ON THE XETRAL SIDE AND NONE ON THE PAYOUT SIDE.
+
+          A local payout IS its currency: money to a Nigerian bank is naira,
+          to a Ghanaian wallet is cedis, to a Kenyan one is shillings. A box
+          offering anything else offered a choice the rail cannot honour, and
+          the only outcomes were picking your own currency anyway or being
+          refused after typing a PIN.
+        */}
+        {destination === 'bank' ? (
+          <View style={styles.row}>
+            <Text style={styles.muted}>Currency</Text>
+            <Text style={styles.amount}>{homeCurrency}</Text>
+          </View>
+        ) : (
+          <>
+            <Select
+              label="Currency"
+              value={currency}
+              onChange={setCurrency}
+              options={offered.map((code) => ({
+                value: code,
+                label: code,
+                // ALWAYS a figure, including a zero. Omitting the hint for a
+                // currency with no balance made "you have none of this" look
+                // identical to "we did not say" — and now that every currency
+                // is offered rather than filtered, that difference is the
+                // whole information the picker carries.
+                hint: formatAmount(held.get(code) ?? '0', code),
+              }))}
+            />
+            {/*
+              THE RATE, UNDER THE BOX THAT DECIDES IT, BEFORE ANY AMOUNT.
+              Sending naira to Ghana is two decisions at once — what to send
+              and what it becomes — and the second was invisible until after
+              the money had moved.
+            */}
+            {converting && (
+              <Text style={styles.hint}>
+                {quote.loading
+                  ? 'Getting today\u2019s rate…'
+                  : quote.data === undefined
+                    ? `We cannot convert ${sendCurrency} to ${recipientCurrency ?? ''} yet.`
+                    : `1 ${sendCurrency} = ${quote.data.rate} ${recipientCurrency ?? ''} today.`}
+              </Text>
+            )}
+          </>
+        )}
 
         {/*
           THE WAY OUT, on the screen where the dead end is. Sending cedis
@@ -470,10 +654,10 @@ export default function Transfer() {
           proves a PIN and is told `insufficient_funds` — true, and silent
           about what to do.
         */}
-        {isZero(held.get(currency) ?? '0') && (
+        {isZero(held.get(sendCurrency) ?? '0') && (
           <Text style={styles.hint}>
-            You have no {currency}. Convert some on the Convert screen first,
-            then come back.
+            You have no {sendCurrency}. Convert some on the Convert screen
+            first, then come back.
           </Text>
         )}
 
@@ -484,12 +668,30 @@ export default function Transfer() {
           value={amount}
           onChangeText={setAmount}
         />
+        {/*
+          WHAT THEY WILL ACTUALLY GET, under the box that decides it. The rate
+          line answers "what is a naira worth"; this answers the question the
+          sender is really asking, which is whether the person at the other
+          end receives enough.
+        */}
+        {converting && amount !== '' && amountValid && (
+          <Text style={styles.hint}>
+            {quote.loading
+              ? 'Working out what they receive…'
+              : quote.data === undefined
+                ? 'We cannot say what they would receive yet.'
+                : `They receive about ${formatAmount(
+                    quote.data.receives,
+                    recipientCurrency ?? sendCurrency,
+                  )}.`}
+          </Text>
+        )}
         {!amountValid && (
           // Caught by the form rather than by a 400 from a money-moving
           // endpoint — and the check counts decimals PER CURRENCY, so USDT
           // gets six and naira gets two.
           <Text style={styles.error}>
-            Enter an amount with at most {exponentFor(currency)} decimal places.
+            Enter an amount with at most {exponentFor(sendCurrency)} decimal places.
           </Text>
         )}
 
@@ -503,7 +705,7 @@ export default function Transfer() {
             // A payout cannot be reviewed without a name to review: a
             // confirmation screen that confirms nothing is worse than none,
             // because it will be read as having been checked.
-            (destination === 'bank' ? beneficiary === undefined : recipient === '')
+            (destination === 'bank' ? beneficiary === undefined : payee === '')
           }
           onPress={() => setStage('confirm')}
         />

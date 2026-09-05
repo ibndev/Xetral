@@ -65,6 +65,32 @@ export const FALLBACK_COUNTRY: XetralCountry = {
   payout_method: 'bank',
 };
 
+/**
+ * A PHONE NUMBER IN THE ONE SHAPE THE SERVER STORES.
+ *
+ * `users.phone` is E.164 — the country's dialling code and the national
+ * digits, with the trunk zero dropped — because a plain unique index on text
+ * cannot see that `+2348031234567`, `2348031234567` and `08031234567` are one
+ * person. Registration builds it that way server-side.
+ *
+ * PAYING SOMEBODY BY PHONE HAS TO BUILD THE SAME STRING, and this is the one
+ * place either app does it. A Xetral-to-Xetral transfer resolves the
+ * recipient by an exact match on that column, so a sender typing the number
+ * the way they have it saved — with the leading zero, the way every Nigerian
+ * writes it — was being told there was no such customer. The dial code comes
+ * from the picker in front of the field, which is also what says which
+ * COUNTRY the money is going to.
+ *
+ * Everything that is not a digit goes: a pasted number carries spaces,
+ * brackets and dashes from a contact card, and none of that is the sender's
+ * mistake to fix.
+ */
+export function e164(dialCode: string, national: string): string {
+  const digits = national.replace(/[^0-9]/g, '').replace(/^0+/, '');
+  const code = dialCode.replace(/[^0-9]/g, '');
+  return digits === '' || code === '' ? '' : `+${code}${digits}`;
+}
+
 export interface Balance {
   readonly currency: string;
   readonly spendable: string;
@@ -473,6 +499,20 @@ export class XetralClient {
      */
     country: string | null;
     home_currency: string | null;
+    /**
+     * THE COUNTRY'S NAME AND HOW MONEY LEAVES IT.
+     *
+     * Both screens personalise on these rather than on the country CODE: a
+     * `switch ('NG' | 'GH' | 'KE')` in two apps is the thing 040 exists to
+     * prevent, and it needs a release on the day a fourth country opens.
+     *
+     * `payout_method` is 'bank' or 'mobile_money'. Null — an account whose
+     * country row is missing — reads as bank, the conservative answer,
+     * because a bank transfer that refuses is recoverable and a send to a
+     * number that is not a wallet is not.
+     */
+    country_name: string | null;
+    payout_method: string | null;
     /** Their own payment handle, or null until `profile()` mints one. */
     handle: string | null;
   }> {

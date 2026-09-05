@@ -111,6 +111,24 @@ export interface SessionSummary {
    */
   readonly country: string | null;
   readonly home_currency: string | null;
+  /**
+   * THE COUNTRY'S NAME AND HOW MONEY LEAVES IT, so a screen does not have to
+   * ask a second time.
+   *
+   * Both apps personalise on these: the payout screen offers a Bank account
+   * in Nigeria and a Momo account in Ghana and Kenya, and the top-up screen
+   * offers what a customer there actually funds a wallet with. Deriving that
+   * from the country CODE on the client would put a `switch` over country
+   * codes in two apps — which is exactly what 040 exists to prevent, and what
+   * would need a release the day a fourth country opens.
+   *
+   * `payout_method` is 'bank' or 'mobile_money', from `countries`. Null only
+   * where the country row itself is missing, which the clients read as bank —
+   * the conservative answer, because a bank transfer that refuses is
+   * recoverable and a send to a number that is not a wallet is not.
+   */
+  readonly country_name: string | null;
+  readonly payout_method: string | null;
   /** The customer's own payment handle, or null if they have not been given
    *  one yet. `GET /v1/profile` mints one on first ask. */
   readonly handle: string | null;
@@ -629,6 +647,8 @@ export class AuthService {
     has_pin: boolean | null;
     country: string | null;
     home_currency: string | null;
+    country_name: string | null;
+    payout_method: string | null;
     handle: string | null;
   }> {
     const [core, handle] = await Promise.all([this.#core(userUuid), this.#handle(userUuid)]);
@@ -652,6 +672,8 @@ export class AuthService {
     has_pin: boolean | null;
     country: string | null;
     home_currency: string | null;
+    country_name: string | null;
+    payout_method: string | null;
   }> {
     try {
       const result = await this.pool.query<{
@@ -660,6 +682,8 @@ export class AuthService {
         has_pin: boolean;
         country: string | null;
         home_currency: string | null;
+        country_name: string | null;
+        payout_method: string | null;
       }>(
         /*
          * `users.full_name` FIRST, then the verified one.
@@ -681,7 +705,9 @@ export class AuthService {
                 u.phone,
                 (p.user_id IS NOT NULL) AS has_pin,
                 u.country,
-                c.currency AS home_currency
+                c.currency AS home_currency,
+                c.name AS country_name,
+                c.payout_method
            FROM users u
            LEFT JOIN transaction_pins p ON p.user_id = u.id
            LEFT JOIN countries c ON c.code = u.country
@@ -697,6 +723,8 @@ export class AuthService {
           has_pin: null,
           country: null,
           home_currency: null,
+          country_name: null,
+          payout_method: null,
         };
       }
 
@@ -721,6 +749,8 @@ export class AuthService {
         has_pin: row.has_pin,
         country: row.country,
         home_currency: row.home_currency,
+        country_name: row.country_name,
+        payout_method: row.payout_method,
       };
     } catch (error: unknown) {
       // LOUD. The previous version swallowed this and returned an answer, and
@@ -736,6 +766,8 @@ export class AuthService {
         has_pin: null,
         country: null,
         home_currency: null,
+        country_name: null,
+        payout_method: null,
       };
     }
   }

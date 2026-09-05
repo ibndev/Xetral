@@ -176,17 +176,23 @@ export class WalletService {
     const offered = new Set<Currency>([home]);
 
     /*
-     * THE NAIRA WALLET IS OFFERED TO EVERYBODY, including customers whose own
-     * currency is something else — and that is not a Nigeria default left
-     * behind, it is the funding rail.
+     * THE NAIRA WALLET USED TO BE OFFERED TO EVERYBODY, and the argument for
+     * it was the funding rail: naira deposits arrive through a dedicated
+     * account number, and that was the one way money entered this platform
+     * without already being on it.
      *
-     * `wallet_funding` deposits arrive in naira through Bitnob's dedicated
-     * account numbers, and that is the one way money enters this platform
-     * without already being on it. A Ghanaian customer paid in naira by a
-     * Nigerian one holds naira, and hiding the wallet it landed in would hide
-     * their money.
+     * THE ARGUMENT WAS ABOUT NIGERIA, NOT ABOUT THE PLATFORM — the same
+     * mistake `HOME_CURRENCY = 'NGN'` made one constant up. A customer in
+     * Accra got a cedi wallet AND a naira one, with nothing on the screen
+     * saying which was theirs, on the account they opened with a Ghanaian
+     * number; and the fix for their funding is a cedi rail, not a naira
+     * wallet they cannot use locally.
+     *
+     * Nothing is hidden by removing it. A currency the customer HOLDS is
+     * merged in by the caller whatever is offered here, so a Ghanaian paid in
+     * naira by a Nigerian still sees that money — which was the real half of
+     * the old argument, and it is handled somewhere else.
      */
-    offered.add(FALLBACK_HOME_CURRENCY);
 
     if (await this.settings.fxEnabled()) {
       // Both sides of every live pair. A published NGN→USD is a statement
@@ -206,8 +212,48 @@ export class WalletService {
       for (const asset of CRYPTO_ASSETS) offered.add(asset);
     }
 
+    /*
+     * ANOTHER COUNTRY'S LOCAL CURRENCY IS NOT A WALLET THIS CUSTOMER HAS.
+     *
+     * The FX loop above adds both sides of every published pair, which is
+     * right for the dollar and the stablecoins — they belong to no country
+     * and are what cross-border payment here is made of — and wrong for a
+     * local one: publishing NGN→GHS so a Nigerian can pay a Ghanaian also
+     * gave the Ghanaian a naira wallet, and the Nigerian a cedi one. Two
+     * empty wallets on the home screen, in money neither of them can spend
+     * where they live.
+     *
+     * READ FROM `countries`, never listed here. A local currency is by
+     * definition one some country calls its own, so an operator opening a
+     * fourth country gets this rule for free — the same reason the offered
+     * set is derived rather than written down.
+     */
+    const local = await this.#localCurrencies();
+    for (const code of offered) {
+      if (code !== home && local.has(code)) offered.delete(code);
+    }
+
     return [...offered];
   }
+
+  /** Every currency some country calls its own. Cached for five seconds, the
+   *  same window a provider credential gets: this changes when an operator
+   *  opens a country, which is rare, and reading it per request would put a
+   *  query in front of every home screen. */
+  async #localCurrencies(): Promise<ReadonlySet<string>> {
+    const now = Date.now();
+    if (this.#localCache !== undefined && this.#localCache.until > now) {
+      return this.#localCache.codes;
+    }
+    const rows = await this.pool.query<{ currency: string }>(
+      `SELECT DISTINCT currency FROM countries`,
+    );
+    const codes = new Set(rows.rows.map((r) => r.currency));
+    this.#localCache = { codes, until: now + 5_000 };
+    return codes;
+  }
+
+  #localCache: { codes: ReadonlySet<string>; until: number } | undefined;
 
   async history(
     userUuid: string,
@@ -559,11 +605,43 @@ export class WalletService {
       return { id: row.id };
     }
 
+    /*
+     * A PHONE NUMBER IN ANY OF THE THREE SHAPES IT GETS TYPED.
+     *
+     * `users.phone` is E.164 and the match was `phone = $1` — exact — so a
+     * sender who typed the number the way they have it saved, with the trunk
+     * zero every Nigerian writes, was told there was no such customer. The
+     * account existed; the string did not match. That is the one refusal on
+     * this screen a customer cannot act on, because nothing tells them the
+     * shape is what is wrong.
+     *
+     * So the identifier is ALSO compared as digits, which makes
+     * `+2348031234567` and `2348031234567` one person — a plus somebody
+     * dropped, or a share sheet stripped.
+     *
+     * IT DELIBERATELY DOES NOT MATCH `08031234567`. A national number has no
+     * country in it, and the only ways to supply one are to assume the
+     * SENDER's — wrong for exactly the cross-border payments this screen
+     * exists for — or to match on a suffix, which on a money path can pay a
+     * stranger in another country who happens to share the digits. The
+     * dialling-code picker in front of the field is what makes the national
+     * form work: both apps build E.164 from it through `e164()`, so the
+     * customer types the number the way they have it saved and the server
+     * still gets one canonical string.
+     *
+     * The digits are computed rather than stored, so this cannot use an index
+     * — but it is guarded by `$2 <> ''`, false for every email address and
+     * every handle, so the scan only happens for something shaped like a
+     * number at all.
+     */
+    const digits = identifier.replace(/[^0-9]/g, '').replace(/^0+/, '');
     const result = await this.pool.query<{ id: string; status: string }>(
       `SELECT id, status FROM users
-        WHERE lower(email) = lower($1) OR phone = $1
+        WHERE lower(email) = lower($1)
+           OR phone = $1
+           OR ($2 <> '' AND regexp_replace(phone, '[^0-9]', '', 'g') = $2)
         LIMIT 1`,
-      [identifier],
+      [identifier, digits],
     );
     const row = result.rows[0];
 

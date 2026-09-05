@@ -104,9 +104,43 @@ export default function UserDetail({ params }: { params: Promise<{ id: string }>
             )}
           </span>
         </div>
+        {/*
+          THE COUNTRY, AND WHAT IT DECIDES.
+
+          It came from the dialling code this customer selected at signup, and
+          it is not a label: it decides their home currency, which wallets
+          they are offered, and whether money leaves through a bank or a
+          mobile money wallet. An operator reading "GH" had two letters and
+          had to know the rest; this row carries the consequences.
+        */}
         <div className="row">
           <span className="muted">Country</span>
-          <span>{profile['country'] ?? <span className="muted">not set</span>}</span>
+          <span>
+            {profile['country'] === undefined || profile['country'] === null ? (
+              <span className="muted">not set</span>
+            ) : (
+              <>
+                {String(profile['country_name'] ?? profile['country'])}{' '}
+                <span className="muted">({String(profile['country'])})</span>
+              </>
+            )}
+          </span>
+        </div>
+        <div className="row">
+          <span className="muted">Local currency</span>
+          <span>
+            {profile['home_currency'] === undefined || profile['home_currency'] === null ? (
+              <span className="muted">unknown</span>
+            ) : (
+              <>
+                <span className="mono">{String(profile['home_currency'])}</span>{' '}
+                <span className="muted">
+                  · money leaves by{' '}
+                  {profile['payout_method'] === 'mobile_money' ? 'mobile money' : 'bank transfer'}
+                </span>
+              </>
+            )}
+          </span>
         </div>
         {/*
           THE SHORT FORM, WITH THE WHOLE THING ON DEMAND.

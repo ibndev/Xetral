@@ -228,8 +228,22 @@ export class AdminService {
         `SELECT u.uuid AS id, u.email, u.status, u.created_at, u.kyc_tier,
                 u.full_name AS account_name, u.phone AS account_phone,
                 u.handle, u.country,
+                /*
+                 * THE COUNTRY BY NAME, and its currency and payout rail.
+                 *
+                 * A bare 'GH' told an operator two letters. The country is
+                 * what decides this customer's home currency, which wallets
+                 * they are offered, and whether money leaves through a bank
+                 * or a mobile money wallet — so the row that names it should
+                 * carry the consequences rather than make somebody look them
+                 * up. It comes from the dialling code the customer picked at
+                 * signup, which 050 also backfilled for every older account.
+                 */
+                c.name AS country_name, c.currency AS home_currency,
+                c.payout_method,
                 k.status::text AS kyc_status, k.full_name, k.bvn_last4, k.phone
            FROM users u
+           LEFT JOIN countries c ON c.code = u.country
            LEFT JOIN kyc_submissions k
              ON k.user_id = u.id AND k.status IN ('approved','pending')
           WHERE u.id = $1::bigint`,
