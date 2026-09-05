@@ -213,6 +213,15 @@ const API_ERROR_CODES = [
    * reload, and it will not be there.
    */
   'not_recoverable',
+  /**
+   * The recovery console asked a database that has not applied 049.
+   *
+   * ITS OWN CODE rather than a bare 500, because the screen it belongs to is
+   * the one an operator opens BECAUSE a customer's money is stuck — and
+   * "Something went wrong" there reads as the money being gone rather than as
+   * a migration being missing.
+   */
+  'recovery_unavailable',
 
   /*
    * PAYMENT HANDLES.

@@ -327,21 +327,67 @@ function PaymentLink() {
   const styles = useStyles();
   const colors = useTheme();
   const profile = useLoad(() => client.profile(), [client]);
+  // The phone is on the SESSION, not on the profile: it is what the Send
+  // screen resolves a recipient by, so reading it from anywhere else would be
+  // a second source for the one string a sender has to type.
+  const session = useLoad(() => client.currentSession(), [client]);
   const [editing, setEditing] = useState(false);
   const [handle, setHandle] = useState('');
   const [pin, setPin] = useState('');
   const { busy, error, code, run } = useSubmit();
 
   return (
-    <Panel title="Your payment link" subtitle="Share it and anyone can pay you">
-      <Text style={styles.lead}>
-        Safe to post publicly. It reveals nothing but the name on your account.
-      </Text>
+    /*
+      TWO WAYS TO BE PAID, AND THEY ARE FOR DIFFERENT PEOPLE.
 
+      The panel offered one — a link — and called itself "Your payment link",
+      which names the mechanism rather than what it does. A Xetral customer
+      paying another does not need a URL at all: they type a phone number,
+      which is what the Send screen now takes and the one thing everybody
+      already knows about everybody they pay. The link is the answer to the
+      other question — being paid by somebody not on Xetral, in another
+      country, out of a message thread.
+    */
+    <Panel title="Receive payment globally" subtitle="Two ways for anyone to pay you">
       {profile.loading && <Loading />}
 
       {profile.data !== undefined && (
         <>
+          {/* THE NUMBER FIRST, because it is what most payments will use. It
+              is already on the session, so there is nothing to fetch and
+              nothing that can be out of step with what a sender types. */}
+          <View
+            style={{
+              marginTop: space.sm,
+              padding: space.md,
+              borderRadius: 14,
+              backgroundColor: colors.surface2,
+              gap: 4,
+            }}
+          >
+            <Text style={[styles.amount, { fontSize: 20 }]} selectable>
+              {session.data?.phone ?? '—'}
+            </Text>
+            <Text style={styles.muted}>Xetral to Xetral user</Text>
+          </View>
+
+          <Button
+            label="Share my number"
+            icon="send"
+            quiet
+            onPress={() => {
+              const number = session.data?.phone;
+              if (number === null || number === undefined) return;
+              // Silent on failure, like the link below: a dismissed share
+              // sheet rejects on iOS, which is a customer changing their mind
+              // rather than an error.
+              void Share.share({ message: number }).catch(() => undefined);
+            }}
+          />
+
+          <Text style={[styles.muted, { marginTop: space.md }]}>
+            Or a link, for anyone not on Xetral
+          </Text>
           <View
             style={{
               marginTop: space.sm,

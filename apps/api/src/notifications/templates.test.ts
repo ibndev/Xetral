@@ -38,6 +38,8 @@ function example(kind: NotificationKind, injected: string): NotificationRequest 
       return { kind, amount: '10,000.00', currency: 'NGN', reference: injected };
     case 'transfer_sent':
       return { kind, amount: '5,000.00', currency: 'NGN', reference: injected };
+    case 'transfer_reversed':
+      return { kind, amount: '5,000.00', currency: 'NGN', reason: injected, reference: injected };
     case 'crypto_withdrawal_sent':
       return { kind, amount: '25.00', asset: 'USDT', address: injected, network: 'tron' };
     case 'card_frozen':

@@ -5,10 +5,11 @@ import type { AccountRef, LedgerIntent } from '@xetral/ledger';
 import type { PurchaseResult, ServiceKind } from '@xetral/providers';
 import { seal } from '@xetral/identity';
 import type { Keyring } from '@xetral/identity';
-import { subtract } from '@xetral/shared';
+import { subtract, toMajor } from '@xetral/shared';
 import type { Currency, Money } from '@xetral/shared';
 import { API_CONFIG, DATABASE, LEDGER } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
+import { NotificationService } from '../notifications/notification.service.js';
 
 /**
  * How a reserved purchase becomes a settled or reversed one.
@@ -48,6 +49,7 @@ export class PurchaseOutcome {
     @Inject(DATABASE) private readonly pool: Pool,
     @Inject(LEDGER) private readonly ledger: LedgerService,
     @Inject(API_CONFIG) private readonly config: ApiConfig,
+    @Inject(NotificationService) private readonly notifications: NotificationService,
   ) {}
 
   /** The hold becomes a real spend. */
@@ -111,6 +113,45 @@ export class PurchaseOutcome {
         posting(pending(row.user_id, currency), negate(amount)),
         posting(wallet(row.user_id, currency), amount),
       ],
+    },
+    {
+      /*
+       * AND TELL THE CUSTOMER, on the reversal's OWN transaction.
+       *
+       * The posting has always been right — the money leaves
+       * `customer_pending` and lands back in the wallet, spendable — and
+       * nothing said so. What a customer saw was a debit and then an
+       * unexplained credit, which reads as money having gone somewhere and
+       * come back by accident. "It was deducted and never returned" is what
+       * that looks like from outside even when the ledger is correct.
+       *
+       * On the entry's own connection, never taking one of its own: this
+       * runs inside a transaction already holding one, and a second would
+       * deadlock the pool at `pool.max`.
+       */
+      onEntry: async (client, entry) => {
+        const found = await client.query<{ email: string | null }>(
+          `SELECT email FROM users WHERE id = $1::bigint`,
+          [row.user_id],
+        );
+        const email = found.rows[0]?.email;
+        if (email === null || email === undefined) return;
+        await this.notifications.enqueueBestEffort(client, {
+          userId: row.user_id,
+          recipient: email,
+          // The ledger key, reused: a second identity for one event is how
+          // the two drift under exactly the conditions that make idempotency
+          // matter, and this path is retried by the sweep by design.
+          idempotencyKey: `receipt:purchase-reverse:${row.reference}`,
+          request: {
+            kind: 'transfer_reversed',
+            amount: toMajor(amount),
+            currency,
+            reason,
+            reference: entry.entryUuid,
+          },
+        });
+      },
     });
 
     await this.pool.query(

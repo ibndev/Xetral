@@ -9,6 +9,7 @@ import { FormError } from '@/ui/form-error';
 import { Icon } from '@/ui/icon';
 import { messageFor } from '@/lib/errors';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/lib/hooks';
+import { Toast } from '@/ui/toast';
 
 /**
  * Airtime, data, bills, eSIMs and virtual numbers.
@@ -77,7 +78,7 @@ function Buy({ service, onBought }: { service: ServiceCode; onBought: () => void
   const [pin, setPin] = useState('');
   const [verified, setVerified] = useState<string | undefined>();
   const attempt = useIdempotencyKey();
-  const { busy, error, code, done, run } = useSubmit();
+  const { busy, error, code, done, run, clear } = useSubmit();
 
   useEffect(() => {
     let cancelled = false;
@@ -231,6 +232,15 @@ function Buy({ service, onBought }: { service: ServiceCode; onBought: () => void
 
       <FormError error={error} code={code} />
       {done !== undefined && <p className="ok">{done}</p>}
+
+        {/*
+          OVER the form as well as in it. Buying a bill, some airtime or an eSIM moves money, and
+          the outcome has to be unmistakable on a phone where the keyboard is
+          closing over the line above. The inline copy stays, so a refusal can
+          still be re-read after this has gone.
+        */}
+        <Toast message={done} tone="ok" onDone={clear} />
+        <Toast message={error} tone="bad" onDone={clear} />
     </form>
   );
 }

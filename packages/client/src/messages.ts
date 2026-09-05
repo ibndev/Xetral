@@ -296,6 +296,8 @@ function sentenceFor(error: ApiError): string {
     case 'account_not_found':
     case 'not_found':
       return 'We could not find that.';
+    case 'recovery_unavailable':
+      return 'Recovery is not available on this deployment yet — migration 049 has not been applied.';
     case 'not_recoverable':
       return 'That is no longer waiting to be recovered. Reload the queue.';
     case 'handle_taken':

@@ -3,7 +3,7 @@ import { Text, View } from 'react-native';
 import { formatAmount, TRANSFER_CURRENCIES } from '@xetral/client';
 import type { FxQuote, FxTrade } from '@xetral/client';
 import { Shell } from '@/shell';
-import { Button, Done, Empty, Field, FormError, Loading, Panel } from '@/ui';
+import { Button, Done, Empty, Field, FormError, Loading, Panel, Toast } from '@/ui';
 import { Select } from '@/select';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/hooks';
 import { font, radius, space, useStyles, useTheme } from '@/theme';
@@ -21,7 +21,7 @@ export default function Fx() {
   const client = useXetral();
   const styles = useStyles();
   const colors = useTheme();
-  const { busy, error, code, done, run } = useSubmit();
+  const { busy, error, code, done, run, clear } = useSubmit();
   const attempt = useIdempotencyKey();
 
   const balances = useLoad(() => client.balances(), [client]);
@@ -48,7 +48,20 @@ export default function Fx() {
   const [quote, setQuote] = useState<FxQuote | undefined>();
 
   return (
-    <Shell>
+    <Shell
+      /*
+        OVER the screen, not inside the scroll. Converting moves money, and a
+        line of text under a form the keyboard is closing over is the easiest
+        thing on the screen to miss. The inline copy stays, so a refusal can
+        be re-read after this has gone.
+      */
+      overlay={
+        <>
+          <Toast message={done} tone="ok" onDone={clear} />
+          <Toast message={error} tone="bad" onDone={clear} />
+        </>
+      }
+    >
       <Text style={styles.h1}>Convert</Text>
       <Text style={styles.lead}>The rate you see is the rate you get.</Text>
 

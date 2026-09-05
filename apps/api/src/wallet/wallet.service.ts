@@ -69,6 +69,23 @@ const FALLBACK_HOME_CURRENCY = 'NGN' as const;
  */
 const CRYPTO_ASSETS = ['BTC', 'USDT', 'USDC'] as const;
 
+/**
+ * THE DOLLAR BELONGS TO NO COUNTRY, for this platform's purposes.
+ *
+ * Every other currency is filtered out of a customer's wallet list when it is
+ * some OTHER open country's local money — a Nigerian has no use for an empty
+ * cedi wallet. The dollar is the exception and has to be named: it is what
+ * cross-border payment here is made of, it is what a virtual card spends, and
+ * it is the quote side of most published FX pairs. Excluding it because the
+ * United States happens to be a row in `countries` would take it off every
+ * home screen.
+ *
+ * `sendableFor()` in @xetral/client states the mirror of this rule for the
+ * Send screen's picker — its LOCAL_CURRENCIES is the complement of this. The
+ * two must agree, and both say why.
+ */
+const SETTLEMENT_CURRENCY = 'USD';
+
 @Injectable()
 export class WalletService {
   constructor(
@@ -230,23 +247,36 @@ export class WalletService {
      */
     const local = await this.#localCurrencies();
     for (const code of offered) {
-      if (code !== home && local.has(code)) offered.delete(code);
+      if (code !== home && code !== SETTLEMENT_CURRENCY && local.has(code)) {
+        offered.delete(code);
+      }
     }
 
     return [...offered];
   }
 
-  /** Every currency some country calls its own. Cached for five seconds, the
-   *  same window a provider credential gets: this changes when an operator
-   *  opens a country, which is rare, and reading it per request would put a
-   *  query in front of every home screen. */
+  /**
+   * Every currency some OPEN country calls its own.
+   *
+   * `enabled`, and that word is load-bearing. 040's seed carries rows for
+   * countries the platform has not opened — the United States and the United
+   * Kingdom among them — so an unfiltered read makes the DOLLAR somebody
+   * else's local money and takes it off every Nigerian's home screen. It
+   * did: two FX suites went red asserting a USD balance that had stopped
+   * being offered. A closed country has no customers, so its currency is not
+   * a local currency of anywhere this platform operates.
+   *
+   * Cached for five seconds, the same window a provider credential gets:
+   * this changes when an operator opens a country, which is rare, and
+   * reading it per request would put a query in front of every home screen.
+   */
   async #localCurrencies(): Promise<ReadonlySet<string>> {
     const now = Date.now();
     if (this.#localCache !== undefined && this.#localCache.until > now) {
       return this.#localCache.codes;
     }
     const rows = await this.pool.query<{ currency: string }>(
-      `SELECT DISTINCT currency FROM countries`,
+      `SELECT DISTINCT currency FROM countries WHERE enabled`,
     );
     const codes = new Set(rows.rows.map((r) => r.currency));
     this.#localCache = { codes, until: now + 5_000 };

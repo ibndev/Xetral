@@ -30,6 +30,7 @@ export default function Settings() {
    */
   const profile = useLoad(() => client.profile(), [client]);
   const [copied, setCopied] = useState(false);
+  const [copiedPhone, setCopiedPhone] = useState(false);
   const [editing, setEditing] = useState(false);
   const [handle, setHandle] = useState('');
   const [pin, setPin] = useState('');
@@ -39,16 +40,61 @@ export default function Settings() {
   return (
     <Shell>
 
+      {/*
+        TWO WAYS TO BE PAID, AND THEY ARE FOR DIFFERENT PEOPLE.
+
+        The panel offered one — a link — and called itself "Your payment
+        link", which is a name for the mechanism rather than for what it does.
+        A Xetral customer paying another Xetral customer does not need a URL
+        at all: they type a phone number, which is the identifier the Send
+        screen now takes and the one thing everybody already knows about
+        everybody they pay.
+
+        The link stays and is the answer to the other question — being paid by
+        somebody who is NOT on Xetral, in another country, from a message
+        thread. Both are on this panel because "how do I get paid?" is one
+        question with two answers depending on who is paying.
+      */}
       <div className="card">
-        <h1>Your payment link</h1>
-        <h2>Share it and anyone can pay you</h2>
-        <p className="lead">
-          Safe to post publicly. It reveals nothing but the name on your account.
-        </p>
+        <h1>Receive payment globally</h1>
+        <h2>Two ways for anyone to pay you</h2>
 
         {profile.loading && <p className="spinner">Loading…</p>}
         {profile.data !== undefined && (
           <>
+            {/*
+              THE NUMBER FIRST, because it is the one most payments will use.
+              It is already on the session — the Send screen resolves a
+              recipient by it — so there is nothing to fetch and nothing that
+              can be out of step with what a sender types.
+            */}
+            <div className="balance">
+              <div>
+                <div className="amount mono">{session.data?.phone ?? '—'}</div>
+                <div className="pending">Xetral to Xetral user</div>
+              </div>
+            </div>
+            <div className="actions">
+              <button
+                type="button"
+                disabled={session.data?.phone === null || session.data?.phone === undefined}
+                onClick={() => {
+                  const number = session.data?.phone ?? '';
+                  void navigator.clipboard
+                    ?.writeText(number)
+                    .then(() => setCopiedPhone(true))
+                    // A clipboard a browser refused is not an error worth a
+                    // banner — the number is on screen and can be selected.
+                    .catch(() => undefined);
+                }}
+              >
+                <Icon name="copy" size={16} /> {copiedPhone ? 'Copied' : 'Copy my number'}
+              </button>
+            </div>
+
+            <div className="row" style={{ marginTop: 18 }}>
+              <span className="muted">Or a link, for anyone not on Xetral</span>
+            </div>
             <div className="balance">
               <div>
                 <div className="amount mono">@{profile.data.handle}</div>

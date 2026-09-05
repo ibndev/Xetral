@@ -49,12 +49,35 @@ export default function AddMoney() {
   const account = useLoad(() => client.existingFundingAccount(), [client]);
   const deposits = useLoad<readonly Deposit[]>(() => client.deposits(), [client]);
 
+  /*
+   * WHAT SOMEBODY HERE CAN ACTUALLY FUND WITH — data, not a `switch`.
+   *
+   * This screen offered one thing: Activate account, which issues a Nigerian
+   * NUBAN. That is how a Nigerian funds a wallet and it was the only answer
+   * the screen had — so a customer in Accra opened the page they go to in
+   * order to put money in and was offered a bank account they cannot pay
+   * into. 051 puts the answer on the country row, which is where 040 says a
+   * fact about a country belongs, and it is an ARRAY because a country can
+   * have both: the day Paystack issues dedicated accounts in Ghana, an
+   * operator adds one entry and this screen offers it on the next load.
+   *
+   * Falls back to nothing rather than to a NUBAN while the list loads and on
+   * an API predating 051. Offering nothing for a moment is a blank space;
+   * offering the wrong rail is a customer sending money into the void.
+   */
+  const session = useLoad(() => client.currentSession(), [client]);
+  const countries = useLoad(() => client.session.countries(), [client]);
+  const here = countries.data?.find((c) => c.code === session.data?.country);
+  const funding = here?.funding_methods ?? [];
+  const canIssueAccount = funding.includes('virtual_account');
+  const usesMobileMoney = funding.includes('mobile_money');
+
   const has = account.data != null;
 
   return (
     <Shell>
       <div className="card">
-        <h1>Top Up Wallet From Any Bank</h1>
+        <h1>Add Money</h1>
 
         {account.loading && <p className="hint">Checking your account…</p>}
 
@@ -101,7 +124,7 @@ export default function AddMoney() {
           a verified BVN. That requirement now lives in its adapter, and the
           default rail does not have it.
         */}
-        {!account.loading && !has && (
+        {!account.loading && !has && canIssueAccount && (
           /*
             EACH PIECE IN ITS OWN ROW, WITH ROOM AROUND IT.
 
@@ -134,6 +157,79 @@ export default function AddMoney() {
 
             <FormError error={issueError} code={issueCode} />
           </div>
+        )}
+
+        {/*
+          MOBILE MONEY, AND WHAT IS HONEST TO SAY ABOUT IT TODAY.
+
+          In Ghana and Kenya money moves through a mobile money wallet, and
+          this screen has to say something true to a customer there rather
+          than offering them a Nigerian account number.
+
+          IT DOES NOT OFFER A BUTTON THAT DOES NOTHING. Linking a momo wallet
+          as a standing funding instrument is a provider integration that does
+          not exist here yet — Paystack's mobile money is a charge channel
+          rather than an account we can issue and watch — and a Link button
+          that opened nothing would be the exact failure a filled box on an
+          operations screen is: it reads as something that is running.
+
+          So it names the routes that DO reach a wallet here today. Every one
+          of them is built and settles into the same balance: another Xetral
+          customer paying this number, a payment link, and crypto.
+        */}
+        {!account.loading && usesMobileMoney && !canIssueAccount && (
+          <div className="activate">
+            <p className="activate-lead">
+              In {here?.name ?? 'your country'}, money reaches your wallet
+              these ways today.
+            </p>
+            <div className="list">
+              <div className="list-row">
+                <span className="row-icon"><Icon name="send" size={19} /></span>
+                <span className="row-main">
+                  <span className="row-title">Another Xetral customer</span>
+                  <span className="row-sub">
+                    They send to your phone number. It arrives in {here?.currency ?? 'your currency'}.
+                  </span>
+                </span>
+              </div>
+              <div className="list-row">
+                <span className="row-icon"><Icon name="globe" size={19} /></span>
+                <span className="row-main">
+                  <span className="row-title">Your payment link</span>
+                  <span className="row-sub">
+                    For anyone not on Xetral. It is on your settings page.
+                  </span>
+                </span>
+              </div>
+              <div className="list-row">
+                <span className="row-icon"><Icon name="bitcoin" size={19} /></span>
+                <span className="row-main">
+                  <span className="row-title">Crypto</span>
+                  <span className="row-sub">Bitcoin, USDT and USDC, on the Crypto screen.</span>
+                </span>
+              </div>
+            </div>
+            <p className="hint">
+              A local mobile money top-up is not open here yet. We will say so
+              on this screen the moment it is, rather than showing a button
+              that does nothing.
+            </p>
+          </div>
+        )}
+
+        {/*
+          NEITHER RAIL, WHICH IS A REAL STATE AND A TEMPORARY ONE. An operator
+          can open a country before its funding rail is arranged —
+          `countries_without_a_way_in` reports exactly this — and a customer
+          there should be told rather than shown an empty page.
+        */}
+        {!account.loading && !canIssueAccount && !usesMobileMoney && !countries.loading && (
+          <p className="hint">
+            Adding money is not open in {here?.name ?? 'your country'} yet. You
+            can still be paid by another Xetral customer, through your payment
+            link, or in crypto.
+          </p>
         )}
 
         {/* Anything that is NOT the verification gate. A provider outage or a

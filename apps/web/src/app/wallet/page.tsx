@@ -184,7 +184,7 @@ export default function Wallet() {
             <Icon name="send" size={17} /> Send
           </Link>
           <Link href="/add-money" className="btn quiet">
-            <Icon name="plus" size={17} /> Top up
+            <Icon name="plus" size={17} /> Add money
           </Link>
           <Link href="/fx" className="btn quiet">
             <Icon name="swap" size={17} /> Convert

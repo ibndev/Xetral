@@ -33,6 +33,14 @@ export interface XetralCountry {
    * not break; callers fall back to 'bank', which is the conservative answer.
    */
   readonly payout_method?: string;
+  /**
+   * HOW SOMEBODY HERE PUTS MONEY IN — `virtual_account`, `mobile_money`, or
+   * both. Optional so an app built against an API predating 051 does not
+   * break; callers fall back to offering nothing rather than offering a
+   * Nigerian account number to a customer in Accra, which is the failure
+   * this column exists because of.
+   */
+  readonly funding_methods?: readonly string[];
 }
 
 /**
@@ -63,6 +71,7 @@ export const FALLBACK_COUNTRY: XetralCountry = {
   currency: 'NGN',
   enabled: true,
   payout_method: 'bank',
+  funding_methods: ['virtual_account'],
 };
 
 /**

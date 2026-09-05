@@ -9,6 +9,7 @@ import { FormError } from '@/ui/form-error';
 import { Icon } from '@/ui/icon';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/lib/hooks';
 import { VerifyPrompt } from '@/ui/verify-prompt';
+import { Toast } from '@/ui/toast';
 
 /**
  * Deposits and withdrawals on chain.
@@ -168,7 +169,7 @@ function Send({ onSent }: { onSent: () => void }) {
   const [pin, setPin] = useState('');
   const [quote, setQuote] = useState<CryptoQuote | undefined>();
   const attempt = useIdempotencyKey();
-  const { busy, error, code, done, run } = useSubmit();
+  const { busy, error, code, done, run, clear } = useSubmit();
   const selected = ASSETS[choice];
 
   return (
@@ -291,6 +292,14 @@ function Send({ onSent }: { onSent: () => void }) {
 
       <FormError error={error} code={code} />
       {done !== undefined && <p className="ok">{done}</p>}
+
+      {/*
+        OVER the form as well as in it. An on-chain withdrawal cannot be
+        recalled, so whether it left is the one thing a customer must not have
+        to guess at. The inline copy stays, so a refusal can be re-read.
+      */}
+      <Toast message={done} tone="ok" onDone={clear} />
+      <Toast message={error} tone="bad" onDone={clear} />
     </form>
   );
 }

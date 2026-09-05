@@ -1,4 +1,11 @@
-import { ConflictException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import type { Pool } from 'pg';
 import { DATABASE } from '../tokens.js';
 import { PayoutService, type PayoutRow } from '../payouts/payout.service.js';
@@ -73,17 +80,37 @@ export class RecoveryService {
     @Inject(AuditService) private readonly audit: AuditService,
   ) {}
 
-  /** What is waiting for a person, oldest first. */
+  /**
+   * What is waiting for a person, oldest first.
+   *
+   * SWALLOWS A MISSING MIGRATION, for the reason the funding diagnostics
+   * screen does. Nothing in this deployment applies migrations, so a release
+   * can ship this code against a database that has not got 049 — and the
+   * screen an operator opens BECAUSE a customer's money is stuck is the worst
+   * possible place to answer 500. The console renders, says the schema is
+   * behind, and names the file.
+   */
   async waiting(): Promise<readonly HeldMoney[]> {
-    const rows = await this.pool.query<HeldMoney>(
-      `SELECT kind::text AS kind, subject_uuid, user_id::text AS user_id, email,
-              currency, amount_minor::text AS amount_minor, status, created_at,
-              round(hours_held::numeric, 1)::float8 AS hours_held, destination
-         FROM money_awaiting_recovery
-        ORDER BY created_at
-        LIMIT 200`,
-    );
-    return rows.rows;
+    try {
+      const rows = await this.pool.query<HeldMoney>(
+        `SELECT kind::text AS kind, subject_uuid, user_id::text AS user_id, email,
+                currency, amount_minor::text AS amount_minor, status, created_at,
+                round(hours_held::numeric, 1)::float8 AS hours_held, destination
+           FROM money_awaiting_recovery
+          ORDER BY created_at
+          LIMIT 200`,
+      );
+      return rows.rows;
+    } catch (error) {
+      this.#logger.error(
+        `THE DATABASE SCHEMA IS BEHIND THIS BUILD, and that is why the recovery ` +
+          `console is empty: ${describe(error)}. Apply ` +
+          `packages/ledger/sql/049_recovery.sql — it adds money_awaiting_recovery ` +
+          `and recovery_actions. Nothing is wrong with the held money itself; ` +
+          `this request never reached it.`,
+      );
+      throw new ServiceUnavailableException({ error: 'recovery_unavailable' });
+    }
   }
 
   /**
@@ -95,6 +122,20 @@ export class RecoveryService {
    * answer presses the button again.
    */
   async recovered(limit = 50): Promise<readonly RecoveryRecord[]> {
+    try {
+      return await this.#recovered(limit);
+    } catch (error) {
+      // Same reasoning as `waiting()`: an operator opening this screen during
+      // an incident must not be met with a 500 about a migration.
+      this.#logger.error(
+        `could not read the recovery log: ${describe(error)}. ` +
+          `Apply packages/ledger/sql/049_recovery.sql to this database.`,
+      );
+      throw new ServiceUnavailableException({ error: 'recovery_unavailable' });
+    }
+  }
+
+  async #recovered(limit: number): Promise<readonly RecoveryRecord[]> {
     const rows = await this.pool.query<RecoveryRecord>(
       `SELECT r.uuid, r.kind::text AS kind, r.subject_uuid, u.email,
               r.amount_minor::text AS amount_minor, r.currency, r.reason,
@@ -260,4 +301,11 @@ export class RecoveryService {
     if (id === undefined) throw new NotFoundException({ error: 'user_not_found' });
     return id;
   }
+}
+
+/** An error's message, or its stringification. Used by the reads above, which
+ *  must log what went wrong without letting it reach an operator as a stack
+ *  trace on a screen they opened during an incident. */
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

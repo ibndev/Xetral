@@ -51,11 +51,32 @@ export default function AddMoney() {
   const account = useLoad(() => client.existingFundingAccount(), [client]);
   const deposits = useLoad<readonly Deposit[]>(() => client.deposits(), [client]);
 
+  /*
+   * WHAT SOMEBODY HERE CAN ACTUALLY FUND WITH — data, not a `switch`.
+   *
+   * This screen offered one thing: Activate account, which issues a Nigerian
+   * NUBAN. So a customer in Accra opened the page they go to in order to put
+   * money in and was offered a bank account they cannot pay into. 051 puts
+   * the answer on the country row, and it is an ARRAY because a country can
+   * have both — the day Paystack issues dedicated accounts in Ghana an
+   * operator adds one entry and this screen offers it on the next load.
+   *
+   * Falls back to NOTHING rather than to a NUBAN. Offering nothing for a
+   * moment is a blank space; offering the wrong rail is a customer sending
+   * money into the void.
+   */
+  const session = useLoad(() => client.currentSession(), [client]);
+  const countries = useLoad(() => client.session.countries(), [client]);
+  const here = countries.data?.find((c) => c.code === session.data?.country);
+  const funding = here?.funding_methods ?? [];
+  const canIssueAccount = funding.includes('virtual_account');
+  const usesMobileMoney = funding.includes('mobile_money');
+
   const has = account.data != null;
 
   return (
-    <Shell back="/wallet" title="Top Up Wallet">
-      <Panel title="Top Up Wallet From Any Bank">
+    <Shell back="/wallet" title="Add Money">
+      <Panel title="Add Money">
         {account.loading && <Loading />}
 
         {account.data != null && (
@@ -111,7 +132,7 @@ export default function AddMoney() {
           The requirement now lives in the Bitnob adapter, where it is true.
           The default rail opens an account from what signup already holds.
         */}
-        {!account.loading && !has && (
+        {!account.loading && !has && canIssueAccount && (
           /*
             EACH PIECE IN ITS OWN ROW, WITH ROOM AROUND IT — the web's
             `.activate`, and the same reason. These were three siblings of a
@@ -137,6 +158,50 @@ export default function AddMoney() {
             />
             <FormError error={issueError} code={issueCode} />
           </View>
+        )}
+
+        {/*
+          MOBILE MONEY, AND WHAT IS HONEST TO SAY ABOUT IT TODAY.
+
+          In Ghana and Kenya money moves through a mobile money wallet, so
+          this screen has to say something true to a customer there rather
+          than offering them a Nigerian account number.
+
+          IT DOES NOT OFFER A BUTTON THAT DOES NOTHING. Linking a momo wallet
+          as a standing funding instrument is a provider integration that does
+          not exist here yet, and a Link button that opened nothing would be
+          the exact failure a filled box on an operations screen is: it reads
+          as something that is running. So it names the routes that DO reach a
+          wallet here today, every one of which is built.
+        */}
+        {!account.loading && usesMobileMoney && !canIssueAccount && (
+          <View style={{ gap: space.md, marginTop: space.md }}>
+            <Text style={[styles.h2, { marginBottom: 0 }]}>
+              In {here?.name ?? 'your country'}, money reaches your wallet
+              these ways today.
+            </Text>
+            <Text style={styles.lead}>
+              Another Xetral customer sending to your phone number — it arrives
+              in {here?.currency ?? 'your currency'}. Your payment link, for
+              anyone not on Xetral. And crypto: Bitcoin, USDT and USDC.
+            </Text>
+            <Text style={styles.hint}>
+              A local mobile money top-up is not open here yet. We will say so
+              on this screen the moment it is, rather than showing a button
+              that does nothing.
+            </Text>
+          </View>
+        )}
+
+        {/* Neither rail — a real state and a temporary one. An operator can
+            open a country before its funding rail is arranged, and a customer
+            there should be told rather than shown an empty screen. */}
+        {!account.loading && !canIssueAccount && !usesMobileMoney && !countries.loading && (
+          <Text style={styles.hint}>
+            Adding money is not open in {here?.name ?? 'your country'} yet. You
+            can still be paid by another Xetral customer, through your payment
+            link, or in crypto.
+          </Text>
         )}
 
         <FormError error={account.error} code={account.code} />

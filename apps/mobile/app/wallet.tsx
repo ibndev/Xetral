@@ -162,7 +162,7 @@ export default function Home() {
 
         <View style={{ flexDirection: 'row', gap: 8, marginTop: space.lg }}>
           <QuickAction href="/transfer" icon="send" label="Send" primary />
-          <QuickAction href="/add-money" icon="plus" label="Top up" />
+          <QuickAction href="/add-money" icon="plus" label="Add money" />
           <QuickAction href="/fx" icon="swap" label="Convert" />
         </View>
 

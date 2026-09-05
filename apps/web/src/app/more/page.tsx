@@ -23,7 +23,7 @@ const GROUPS: readonly {
     title: 'Money',
     items: [
       { href: '/transfer',  label: 'Send money',   sub: 'To another Xetral account', icon: 'send' },
-      { href: '/add-money', label: 'Add money',    sub: 'Your dedicated account number', icon: 'bank' },
+      { href: '/add-money', label: 'Add money',    sub: 'How money reaches your wallet', icon: 'bank' },
       { href: '/fx',        label: 'Convert',      sub: 'Between your currencies, or send abroad', icon: 'swap' },
       { href: '/crypto',    label: 'Crypto',       sub: 'USDT and Bitcoin, on chain', icon: 'bitcoin' },
     ],

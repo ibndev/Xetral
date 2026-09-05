@@ -1,0 +1,34 @@
+-- ============================================================================
+--  052 — telling a customer their money came back
+--
+--  WHAT WAS WRONG, and it is not the ledger. When a bank payout or a purchase
+--  fails, the money returns by a reversal posted against the reservation:
+--  it leaves `customer_pending` and lands back in the wallet, spendable. That
+--  has always worked and every invariant test agrees.
+--
+--  NOTHING TOLD THE CUSTOMER. What they saw was a debit, and then — minutes or
+--  days later, depending on whether a sweep resolved it — a credit with no
+--  explanation attached. From outside, a correct ledger and money that was
+--  taken and never returned look exactly the same, and the second is what
+--  people reasonably conclude.
+--
+--  So `transfer_reversed` is a message, enqueued on the reversal's OWN
+--  transaction through `post()`'s `onEntry` hook. It cannot exist without the
+--  posting and the posting cannot commit without it being queued — 012's rule,
+--  and the same one the settlement receipt follows.
+--
+--  THE ENUM AND THE UNION HAVE TO BE CHANGED TOGETHER, which is the whole
+--  reason this file exists. Phase 13 records adding `operations_alert` to the
+--  TypeScript union alone: it typechecked, passed every unit test, and failed
+--  on the first real enqueue. `receipts.e2e.test.ts` writes every declared
+--  kind for exactly that reason, and it is what caught this one before it
+--  shipped.
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+--  OUTSIDE a transaction block, the convention 005 established: Postgres
+--  permits ADD VALUE inside one, but the value cannot be USED until that
+--  transaction commits — which turns a migration that adds a value and then
+--  references it into an error reading as though the value was never added.
+-- ---------------------------------------------------------------------------
+ALTER TYPE notification_kind ADD VALUE IF NOT EXISTS 'transfer_reversed';

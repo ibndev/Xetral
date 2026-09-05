@@ -8,6 +8,7 @@ import { Select } from '@/ui/select';
 import { FormError } from '@/ui/form-error';
 import { Icon } from '@/ui/icon';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/lib/hooks';
+import { Toast } from '@/ui/toast';
 
 /**
  * What can be converted between.
@@ -39,7 +40,7 @@ export default function Fx() {
   const [pin, setPin] = useState('');
   const [quote, setQuote] = useState<FxQuote | undefined>();
   const attempt = useIdempotencyKey();
-  const { busy, error, code, done, run } = useSubmit();
+  const { busy, error, code, done, run, clear } = useSubmit();
   const trades = useLoad(() => client.fxTrades(), [client]);
 
   return (
@@ -201,6 +202,15 @@ export default function Fx() {
         {from === to && <p className="hint">Pick two different currencies.</p>}
         <FormError error={error} code={code} />
         {done !== undefined && <p className="ok">{done}</p>}
+
+        {/*
+          OVER the form as well as in it. Buying a conversion moves money, and
+          the outcome has to be unmistakable on a phone where the keyboard is
+          closing over the line above. The inline copy stays, so a refusal can
+          still be re-read after this has gone.
+        */}
+        <Toast message={done} tone="ok" onDone={clear} />
+        <Toast message={error} tone="bad" onDone={clear} />
       </form>
 
       <div className="card">

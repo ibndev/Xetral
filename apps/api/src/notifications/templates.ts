@@ -77,6 +77,26 @@ export type NotificationRequest =
       readonly currency: string;
       readonly reference: string;
     }
+  /**
+   * A TRANSFER THAT DID NOT HAPPEN, AND THE MONEY IS BACK.
+   *
+   * This is the message the product was missing. When a payout fails the
+   * money returns by a reversal posted against the reservation — that has
+   * always worked — and NOTHING TOLD THE CUSTOMER. They saw a debit, then a
+   * credit with no explanation, and reasonably concluded their money had
+   * gone somewhere and come back by accident.
+   *
+   * It carries the REASON the provider gave, because "your transfer did not
+   * go through" without one sends somebody to support to ask the question
+   * this email could have answered.
+   */
+  | {
+      readonly kind: 'transfer_reversed';
+      readonly amount: string;
+      readonly currency: string;
+      readonly reason: string;
+      readonly reference: string;
+    }
   | {
       readonly kind: 'crypto_withdrawal_sent';
       readonly amount: string;
@@ -149,6 +169,11 @@ const CLASS_OF: Record<NotificationKind, NotificationClass> = {
   devices_revoked: 'security',
   deposit_credited: 'transactional',
   transfer_sent: 'transactional',
+  // TRANSACTIONAL, not security. It is a receipt for something the customer
+  // themselves started that did not happen — an explanation rather than a
+  // warning — and classing it `security` would put it ahead of password
+  // resets in the queue for no benefit.
+  transfer_reversed: 'transactional',
   crypto_withdrawal_sent: 'transactional',
   card_frozen: 'transactional',
   transfer_blocked: 'security',
@@ -444,6 +469,27 @@ ${SECURITY_FOOTER}`,
         html: shell(
           `You sent ${amount}`,
           h`<p style="margin:0 0 8px;">${amount} was sent from your wallet.</p>` +
+            h`<p style="margin:0;font-size:13px;color:#7c8089;">Reference ${request.reference}</p>`,
+        ),
+      };
+    }
+
+    case 'transfer_reversed': {
+      const amount = `${request.currency} ${groupDigits(request.amount)}`;
+      return {
+        // NOT "we have refunded you", which is what a phishing message says.
+        // This states what happened to a transfer the customer themselves
+        // started, and it names no link and asks for nothing.
+        subject: `Your ${amount} transfer did not go through`,
+        text:
+          `${amount} did not reach its destination, so it is back in your ` +
+          `Xetral wallet and is available to spend.\n\n` +
+          `Why: ${request.reason}\n\n` +
+          `Reference: ${request.reference}`,
+        html: shell(
+          `Your ${amount} transfer did not go through`,
+          h`<p style="margin:0 0 8px;">${amount} did not reach its destination, so it is back in your wallet and available to spend.</p>` +
+            h`<p style="margin:0 0 8px;">Why: ${request.reason}</p>` +
             h`<p style="margin:0;font-size:13px;color:#7c8089;">Reference ${request.reference}</p>`,
         ),
       };

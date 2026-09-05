@@ -382,7 +382,17 @@ export class PayoutService {
     return rows.rows[0]?.email ?? undefined;
   }
 
-  /** Gives the money back by APPENDING a reversal naming the reservation. */
+  /**
+   * Gives the money back by APPENDING a reversal naming the reservation.
+   *
+   * AND TELLS THE CUSTOMER, which is the half that was missing. The posting
+   * has always been correct — the money leaves `customer_pending` and lands
+   * back in the wallet, spendable — and nothing anywhere said so. What a
+   * customer saw was a debit, then an unexplained credit some minutes or days
+   * later, which reads as money having gone somewhere and come back by
+   * accident. "It was deducted and never returned" is what that looks like
+   * from the outside even when the ledger is right.
+   */
   async fail(row: PayoutRow, reason: string): Promise<void> {
     const currency = row.currency as Currency;
     const total = money(BigInt(row.amount_minor) + BigInt(row.fee_minor), currency);
@@ -398,6 +408,41 @@ export class PayoutService {
         posting(pendingAccount(row.user_id, currency), money(-total.amount, currency)),
         posting(walletAccount(row.user_id, currency), total),
       ],
+    },
+    {
+      /*
+       * ON THE REVERSAL'S OWN TRANSACTION, the rule 012 states and the same
+       * hook the settlement uses. A message enqueued afterwards is lost when
+       * the process dies in the gap — and the gap here is exactly the moment
+       * a customer is watching a balance that has not moved yet. A message
+       * enqueued inside would promise money back for an entry that then
+       * rolls back.
+       *
+       * It must not take a connection of its own: it is inside a transaction
+       * holding one, and a second would deadlock the pool at `pool.max`.
+       */
+      onEntry: async (client, entry) => {
+        const email = await this.#emailFor(client, row.user_id);
+        if (email === undefined) return;
+        await this.notifications.enqueueBestEffort(client, {
+          userId: row.user_id,
+          recipient: email,
+          // The ledger key, reused. A second identity for one event is how
+          // the two drift apart under the conditions that make idempotency
+          // matter — and a reversal is retried by the sweep by design.
+          idempotencyKey: `receipt:bank-payout-reverse:${row.reference}`,
+          request: {
+            kind: 'transfer_reversed',
+            amount: toMajor(total),
+            currency,
+            // The provider's own sentence. Without it "your transfer did not
+            // go through" sends somebody to support to ask the question this
+            // message could have answered.
+            reason,
+            reference: entry.entryUuid,
+          },
+        });
+      },
     });
 
     await this.pool.query(

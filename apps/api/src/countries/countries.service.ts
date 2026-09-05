@@ -33,6 +33,12 @@ export interface Country {
    * `switch` in two apps, for the reason 040 gives about countries.
    */
   readonly payout_method: string;
+  /**
+   * HOW SOMEBODY HERE PUTS MONEY IN — `virtual_account`, `mobile_money`, or
+   * both. The top-up screen renders one panel per entry, so adding one to a
+   * country row is a new option on the next load with no deploy.
+   */
+  readonly funding_methods: readonly string[];
 }
 
 @Injectable()
@@ -48,7 +54,7 @@ export class CountriesService {
    */
   async open(): Promise<readonly Country[]> {
     const result = await this.pool.query<Country>(
-      `SELECT code, name, dial_code, currency, enabled, payout_method
+      `SELECT code, name, dial_code, currency, enabled, payout_method, funding_methods
          FROM countries WHERE enabled ORDER BY name`,
     );
     return result.rows;
