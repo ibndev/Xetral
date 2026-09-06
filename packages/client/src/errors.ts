@@ -45,6 +45,19 @@ const API_ERROR_CODES = [
      telling them to try again would send them round a loop that cannot end. */
   'password_reset_unavailable',
   /*
+   * THE PUBLIC CHECKOUT.
+   *
+   * `link_not_found` is deliberately ONE answer to two questions — a slug
+   * nobody holds, and one whose owner has closed their account. The page is
+   * open to anybody, so distinguishing them would say which links are real.
+   *
+   * `checkout_unavailable` is not user-fixable: no Paystack credential, or a
+   * deployment behind 058. The payer can do nothing about either, so the words
+   * must not send them round a loop.
+   */
+  'link_not_found',
+  'checkout_unavailable',
+  /*
    * TOO MANY WRONG CODES, AND EVERY LIVE ONE IS NOW BURNT.
    *
    * Said out loud, unlike the three refusals the API collapses into

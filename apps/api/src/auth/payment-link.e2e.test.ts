@@ -103,28 +103,108 @@ describe('a customer asking to be paid', () => {
     expect(res.body.phone).toBe(person.phone);
   });
 
-  it('the link carries the number without its plus', async () => {
-    // A `+` in a URL is a space to enough software that a link carrying one
-    // arrives broken at whoever was asked to pay. Dropping it loses nothing:
-    // an E.164 number without the plus is still the whole number, country
-    // code first.
+  it('the link is the account\'s own slug, and every account has one', async () => {
+    /*
+     * THE LINK IS NO LONGER THE PHONE NUMBER, and that is not a cosmetic
+     * change: it is now a page a STRANGER pays on, so the address a customer
+     * publishes must not be the number their bank, their contacts and their
+     * two-factor codes are attached to. The slug is minted by a trigger on
+     * `users` in 058, so there is no path by which an account exists without
+     * one — which is what makes "share your link" a thing every customer can
+     * do on the day they sign up, with nothing to create first.
+     *
+     * It is also URL-safe by CHECK rather than by escaping. The `+` this test
+     * used to guard against cannot occur in `^[a-z0-9]{8,32}$`, and neither
+     * can anything else that changes meaning in a URL, a QR code or a text
+     * message.
+     */
     const person = await register();
 
     const res = await mine(person).expect(200);
+    const slug = res.body.slug as string | null;
     const link = res.body.link as string | null;
+
+    expect(slug).toMatch(/^[a-z0-9]{8,32}$/);
     // `testApiConfig` sets an app base URL, so the API can build one here. On
     // a deployment that has not been told its own address this is null and
     // each app fills it in from the origin it is already running on — which is
     // asserted in the clients, because only they have an origin.
     expect(link).not.toBeNull();
-    expect(link).toContain(`/pay/${person.phone.slice(1)}`);
-    expect(link).not.toContain('+');
+    expect(link).toContain(`/pay/${slug as string}`);
+    // AND IT IS NOT THE NUMBER. Asserted rather than implied, because the
+    // previous shape of this link WAS the number and a fallback that quietly
+    // reverted would publish it again.
+    expect(link).not.toContain(person.phone.slice(1));
+  });
+
+  it('a stranger with no account can read who a link pays', async () => {
+    /*
+     * THE WHOLE POINT OF THE LINK, and the half a signed-in test cannot see:
+     * this request carries no bearer token at all. If it needed one, a payment
+     * link would only be payable by people who already have an account, which
+     * is not a payment link.
+     *
+     * It answers a NAME and a CURRENCY. Not an email, not a number — a payer
+     * has to see who they are about to pay, and if the page could also show
+     * the address behind the link then every published link would be a
+     * harvester.
+     */
+    const payee = await register();
+    const slug = (await mine(payee).expect(200)).body.slug as string;
+
+    const seen = await request(app.getHttpServer()).get(`/v1/pay/${slug}`).expect(200);
+
+    expect(seen.body.name).toBe('Payment Link Person');
+    expect(seen.body.currency).toBe('NGN');
+    expect(Object.keys(seen.body as object).sort()).toEqual(['currency', 'name']);
+  });
+
+  it('an unknown link answers exactly as a malformed one does', async () => {
+    // Distinguishing them would say which slugs exist, one request at a time,
+    // to a caller who needs no account to ask. Same rule as an unknown bank
+    // account and an unreachable bank.
+    const unknown = await request(app.getHttpServer()).get('/v1/pay/zzzzzzzzzzzz');
+    const malformed = await request(app.getHttpServer()).get('/v1/pay/NOT-A-SLUG');
+
+    expect(unknown.status).toBe(malformed.status);
+    expect(unknown.body.error).toBe(malformed.body.error);
+    expect(unknown.body.error).toBe('link_not_found');
+  });
+
+  it('a link already in the world, built from a number, still resolves', async () => {
+    /*
+     * NOBODY RE-READS A LINK THEY HAVE ALREADY SENT. Every link shared before
+     * the slug existed carries a phone number, and those are in message
+     * threads, bios and printouts we cannot reach. `payLinkTarget` therefore
+     * unwraps `/pay/<segment>` first and reads all digits as a number, so the
+     * old shape keeps working — silently redirecting them to nobody would be
+     * the worst possible way to make this change.
+     */
+    const payee = await register();
+    const payer = await register();
+
+    const sent = await request(app.getHttpServer())
+      .post('/v1/wallets/transfers')
+      .set('Authorization', `Bearer ${payer.token}`)
+      .send({
+        recipient: `https://app.xetral.test/pay/${payee.phone.slice(1)}`,
+        amount: '100.00',
+        currency: 'NGN',
+        idempotency_key: randomUUID(),
+        transaction_pin: PIN,
+      });
+
+    // The payer has no balance, so `insufficient_funds` is the answer that
+    // says the RECIPIENT WAS FOUND — see the next test for why that is the
+    // assertion rather than a 200.
+    expect(sent.body.error).toBe('insufficient_funds');
   });
 
   it('pasting that link back into Send resolves to the person it names', async () => {
-    // THE HALF THAT WAS NEVER CHECKED END TO END. The link is built by one
-    // regex in the profile service and taken apart by another in the wallet
-    // service, in different files, with no type between them.
+    // THE HALF THAT WAS NEVER CHECKED END TO END. The link is built in the
+    // profile service and taken apart by `payLinkTarget` in the wallet
+    // service, in different files, with no type between them — and the slug
+    // branch resolves through `payable_links`, which is a third file again.
     const payee = await register();
     const payer = await register();
 

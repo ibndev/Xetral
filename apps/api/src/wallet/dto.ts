@@ -3,15 +3,19 @@ import { z } from 'zod';
 /**
  * WHAT A CUSTOMER MAY SEND TO ANOTHER CUSTOMER.
  *
- * Four, and BTC is deliberately not among them: an internal transfer is a
- * ledger movement between two wallets, and these four are the ones the
- * platform actually holds customer balances in. Adding one is adding
- * it to `TRANSFER_CURRENCIES` in `@xetral/client` too — `wallet-currencies.
- * test.ts` fails the build if the two disagree, because a currency a client
- * offers and this refuses is a form that 400s on a field the customer filled
- * in correctly.
+ * EVERY CURRENCY THE PLATFORM HOLDS, BTC INCLUDED. It was excluded on the
+ * reasoning that these are the ones the platform "actually holds customer
+ * balances in" — which stopped being true when 007 landed — and a
+ * Xetral-to-Xetral transfer is a movement between two wallets on our own
+ * ledger anyway: no chain, no provider, no network fee. There is nothing
+ * about Bitcoin that makes it different from moving cedis.
+ *
+ * Adding one is adding it to `TRANSFER_CURRENCIES` in `@xetral/client` too —
+ * `wallet-currencies.test.ts` fails the build if the two disagree, because a
+ * currency a client offers and this refuses is a form that 400s on a field
+ * the customer filled in correctly.
  */
-const TRANSFER_CURRENCIES = ['NGN', 'GHS', 'KES', 'USD', 'USDT', 'USDC'] as const;
+const TRANSFER_CURRENCIES = ['NGN', 'GHS', 'KES', 'USD', 'USDT', 'USDC', 'BTC'] as const;
 
 /**
  * WHAT A CUSTOMER MAY READ THE HISTORY OF.

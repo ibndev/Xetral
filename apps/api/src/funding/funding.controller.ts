@@ -14,10 +14,19 @@ import { FundingService } from './funding.service.js';
 import type { DepositView, VirtualAccountView } from './funding.service.js';
 import { DepositWebhookService } from './deposit-webhook.service.js';
 import { PaystackWebhookService } from './paystack-webhook.service.js';
+import { PaymentLinkService } from '../pay/payment-link.service.js';
+import { z } from 'zod';
+
+/** MAJOR units as a decimal STRING, parsed once by `fromMajor` — the rule
+ *  every money field on this platform follows. */
+const topUpSchema = z.object({ amount: z.string().trim().min(1).max(32) }).strict();
 
 @Controller('v1/funding')
 export class FundingController {
-  constructor(@Inject(FundingService) private readonly funding: FundingService) {}
+  constructor(
+    @Inject(FundingService) private readonly funding: FundingService,
+    @Inject(PaymentLinkService) private readonly links: PaymentLinkService,
+  ) {}
 
   /**
    * The customer's dedicated account number.
@@ -51,6 +60,39 @@ export class FundingController {
     @Req() request: AuthenticatedRequest,
   ): Promise<{ account: VirtualAccountView | null }> {
     return { account: (await this.funding.existingAccount(claimsOf(request).sub)) ?? null };
+  }
+
+  /**
+   * TOP UP FROM MOBILE MONEY, A BANK OR A CARD — Paystack's hosted checkout.
+   *
+   * WHAT THIS IS FOR. In Ghana and Kenya there is no dedicated account to pay
+   * into: money moves through a mobile money wallet, and Paystack's mobile
+   * money is a CHARGE CHANNEL rather than an account we can issue. So the Add
+   * Money screen there had nothing that could actually add money and said so.
+   *
+   * NO PIN. A transaction PIN authorises money LEAVING a customer's account,
+   * and this brings money in — the same reasoning that leaves a deposit
+   * unauthenticated at the other end of the rail. What it does spend is a
+   * Paystack call, which is why it is metered by the authenticated bucket like
+   * everything else.
+   *
+   * It answers a URL and nothing else. The customer pays on Paystack's own
+   * page, which is what keeps card details out of this API entirely.
+   */
+  @Post('topup')
+  @HttpCode(200)
+  async topUp(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: unknown,
+  ): Promise<{ authorization_url: string; reference: string }> {
+    const parsed = topUpSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException({
+        error: 'invalid_request',
+        fields: parsed.error.issues.map((i) => i.path.join('.')),
+      });
+    }
+    return this.links.topUp(claimsOf(request).sub, parsed.data.amount);
   }
 
   /** What has landed. Reading this moves nothing, so no PIN. */

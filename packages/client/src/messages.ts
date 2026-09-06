@@ -231,6 +231,13 @@ function sentenceFor(error: ApiError): string {
       // thing only — no email provider is configured — because a reset is a
       // CODE and no longer needs this deployment to know its own address.
       return 'Password resets are unavailable right now. Contact support.';
+    case 'link_not_found':
+      // One sentence for a link that never existed and one whose owner has
+      // closed their account, because the API answers the same for both.
+      return 'This payment link is not active. Ask whoever sent it for a new one.';
+    case 'checkout_unavailable':
+      // NOT user-fixable. Nothing the payer types changes this.
+      return 'Payments are unavailable right now. Try again shortly.';
     case 'reset_code_attempts':
       // Names the way out. "Invalid code" would be true and would leave
       // somebody retyping a code that can never work again.

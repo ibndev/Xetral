@@ -667,7 +667,8 @@ Schema: `packages/ledger/sql/039_profile_handles.sql`.
 
 ### One identifier, and the link made from it — non-obvious rules
 
-Schema: `packages/ledger/sql/039_profile_handles.sql` (the handle, now legacy).
+Schema: `packages/ledger/sql/039_profile_handles.sql` (the handle, now legacy)
+and `058_payment_links.sql` (the slug the link is made of).
 `apps/api/src/auth/profile.service.ts`, on the Add Money screen of both apps.
 
 - **THE IDENTIFIER IS THE PHONE NUMBER.** It was an `@handle`, minted from the
@@ -676,19 +677,29 @@ Schema: `packages/ledger/sql/039_profile_handles.sql` (the handle, now legacy).
   identifiers for one account is two things to get wrong for no capability the
   number does not already have. There is no route that changes it: a number is
   changed by changing the number on the account.
+- **THE NUMBER IS FOR XETRAL-TO-XETRAL AND THE LINK IS FOR EVERYBODY ELSE**,
+  and they are two different strings for that reason. The number is what
+  another customer types into Send; the link is a checkout a stranger pays on,
+  so its address must not be the number a customer's bank, contacts and
+  two-factor codes are attached to. The Request payment panel says which is
+  which rather than offering one identifier twice.
 - **A LINK ALREADY IN THE WORLD STILL RESOLVES.** `payLinkTarget` unwraps
   `/pay/<segment>` FIRST, then reads all digits as a number and anything else
-  as a handle. Removing the handle branch would silently redirect every link
-  shared before the change, and nobody re-reads a link they have already sent.
-- **THE LINK DROPS THE `+`**, because a plus in a URL is a space to enough
-  software that a shared link breaks at the only moment it is used. Both
-  readers put it back — the landing page for a browser, `payLinkTarget` for a
-  paste — and `payment-link.test.ts` asserts all three halves, because a
+  as a slug — resolved through `payable_links`, falling through to the legacy
+  handle branch when no live link matches. Every one of the three shapes has
+  been published to somebody, and nobody re-reads a link they have already
+  sent.
+- **THE LEGACY LINK DROPS THE `+`**, because a plus in a URL is a space to
+  enough software that a shared link breaks at the only moment it is used.
+  Both readers put it back — the landing page for a browser, `payLinkTarget`
+  for a paste — and `payment-link.test.ts` asserts all three halves, because a
   template string in one workspace and a directory name in another are what
-  the `/pay` 404 was made of.
+  the `/pay` 404 was made of. The slug needs none of that: `^[a-z0-9]{8,32}$`
+  cannot contain a character that changes meaning in a URL, a QR code or a
+  text message, which is a CHECK rather than an escaping discipline.
 - **AN UNSET `APP_BASE_URL` IS NOT A CUSTOMER-FACING ERROR.** The API returns
   no link and each app fills it in from the origin it is already running on —
-  `paymentLinkFor(origin, phone)`, in `@xetral/client`. "No link yet — this
+  `paymentLinkFor(origin, slug)`, in `@xetral/client`. "No link yet — this
   deployment has no public address set" was an operator's problem printed on
   the screen somebody opened in order to ask to be paid.
 - **`displayPhone` SHARES AND `nationalPhone` RECOGNISES.** A customer reading
@@ -703,6 +714,58 @@ Schema: `packages/ledger/sql/039_profile_handles.sql` (the handle, now legacy).
   a customer whose number we hold was shown an em dash and greeted as
   "there". That is the same failure this method's comment already recorded
   about `handle` and 039, one migration later.
+
+### A link a stranger can pay — non-obvious rules
+
+Schema: `packages/ledger/sql/058_payment_links.sql`. Service in
+`apps/api/src/pay/payment-link.service.ts`, checkout at `/pay/<slug>`.
+
+- **THE LINK WAS A SHORTCUT FOR EXISTING CUSTOMERS, UNDER A HEADING THAT SAID
+  OTHERWISE.** `/pay/<x>` handed the identifier to the SEND screen, which is
+  behind a sign-in — so a link a customer shared "to accept payment globally"
+  was payable only by somebody who already had a Xetral account with money in
+  it. For everybody else it was a sign-in page, which reads as the customer
+  having sent a broken link.
+- **EVERY ACCOUNT HAS ONE AND NOBODY CREATES IT.** The slug is minted by an
+  `AFTER INSERT ON users` trigger and the migration backfills the rest, so
+  "share your link" is something a customer can do on the day they sign up
+  with nothing to set up first — the fix for existing customers being asked to
+  create something they already had.
+- **THE ROW IS WRITTEN BEFORE THE PAYER LEAVES, and that ordering is the whole
+  security argument.** 044 refuses to credit on `charge.success` alone and
+  demands `channel = 'dedicated_nuban'`; a checkout has no dedicated account,
+  so that test cannot apply. What replaces it is stronger: the reference is
+  OURS and names a row saying which customer and how much, so an event whose
+  reference matches no row credits nobody.
+- **THE AMOUNT AND CURRENCY ARE VERIFIED AGAINST PAYSTACK BEFORE ANYTHING IS
+  POSTED**, and a mismatch refuses rather than crediting what was paid. The
+  payer chooses the amount, so believing the row would credit whatever was
+  asked for and believing the event alone would credit whatever arrived.
+- **SETTLE IS PUBLIC AND UNSIGNED, AND GRANTS NOBODY ANYTHING.** It verifies
+  with Paystack rather than believing its caller, so a made-up reference does
+  nothing. What it buys is the customer seeing the money in the second it
+  takes the payer to come back, rather than whenever the webhook lands — and
+  the webhook keys on the same reference, so whichever arrives second is a
+  replay at the ledger.
+- **THE LOOKUP ANSWERS A NAME AND A CURRENCY AND NOTHING ELSE.** A payer has
+  to see who they are about to pay; if the page could also show the address or
+  the number behind the link, every published link would be a harvester —
+  `payable_links` carries no email and no phone, the same argument
+  `payable_handles` recorded.
+- **AN UNKNOWN SLUG AND A MALFORMED ONE ANSWER IDENTICALLY**, 404 and
+  `link_not_found`, status included. A malformed one answered 400 and an
+  unknown one 404, which from a page anybody can open is a way to learn which
+  slugs are the right SHAPE and therefore worth guessing. Caught by asserting
+  the two responses are EQUAL rather than by asserting each separately, which
+  is how they came to differ.
+- **A PAID PAYMENT HAS AN ENTRY, BY CHECK**, and identity and amount are
+  immutable once the row exists — `(status = 'paid') = (entry_id IS NOT NULL)`
+  refuses a payment marked paid that credited nobody and an entry attached to
+  one that is not.
+- **A CUSTOMER TOPPING UP THEIR OWN WALLET IS THE SAME CODE PATH.** Ghana and
+  Kenya fund by mobile money, which is this checkout with the payer being the
+  owner — a second implementation would be a second set of assumptions about
+  the ledger, and the copy that drifts is the one nobody watches.
 
 ### Getting back in — non-obvious rules
 
@@ -2437,6 +2500,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/054_elevation_window.sq
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/055_uk_and_canada.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/056_reset_codes.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/057_reference_rates.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/058_payment_links.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -2493,6 +2557,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/054_elevation_window.te
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/055_uk_and_canada.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/056_reset_codes.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/057_reference_rates.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/058_payment_links.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

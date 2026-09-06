@@ -3,18 +3,20 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 /**
- * THE LINK THE API BUILDS MUST BE A PAGE THIS APP SERVES.
+ * THE LINK THE API BUILDS MUST BE A PAGE THIS APP SERVES, AND THAT PAGE MUST
+ * BE PAYABLE BY A STRANGER.
  *
- * `paymentLinkFor()` returns `${origin}/pay/${digits}`. The Add Money screen
- * shows it with a Copy button and tells the customer it is safe to post
- * publicly. `apps/web` had no `/pay` route at all, so every link generated
- * since the feature shipped answered 404 — and nothing failed anywhere: the
- * path is a template string in one workspace and a DIRECTORY NAME in another,
- * which no compiler and no type can compare.
+ * `paymentLinkFor()` returns `${origin}/pay/${slug}` and the page that answers
+ * it is a DIRECTORY NAME in another workspace. Nothing compares those two: one
+ * is a string literal in the API, the other a folder on disk here, and no
+ * compiler has an opinion about either. That is not hypothetical — `apps/web`
+ * once had no `/pay` route at all and every link generated answered 404.
  *
- * It is also the shape `wallet.service.ts` parses back out of a pasted link,
- * so three separate places have to agree on one segment. This test is the only
- * thing that reads all three.
+ * THE SECOND HALF IS NEWER AND IS THE ONE THAT WAS REPORTED. The page existed
+ * and REDIRECTED TO THE SEND SCREEN, which is behind a sign-in — so the link a
+ * customer was told to share "to accept payment globally" was payable only by
+ * somebody who already had a Xetral account with money in it. A test that only
+ * checks the route exists would have passed throughout.
  */
 
 const HERE = new URL('.', import.meta.url).pathname;
@@ -39,55 +41,58 @@ describe('the payment link', () => {
   it('the segment the API generates is the directory this app serves', () => {
     expect(
       existsSync(join(HERE, '..', segment(), '[ref]', 'page.tsx')),
-      `the API hands customers /${segment()}/<number> and apps/web has no page for it — ` +
+      `the API hands people /${segment()}/<slug> and apps/web has no page for it — ` +
         'every payment link answers 404',
     ).toBe(true);
   });
 
-  it('the parser accepts the link the service produces', () => {
-    // `payLinkTarget` is what turns a pasted link back into an identifier on
-    // the transfer path. It matches on the same segment, in its own regex, in
-    // a third file — so the two can disagree without either one being wrong on
-    // its own.
-    const wallet = read(join(API, 'wallet', 'wallet.service.ts'));
+  it('the page takes a payment; it does not send the payer to sign in', () => {
+    /*
+     * THE FAULT THIS FILE EXISTS FOR NOW. The page used to `redirect()` to
+     * `/transfer`, which is authenticated — so the "payment link" was a
+     * shortcut for existing customers wearing the name of something else.
+     */
+    const page = read(join(HERE, '[ref]', 'page.tsx'));
+    expect(page.includes('redirect('), 'the checkout page redirects again').toBe(false);
     expect(
-      wallet.includes(`\\/${segment()}\\/`),
-      `payLinkTarget() does not parse /${segment()}/ links, so a customer pasting one is ` +
-        'told there is no such recipient',
+      page.includes('/charge'),
+      'the checkout page does not start a payment, so nobody without an account can pay',
     ).toBe(true);
   });
 
-  it('the link drops the plus and both readers put it back', () => {
-    // A `+` in a URL is a space to enough software that a link carrying one
-    // breaks on the way to whoever was asked to pay. So the generator strips
-    // it, and BOTH things that read a link back have to restore it — the
-    // landing page for a browser, and the API parser for a paste.
+  it('the money goes to Paystack, and no card detail touches this page', () => {
+    // The only thing this page does with money is hand the payer to Paystack's
+    // own hosted page. A field that took a card number here would drag in
+    // everything that decision exists to stay out of.
+    const page = read(join(HERE, '[ref]', 'page.tsx'));
+    expect(page.includes('authorization_url')).toBe(true);
+    for (const forbidden of ['card_number', 'cardNumber', 'cvv', 'expiry']) {
+      expect(page.includes(forbidden), `the checkout page asks for ${forbidden}`).toBe(false);
+    }
+  });
+
+  it('the slug is not the phone number', () => {
+    /*
+     * A link is forwarded, indexed and pasted into group chats. A phone number
+     * in one is a phone number published to everybody it reaches, for ever,
+     * with no way to take it back — and the customer cannot rotate it, because
+     * changing it means changing the number on the account.
+     */
     const profile = read(join(API, 'auth', 'profile.service.ts'));
     expect(
-      profile.includes("replace(/^\\+/, '')"),
-      'paymentLinkFor() no longer strips the leading +, so a shared link can arrive broken',
-    ).toBe(true);
-
-    const landing = read(join(HERE, '[ref]', 'page.tsx'));
-    expect(landing.includes('`+${ref}`'), 'the landing page does not restore the +').toBe(true);
-
-    const wallet = read(join(API, 'wallet', 'wallet.service.ts'));
-    expect(
-      wallet.includes('`+${segment}`'),
-      'payLinkTarget() does not restore the +, so a pasted link misses the account',
-    ).toBe(true);
+      /paymentLinkFor\(origin,\s*phone\)/.test(profile),
+      'the link is built from the phone number again',
+    ).toBe(false);
+    expect(profile.includes('paymentLinkFor(origin, slug)')).toBe(true);
   });
 
-  it('the landing page hands the identifier to the transfer screen, which reads it', () => {
-    const landing = read(join(HERE, '[ref]', 'page.tsx'));
-    const key = landing.match(/redirect\(`\/transfer\?([a-z]+)=/)?.[1];
-    expect(key, 'the landing page no longer redirects to /transfer with a query key').toBeDefined();
-
-    const transfer = read(join(HERE, '..', 'transfer', 'page.tsx'));
-    expect(
-      transfer.includes(`params.get('${key ?? ''}')`),
-      `the landing page sends ?${key}= and the transfer screen does not read it, so a ` +
-        'customer following a link lands on an empty form',
-    ).toBe(true);
+  it('a payment credits the wallet of the customer the link belongs to', () => {
+    // The one thing the whole feature is for, asserted where it is decided.
+    // `link_payments.user_id` is written before the payer is sent to Paystack
+    // and is immutable by trigger, so the wallet credited is the one the link
+    // named at the moment somebody chose to pay it.
+    const service = read(join(API, 'pay', 'payment-link.service.ts'));
+    expect(service.includes("kind: 'customer_wallet', ownerId: row.user_id")).toBe(true);
+    expect(service.includes("kind: 'wallet_funding'")).toBe(true);
   });
 });

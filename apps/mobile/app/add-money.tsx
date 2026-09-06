@@ -1,5 +1,6 @@
-import { Share, Text, View } from 'react-native';
-import { displayPhone, formatAmount, paymentLinkFor } from '@xetral/client';
+import { useState } from 'react';
+import { Linking, Share, Text, TextInput, View } from 'react-native';
+import { formatAmount, nationalPhone, paymentLinkFor } from '@xetral/client';
 import type { Deposit } from '@xetral/client';
 import { Shell } from '@/shell';
 import { Button, FormError, Loading, Panel } from '@/ui';
@@ -49,6 +50,7 @@ export default function AddMoney() {
    * effect of being looked at, and it was survivable only because issuing is
    * idempotent. Opening one is a BUTTON now, which is what it is.
    */
+  const [topUp, setTopUp] = useState('');
   const account = useLoad(() => client.existingFundingAccount(), [client]);
   const deposits = useLoad<readonly Deposit[]>(() => client.deposits(), [client]);
 
@@ -70,7 +72,14 @@ export default function AddMoney() {
   const countries = useLoad(() => client.session.countries(), [client]);
   const here = countries.data?.find((c) => c.code === session.data?.country);
   const funding = here?.funding_methods ?? [];
-  const canIssueAccount = funding.includes('virtual_account');
+  /*
+   * THE ACTIVATE BUTTON IS OFFERED EVERYWHERE NOW — the web's decision, and
+   * the same reason. It was gated on `virtual_account`, so a customer in Ghana
+   * was never offered an account at all. What the gate protected against is a
+   * button that fails; what it caused is a screen that cannot even try. A
+   * refusal from the provider is RELAYED with its own reason, which an
+   * operator can act on, where a hidden button is a silence nobody can.
+   */
   const usesMobileMoney = funding.includes('mobile_money');
 
   const has = account.data != null;
@@ -133,7 +142,7 @@ export default function AddMoney() {
           The requirement now lives in the Bitnob adapter, where it is true.
           The default rail opens an account from what signup already holds.
         */}
-        {!account.loading && !has && canIssueAccount && (
+        {!account.loading && !has && (
           /*
             EACH PIECE IN ITS OWN ROW, WITH ROOM AROUND IT — the web's
             `.activate`, and the same reason. These were three siblings of a
@@ -162,47 +171,65 @@ export default function AddMoney() {
         )}
 
         {/*
-          MOBILE MONEY, AND WHAT IS HONEST TO SAY ABOUT IT TODAY.
+          MOBILE MONEY, AS A TOP-UP THAT ACTUALLY MOVES MONEY — the web's,
+          and the same reasoning.
 
-          In Ghana and Kenya money moves through a mobile money wallet, so
-          this screen has to say something true to a customer there rather
-          than offering them a Nigerian account number.
+          THIS SCREEN USED TO LIST THREE THINGS AND OFFER NONE OF THEM. It
+          said money reaches your wallet "these ways today" and then named
+          another Xetral customer, a payment link and crypto — three routes
+          that are all somebody ELSE paying you. A customer who opened Add
+          Money in order to put their OWN money in was given a reading list.
 
-          IT DOES NOT OFFER A BUTTON THAT DOES NOTHING. Linking a momo wallet
-          as a standing funding instrument is a provider integration that does
-          not exist here yet, and a Link button that opened nothing would be
-          the exact failure a filled box on an operations screen is: it reads
-          as something that is running. So it names the routes that DO reach a
-          wallet here today, every one of which is built.
+          What was missing was not a button, it was a rail: Paystack's mobile
+          money is a CHARGE CHANNEL rather than an account we can issue, so
+          there was nothing to "link". A charge is what the payment link
+          already is, so this is the same checkout with the customer as their
+          own payer.
+
+          THE MOMO NUMBER IS TYPED ON PAYSTACK'S PAGE, not here. They ask for
+          it, send the prompt to the handset and confirm it; asking on this
+          screen would be collecting a credential we cannot verify.
         */}
-        {!account.loading && usesMobileMoney && !canIssueAccount && (
+        {!account.loading && usesMobileMoney && (
           <View style={{ gap: space.md, marginTop: space.md }}>
             <Text style={[styles.h2, { marginBottom: 0 }]}>
-              In {here?.name ?? 'your country'}, money reaches your wallet
-              these ways today.
+              Top up from mobile money{here === undefined ? '' : ` in ${here.name}`}
             </Text>
-            <Text style={styles.lead}>
-              Another Xetral customer sending to your phone number — it arrives
-              in {here?.currency ?? 'your currency'}. Your payment link, for
-              anyone not on Xetral. And crypto: Bitcoin, USDT and USDC.
-            </Text>
+
+            <Text style={styles.label}>Amount ({here?.currency ?? ''})</Text>
+            <TextInput
+              style={styles.input}
+              value={topUp}
+              onChangeText={setTopUp}
+              // `decimal-pad`, and the value stays TEXT: money is a string on
+              // this platform from end to end.
+              keyboardType="decimal-pad"
+              placeholder="0.00"
+              placeholderTextColor={colors.text3}
+            />
+
+            <Button
+              label={busy ? 'Opening…' : 'Continue'}
+              icon="arrowRight"
+              busy={busy}
+              disabled={topUp.trim() === ''}
+              onPress={() =>
+                void run(async () => {
+                  const { authorization_url } = await client.topUp(topUp.trim());
+                  // Paystack's own page, in the system browser. It renders
+                  // mobile money, bank and card for this country, which is why
+                  // no payment detail passes through the app.
+                  await Linking.openURL(authorization_url);
+                  return undefined;
+                })
+              }
+            />
+
             <Text style={styles.hint}>
-              A local mobile money top-up is not open here yet. We will say so
-              on this screen the moment it is, rather than showing a button
-              that does nothing.
+              You pay on Paystack&apos;s secure page — mobile money, bank or card. To move money
+              back out to your wallet, use Send.
             </Text>
           </View>
-        )}
-
-        {/* Neither rail — a real state and a temporary one. An operator can
-            open a country before its funding rail is arranged, and a customer
-            there should be told rather than shown an empty screen. */}
-        {!account.loading && !canIssueAccount && !usesMobileMoney && !countries.loading && (
-          <Text style={styles.hint}>
-            Adding money is not open in {here?.name ?? 'your country'} yet. You
-            can still be paid by another Xetral customer, through your payment
-            link, or in crypto.
-          </Text>
         )}
 
         <FormError error={account.error} code={account.code} />
@@ -266,8 +293,13 @@ function RequestPayment() {
   const styles = useStyles();
   const colors = useTheme();
   const profile = useLoad(() => client.profile(), [client]);
+  // Their own dialling code, so it can come OFF the number.
+  const session = useLoad(() => client.currentSession(), [client]);
+  const countries = useLoad(() => client.session.countries(), [client]);
+  const here = countries.data?.find((c) => c.code === session.data?.country);
 
   const phone = profile.data?.phone ?? null;
+  const local = nationalPhone(phone, here?.dial_code);
   /*
    * THE ORIGIN THIS BUILD ALREADY TALKS TO, as the fallback for a link the API
    * could not build.
@@ -280,9 +312,10 @@ function RequestPayment() {
    * set: an operator naming a canonical origin has said which one a shared
    * link should carry.
    */
+  const slug = profile.data?.slug ?? null;
   const link =
     profile.data?.link ??
-    (phone !== null && webOrigin() !== '' ? paymentLinkFor(webOrigin(), phone) : null);
+    (slug !== null && webOrigin() !== '' ? paymentLinkFor(webOrigin(), slug) : null);
 
   const box = {
     marginTop: space.xs,
@@ -298,25 +331,28 @@ function RequestPayment() {
 
       {profile.data !== undefined && (
         <>
-          <Text style={styles.muted}>My Xetral number</Text>
-          {/* THE WHOLE NUMBER, country code and all, because this one is for
-              SHARING: a national number has no country in it, so a sender
-              abroad pasting one would be addressing nobody. */}
+          <Text style={styles.muted}>My Xetral-to-Xetral number</Text>
+          {/* THE LOCAL NUMBER, WITHOUT THE COUNTRY CODE. This one is for
+              another XETRAL customer, and the Send screen puts a dialling-code
+              picker in front of its phone field — the sender picks the country
+              and types the national digits. So the national form is exactly
+              what gets typed in, and a country code beside it is a prefix
+              somebody would type twice. What is shared is what is shown. */}
           <View style={box}>
             <Text style={[styles.amount, { fontSize: 18 }]} selectable>
-              {displayPhone(phone) || 'Not set'}
+              {local || 'Not set'}
             </Text>
           </View>
           <Button
             label="Copy my number"
             icon="copy"
             quiet
-            disabled={phone === null}
+            disabled={local === ''}
             onPress={() => {
-              if (phone === null) return;
+              if (local === '') return;
               // Silent on failure: a dismissed share sheet rejects on iOS,
               // which is somebody changing their mind rather than an error.
-              void Share.share({ message: phone }).catch(() => undefined);
+              void Share.share({ message: local }).catch(() => undefined);
             }}
           />
 

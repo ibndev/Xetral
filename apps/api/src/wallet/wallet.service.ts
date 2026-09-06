@@ -632,6 +632,35 @@ export class WalletService {
      * nobody re-reads a link they have already sent.
      */
     const identifier = payLinkTarget(raw);
+
+    /*
+     * A CHECKOUT SLUG, WHICH IS WHAT A PAYMENT LINK CARRIES NOW.
+     *
+     * The link is public and pays whoever it belongs to, so a Xetral customer
+     * who pastes a friend's link into Send should pay that friend rather than
+     * be told there is no such person. `payable_links` excludes closed
+     * accounts and carries no contact detail, which is why the lookup can be
+     * this direct — and an unknown slug answers exactly as an unknown email
+     * does, so it cannot be walked to learn which links are real.
+     *
+     * BEFORE the handle branch, because 039's handle shape and a slug overlap:
+     * both are lowercase letters and digits. A slug is what this product
+     * generates today, so it is the reading that must win.
+     */
+    if (/^[a-z0-9]{8,32}$/.test(identifier)) {
+      const bySlug = await this.pool.query<{ id: string }>(
+        `SELECT u.id FROM users u
+           JOIN payable_links p ON p.user_uuid = u.uuid
+          WHERE p.slug = $1`,
+        [identifier],
+      );
+      const row = bySlug.rows[0];
+      if (row !== undefined) return { id: row.id };
+      // Falls THROUGH rather than refusing: an eight-character string is also
+      // a legal handle, and a link shared before the identifier settled must
+      // go on paying the same person.
+    }
+
     const handle = handleIn(identifier);
     if (handle !== undefined) {
       const byHandle = await this.pool.query<{ id: string }>(
@@ -740,13 +769,21 @@ export function handleIn(raw: string): string | undefined {
 /**
  * Whatever was pasted, with a payment link unwrapped to the thing it names.
  *
- * A link carries the number without its `+`, because a plus in a URL is a
- * space to half the software that will touch it. Putting it back is what
- * makes the unwrapped value an E.164 number again, so the phone match below
- * sees the same string every other screen sends.
+ * THREE GENERATIONS OF LINK RESOLVE THROUGH HERE, and that is the whole
+ * reason it exists rather than being one regex at the call site. A link is
+ * forwarded and cannot be recalled, so every shape this product has ever
+ * printed on a screen goes on working:
  *
- * Anything that is not a payment link is returned UNCHANGED — an email, a
- * bare number, an `@handle` — because this function's only job is the
+ *   /pay/<slug>              the checkout, and what is generated today
+ *   /pay/<digits>            the phone number, generated for one release
+ *   /pay/<handle>            the `@handle`, retired with 039's identifier
+ *
+ * The digits get their `+` back, because the link deliberately dropped it — a
+ * plus in a URL is a space to half the software that will touch it — and that
+ * is what makes the unwrapped value an E.164 number again.
+ *
+ * Anything that is not a payment link is returned UNCHANGED — an email, a bare
+ * number, an `@handle` typed by hand — because this function's only job is the
  * wrapper.
  */
 export function payLinkTarget(raw: string): string {
@@ -754,7 +791,7 @@ export function payLinkTarget(raw: string): string {
   const asUrl = value.match(/^(?:https?:\/\/)?[^\s/]+\/pay\/([^/?#\s]+)/i);
   const segment = asUrl?.[1];
   if (segment === undefined) return value;
-  return /^[0-9]{7,15}$/.test(segment) ? `+${segment}` : value;
+  return /^[0-9]{7,15}$/.test(segment) ? `+${segment}` : segment;
 }
 
 function negate<C extends Currency>(amount: Money<C>): Money<C> {

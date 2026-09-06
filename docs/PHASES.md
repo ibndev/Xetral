@@ -25,6 +25,7 @@ shipped, that is called out explicitly.
 | 14 — Bitnob v2, and paying a bank | ✅ | Bitnob credentials to go live |
 | 15 — Funding without KYC, KYC before a card | ✅ | Paystack credentials to go live |
 | 16 — One identifier, a code to get back in, a price that keeps itself | ✅ | ExchangeRate-API key to go live |
+| 17 — A link a stranger can pay | ✅ | Paystack credentials to go live |
 
 All eleven phases are built, a **pre-deployment audit** (Phase 12) closed what
 building them phase by phase had left between the phases, and **Phase 13** is
@@ -1818,3 +1819,104 @@ either, the query throws — and the catch returns EVERY FIELD AS NULL.
 an ExchangeRate-API key at `/admin/credentials`, and set
 `FX_RATE_SYNC_INTERVAL_SECONDS` on exactly one instance — a day is the natural
 value, because the feed itself refreshes daily.
+
+
+---
+
+## Phase 17 — A link a stranger can pay ✅
+
+Not a feature list. One screen that promised something it could not do, one
+that had grown a structure for a country it does not serve, and four smaller
+things a customer could see were wrong.
+
+| File | What it is |
+|---|---|
+| `packages/ledger/sql/058_payment_links.sql` | the slug every account is minted, and what a payment on it records |
+| `packages/providers/src/paystack/checkout.ts` | initialize and verify, the two calls a hosted checkout is |
+| `apps/api/src/pay/payment-link.service.ts` | begin, settle, and the customer paying their own link |
+| `apps/api/src/pay/pay.controller.ts` | three routes with no bearer token anywhere |
+| `apps/web/src/app/pay/[ref]/page.tsx` | the page a payer with no account opens |
+| `apps/web/src/app/add-money/page.tsx`, `apps/mobile/app/add-money.tsx` | mobile money in, and the account to activate |
+
+### The link was a shortcut, under a heading that said otherwise
+
+`/pay/<x>` handed the identifier to the SEND screen, which is behind a
+sign-in. So the link a customer shared "to accept payment globally" was
+payable only by somebody who already had a Xetral account with money in it.
+
+1. **FOR EVERYBODY ELSE IT WAS A SIGN-IN PAGE**, which does not read as a
+   product boundary — it reads as the customer having sent a broken link, to
+   the person they were asking for money.
+2. **EVERY ACCOUNT HAS A SLUG AND NOBODY CREATES IT.** Minted by an `AFTER
+   INSERT ON users` trigger with a backfill for the rest, so sharing a link is
+   something a customer can do on the day they sign up — the fix for existing
+   customers being asked to create a thing they already had.
+3. **THE SLUG IS NOT THE PHONE NUMBER, deliberately.** The number is what
+   another customer types into Send; the link is a page a STRANGER opens, and
+   the address a customer publishes must not be the number their bank, their
+   contacts and their two-factor codes are attached to. Two strings, each for
+   one job, and the panel says which is which.
+4. **THE ROW IS WRITTEN BEFORE THE PAYER LEAVES.** 044 refuses to credit on
+   `charge.success` alone and demands `channel = 'dedicated_nuban'`; a
+   checkout has no dedicated account, so that test cannot apply. What replaces
+   it is stronger: the reference is OURS and names a row saying which customer
+   and how much, so an event whose reference matches no row credits nobody.
+   The amount and currency are then verified WITH PAYSTACK before anything is
+   posted, because the payer chooses the amount.
+5. **AN UNKNOWN SLUG AND A MALFORMED ONE NOW ANSWER IDENTICALLY**, status
+   included. The malformed one answered 400 and the unknown one 404 — from a
+   page anybody can open, that is a way to learn which slugs are the right
+   SHAPE and therefore worth guessing. Found by asserting the two responses
+   are EQUAL rather than asserting each separately, which is exactly how they
+   came to differ.
+6. **A LINK ALREADY IN THE WORLD STILL RESOLVES.** `payLinkTarget` reads all
+   digits as a number, anything else as a slug, and falls through to the
+   legacy handle branch — three shapes, each published to somebody, and nobody
+   re-reads a link they have already sent.
+
+### Add Money in Ghana described a Nigerian product
+
+The screen offered "Another Xetral customer / Your payment link / Crypto",
+which is a list of ways to be paid rather than a way to add money, and it
+overflowed its box saying so.
+
+7. **A CUSTOMER TOPPING UP THEIR OWN WALLET IS THE PUBLIC CHECKOUT, with the
+   payer being the owner.** Mobile money is how money moves in Accra and
+   Nairobi, and it is the same three calls — so it is the same code path. A
+   second implementation would be a second set of assumptions about the
+   ledger, and the copy that drifts is the one nobody watches.
+8. **THE ACTIVATE BUTTON IS NO LONGER GATED ON ALREADY HAVING AN ACCOUNT.**
+   It was shown only where `virtual_account` was already present, so the one
+   customer who needed it could not see it. It relays Paystack's own refusal
+   where the product is not enabled, rather than hiding the button and leaving
+   nothing on screen to explain why.
+
+### And four things that were simply wrong
+
+9. **"Your daily limits" listed other countries' currencies.** A Nigerian
+   customer has no cedi ceiling to read; `limitCurrenciesFor` keeps their own
+   local currency and the four that belong to no country. Same rule, same
+   file, as the activity rail — which was showing GHS and KES to the same
+   customer for the same reason.
+10. **THE BALANCE CARD'S BUTTONS WERE WIDER THAN THE CARD.** Measured in a
+    browser at 320/360/390/412/430/520 rather than reasoned about: they now
+    hold one row everywhere except 320, which genuinely cannot fit three
+    labelled buttons. The two quiet ones take the card's own hairline, so the
+    active one is the only filled thing on it.
+11. **THE ADMIN PRICES PAGE ASKED FOR A PIN AND REFUSED THE ONE IT WAS
+    GIVEN.** "Refresh from the market" was the one control on that page whose
+    `disabled` did not include `pin === ''`, so it sent none and the server
+    answered `transaction_pin_required` — rendered as "Enter transaction pin"
+    beside a box the operator had just filled in. It is gated now, and the PIN
+    is no longer cleared after each success, because an operator publishing
+    four corridors types it four times otherwise.
+12. **THE RATES PANEL IS ABOVE THE FORMS, AND OPERATING CORRIDORS FIRST.**
+    A page whose first control is manual entry teaches manual entry; the
+    generated rates are the thing being read, and the currencies the platform
+    actually operates in are the ones read first.
+
+**Before this goes live, an operator must:** apply migration **058**, set
+`PAYSTACK_SECRET_KEY` (the same one credential — it authorises the checkout
+and verifies its webhook), and give Paystack the
+`/v1/webhooks/paystack/deposits` URL if it has not been given already. The
+checkout uses no new credential and no new provider.

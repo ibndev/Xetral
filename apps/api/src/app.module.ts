@@ -115,6 +115,8 @@ import { RetentionService } from './retention/retention.service.js';
 import { BalanceReconciliationService } from './reconciliation/balance-reconciliation.service.js';
 import { MonitoringService } from './risk/monitoring.service.js';
 import { RateFeedService } from './fx/rate-feed.service.js';
+import { PayController } from './pay/pay.controller.js';
+import { PaymentLinkService } from './pay/payment-link.service.js';
 import { CaseService } from './risk/case.service.js';
 import {
   InMemoryRateLimitStore,
@@ -1042,6 +1044,7 @@ export class AppModule {
         AdminDisputeController,
         CountriesController,
         AdminCountriesController,
+        PayController,
       ],
       providers: [
         { provide: API_CONFIG, useValue: options.config },
@@ -1253,6 +1256,7 @@ export class AppModule {
         BalanceReconciliationService,
         MonitoringService,
         RateFeedService,
+        PaymentLinkService,
         CaseService,
         BalanceReconciliationLifecycle,
         MonitoringLifecycle,

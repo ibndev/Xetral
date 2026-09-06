@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { limitCurrenciesFor } from '@xetral/client';
 import type { KycLimits, KycStatus } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { FormError } from '@/ui/form-error';
@@ -227,6 +228,9 @@ function Submitted({ status }: { status: KycStatus }) {
 function Limits() {
   const client = useXetral();
   const { data } = useLoad<KycLimits>(() => client.kycLimits(), [client]);
+  // Their own country's money, so the list can leave out everybody else's.
+  const session = useLoad(() => client.currentSession(), [client]);
+  const home = session.data?.home_currency ?? null;
   if (data === undefined) return null;
 
   const TIERS = ['Registered', 'Verified', 'Enhanced'];
@@ -239,15 +243,29 @@ function Limits() {
   return (
     <div className="card">
       <h2>
-        Your daily limits{' '}
+        Daily transaction limit{' '}
         <span className="badge">{TIERS[data.tier] ?? `tier ${data.tier}`}</span>
       </h2>
-      {data.limits.map((limit) => (
-        <div className="row" key={limit.currency}>
-          <span className="muted">{limit.currency}</span>
-          <span>{verified ? 'Unlimited' : 'Limited'}</span>
-        </div>
-      ))}
+      {/*
+        THEIR OWN CURRENCY AND THE FOUR THAT BELONG TO NOBODY. The API answers
+        every ceiling the platform has, which is right for an API and wrong
+        for this panel — a Nigerian was shown GHS and KES rows about money
+        they do not hold. `limitCurrenciesFor` is shared with the phone so the
+        two cannot show different lists.
+      */}
+      {data.limits
+        .filter((limit) =>
+          limitCurrenciesFor(
+            home,
+            data.limits.map((l) => l.currency),
+          ).includes(limit.currency),
+        )
+        .map((limit) => (
+          <div className="row" key={limit.currency}>
+            <span className="muted">{limit.currency}</span>
+            <span>{verified ? 'Unlimited' : 'Limited'}</span>
+          </div>
+        ))}
       {data.next_tier === 1 && (
         <p className="hint">Verifying lifts these, and unlocks a dollar card.</p>
       )}

@@ -15,6 +15,7 @@ import { FundingService } from './funding.service.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { ProviderCredentialService } from '../settings/provider-credentials.service.js';
 import { NotificationService } from '../notifications/notification.service.js';
+import { PaymentLinkService } from '../pay/payment-link.service.js';
 
 const PROVIDER = 'paystack';
 
@@ -51,6 +52,7 @@ export class PaystackWebhookService {
     @Inject(ProviderCredentialService)
     private readonly credentials: ProviderCredentialService,
     @Inject(NotificationService) private readonly notifications: NotificationService,
+    @Inject(PaymentLinkService) private readonly links: PaymentLinkService,
   ) {}
 
   async handle(rawBody: string, headers: Record<string, string | undefined>): Promise<void> {
@@ -86,6 +88,27 @@ export class PaystackWebhookService {
     }
 
     const event = parsePaystackWebhook(rawBody);
+
+    /*
+     * A PAYMENT LINK CHARGE, BEFORE THE DEDICATED-ACCOUNT PATH.
+     *
+     * `charge.success` fires for every successful charge on the integration,
+     * and 044's answer to that is `channel = 'dedicated_nuban'` — necessary
+     * there, and it cannot be the test here, because a checkout has no
+     * dedicated account and its channel is whatever the payer chose.
+     *
+     * What identifies this one is that the REFERENCE IS OURS: it names a row
+     * written before the payer was ever sent to Paystack, and that row says
+     * which customer and how much. `settle` answers `pending` for a reference
+     * that matches no row, which is every dedicated-account credit — so this
+     * is a cheap miss on the common path rather than a branch that can
+     * swallow one.
+     */
+    const link = await this.links.settle(event.data.reference);
+    if (link !== 'pending') {
+      this.#logger.log(`payment link charge ${event.data.reference}: ${link}`);
+      return;
+    }
 
     let outcome: PaystackDepositOutcome;
     try {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { displayPhone, formatAmount, paymentLinkFor } from '@xetral/client';
+import { formatAmount, nationalPhone, paymentLinkFor } from '@xetral/client';
 import type { Deposit } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { FormError } from '@/ui/form-error';
@@ -70,7 +70,18 @@ export default function AddMoney() {
   const countries = useLoad(() => client.session.countries(), [client]);
   const here = countries.data?.find((c) => c.code === session.data?.country);
   const funding = here?.funding_methods ?? [];
-  const canIssueAccount = funding.includes('virtual_account');
+  /*
+   * THE ACTIVATE BUTTON IS OFFERED EVERYWHERE NOW, and `funding_methods` is
+   * what the mobile money panel below turns on rather than what gates it.
+   *
+   * It was gated on `virtual_account`, so a customer in Ghana was never
+   * offered an account at all — and Paystack does issue in more places than
+   * this platform's own country rows know about. What the gate was protecting
+   * against is a button that fails; what it caused is a screen that cannot
+   * even try. A refusal from the provider is RELAYED with its own reason
+   * (`account_issue_refused`), which is a sentence an operator can act on,
+   * where a hidden button is a silence nobody can.
+   */
   const usesMobileMoney = funding.includes('mobile_money');
 
   const has = account.data != null;
@@ -82,6 +93,7 @@ export default function AddMoney() {
    * not where they go when they need to be paid.
    */
   const profile = useLoad(() => client.profile(), [client]);
+  const [topUp, setTopUp] = useState('');
   const [copiedPhone, setCopiedPhone] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
 
@@ -105,8 +117,12 @@ export default function AddMoney() {
   const [origin, setOrigin] = useState('');
   useEffect(() => setOrigin(window.location.origin), []);
   const phone = profile.data?.phone ?? null;
+  // Their own dialling code, so it can come OFF the number. `here` is the
+  // country row this screen already loaded to decide what funding it offers.
+  const local = nationalPhone(phone, here?.dial_code);
+  const slug = profile.data?.slug ?? null;
   const link =
-    profile.data?.link ?? (phone !== null && origin !== '' ? paymentLinkFor(origin, phone) : null);
+    profile.data?.link ?? (slug !== null && origin !== '' ? paymentLinkFor(origin, slug) : null);
 
   function copy(text: string, mark: (v: boolean) => void): void {
     if (text === '') return;
@@ -168,7 +184,7 @@ export default function AddMoney() {
           a verified BVN. That requirement now lives in its adapter, and the
           default rail does not have it.
         */}
-        {!account.loading && !has && canIssueAccount && (
+        {!account.loading && !has && (
           /*
             EACH PIECE IN ITS OWN ROW, WITH ROOM AROUND IT.
 
@@ -204,76 +220,70 @@ export default function AddMoney() {
         )}
 
         {/*
-          MOBILE MONEY, AND WHAT IS HONEST TO SAY ABOUT IT TODAY.
+          MOBILE MONEY, AS A TOP-UP THAT ACTUALLY MOVES MONEY.
 
-          In Ghana and Kenya money moves through a mobile money wallet, and
-          this screen has to say something true to a customer there rather
-          than offering them a Nigerian account number.
+          THIS SCREEN USED TO LIST THREE THINGS AND OFFER NONE OF THEM. In
+          Ghana and Kenya it said money reaches your wallet "these ways today"
+          and then named another Xetral customer, a payment link and crypto —
+          three routes that are all somebody ELSE paying you. A customer who
+          opened Add Money in order to put their own money in was given a
+          reading list.
 
-          IT DOES NOT OFFER A BUTTON THAT DOES NOTHING. Linking a momo wallet
-          as a standing funding instrument is a provider integration that does
-          not exist here yet — Paystack's mobile money is a charge channel
-          rather than an account we can issue and watch — and a Link button
-          that opened nothing would be the exact failure a filled box on an
-          operations screen is: it reads as something that is running.
+          What was missing was not a button, it was a rail: Paystack's mobile
+          money is a CHARGE CHANNEL rather than an account we can issue and
+          watch, so there was nothing to "link". A charge is what the payment
+          link already is, so this is the same checkout with the customer as
+          their own payer — one code path, and every rule it has comes along.
 
-          So it names the routes that DO reach a wallet here today. Every one
-          of them is built and settles into the same balance: another Xetral
-          customer paying this number, a payment link, and crypto.
+          THE MOMO NUMBER IS TYPED ON PAYSTACK'S PAGE, not here. They ask for
+          it, they send the prompt to the handset, and they confirm it. Asking
+          for it on this screen would be collecting a credential we cannot
+          verify and do not need.
         */}
-        {!account.loading && usesMobileMoney && !canIssueAccount && (
+        {!account.loading && usesMobileMoney && (
           <div className="activate">
             <p className="activate-lead">
-              In {here?.name ?? 'your country'}, money reaches your wallet
-              these ways today.
+              Top up from mobile money{here === undefined ? '' : ` in ${here.name}`}
             </p>
-            <div className="list">
-              <div className="list-row">
-                <span className="row-icon"><Icon name="send" size={19} /></span>
-                <span className="row-main">
-                  <span className="row-title">Another Xetral customer</span>
-                  <span className="row-sub">
-                    They send to your phone number. It arrives in {here?.currency ?? 'your currency'}.
-                  </span>
-                </span>
-              </div>
-              <div className="list-row">
-                <span className="row-icon"><Icon name="globe" size={19} /></span>
-                <span className="row-main">
-                  <span className="row-title">Your payment link</span>
-                  <span className="row-sub">
-                    For anyone not on Xetral. It is on your settings page.
-                  </span>
-                </span>
-              </div>
-              <div className="list-row">
-                <span className="row-icon"><Icon name="bitcoin" size={19} /></span>
-                <span className="row-main">
-                  <span className="row-title">Crypto</span>
-                  <span className="row-sub">Bitcoin, USDT and USDC, on the Crypto screen.</span>
-                </span>
-              </div>
+
+            <div className="field">
+              <label htmlFor="topup">Amount ({here?.currency ?? ''})</label>
+              <input
+                id="topup"
+                // `text` with a decimal keypad, not `number`: money is a
+                // string on this platform from end to end.
+                type="text"
+                inputMode="decimal"
+                placeholder="0.00"
+                value={topUp}
+                onChange={(e) => setTopUp(e.target.value)}
+              />
             </div>
+
+            <div>
+              <button
+                type="button"
+                disabled={busy || topUp.trim() === ''}
+                onClick={() =>
+                  void run(async () => {
+                    const { authorization_url } = await client.topUp(topUp.trim());
+                    // Paystack's own page. It renders mobile money, bank and
+                    // card for this customer's country, which is why no
+                    // payment detail passes through here.
+                    window.location.href = authorization_url;
+                    return undefined;
+                  })
+                }
+              >
+                {busy ? 'Opening…' : 'Continue'} <Icon name="arrowRight" size={18} />
+              </button>
+            </div>
+
             <p className="hint">
-              A local mobile money top-up is not open here yet. We will say so
-              on this screen the moment it is, rather than showing a button
-              that does nothing.
+              You pay on Paystack&apos;s secure page — mobile money, bank or card. To move money
+              back out to your wallet, use Send.
             </p>
           </div>
-        )}
-
-        {/*
-          NEITHER RAIL, WHICH IS A REAL STATE AND A TEMPORARY ONE. An operator
-          can open a country before its funding rail is arranged —
-          `countries_without_a_way_in` reports exactly this — and a customer
-          there should be told rather than shown an empty page.
-        */}
-        {!account.loading && !canIssueAccount && !usesMobileMoney && !countries.loading && (
-          <p className="hint">
-            Adding money is not open in {here?.name ?? 'your country'} yet. You
-            can still be paid by another Xetral customer, through your payment
-            link, or in crypto.
-          </p>
         )}
 
         {/* Anything that is NOT the verification gate. A provider outage or a
@@ -301,19 +311,28 @@ export default function AddMoney() {
         </div>
 
         <div className="copy-row">
-          <span className="copy-label">My Xetral number</span>
+          <span className="copy-label">My Xetral-to-Xetral number</span>
           {/*
-            THE WHOLE NUMBER, country code and all, because this one is for
-            SHARING. `nationalPhone` is right where somebody reads their own
-            number back to themselves; here it would hand a sender abroad a
-            string with no country in it.
+            THE LOCAL NUMBER, WITHOUT THE COUNTRY CODE — `553 921 133`, not
+            `+233 553 921 133`.
+            
+            This one is for another XETRAL customer, and the Send screen puts a
+            dialling-code picker in front of its phone field: the sender picks
+            the country and types the national digits, and `e164()` joins the
+            two server-side. So the national form is exactly what gets typed
+            in, and the country code shown beside it is a prefix somebody would
+            type twice.
+            
+            WHAT IS COPIED IS WHAT IS SHOWN, for the same reason. A clipboard
+            that carried a different string from the one on screen is a
+            surprise at the only moment it matters.
           */}
-          <div className="copy-value mono">{displayPhone(phone) || 'Not set'}</div>
+          <div className="copy-value mono">{local || 'Not set'}</div>
           <button
             type="button"
             className="ghost small"
-            disabled={phone === null}
-            onClick={() => copy(phone ?? '', setCopiedPhone)}
+            disabled={local === ''}
+            onClick={() => copy(local, setCopiedPhone)}
           >
             <Icon name="copy" size={15} /> {copiedPhone ? 'Copied' : 'Copy my number'}
           </button>

@@ -701,9 +701,43 @@ h3 { font-size: 16px; }
    -------------------------------------------------------------------------- */
 
 /* Withdraw / Top Up / Convert */
-.quick-actions { display: flex; gap: 10px; margin-top: var(--s-4); flex-wrap: wrap; }
-.quick-actions .btn { flex: 1 1 0; min-width: 0; padding: 12px 12px; font-size: 14px; }
-@media (min-width: 420px) { .quick-actions .btn { padding: 12px 18px; font-size: 15px; } }
+/*
+ * THREE BUTTONS THAT FIT INSIDE THE CARD, MEASURED.
+ *
+ * `flex: 1 1 0` with `min-width: 0` let a button be narrower than its own
+ * label, and `white-space: nowrap` on `.btn` means the label does not wrap —
+ * so it ran out past the background. Measured in a browser at 380px: the
+ * boxes were 90px, "Add money" reached 83px inside one whose right padding
+ * starts at 78, and "Convert" landed on 77. That is what the screenshot
+ * shows: text longer than the dark shape behind it.
+ *
+ * `1 0 auto` is the fix — grow to fill the row, never shrink below the
+ * label — and the padding, gap and size come down so three of them still fit
+ * across a 320px handset, which is what `1 1 0` was buying.
+ */
+.quick-actions { display: flex; gap: 6px; margin-top: var(--s-4); flex-wrap: wrap; }
+.quick-actions .btn { flex: 1 0 auto; padding: 12px 7px; gap: 5px; font-size: 13px; }
+/* MEASURED, and the breakpoints are where three of them stop fitting rather
+   than round numbers. The old bump was at 420 and pushed the row onto two
+   lines on a 430px handset, which is most of them. */
+@media (min-width: 400px) {
+  .quick-actions { gap: 8px; }
+  .quick-actions .btn { padding: 12px 12px; gap: 6px; font-size: 13.5px; }
+}
+@media (min-width: 520px) {
+  .quick-actions { gap: 10px; }
+  .quick-actions .btn { padding: 12px 18px; gap: 8px; font-size: 15px; }
+}
+/*
+ * THE HAIRLINE THE CARD HAS, on the two that are not the primary action.
+ *
+ * `--edge`, the card's own token, so it is the SAME line rather than one that
+ * matches today — and it resolves to transparent in the light theme, where
+ * this design has no borders at all. The filled button is untouched: an
+ * outline around a solid shape is a second edge on the one control that does
+ * not need help being found.
+ */
+.quick-actions .btn.quiet { border-color: var(--edge); }
 
 /* ═══════════════════════════ product tiles ═══════════════════════════ */
 

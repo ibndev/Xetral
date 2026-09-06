@@ -166,12 +166,12 @@ export function displayPhone(phone: string | null | undefined): string {
  * where a customer is standing, and every app already knows an origin that
  * works.
  *
- * The `+` goes, because a link is pasted into places that treat one as a
- * space. An E.164 number without it is still the whole number, country code
- * first.
+ * THE SEGMENT IS A SLUG, NOT A PHONE NUMBER. A link is forwarded, indexed and
+ * pasted into group chats — a number in one is a number published to everybody
+ * it reaches, for ever, with no way to take it back.
  */
-export function paymentLinkFor(origin: string, phone: string): string {
-  return `${origin.replace(/\/+$/, '')}/pay/${phone.replace(/^\+/, '')}`;
+export function paymentLinkFor(origin: string, slug: string): string {
+  return `${origin.replace(/\/+$/, '')}/pay/${slug}`;
 }
 
 export interface Balance {
@@ -601,6 +601,21 @@ export class XetralClient {
   }
 
   /**
+   * TOP UP FROM MOBILE MONEY, A BANK OR A CARD.
+   *
+   * Answers a URL to send the customer to — Paystack's own hosted page, which
+   * renders the methods they actually have. Nothing about a card ever reaches
+   * this client or the API.
+   *
+   * This is what Add Money offers where there is no dedicated account to pay
+   * into: in Ghana and Kenya money moves through a mobile money wallet, and
+   * Paystack's mobile money is a charge rather than an account we can issue.
+   */
+  async topUp(amount: string): Promise<{ authorization_url: string; reference: string }> {
+    return this.#post('/v1/funding/topup', { amount });
+  }
+
+  /**
    * The customer's own number and the payment link built from it.
    *
    * `link` is null when the API has not been told its own address, and a
@@ -608,7 +623,13 @@ export class XetralClient {
    * origin it is already running on rather than showing nothing — a customer
    * asking to be paid must never be handed an explanation instead of a link.
    */
-  async profile(): Promise<{ phone: string | null; link: string | null }> {
+  async profile(): Promise<{
+    phone: string | null;
+    link: string | null;
+    /** The public segment the checkout is served under. Present so an app can
+     *  build the link itself when the API has no configured origin. */
+    slug?: string | null;
+  }> {
     return this.#get('/v1/auth/profile');
   }
 

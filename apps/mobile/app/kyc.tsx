@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Text, View } from 'react-native';
+import { limitCurrenciesFor } from '@xetral/client';
 import type { KycLimits, KycStatus } from '@xetral/client';
 import { Shell } from '@/shell';
 import { Button, Done, Field, FormError, Loading, Panel } from '@/ui';
@@ -191,7 +192,14 @@ function Limits() {
   const styles = useStyles();
   const colors = useTheme();
   const { data } = useLoad<KycLimits>(() => client.kycLimits(), [client]);
+  // Their own country's money, so the list can leave out everybody else's.
+  const session = useLoad(() => client.currentSession(), [client]);
   if (data === undefined) return null;
+
+  const shown = limitCurrenciesFor(
+    session.data?.home_currency,
+    data.limits.map((l) => l.currency),
+  );
 
   const TIERS = ['Registered', 'Verified', 'Enhanced'];
 
@@ -201,13 +209,19 @@ function Limits() {
   const verified = data.tier > 0;
 
   return (
-    <Panel title="Your daily limits" subtitle={TIERS[data.tier] ?? `Tier ${data.tier}`}>
-      {data.limits.map((limit) => (
-        <View key={limit.currency} style={styles.row}>
-          <Text style={[styles.muted, { flex: 1 }]}>{limit.currency}</Text>
-          <Text style={{ color: colors.text }}>{verified ? 'Unlimited' : 'Limited'}</Text>
-        </View>
-      ))}
+    <Panel title="Daily transaction limit" subtitle={TIERS[data.tier] ?? `Tier ${data.tier}`}>
+      {/* Their own currency and the four that belong to nobody. The API
+          answers every ceiling the platform has, which is right for an API
+          and wrong for this panel. `limitCurrenciesFor` is shared with the
+          web app so the two cannot show different lists. */}
+      {data.limits
+        .filter((limit) => shown.includes(limit.currency))
+        .map((limit) => (
+          <View key={limit.currency} style={styles.row}>
+            <Text style={[styles.muted, { flex: 1 }]}>{limit.currency}</Text>
+            <Text style={{ color: colors.text }}>{verified ? 'Unlimited' : 'Limited'}</Text>
+          </View>
+        ))}
       <Text style={[styles.hint, { color: colors.text3 }]}>
         Verifying your identity lifts these.
       </Text>

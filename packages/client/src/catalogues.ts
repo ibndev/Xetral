@@ -116,11 +116,40 @@ export const PURCHASE_SERVICES = [
  * every tier (029), or the enable trigger refuses the country and
  * `kyc_tier_coverage` reports the gap.
  */
-export const TRANSFER_CURRENCIES = ['NGN', 'GHS', 'KES', 'USD', 'USDT', 'USDC'] as const;
+export const TRANSFER_CURRENCIES = [
+  'NGN',
+  'GHS',
+  'KES',
+  'USD',
+  'USDT',
+  'USDC',
+  /*
+   * BTC, and it is the transfer list that gets it rather than the activity
+   * rail or the limits screen alone.
+   *
+   * A Xetral-to-Xetral transfer is a movement between two wallets on OUR
+   * ledger — no chain, no provider, no network fee — so there is nothing
+   * about Bitcoin that makes it different from moving cedis. It was left out
+   * on the reasoning that these are the currencies the platform "actually
+   * holds customer balances in", which stopped being true when 007 landed.
+   *
+   * It has a ceiling at every tier in `029_kyc_tiers.seed.sql` and a row in
+   * `risk_thresholds`, which is the check that matters: 038 records what
+   * happens when a currency reaches `accounts` before those exist.
+   */
+  'BTC',
+] as const;
 export type TransferCurrency = (typeof TRANSFER_CURRENCIES)[number];
 
 /**
  * Which of those a particular customer is offered — ordered, not filtered.
+ *
+ * EVERY CURRENCY IS SENDABLE AND CONVERTIBLE, and this is the one list where
+ * that is true. The activity rail and the limits screen are narrowed to the
+ * customer's own local currency plus the four everybody can hold; here the
+ * whole set stays, because sending somebody cedis is the cross-border case
+ * this platform exists for and a currency missing from the picker is a
+ * capability with no route to it.
  *
  * IT USED TO FILTER, and the reasoning was that another country's local
  * currency is noise: a Nigerian shown GHS and KES has two options that answer
@@ -161,6 +190,33 @@ export function sendableFor(
 }
 
 /**
+ * WHICH CEILINGS A CUSTOMER IS SHOWN — their own, plus the four that belong
+ * to nobody.
+ *
+ * `GET /v1/kyc/limits` answers every currency the platform has a ceiling for,
+ * which is the right answer for an API and the wrong list for a screen: a
+ * Nigerian was shown GHS and KES rows — two ceilings on money they do not
+ * hold, on a panel whose whole job is to say what THEY may move today.
+ *
+ * The dollar, the stablecoins and Bitcoin stay for everybody, because they
+ * belong to no country and are held across all of them. What is dropped is
+ * another country's LOCAL currency — the same distinction `activityFiltersFor`
+ * makes about the rail, and the opposite of the one `sendableFor` makes about
+ * the picker, where a missing currency is a capability with no route to it.
+ *
+ * Shared by both apps so the two cannot show different lists, which is the
+ * drift `activityFiltersFor` exists to prevent.
+ */
+export function limitCurrenciesFor(
+  home: string | null | undefined,
+  currencies: readonly string[],
+): readonly string[] {
+  return currencies.filter(
+    (code) => !LOCAL_CURRENCIES.includes(code) || code === home,
+  );
+}
+
+/**
  * The activity rail, for one customer.
  *
  * `ACTIVITY_FILTERS` below is the whole set and is what the two apps used to
@@ -177,10 +233,25 @@ export function activityFiltersFor(
   home: string | null | undefined,
   held: readonly string[] = [],
 ): readonly [ActivityFilter, ...ActivityFilter[]] {
-  const sendable = new Set<string>(sendableFor(home, held));
   const kept = ACTIVITY_FILTERS.filter((filter) => {
     if (filter.id === 'gift') return home === 'NGN' || held.includes('NGN');
-    return sendable.has(filter.currency) || held.includes(filter.currency);
+    /*
+     * ANOTHER COUNTRY'S MONEY IS NOT ON THIS RAIL, unless they hold some.
+     *
+     * A Nigerian was shown GHS and KES tabs — two rails that are empty for
+     * almost everybody, on the screen whose whole job is to find one
+     * transaction. That is the opposite trade-off from the transfer picker
+     * above, and deliberately: a currency missing from a PICKER is a
+     * capability with no route to it, while a currency on a rail nobody
+     * holds is five taps of nothing between them and their own history.
+     *
+     * The four that stay for everybody — USD, USDT, USDC, BTC — belong to no
+     * country, so there is no "somebody else's currency" reading of them.
+     */
+    if (LOCAL_CURRENCIES.includes(filter.currency)) {
+      return filter.currency === home || held.includes(filter.currency);
+    }
+    return true;
   });
 
   /*
@@ -235,6 +306,7 @@ export const ACTIVITY_FILTERS = [
   { id: 'USD', label: 'USD', currency: 'USD' },
   { id: 'USDT', label: 'USDT', currency: 'USDT' },
   { id: 'USDC', label: 'USDC', currency: 'USDC' },
+  { id: 'BTC', label: 'BTC', currency: 'BTC' },
   {
     id: 'gift',
     label: 'Gift',

@@ -160,7 +160,7 @@ export default function Home() {
           order to be paid.
         */}
 
-        <View style={{ flexDirection: 'row', gap: 8, marginTop: space.lg }}>
+        <View style={{ flexDirection: 'row', gap: 6, marginTop: space.lg }}>
           <QuickAction href="/transfer" icon="send" label="Send" primary />
           <QuickAction href="/add-money" icon="plus" label="Add money" />
           <QuickAction href="/fx" icon="swap" label="Convert" />
@@ -298,16 +298,35 @@ function QuickAction({
           flexDirection: 'row',
           alignItems: 'center',
           justifyContent: 'center',
-          gap: 6,
+          gap: 5,
+          // Padding, so the label is never flush against the edge of the
+          // shape behind it — the fault the web's version was reported for,
+          // where "Add money" ran out past its own background.
+          paddingHorizontal: 8,
           minHeight: 46,
           borderRadius: radius.pill,
           backgroundColor: primary === true ? colors.brand : colors.surface2,
+          /*
+           * THE HAIRLINE THE BALANCE CARD HAS, on the two that are not the
+           * primary action. `colors.line` is the card's own token, so it is
+           * the same line rather than one that matches today. The filled
+           * button gets none: an outline around a solid shape is a second
+           * edge on the one control that does not need help being found.
+           */
+          borderWidth: 1,
+          borderColor: primary === true ? 'transparent' : colors.line,
         }}
       >
         <Icon name={icon} size={16} color={primary === true ? colors.onBrand : colors.text} />
         <Text
+          // ONE LINE, SHRUNK TO FIT rather than spilling. `adjustsFontSizeToFit`
+          // is the platform's own answer to a label that does not fit the shape
+          // behind it, and `numberOfLines` is what makes it apply.
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.85}
           style={{
-            fontSize: 14,
+            fontSize: 13.5,
             fontFamily: font.sansSemi,
             color: primary === true ? colors.onBrand : colors.text,
           }}

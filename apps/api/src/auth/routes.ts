@@ -47,6 +47,38 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
           'inside the handler and absent entirely when that is unset',
       )
 
+      /*
+       * THE PUBLIC CHECKOUT. Three routes, and their being public IS the
+       * feature: a payment link payable only by somebody who already has an
+       * account is a shortcut for customers, not a payment link.
+       *
+       * None of them can be used to learn anything. The lookup answers a name
+       * and a currency and gives the same answer for a slug nobody holds; the
+       * charge writes a row and hands the payer to Paystack, so no card
+       * detail ever reaches this API; and settle VERIFIES WITH PAYSTACK
+       * before crediting, so a made-up reference does nothing at all.
+       */
+      .public(
+        'GET',
+        '/v1/pay/:slug',
+        'the checkout page has to name who is being paid before anybody signs ' +
+          'in, and it answers a name and a currency and nothing that could ' +
+          'reach them',
+      )
+      .public(
+        'POST',
+        '/v1/pay/:slug/charge',
+        'a payment link is paid by people with no Xetral account; this writes ' +
+          'a row and hands them to Paystack, and takes no card detail itself',
+      )
+      .public(
+        'POST',
+        '/v1/pay/settle',
+        'the payer returning from Paystack. It verifies the reference WITH ' +
+          'Paystack before anything is credited, so calling it with an ' +
+          'invented one does nothing',
+      )
+
       .public(
         'GET',
         '/v1/countries',
@@ -523,6 +555,13 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // Reading whether one exists, which is a different question from
       // issuing one — see the controller.
       .authenticated('GET', '/v1/funding/account', { pin: false })
+      /*
+       * TOPPING UP THROUGH THE HOSTED CHECKOUT. No PIN: a transaction PIN
+       * authorises money LEAVING an account, and this brings money in — the
+       * same reasoning that leaves the deposit webhook at the other end of
+       * this rail unauthenticated.
+       */
+      .authenticated('POST', '/v1/funding/topup', { pin: false })
       .authenticated('GET', '/v1/funding/deposits', { pin: false })
 
       // Crypto. Receiving an address takes no PIN; sending takes one, because

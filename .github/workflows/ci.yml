@@ -143,6 +143,7 @@ jobs:
             -f packages/ledger/sql/055_uk_and_canada.sql \
             -f packages/ledger/sql/056_reset_codes.sql \
             -f packages/ledger/sql/057_reference_rates.sql \
+            -f packages/ledger/sql/058_payment_links.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       - name: Ledger and identity invariants
@@ -208,6 +209,7 @@ jobs:
                    packages/ledger/sql/055_uk_and_canada.test.sql \
                    packages/ledger/sql/056_reset_codes.test.sql \
                    packages/ledger/sql/057_reference_rates.test.sql \
+                   packages/ledger/sql/058_payment_links.test.sql \
                    packages/ledger/sql/099_least_privilege.test.sql; do
             echo "== $f"
             psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
@@ -489,6 +491,25 @@ jobs:
           # deployment and psql was the only way out.
           check "price publication is mounted" 401 http://127.0.0.1:3100/v1/admin/prices
           check "provider health is mounted" 401 http://127.0.0.1:3100/v1/admin/providers
+
+          # THE PUBLIC CHECKOUT, and 400 is the whole point of the number.
+          #
+          # A route that is not mounted answers 404 and a route with no policy
+          # answers 403, so 400 — the body validator refusing an empty POST —
+          # is the only answer that proves this reached a handler WITHOUT a
+          # bearer token. That is the property the page depends on: a payment
+          # link payable only by somebody who already has an account is not a
+          # payment link, and the previous shape of `/pay` was exactly that.
+          check "public checkout is mounted and public" 400 \
+            http://127.0.0.1:3100/v1/pay/aaaaaaaaaaaa/charge \
+            -X POST -H 'content-type: application/json' -d '{}'
+
+          # And the lookup answers the same way for a slug nobody holds as for
+          # one that is not even the right shape — asserted here as well as in
+          # the e2e, because a status is exactly the sort of thing that differs
+          # only once the bundle is assembling the responses itself.
+          check "unknown link is not found" 404 http://127.0.0.1:3100/v1/pay/zzzzzzzzzzzz
+          check "malformed link answers the same" 404 http://127.0.0.1:3100/v1/pay/NOT-A-SLUG
 
           # Metrics with no METRICS_TOKEN set, which is how the bundle boots
           # here. 404 rather than 401 is the assertion: an unconfigured

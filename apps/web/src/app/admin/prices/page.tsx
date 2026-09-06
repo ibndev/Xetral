@@ -30,6 +30,26 @@ export default function Prices() {
   // and a deployment without it should render this panel empty rather than
   // fail the whole screen over a table one panel needs.
   const rates = useLoad(() => admin.fxRates(), [admin]);
+  /*
+   * WHICH CURRENCIES THIS PLATFORM ACTUALLY OPERATES IN, so the corridors it
+   * runs on sort to the top of the table.
+   *
+   * The feed answers every pair between eight currencies — fifty-six rows —
+   * and an operator checking whether the naira is priced today should not be
+   * reading down an alphabetical list to find it. Derived from the ENABLED
+   * countries rather than written out, so opening a country moves its currency
+   * up this table on the next load rather than in whichever release somebody
+   * remembers this file in.
+   */
+  const countries = useLoad(() => admin.countries(), [admin]);
+  const operating = new Set<string>([
+    ...(countries.data?.countries ?? []).filter((c) => c.enabled).map((c) => c.currency),
+    // The dollar and the stablecoins belong to no country and are held across
+    // all of them — the same exception `wallet.service.ts` names.
+    'USD',
+    'USDT',
+    'USDC',
+  ]);
   const [pin, setPin] = useState('');
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
@@ -41,7 +61,20 @@ export default function Prices() {
       await work();
       prices.reload();
       rates.reload();
-      setPin('');
+      /*
+       * THE PIN IS NOT CLEARED, and that is the fix rather than an oversight.
+       *
+       * It was, and the reported symptom is exactly what that produces: an
+       * operator types a PIN, publishes one price, and the next button on the
+       * same page answers "Enter transaction pin" — with a box that looks
+       * empty for a reason nobody can see. There are five actions on this
+       * screen and somebody setting prices uses several in a sitting.
+       *
+       * The same argument 014 records about the staff second factor: a
+       * credential that has to be re-entered per action is a credential people
+       * find a way to stop re-entering. It is held in component state, so it
+       * is gone the moment this page is left.
+       */
     } catch (caught) {
       setError(messageFor(caught));
     } finally {
@@ -88,6 +121,16 @@ export default function Prices() {
           </>
         )}
 
+        {/*
+          ONE PIN FOR THE WHOLE SCREEN, AND NOTHING SUBMITS WITHOUT IT.
+          
+          Every action here — publish a spread, publish a rate, generate them
+          all, retire one — is gated on this field being filled, so the red
+          "Enter transaction pin" that was being reported cannot be reached at
+          all: there is no button to press until there is a PIN to send.
+          
+          It stays filled between actions. See `act` above for why.
+        */}
         <label>
           Your transaction PIN
           <input
@@ -98,16 +141,12 @@ export default function Prices() {
             onChange={(e) => setPin(e.target.value)}
           />
           <span className="hint">
-            Required: both change what customers are charged.
+            Required for every button on this page — each one changes what
+            customers are charged. It is kept until you leave.
           </span>
         </label>
         {error !== undefined && <p className="error">{error}</p>}
       </div>
-
-      <PublishFx pin={pin} busy={busy} onPublish={act} />
-      <PublishRate pin={pin} busy={busy} onPublish={act} />
-
-      <PublishFxRate pin={pin} busy={busy} onPublish={act} />
 
       {/*
         WHAT A CURRENCY IS WORTH, which nothing could set before.
@@ -128,23 +167,33 @@ export default function Prices() {
         <div className="section-head">
           <h2>Exchange rates</h2>
           {/*
-            FETCH THEM NOW. The worker does this daily; this is the button for
-            the afternoon the market moves. It republishes only what changed
-            and never touches a rate a person published — a deliberate price
-            outranks a market one.
+            GENERATE THEM. The worker does this daily; this is the button for
+            the afternoon the market moves — and it is what makes typing a rate
+            by hand optional rather than the only way to have one.
+            
+            IT WAS THE ONE CONTROL ON THIS PAGE NOT GATED ON THE PIN, which is
+            the bug that was reported: pressing it with an empty box sent no
+            PIN, the server answered `transaction_pin_required`, and the
+            operator got "Enter your transaction PIN" in red beside a field
+            they had not been told they needed to fill first. Every other
+            action here has had `pin === ''` in its `disabled` since it was
+            written; this one was added later and missed it.
+            
+            It republishes only what changed and never touches a rate a person
+            published — a deliberate price outranks a market one.
           */}
           <button
             type="button"
-            className="ghost small"
-            disabled={busy}
+            className="small"
+            disabled={busy || pin === ''}
+            title={pin === '' ? 'Enter your transaction PIN above first' : undefined}
             onClick={() => {
-              // `act` reloads the table and clears the PIN, so the feedback
-              // is the ages resetting to minutes — which is the number that
-              // matters here anyway.
+              // `act` reloads the table, so the feedback is the ages resetting
+              // to minutes — which is the number that matters here anyway.
               void act(() => admin.refreshFxRates(pin));
             }}
           >
-            <Icon name="swap" size={15} /> Refresh from the market
+            <Icon name="swap" size={15} /> Generate rates
           </button>
         </div>
         <p className="lead">
@@ -174,7 +223,7 @@ export default function Prices() {
                 </tr>
               </thead>
               <tbody>
-                {(rates.data ?? []).map((row) => (
+                {ratesInOperationFirst(rates.data ?? [], operating).map((row) => (
                   <tr key={row.uuid}>
                     <td>
                       {row.base_currency}&rarr;{row.quote_currency}
@@ -213,6 +262,12 @@ export default function Prices() {
           </div>
         )}
       </div>
+
+      <PublishFx pin={pin} busy={busy} onPublish={act} />
+      <PublishRate pin={pin} busy={busy} onPublish={act} />
+
+      <PublishFxRate pin={pin} busy={busy} onPublish={act} />
+
 
       <div className="panel">
         <h2>FX spreads</h2>
@@ -650,4 +705,29 @@ function ageOf(seconds: string | number | undefined): string {
   if (value < 3600) return `${Math.max(0, Math.round(value / 60))}m`;
   if (value < 86_400) return `${Math.round(value / 3600)}h`;
   return `${Math.round(value / 86_400)}d`;
+}
+
+/**
+ * The corridors this platform runs on, first.
+ *
+ * A pair BOTH of whose currencies are in operation is a corridor a customer
+ * can actually be quoted today; one with a single side is a rate we hold for
+ * a country not yet open; the rest — Bitcoin against the world, and every
+ * other pair the feed answers — are reference, and belong under them.
+ *
+ * Stable within each group: the API already returns them ordered by base and
+ * quote, and `sort` in V8 is stable, so nothing moves around under somebody
+ * reading the table.
+ */
+function ratesInOperationFirst<T extends { base_currency: string; quote_currency: string }>(
+  rows: readonly T[],
+  operating: ReadonlySet<string>,
+): readonly T[] {
+  const rank = (row: T): number => {
+    const base = operating.has(row.base_currency);
+    const quote = operating.has(row.quote_currency);
+    if (base && quote) return 0;
+    return base || quote ? 1 : 2;
+  };
+  return [...rows].sort((a, b) => rank(a) - rank(b));
 }

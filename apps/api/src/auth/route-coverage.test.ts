@@ -111,6 +111,7 @@ describe('the public surface is small and justified', () => {
       // The signup form needs the country list and its dialling codes before
       // anybody has an account. It carries no customer data.
       'GET /v1/countries',
+      'GET /v1/pay/:slug',
       'POST /v1/auth/login',
       // Account recovery. Public because a customer who has lost their
       // password has no session to present; both answer 204 and neither
@@ -119,6 +120,10 @@ describe('the public surface is small and justified', () => {
       'POST /v1/auth/password/reset',
       'POST /v1/auth/refresh',
       'POST /v1/auth/register',
+      // The public checkout. Public IS the feature: a payment link payable
+      // only by an existing customer is a shortcut, not a payment link.
+      'POST /v1/pay/:slug/charge',
+      'POST /v1/pay/settle',
       'POST /v1/webhooks/bitnob',
       'POST /v1/webhooks/bitnob/crypto',
       'POST /v1/webhooks/bitnob/deposits',

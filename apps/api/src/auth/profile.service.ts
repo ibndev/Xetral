@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { Pool } from 'pg';
 import type { ApiConfig } from '../config.js';
 import { API_CONFIG, DATABASE } from '../tokens.js';
+import { PaymentLinkService } from '../pay/payment-link.service.js';
 
 export interface ProfileView {
   /**
@@ -26,6 +27,15 @@ export interface ProfileView {
    * `@xetral/client`. This field is the server's answer, not the product's.
    */
   readonly link: string | null;
+  /**
+   * The public segment the link is served under.
+   *
+   * Returned as well as the whole link, because the apps build their own when
+   * `APP_BASE_URL` is unset — a customer asking to be paid must never be handed
+   * an operator's problem instead of a link. Null only on a deployment behind
+   * 058.
+   */
+  readonly slug: string | null;
 }
 
 /**
@@ -56,6 +66,7 @@ export class ProfileService {
   constructor(
     @Inject(DATABASE) private readonly pool: Pool,
     @Inject(API_CONFIG) private readonly config: ApiConfig,
+    @Inject(PaymentLinkService) private readonly links: PaymentLinkService,
   ) {}
 
   async mine(userUuid: string): Promise<ProfileView> {
@@ -65,11 +76,25 @@ export class ProfileService {
     );
     const row = result.rows[0];
     if (row === undefined) throw new Error('profile requested for a user that does not exist');
-    return this.#view(row.phone);
+
+    /*
+     * TWO INDEPENDENT READS, and the number is not what the link is made of
+     * any more.
+     *
+     * The phone is the XETRAL-TO-XETRAL identifier — what another customer
+     * types on the Send screen. The link is a public checkout, and its slug is
+     * random precisely so the URL a customer posts in public does not publish
+     * their phone number to everybody it is forwarded to.
+     *
+     * So an account with no phone still has a working link, and an account on
+     * a database behind 058 still has a working number. Neither can take the
+     * other out.
+     */
+    return this.#view(row.phone, await this.links.slugFor(userUuid));
   }
 
-  #view(phone: string | null): ProfileView {
-    if (phone === null) return { phone: null, link: null };
+  #view(phone: string | null, slug: string | undefined): ProfileView {
+    if (slug === undefined) return { phone, link: null, slug: null };
 
     // `appBaseUrl` is the customer-facing origin and is CONFIGURATION, never a
     // request header — the same rule password reset follows. A link built from
@@ -84,22 +109,21 @@ export class ProfileService {
           'returns no link and each app falls back to its own origin. Set it ' +
           'to the origin a customer browser reaches.',
       );
-      return { phone, link: null };
+      return { phone, link: null, slug };
     }
-    return { phone, link: paymentLinkFor(origin, phone) };
+    return { phone, link: paymentLinkFor(origin, slug), slug };
   }
 }
 
 /**
  * The link, in the one place both halves of it can be seen at once.
  *
- * The `+` goes, because a link is pasted into places that treat one as a
- * space — a mail client wrapping a line, a chat app's own linkifier — and a
- * payment link that breaks when it is shared is a payment link that does not
- * work at the only moment it is used. `/pay/2348031234567` is unambiguous
- * without it: an E.164 number with the plus removed is still the whole number,
- * country code first.
+ * THE SEGMENT IS THE SLUG AND NOT THE PHONE NUMBER any more, and that is the
+ * decision this function exists to hold. A link is forwarded, indexed and
+ * pasted into group chats; a phone number in it is a phone number published to
+ * everybody it reaches, for ever, with no way to take it back. A slug can be
+ * rotated.
  */
-export function paymentLinkFor(origin: string, phone: string): string {
-  return `${origin.replace(/\/+$/, '')}/pay/${phone.replace(/^\+/, '')}`;
+export function paymentLinkFor(origin: string, slug: string): string {
+  return `${origin.replace(/\/+$/, '')}/pay/${slug}`;
 }
