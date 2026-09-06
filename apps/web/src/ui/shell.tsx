@@ -57,6 +57,53 @@ export function Shell({
   const router = useRouter();
   const [scrolled, setScrolled] = useState(false);
 
+  /*
+   * NOBODY SEES THE DASHBOARD BEFORE THEY ARE SIGNED IN, not even for a frame.
+   *
+   * WHAT WAS HAPPENING. Every screen rendered its chrome immediately — the tab
+   * bar, the sidebar, the balance card's skeleton — and only THEN did a hook
+   * call the API, get a 401, and push to /signin. So opening the site while
+   * signed out flashed somebody else's dashboard shape at them before the sign
+   * in page arrived. Nothing was leaked, because no data had loaded yet; what
+   * it looked like was the product briefly letting them in and then changing
+   * its mind, which for a bank is the worst possible first impression.
+   *
+   * THE GATE IS HERE RATHER THAN ON EACH PAGE for the reason the keyboard fix
+   * is in the root layout: there are nine customer screens and a tenth is
+   * always about to be added, and a gate somebody has to remember is a gate
+   * that is missing on exactly one of them. `shell-gate.test.ts` fails the
+   * build on a screen that renders customer chrome without it.
+   *
+   * IT ASKS THE TOKEN STORE, not the API. `read()` returns what is in memory
+   * or exchanges the httpOnly cookie for an access token, behind the store's
+   * own single-flight latch — so this costs at most the one refresh the first
+   * data call was going to make anyway, and never a second one.
+   */
+  const [allowed, setAllowed] = useState<boolean | undefined>();
+
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      try {
+        const signedIn = await xetral().session.hasSession();
+        if (!live) return;
+        if (!signedIn) {
+          setAllowed(false);
+          router.replace('/signin');
+          return;
+        }
+        setAllowed(true);
+      } catch {
+        if (!live) return;
+        setAllowed(false);
+        router.replace('/signin');
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [router]);
+
   // The appbar grows a hairline border once the page moves under it, so the
   // header separates from the content only when there is content behind it.
   useEffect(() => {
@@ -74,6 +121,19 @@ export function Shell({
 
   const isActive = (href: string) =>
     href === '/wallet' ? pathname === href : pathname.startsWith(href);
+
+  /*
+   * NOTHING AT ALL until the answer is in, and `replace` rather than `push`
+   * so the back button does not walk a signed-out visitor into the screen
+   * they were just sent away from.
+   *
+   * A spinner was the other option and is worse: it is one more thing a
+   * stranger sees before the sign in page, and on a signed-in customer's
+   * usual case — a warm cookie — the whole wait is a single already-cached
+   * refresh. An empty frame that becomes the app is invisible; a spinner that
+   * becomes the app is a flash of its own.
+   */
+  if (allowed !== true) return <div className="app-frame" aria-busy="true" />;
 
   return (
     <div className="app-frame">

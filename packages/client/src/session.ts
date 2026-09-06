@@ -221,6 +221,33 @@ export class Session {
     }
   }
 
+  /**
+   * IS THERE A SESSION AT ALL? — asked WITHOUT the side effects of finding out
+   * the usual way.
+   *
+   * `accessToken()` is the only other way to learn this, and it does two
+   * things a caller asking the question does not want: it fires
+   * `onSignedOut`, and it throws. Both are right when a request is about to be
+   * made and wrong when a screen is deciding whether to render — the shell
+   * needs to know before it paints anything, so that a signed-out visitor
+   * never sees the dashboard's shape flash past on the way to the sign in
+   * page.
+   *
+   * It goes through the SAME `read()` every request goes through, so on the
+   * web it is served by the token store's own single-flight latch and costs at
+   * most the one cookie exchange the first data call was going to make anyway.
+   * Asking a second time is free.
+   */
+  async hasSession(): Promise<boolean> {
+    try {
+      return (await this.#store.read()) !== undefined;
+    } catch {
+      // A store that cannot answer is not a session. Throwing here would make
+      // every caller wrap this in the try/catch it exists to avoid.
+      return false;
+    }
+  }
+
   /** A valid access token, refreshing first if it is close to expiring. */
   async accessToken(): Promise<string> {
     const tokens = await this.#store.read();

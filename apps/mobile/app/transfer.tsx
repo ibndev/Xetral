@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Text, TextInput, View } from 'react-native';
 import { router } from 'expo-router';
 import { e164, exponentFor, formatAmount, isValidAmount, sendableFor } from '@xetral/client';
+import { codeOf } from '@xetral/client';
 import { Shell } from '@/shell';
 import { Button, Done, Field, FormError, Loading, Panel, Toast } from '@/ui';
 import { Select } from '@/select';
@@ -81,9 +82,19 @@ export default function Transfer() {
   const [beneficiary, setBeneficiary] = useState<string | undefined>(undefined);
   const [lookingUp, setLookingUp] = useState(false);
   const [lookupFailed, setLookupFailed] = useState(false);
+  /* A Mobile Money wallet has no name enquiry on any of these rails — see the
+   * web Send screen, which records why this is its own state rather than a
+   * failure, and why it must never become an echo of what the sender typed. */
+  const [nameUnavailable, setNameUnavailable] = useState(false);
 
   const [amount, setAmount] = useState('');
-  const [currency, setCurrency] = useState('NGN');
+  /*
+   * EMPTY UNTIL THE SESSION LOADS, then resolved rather than stored — the
+   * same fix, for the same reason, as the web Send screen. It was 'NGN', so
+   * every customer's picker opened on naira: a customer in Accra was shown
+   * "You have no NGN" on the screen they opened in order to pay somebody.
+   */
+  const [currency, setCurrency] = useState('');
   const [pin, setPin] = useState('');
 
   /*
@@ -138,9 +149,18 @@ export default function Transfer() {
    * Nigeria needs.
    */
   const countries = useLoad(() => client.session.countries(), [client]);
+  /*
+   * FROM THE SESSION FIRST — the API reads `payout_method` off the customer's
+   * own country row, and it is what Add Money already personalises on.
+   * Deriving it a second time from the public country list is one more thing
+   * that has to have loaded before the answer is right, and while it has not
+   * the fallback is 'bank' — which offered a customer in Accra a bank account
+   * form for money that moves on a phone number.
+   */
   const mobileMoney =
-    (countries.data?.find((c) => c.code === homeCountry)?.payout_method ?? 'bank') ===
-    'mobile_money';
+    (session.data?.payout_method ??
+      countries.data?.find((c) => c.code === homeCountry)?.payout_method ??
+      'bank') === 'mobile_money';
 
   /* Loaded only when the bank tab is open: it is a provider call behind our
    * API, and a customer who never opens the tab never pays for it. */
@@ -168,7 +188,8 @@ export default function Transfer() {
   );
   const recipientCurrency = recipientPlace?.currency;
   const homeCurrency = session.data?.home_currency ?? 'NGN';
-  const sendCurrency = destination === 'bank' ? homeCurrency : currency;
+  const sendCurrency =
+    destination === 'bank' ? homeCurrency : currency === '' ? homeCurrency : currency;
 
   /* Arrived from a payment link? Then the recipient is already named and must
    * not be asked for again — a link names one Xetral customer, which is what
@@ -207,10 +228,12 @@ export default function Transfer() {
     if (code === '' || number.length < 10) {
       setBeneficiary(undefined);
       setLookupFailed(false);
+      setNameUnavailable(false);
       return;
     }
     setLookingUp(true);
     setLookupFailed(false);
+    setNameUnavailable(false);
     try {
       const found = await client.lookupBankAccount({
         country: homeCountry,
@@ -218,12 +241,14 @@ export default function Transfer() {
         accountNumber: number,
       });
       setBeneficiary(found.account_name);
-    } catch {
-      // Deliberately not distinguishing "no such account" from "the bank did
-      // not answer": telling them apart would let somebody map which numbers
-      // are live at which bank, one request at a time.
+    } catch (error: unknown) {
       setBeneficiary(undefined);
-      setLookupFailed(true);
+      // Only `name_unavailable` is told apart, and it says nothing about
+      // which numbers exist — it is a fact about Mobile Money as a product.
+      // Everything else stays indistinguishable, or the lookup becomes a way
+      // to map which numbers are live at which bank one request at a time.
+      if (codeOf(error) === 'name_unavailable') setNameUnavailable(true);
+      else setLookupFailed(true);
     } finally {
       setLookingUp(false);
     }
@@ -471,7 +496,7 @@ export default function Transfer() {
         title="Send money"
         subtitle={
           mobileMoney
-            ? 'To a Xetral account or a mobile money wallet'
+            ? 'To a Xetral account or a Mobile Money number'
             : 'To a Xetral account or a bank account'
         }
       >
@@ -487,7 +512,7 @@ export default function Transfer() {
             { value: 'xetral', label: 'A Xetral account' },
             {
               value: 'bank',
-              label: mobileMoney ? 'A Momo account' : 'A bank account',
+              label: mobileMoney ? 'Mobile Money' : 'A bank account',
             },
           ]}
         />
@@ -495,7 +520,7 @@ export default function Transfer() {
         {destination === 'bank' ? (
           <>
             <Select
-              label={mobileMoney ? 'Momo provider' : 'Bank'}
+              label={mobileMoney ? 'Mobile Money provider' : 'Bank'}
               // Paystack returns upwards of a hundred Nigerian banks; finding
               // one by flicking through an alphabetical sheet is the customer
               // doing the computer's work.
@@ -512,7 +537,7 @@ export default function Transfer() {
               }))}
             />
             <Field
-              label={mobileMoney ? 'Momo number' : 'Account number'}
+              label={mobileMoney ? 'Mobile Money number' : 'Account number'}
               inputMode="numeric"
               placeholder={mobileMoney ? '0244123456' : '0123456789'}
               autoCapitalize="none"
@@ -542,8 +567,14 @@ export default function Transfer() {
             {lookupFailed && (
               <Text style={styles.error}>
                 {mobileMoney
-                  ? 'We could not find that wallet. Check the number and the provider.'
+                  ? 'We could not check that number. Check the provider and the number.'
                   : 'We could not find that account. Check the number and the bank.'}
+              </Text>
+            )}
+            {nameUnavailable && (
+              <Text style={styles.hint}>
+                Mobile Money does not confirm names. Check the number and the provider
+                carefully — a transfer cannot be recalled.
               </Text>
             )}
           </>
@@ -617,7 +648,7 @@ export default function Transfer() {
           <>
             <Select
               label="Currency"
-              value={currency}
+              value={sendCurrency}
               onChange={setCurrency}
               options={offered.map((code) => ({
                 value: code,
@@ -706,7 +737,12 @@ export default function Transfer() {
             // A payout cannot be reviewed without a name to review: a
             // confirmation screen that confirms nothing is worse than none,
             // because it will be read as having been checked.
-            (destination === 'bank' ? beneficiary === undefined : payee === '')
+            (destination === 'bank'
+              ? // A Mobile Money wallet has no name to review — requiring one
+                // would leave every customer in Accra and Nairobi with a
+                // button that never enables.
+                beneficiary === undefined && !nameUnavailable
+              : payee === '')
           }
           onPress={() => setStage('confirm')}
         />

@@ -8,7 +8,13 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import type { Pool } from 'pg';
-import { PaystackClient, initializeCheckout, verifyCheckout } from '@xetral/providers';
+import {
+  FlutterwaveCheckoutAdapter,
+  FlutterwaveClient,
+  PaystackCheckoutAdapter,
+  PaystackClient,
+} from '@xetral/providers';
+import type { CheckoutPort } from '@xetral/providers';
 import { ProviderRejectedError } from '@xetral/providers';
 import { assertBalanced, posting } from '@xetral/ledger';
 import type { LedgerIntent } from '@xetral/ledger';
@@ -19,9 +25,8 @@ import { CURRENCIES } from '@xetral/shared';
 import { API_CONFIG, DATABASE, LEDGER } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
 import { ProviderCredentialService } from '../settings/provider-credentials.service.js';
-import { paystackSecretKey } from '../app.module.js';
-
-const PROVIDER = 'paystack';
+import { flutterwaveSecretKey, paystackSecretKey } from '../app.module.js';
+import { ProviderRouterService } from '../routing/provider-router.service.js';
 
 /**
  * THE PAYMENT LINK, AND WHY IT IS A CHECKOUT RATHER THAN A SHORTCUT.
@@ -56,6 +61,8 @@ export class PaymentLinkService {
     @Inject(API_CONFIG) private readonly config: ApiConfig,
     @Inject(ProviderCredentialService)
     private readonly credentials: ProviderCredentialService,
+    @Inject(ProviderRouterService)
+    private readonly router: ProviderRouterService,
   ) {}
 
   /**
@@ -104,7 +111,9 @@ export class PaymentLinkService {
 
   /** Who a public link pays. A NAME and a CURRENCY, and deliberately no way
    *  to reach them — see `payable_links` in 058. */
-  async payee(slug: string): Promise<{ name: string; currency: string }> {
+  async payee(
+    slug: string,
+  ): Promise<{ name: string; currency: string; currencies: readonly string[] }> {
     const found = await this.pool.query<{ full_name: string | null; currency: string }>(
       `SELECT full_name, currency FROM payable_links WHERE slug = $1`,
       [slug],
@@ -114,11 +123,60 @@ export class PaymentLinkService {
     // closed their account. Distinguishing them would say which slugs are
     // real, on a page anybody can open.
     if (row === undefined) throw new NotFoundException({ error: 'link_not_found' });
-    return { name: row.full_name ?? 'a Xetral customer', currency: row.currency };
+    return {
+      name: row.full_name ?? 'a Xetral customer',
+      /*
+       * The payee's OWN currency leads, because most payments are domestic
+       * and the commonest case should need no decision at all.
+       */
+      currency: row.currency,
+      /*
+       * WHAT A PAYER MAY CHOOSE, from the route table rather than from a list
+       * in this file.
+       *
+       * A hardcoded list would be a claim about which rails exist, made in a
+       * screen, and it would go stale the first time an operator opened a
+       * corridor. `provider_routes` already knows: a currency with a
+       * `collect` route is one this platform can actually take money in, and
+       * one without is a page that would fail after the payer had typed an
+       * amount.
+       */
+      currencies: await this.collectableCurrencies(row.currency),
+    };
   }
 
   /**
-   * Start a payment. Writes the row, then asks Paystack for a page.
+   * Which currencies this deployment can actually collect, the payee's first.
+   *
+   * ITS OWN METHOD BECAUSE TWO SCREENS ASK IT — the public checkout and Add
+   * Money — and a second copy would be a second answer on the day a corridor
+   * opens.
+   *
+   * The payee's currency is included even when nothing routes it, and that is
+   * deliberate: a link that offered every currency EXCEPT the owner's would be
+   * a worse failure than one that offers it and refuses at `begin`, where the
+   * refusal names the reason. `provider_route_coverage` is where an operator
+   * sees the gap.
+   */
+  async collectableCurrencies(payeeCurrency: string): Promise<readonly string[]> {
+    let routed: readonly string[] = [];
+    try {
+      const rows = await this.pool.query<{ currency: string }>(
+        `SELECT currency FROM provider_routes WHERE operation = 'collect' ORDER BY currency`,
+      );
+      routed = rows.rows.map((r) => r.currency);
+    } catch {
+      // A deployment behind 059. The payee's own currency is still offerable,
+      // which is exactly what the screen did before routes existed.
+      routed = [];
+    }
+    const offered = [payeeCurrency, ...routed.filter((c) => c !== payeeCurrency)];
+    return offered.filter((code) => CURRENCIES[code as Currency] !== undefined);
+  }
+
+  /**
+   * Start a payment. Writes the row, then asks whichever rail serves that
+   * currency for a page.
    *
    * THE AMOUNT IS A STRING IN MAJOR UNITS, parsed once by `fromMajor` — the
    * rule every money field on this platform follows. A JSON number has already
@@ -126,7 +184,23 @@ export class PaymentLinkService {
    */
   async begin(
     slug: string,
-    input: { readonly amount: string; readonly payerEmail: string; readonly payerName?: string },
+    input: {
+      readonly amount: string;
+      readonly payerEmail: string;
+      readonly payerName?: string;
+      /**
+       * WHAT THE PAYER CHOSE TO PAY IN, and it is credited AS ITSELF.
+       *
+       * The ledger has been multi-currency since Phase 1, so a customer in
+       * Accra paid in dollars holds dollars — converting at the moment of
+       * credit would pick a rate nobody agreed to and lose the fact that the
+       * payment was ever in another currency. Absent, it is the payee's own,
+       * which is the commonest case and needs no decision.
+       */
+      readonly currency?: string;
+      /** What the payment is for, in the payer's words. Inert — see the port. */
+      readonly note?: string;
+    },
   ): Promise<{ authorization_url: string; reference: string }> {
     const target = await this.pool.query<{
       link_id: string;
@@ -144,12 +218,38 @@ export class PaymentLinkService {
     const payee = target.rows[0];
     if (payee === undefined) throw new NotFoundException({ error: 'link_not_found' });
 
-    const currency = payee.currency as Currency;
+    const currency = (input.currency ?? payee.currency).toUpperCase() as Currency;
     if (CURRENCIES[currency] === undefined) {
-      // A country row naming a currency the money registry does not know. It
-      // cannot be quoted, and refusing beats charging somebody in a unit
-      // nothing can hold.
+      // A country row naming a currency the money registry does not know, or
+      // a payer asking for one. It cannot be quoted, and refusing beats
+      // charging somebody in a unit nothing can hold.
       throw new BadRequestException({ error: 'currency_not_supported' });
+    }
+    const offered = await this.collectableCurrencies(payee.currency);
+    if (!offered.includes(currency)) {
+      // Asked for on the wire but not offered by the page. A client cannot
+      // widen what this deployment collects by sending a different string.
+      throw new BadRequestException({ error: 'currency_not_supported' });
+    }
+
+    /*
+     * WHICH RAIL, decided by the currency and by nothing else.
+     *
+     * This is the whole point of 059. A Paystack account registered in
+     * Nigeria settles in naira, so asking it for cedis either refuses or
+     * converts at a rate nobody chose — and the customer saw "Payments are
+     * unavailable right now" with no way to tell those apart. An unrouted
+     * currency is refused HERE, before a row is written and before a payer is
+     * sent anywhere, with a code the screen can turn into real words.
+     */
+    const provider = await this.router.providerFor('collect', currency);
+    if (provider === undefined) {
+      this.#logger.error(
+        `no collect route for ${currency}; read provider_route_coverage. ` +
+          `If this is a fresh deployment, apply ` +
+          `packages/ledger/sql/059_provider_routing.sql.`,
+      );
+      throw new ServiceUnavailableException({ error: 'currency_not_supported' });
     }
 
     let amount;
@@ -171,8 +271,8 @@ export class PaymentLinkService {
 
     await this.pool.query(
       `INSERT INTO link_payments
-         (reference, link_id, user_id, amount_minor, currency, payer_name, payer_email)
-       VALUES ($1, $2::bigint, $3::bigint, $4::bigint, $5, $6, $7)`,
+         (reference, link_id, user_id, amount_minor, currency, payer_name, payer_email, provider)
+       VALUES ($1, $2::bigint, $3::bigint, $4::bigint, $5, $6, $7, $8)`,
       [
         reference,
         payee.link_id,
@@ -181,18 +281,29 @@ export class PaymentLinkService {
         currency,
         input.payerName ?? null,
         input.payerEmail,
+        /*
+         * THE RAIL IS RECORDED, and 059 makes it immutable.
+         *
+         * A provider-side reference is opaque and only its issuer can verify
+         * it, so settling reads the rail off THIS ROW rather than off the
+         * route table — otherwise every payment in flight becomes
+         * unverifiable the instant an operator moves a corridor, which is
+         * the exact state `bank_payouts_stuck` exists to count one flow over.
+         */
+        provider,
       ],
     );
 
-    const client = this.#client();
     let session;
     try {
-      session = await initializeCheckout(client, {
+      session = await this.#checkout(provider).begin({
         payerEmail: input.payerEmail,
         amountMinor: amount.amount,
         currency,
         reference,
         ...(payee.full_name === null ? {} : { payeeName: payee.full_name }),
+        ...(input.payerName === undefined ? {} : { payerName: input.payerName }),
+        ...(input.note === undefined ? {} : { note: input.note }),
         ...(this.config.appBaseUrl === undefined
           ? {}
           : { callbackUrl: `${this.config.appBaseUrl}/pay/${slug}?paid=${reference}` }),
@@ -238,6 +349,7 @@ export class PaymentLinkService {
   async topUp(
     userUuid: string,
     amount: string,
+    currency?: string,
   ): Promise<{ authorization_url: string; reference: string }> {
     const found = await this.pool.query<{ slug: string; email: string | null }>(
       `SELECT p.slug, u.email
@@ -253,7 +365,11 @@ export class PaymentLinkService {
       throw new ServiceUnavailableException({ error: 'checkout_unavailable' });
     }
 
-    return this.begin(row.slug, { amount, payerEmail: row.email });
+    return this.begin(row.slug, {
+      amount,
+      payerEmail: row.email,
+      ...(currency === undefined ? {} : { currency }),
+    });
   }
 
   /**
@@ -278,8 +394,10 @@ export class PaymentLinkService {
       amount_minor: string;
       currency: string;
       status: string;
+      provider: string;
     }>(
-      `SELECT id, user_id, amount_minor, currency, status
+      `SELECT id, user_id, amount_minor, currency, status,
+              COALESCE(provider, 'paystack') AS provider
          FROM link_payments WHERE reference = $1`,
       [reference],
     );
@@ -293,7 +411,13 @@ export class PaymentLinkService {
 
     let outcome;
     try {
-      outcome = await verifyCheckout(this.#client(), reference);
+      /*
+       * ASKED OF THE RAIL THAT TOOK THE MONEY, from the row rather than from
+       * the route table. Asking the other one would answer "no such
+       * transaction", which is indistinguishable from a payment that never
+       * happened — and would leave a real one uncredited for ever.
+       */
+      outcome = await this.#checkout(row.provider).verify(reference);
     } catch (error: unknown) {
       if (error instanceof ProviderRejectedError) return 'pending';
       throw error;
@@ -317,11 +441,20 @@ export class PaymentLinkService {
      * pending and a person looks, which is the same decision 006 makes about a
      * deposit that blows the ceiling.
      */
-    const paid = toMinor(outcome.amount);
-    if (paid === undefined || paid !== BigInt(row.amount_minor)) {
+    /*
+     * MINOR UNITS ON BOTH SIDES OF THIS COMPARISON.
+     *
+     * The adapter has already converted, which is what makes this line safe
+     * to read: Paystack sends minor units and Flutterwave sends major ones,
+     * and a comparison that had to know which would be wrong by a factor of a
+     * hundred on one of the two rails — in the direction that credits too
+     * much. `ports/checkout.ts` states the unit; here it is simply relied on.
+     */
+    const paid = outcome.amountMinor;
+    if (paid !== BigInt(row.amount_minor)) {
       this.#logger.error(
         `payment ${reference} was initialised for ${row.amount_minor} and paid ` +
-          `${String(outcome.amount)}; refusing to credit`,
+          `${paid.toString()}; refusing to credit`,
       );
       return 'pending';
     }
@@ -341,7 +474,16 @@ export class PaymentLinkService {
        * the ledger answers `replayed` to the second — 044's rule about
        * `data.reference`, applied to the reference we generated.
        */
-      idempotencyKey: `${PROVIDER}:link:${reference}`,
+      /*
+       * KEYED ON THE RAIL AND OUR REFERENCE, which both callers hold. A
+       * webhook redelivery and the payer refreshing their return page produce
+       * the same key, and the ledger answers `replayed` to the second — 044's
+       * rule about `data.reference`, applied to the reference we generated.
+       * The rail is in the key because two providers must never be able to
+       * collide on one, and it comes off the ROW, so it is fixed for the life
+       * of the payment.
+       */
+      idempotencyKey: `${row.provider}:link:${reference}`,
       kind: 'wallet_funding',
       occurredAt: outcome.paidAt === undefined ? new Date() : new Date(outcome.paidAt),
       description: 'payment received through your link',
@@ -375,18 +517,53 @@ export class PaymentLinkService {
     return posted.replayed ? 'replayed' : 'credited';
   }
 
-  #client(): PaystackClient {
-    const baseUrl = this.config.paystackBaseUrl;
-    if (baseUrl === undefined) {
-      // No Paystack at all. Said as an outage rather than a 500, because the
-      // fix is a deployment value and the caller is a stranger on a public
-      // page who can do nothing about it.
-      throw new ServiceUnavailableException({ error: 'checkout_unavailable' });
+  /**
+   * The checkout for a named rail.
+   *
+   * BUILT PER CALL, not held, because both clients resolve their credential
+   * through a function — a key pasted on `/admin/credentials` has to reach a
+   * port that was constructed at boot, and a rotation during an incident must
+   * take effect within the credential cache rather than at the next restart.
+   * Constructing an adapter is a few object allocations; the HTTP call after
+   * it is what costs anything.
+   *
+   * AN UNKNOWN NAME IS AN OUTAGE, not a 500. It means a route names a rail
+   * this deployment has no adapter for — an operator's typo, or a build older
+   * than the row — and the caller is a stranger on a public page who can do
+   * nothing about either.
+   */
+  #checkout(provider: string): CheckoutPort {
+    if (provider === 'flutterwave') {
+      const baseUrl = this.config.flutterwaveBaseUrl;
+      if (baseUrl === undefined) throw this.#noRail(provider);
+      return new FlutterwaveCheckoutAdapter(
+        new FlutterwaveClient({
+          baseUrl,
+          secretKey: flutterwaveSecretKey(this.config, this.credentials),
+        }),
+      );
     }
-    return new PaystackClient({
-      baseUrl,
-      secretKey: paystackSecretKey(this.config, this.credentials),
-    });
+
+    if (provider === 'paystack') {
+      const baseUrl = this.config.paystackBaseUrl;
+      if (baseUrl === undefined) throw this.#noRail(provider);
+      return new PaystackCheckoutAdapter(
+        new PaystackClient({
+          baseUrl,
+          secretKey: paystackSecretKey(this.config, this.credentials),
+        }),
+      );
+    }
+
+    throw this.#noRail(provider);
+  }
+
+  #noRail(provider: string): ServiceUnavailableException {
+    this.#logger.error(
+      `no checkout adapter for '${provider}'. Check provider_routes and the ` +
+        `base URL for that rail.`,
+    );
+    return new ServiceUnavailableException({ error: 'checkout_unavailable' });
   }
 }
 

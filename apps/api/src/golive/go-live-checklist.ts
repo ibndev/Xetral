@@ -390,6 +390,42 @@ export const PROVIDERS: readonly Item[] = [
       'whether the money is real.',
   },
   {
+    name: 'FLUTTERWAVE_SECRET_KEY',
+    kind: 'env',
+    failure: 'refuses-the-first-request',
+    flow: 'collecting cedis and shillings',
+    ifMissed:
+      'every payment in GHS or KES is refused, on both the public payment ' +
+      'link and Add Money — those corridors are routed to Flutterwave ' +
+      'because a Paystack account registered in Nigeria settles in naira. ' +
+      'Starts FLWSECK_TEST or FLWSECK, which is what decides whether the ' +
+      'money is real.',
+  },
+  {
+    name: 'FLUTTERWAVE_WEBHOOK_HASH',
+    kind: 'env',
+    failure: 'silent',
+    flow: 'collecting cedis and shillings',
+    ifMissed:
+      'A DIFFERENT SECRET FROM THE KEY ABOVE, and this is the one that fails ' +
+      'quietly. Flutterwave does not sign the body: it returns verbatim a ' +
+      'value you set on their dashboard. Unset, every inbound event is ' +
+      'refused — outbound calls keep working perfectly, so the integration ' +
+      'looks healthy while payments are only ever credited when the payer ' +
+      'happens to come back to the page.',
+  },
+  {
+    name: 'FLUTTERWAVE_BASE_URL',
+    kind: 'env',
+    failure: 'default-is-deliberate',
+    flow: 'collecting cedis and shillings',
+    ifMissed:
+      'defaults to https://api.flutterwave.com, which is the only host they ' +
+      'serve. The /v3 prefix is on each path rather than on this value, so a ' +
+      'base URL carrying one produces /v3/v3/payments — the doubling 042 ' +
+      'records about Bitnob.',
+  },
+  {
     name: 'PAYSTACK_BASE_URL',
     kind: 'env',
     failure: 'default-is-deliberate',
@@ -1432,6 +1468,28 @@ export const CREDENTIALS: readonly Item[] = [
       'ONE credential, not two: it authorises calls and verifies webhooks, ' +
       'because Paystack signs an inbound event with the same key. Without ' +
       'it no dedicated account can be opened and no deposit can be credited.',
+  },
+  {
+    name: 'flutterwave.secret_key',
+    kind: 'credential',
+    failure: 'refuses-the-first-request',
+    flow: 'collecting cedis and shillings, and paying a mobile money wallet',
+    ifMissed:
+      'Ghana and Kenya are routed to Flutterwave by provider_routes, so ' +
+      'without this every payment and every payout there is refused. Read ' +
+      'provider_route_coverage to see which corridors depend on it.',
+  },
+  {
+    name: 'flutterwave.webhook_hash',
+    kind: 'credential',
+    failure: 'silent',
+    flow: 'collecting cedis and shillings',
+    ifMissed:
+      'NOT the secret key. It is the value you type into Flutterwave\'s own ' +
+      'webhook settings, returned verbatim in verif-hash. Unset, every ' +
+      'inbound event is refused while outbound calls keep working — the ' +
+      'integration looks healthy and payments land only when a payer ' +
+      'happens to return to the page.',
   },
   {
     name: 'brevo.api_key',

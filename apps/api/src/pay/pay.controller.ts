@@ -39,10 +39,31 @@ const beginSchema = z
   .object({
     /** MAJOR units as a decimal STRING, parsed once by `fromMajor`. */
     amount: z.string().trim().min(1).max(32),
-    /** Paystack requires one and sends the receipt there. The only thing
-     *  this page asks for beyond an amount. */
+    /** Both rails require one and send the receipt there. */
     email: z.string().trim().email().max(255),
     name: z.string().trim().min(1).max(120).optional(),
+    /**
+     * WHAT THE PAYER CHOSE TO PAY IN.
+     *
+     * Validated as a SHAPE here and as a MEMBERSHIP in the service, against
+     * the routes this deployment actually holds — a client must not be able
+     * to widen what the platform collects by sending a different string, and
+     * the list is data rather than an enum in this file for the same reason
+     * a country is.
+     */
+    currency: z
+      .string()
+      .trim()
+      .regex(/^[A-Za-z]{3,4}$/)
+      .optional(),
+    /**
+     * WHAT IT IS FOR, in the payer's words.
+     *
+     * Carried into the provider's metadata and onto the receipt, and inert
+     * everywhere else: it can never alter the amount, the currency or who is
+     * credited. Bounded because it goes into somebody else's system for ever.
+     */
+    note: z.string().trim().min(1).max(140).optional(),
   })
   .strict();
 
@@ -54,7 +75,9 @@ export class PayController {
 
   /** Who this link pays. A name and a currency — see `payable_links` in 058. */
   @Get(':slug')
-  async payee(@Param('slug') slug: string): Promise<{ name: string; currency: string }> {
+  async payee(
+    @Param('slug') slug: string,
+  ): Promise<{ name: string; currency: string; currencies: readonly string[] }> {
     return this.links.payee(parseSlug(slug));
   }
 
@@ -76,6 +99,10 @@ export class PayController {
       amount: parsed.data.amount,
       payerEmail: parsed.data.email,
       ...(parsed.data.name === undefined ? {} : { payerName: parsed.data.name }),
+      ...(parsed.data.currency === undefined
+        ? {}
+        : { currency: parsed.data.currency.toUpperCase() }),
+      ...(parsed.data.note === undefined ? {} : { note: parsed.data.note }),
     });
   }
 

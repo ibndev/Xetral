@@ -102,6 +102,56 @@ describe('staging cannot reach a live provider', () => {
     ).toThrow(/LIVE provider/);
   });
 
+  it('refuses to boot with a LIVE Flutterwave key', () => {
+    /*
+     * AND THIS ONE CAN BE CHECKED AT BOOT, unlike Bitnob's.
+     *
+     * Bitnob v2 serves both environments from one host and the secret selects
+     * between them, so nothing visible at boot says which money is real and
+     * the guard had to move to the first call. Flutterwave puts it in the key
+     * — `FLWSECK_TEST-` against `FLWSECK-` — so a staging box collecting real
+     * cedis is refused before it serves a request.
+     */
+    expect(() =>
+      loadConfig(
+        env({
+          XETRAL_ENVIRONMENT: 'staging',
+          FLUTTERWAVE_SECRET_KEY: 'FLWSECK-0123456789abcdef',
+        }),
+      ),
+    ).toThrow(/LIVE provider/);
+  });
+
+  it('accepts a Flutterwave TEST key on staging', () => {
+    const config = loadConfig(
+      env({
+        XETRAL_ENVIRONMENT: 'staging',
+        FLUTTERWAVE_SECRET_KEY: 'FLWSECK_TEST-0123456789abcdef',
+      }),
+    );
+    expect(config.flutterwaveSecretKey).toBe('FLWSECK_TEST-0123456789abcdef');
+  });
+
+  it('never echoes a live credential into the refusal', () => {
+    // The message reaches a log. Naming the VARIABLE is enough to act on;
+    // naming the value would put a live key in it.
+    const error = (() => {
+      try {
+        loadConfig(
+          env({
+            XETRAL_ENVIRONMENT: 'staging',
+            FLUTTERWAVE_SECRET_KEY: 'FLWSECK-0123456789abcdef',
+          }),
+        );
+        return undefined;
+      } catch (e) {
+        return e as Error;
+      }
+    })();
+    expect(error?.message).toContain('FLUTTERWAVE_SECRET_KEY');
+    expect(error?.message).not.toContain('0123456789abcdef');
+  });
+
   it('names every offending variable at once', () => {
     // One at a time would mean three deploys to find three mistakes, and the
     // person hitting this is already in a hurry.

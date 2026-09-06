@@ -156,7 +156,25 @@ describe('a customer asking to be paid', () => {
 
     expect(seen.body.name).toBe('Payment Link Person');
     expect(seen.body.currency).toBe('NGN');
-    expect(Object.keys(seen.body as object).sort()).toEqual(['currency', 'name']);
+    /*
+     * And the currencies a payer may CHOOSE, which is what makes the picker
+     * data rather than a list in a screen. The payee's own leads, because most
+     * payments are domestic and the commonest case should need no decision.
+     */
+    expect(seen.body.currencies[0]).toBe('NGN');
+
+    /*
+     * THE ASSERTION THAT MATTERS IS WHAT IS ABSENT. A payer has to see who
+     * they are about to pay; if this could also answer the address or the
+     * number behind the link, every published link would be a harvester. The
+     * check is on the SERIALISED body rather than on a key list, because what
+     * is being guarded against is a field nobody thought to name — the same
+     * reasoning the data-export test uses.
+     */
+    const body = JSON.stringify(seen.body);
+    expect(body).not.toContain(payee.email);
+    expect(body).not.toContain(payee.phone);
+    expect(body).not.toContain(payee.phone.slice(1));
   });
 
   it('an unknown link answers exactly as a malformed one does', async () => {

@@ -83,6 +83,7 @@ import {
 import { CryptoService } from './crypto/crypto.service.js';
 import { PayoutService } from './payouts/payout.service.js';
 import { PaystackWebhookService } from './funding/paystack-webhook.service.js';
+import { FlutterwaveWebhookService } from './funding/flutterwave-webhook.service.js';
 import { SwitchingFundingPort } from './funding/funding-provider.js';
 import { SwitchingPayoutPort } from './payouts/payout-provider.js';
 import { PayoutController } from './payouts/payout.controller.js';
@@ -117,6 +118,7 @@ import { MonitoringService } from './risk/monitoring.service.js';
 import { RateFeedService } from './fx/rate-feed.service.js';
 import { PayController } from './pay/pay.controller.js';
 import { PaymentLinkService } from './pay/payment-link.service.js';
+import { ProviderRouterService } from './routing/provider-router.service.js';
 import { CaseService } from './risk/case.service.js';
 import {
   InMemoryRateLimitStore,
@@ -239,6 +241,38 @@ export function paystackSecretKey(
 ): string | (() => Promise<string | undefined>) {
   if (credentials === undefined) return config.paystackSecretKey ?? '';
   return () => credentials.secretFor('paystack', 'secret_key', config.paystackSecretKey);
+}
+
+/**
+ * The Flutterwave secret, resolved per call.
+ *
+ * Same shape as `paystackSecretKey` and for the same reason: a key pasted on
+ * `/admin/credentials` must reach a port constructed at boot, and a rotation
+ * during an incident must take effect within the credential cache rather than
+ * at the next restart.
+ */
+export function flutterwaveSecretKey(
+  config: ApiConfig,
+  credentials?: ProviderCredentialService,
+): string | (() => Promise<string | undefined>) {
+  if (credentials === undefined) return config.flutterwaveSecretKey ?? '';
+  return () => credentials.secretFor('flutterwave', 'secret_key', config.flutterwaveSecretKey);
+}
+
+/**
+ * The Flutterwave WEBHOOK HASH — a different secret from the key above.
+ *
+ * They send it back verbatim in `verif-hash`; there is nothing to recompute.
+ * It is resolved per call like every other credential so an operator can
+ * rotate it on the dashboard the moment they believe it has leaked.
+ */
+export function flutterwaveWebhookHash(
+  config: ApiConfig,
+  credentials?: ProviderCredentialService,
+): () => Promise<string | undefined> {
+  if (credentials === undefined) return async () => config.flutterwaveWebhookHash;
+  return () =>
+    credentials.secretFor('flutterwave', 'webhook_hash', config.flutterwaveWebhookHash);
 }
 
 export function bitnobCredentials(
@@ -1214,6 +1248,7 @@ export class AppModule {
         FundingService,
         DepositWebhookService,
         PaystackWebhookService,
+        FlutterwaveWebhookService,
         CryptoService,
         PayoutService,
         CryptoWebhookService,
@@ -1257,6 +1292,7 @@ export class AppModule {
         MonitoringService,
         RateFeedService,
         PaymentLinkService,
+        ProviderRouterService,
         CaseService,
         BalanceReconciliationLifecycle,
         MonitoringLifecycle,

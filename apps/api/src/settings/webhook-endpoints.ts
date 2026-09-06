@@ -31,6 +31,15 @@ export const WEBHOOK_ENDPOINTS: readonly WebhookEndpoint[] = [
     secret: 'paystack.secret_key',
   },
   {
+    path: '/v1/webhooks/flutterwave/deposits',
+    label: 'Payments collected in cedis and shillings (Flutterwave)',
+    // NOT the secret key. Flutterwave verifies with a value an operator sets
+    // on its own dashboard and returns verbatim in `verif-hash`, so naming
+    // the key here would send them to paste the wrong string and wonder why
+    // every event was refused.
+    secret: 'flutterwave.webhook_hash',
+  },
+  {
     path: '/v1/webhooks/bitnob/deposits',
     label: 'Deposits into dedicated Nigerian account numbers (Bitnob)',
     secret: 'bitnob.webhook_secret',

@@ -151,8 +151,10 @@ export default function AddMoney() {
             money in sat hard against a line of text either side of it.
           */
           <View style={{ gap: space.lg, marginTop: space.md }}>
+            {/* NOT "your naira account" — see the web screen. The account is
+                the one for the customer's own country. */}
             <Text style={[styles.h2, { marginBottom: 0 }]}>
-              Your naira account is ready. Get it below.
+              Your account is ready. Get it below.
             </Text>
             <Button
               label={busy ? 'Activating…' : 'Activate Account'}
@@ -225,10 +227,6 @@ export default function AddMoney() {
               }
             />
 
-            <Text style={styles.hint}>
-              You pay on Paystack&apos;s secure page — mobile money, bank or card. To move money
-              back out to your wallet, use Send.
-            </Text>
           </View>
         )}
 

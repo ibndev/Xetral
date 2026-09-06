@@ -715,6 +715,80 @@ and `058_payment_links.sql` (the slug the link is made of).
   "there". That is the same failure this method's comment already recorded
   about `handle` and 039, one migration later.
 
+### Which provider serves which currency — non-obvious rules
+
+Schema: `packages/ledger/sql/059_provider_routing.sql`. Router in
+`apps/api/src/routing/provider-router.service.ts`. Adapters in
+`packages/providers/src/flutterwave/`.
+
+- **`funding_provider` AND `payout_provider` ARE ONE NAME EACH, and that was
+  the whole problem.** They can say "Paystack" or "Bitnob"; they cannot say
+  "Paystack for naira and somebody else for cedis", which is the only sentence
+  that describes a platform operating in three countries.
+- **A PAYSTACK ACCOUNT REGISTERED IN NIGERIA SETTLES IN NAIRA.** Asked for
+  cedis it either refuses outright or accepts and converts at a rate nobody
+  chose — so a customer in Accra tapping Add Money saw "Payments are
+  unavailable right now", and nothing anywhere could say which of those two
+  had happened. That is what the route table is for.
+- **A ROUTE NAMES WHO, NEVER WHETHER.** The four kill switches in 009 decide
+  whether a flow runs; routing decides who serves it. They stay separate
+  because an operator turning something off during an incident must not have to
+  know which rail it was on, and a router that could also disable would be a
+  second, quieter switch nobody thinks to check.
+- **AN UNROUTED CURRENCY IS REFUSED BEFORE A ROW IS WRITTEN**, with a code the
+  screen turns into words. A default would send dollars at a rail that cannot
+  take them, and the refusal would arrive from the provider as something
+  unrelated. `provider_route_coverage` reports the gap in both directions.
+- **THE RAIL IS RECORDED ON THE PAYMENT AND IS IMMUTABLE**, like
+  `bank_payouts.provider` since 046. Settling reads it off the ROW, never off
+  the route table — otherwise every payment in flight becomes unverifiable the
+  instant an operator moves a corridor, and an unverifiable payment is one
+  nothing can settle.
+- **THE UNIT IS THE THING TO GET RIGHT.** Paystack takes MINOR units on the
+  wire and Flutterwave takes MAJOR ones. Copying one adapter's
+  `amountMinor.toString()` into the other charges a payer a HUNDRED TIMES the
+  amount, in the direction that takes their money, and neither API would refuse
+  it — 5,000 cedis is a valid charge. `ports/checkout.ts` declares minor units
+  across the boundary and each adapter converts once, through `toMajor`, which
+  is the only code that knows an exponent is per currency.
+- **FLUTTERWAVE'S ENVELOPE IS A STRING WHERE PAYSTACK'S IS A BOOLEAN.**
+  `status: "success" | "error"`. Testing it as truthy — the shape one directory
+  away — makes `"error"` pass, which is the single most likely way a refusal
+  gets recorded here as a collection. The test is an equality.
+- **AND `successful` IS NOT `success`.** The envelope says one and the
+  transaction says the other, one nesting level apart. Reading either as the
+  other is the difference between crediting an unpaid checkout and never
+  crediting a paid one.
+- **THEIR WEBHOOK IS NOT SIGNED.** They return, verbatim in `verif-hash`, the
+  secret an operator typed into their dashboard — so writing an HMAC here (the
+  instinct built by both adapters either side of it) rejects every real event
+  and reads as a wrong secret. A valid header proves the SENDER and nothing
+  about what they sent, so every figure is re-read from Flutterwave by our own
+  reference before a posting exists. **An unset hash REFUSES**, never accepts.
+- **TWO CREDENTIALS, AND ONLY ONE AUTHORISES.** A deployment holding just the
+  secret key authorises every outbound call correctly and rejects every
+  webhook — which from inside is indistinguishable from a broken integration
+  rather than a missing box.
+- **A MOBILE MONEY WALLET HAS NO NAME ENQUIRY**, so `name_unavailable` is its
+  own refusal, told apart from `account_not_found` — which stays
+  indistinguishable from an unreachable bank, per 043. What the adapter will
+  not do is echo back the name the sender typed: that is a confirmation screen
+  that confirms nothing while looking exactly like one.
+- **THE NETWORKS ARE A TABLE, NOT A CALL.** `GET /v3/banks/GH` answers BANKS,
+  and a Ghanaian offered that list is choosing a bank in order to pay an MTN
+  wallet — 046's lesson about offering a product the customer's money cannot
+  reach.
+- **`debit_currency` IS STATED ON EVERY PAYOUT.** Left out, Flutterwave picks a
+  balance, and on a multi-currency account that means funding a cedi payout
+  from the naira one at a rate nobody chose — the same silent conversion this
+  whole migration exists because of, outbound.
+- **`/v3` IS ON THE PATH, NOT THE BASE URL**, so a misconfigured base is a
+  wrong HOST rather than the `/api/v1/api/cards` doubling 042 records.
+- **`scripts/verify-flutterwave-sandbox.mjs` HAS NOT BEEN RUN AGAINST A LIVE
+  KEY.** Every constant here comes from Flutterwave's published v3 API, dated
+  in the header — and this repo has twice shipped a table of plausible
+  constants that passed tests written from the same assumptions. Run it first.
+
 ### A link a stranger can pay — non-obvious rules
 
 Schema: `packages/ledger/sql/058_payment_links.sql`. Service in
@@ -2201,9 +2275,10 @@ Schema: `packages/ledger/sql/015_error_events.sql`.
 
 ## Providers
 
-Live set: **Paystack** (NGN virtual accounts — the default funding rail),
-**Bitnob** (NGN virtual accounts as the fallback, crypto, USDT, stablecoin,
-virtual USD cards, FX),
+Live set: **Paystack** (NGN virtual accounts — the default funding rail, and
+the naira checkout), **Flutterwave** (collecting and paying out GHS and KES —
+mobile money in Accra and Nairobi), **Bitnob** (NGN virtual accounts as the
+fallback, crypto, USDT, stablecoin, virtual USD cards, FX),
 **VTpass** (airtime, data, bills), **Airalo** (eSIM), **Twilio** (virtual
 numbers), **Resend** (email).
 
@@ -2501,6 +2576,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/055_uk_and_canada.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/056_reset_codes.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/057_reference_rates.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/058_payment_links.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/059_provider_routing.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -2558,6 +2634,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/055_uk_and_canada.test.
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/056_reset_codes.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/057_reference_rates.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/058_payment_links.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/059_provider_routing.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

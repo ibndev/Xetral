@@ -196,7 +196,13 @@ export default function AddMoney() {
             space either side rather than the middle of a sentence.
           */
           <div className="activate">
-            <p className="activate-lead">Your naira account is ready. Get it below.</p>
+            {/* NOT "your naira account". The account this button opens is
+                the one for the customer's OWN country, and calling it a naira
+                account in Accra is the same mistake as the Send screen
+                offering a Nigerian bank list everywhere — it describes a
+                Nigerian product to somebody who is not in Nigeria. The
+                currency is stated where it is true, on the amount field. */}
+            <p className="activate-lead">Your account is ready. Get it below.</p>
 
             <div>
               <button
@@ -279,10 +285,6 @@ export default function AddMoney() {
               </button>
             </div>
 
-            <p className="hint">
-              You pay on Paystack&apos;s secure page — mobile money, bank or card. To move money
-              back out to your wallet, use Send.
-            </p>
           </div>
         )}
 

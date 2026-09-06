@@ -223,6 +223,17 @@ const API_ERROR_CODES = [
    * other people's transfers — the same rule 018 applies to disputes.
    */
   'account_not_found',
+  /*
+   * `name_unavailable` is a fact about MOBILE MONEY, not about the number.
+   *
+   * A bank can be asked who holds an account and its answer is the only claim
+   * about the beneficiary that does not come from the sender. No such call
+   * exists for a wallet on any of these rails — so this is not a refusal that
+   * says anything about which numbers are live, and it must be told apart
+   * from `account_not_found` or every send in Ghana and Kenya sits behind a
+   * confirmation that can never arrive.
+   */
+  'name_unavailable',
   'not_found',
   'payout_provider_not_configured',
 

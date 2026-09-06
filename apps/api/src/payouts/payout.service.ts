@@ -249,7 +249,26 @@ export class PayoutService {
     return toView(await this.#reload(reserved.id));
   }
 
-  /** The lookup, refusing rather than guessing. Shared by the route and `send`. */
+  /**
+   * The lookup, refusing rather than guessing. Shared by the route and `send`.
+   *
+   * ONE REFUSAL IS TOLD APART FROM THE OTHERS, and only one. A MOBILE MONEY
+   * WALLET HAS NO NAME ENQUIRY — there is no call to make, on any of these
+   * rails, because the networks do not offer one. That is a fact about the
+   * PRODUCT and not about the number, so saying it out loud leaks nothing
+   * about which numbers exist, and a customer in Accra needs to hear it: the
+   * alternative is a Send screen whose Review button never enables.
+   *
+   * Everything else stays deliberately indistinguishable. 043's rule holds:
+   * "no such account" and "the bank did not answer" must read identically, or
+   * the endpoint becomes a way to map which numbers are live at which bank one
+   * request at a time.
+   *
+   * WHAT THIS DOES NOT DO is invent a name. The whole reason the beneficiary
+   * is re-fetched rather than accepted from the request is that a name the
+   * sender typed confirms nothing — so where the rail cannot answer, the
+   * answer is an empty string and a screen that says so, never an echo.
+   */
   async lookupOrRefuse(body: PayoutBody): Promise<{ accountName: string }> {
     try {
       const found = await this.port.lookup(
@@ -260,6 +279,9 @@ export class PayoutService {
       return { accountName: found.accountName };
     } catch (error) {
       if (error instanceof ProviderRejectedError) {
+        if (error.providerCode === 'name_unavailable') {
+          throw new NotFoundException({ error: 'name_unavailable' });
+        }
         throw new NotFoundException({ error: 'account_not_found' });
       }
       throw error;

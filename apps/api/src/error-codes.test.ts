@@ -32,6 +32,8 @@ const SOURCE = dirname(fileURLToPath(import.meta.url));
 const INTERNAL: Readonly<Record<string, string>> = {
   // Webhook authentication. The only caller is a provider, which has no UI.
   invalid_signature: 'answered to a provider webhook, never to an app',
+  invalid_payload:
+    'answered to a provider webhook whose body is not JSON, never to an app',
   raw_body_unavailable: 'a bootstrap fault in webhook body capture, not a client condition',
   // Deployment faults. A client can do nothing with these beyond "try later",
   // which `unknown` already says.

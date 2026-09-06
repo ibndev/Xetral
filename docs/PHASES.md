@@ -26,6 +26,7 @@ shipped, that is called out explicitly.
 | 15 — Funding without KYC, KYC before a card | ✅ | Paystack credentials to go live |
 | 16 — One identifier, a code to get back in, a price that keeps itself | ✅ | ExchangeRate-API key to go live |
 | 17 — A link a stranger can pay | ✅ | Paystack credentials to go live |
+| 18 — A provider per currency | ✅ | Flutterwave credentials to go live |
 
 All eleven phases are built, a **pre-deployment audit** (Phase 12) closed what
 building them phase by phase had left between the phases, and **Phase 13** is
@@ -1920,3 +1921,108 @@ overflowed its box saying so.
 and verifies its webhook), and give Paystack the
 `/v1/webhooks/paystack/deposits` URL if it has not been given already. The
 checkout uses no new credential and no new provider.
+
+
+---
+
+## Phase 18 — A provider per currency ✅
+
+Not a feature list. One sentence the platform could not say — "Paystack for
+naira and somebody else for cedis" — and everything that followed from it.
+
+| File | What it is |
+|---|---|
+| `packages/ledger/sql/059_provider_routing.sql` | the route table, its history, and what it reports |
+| `apps/api/src/routing/provider-router.service.ts` | which provider serves which currency, read per call |
+| `packages/providers/src/ports/checkout.ts` | the checkout as a port, now that there are two |
+| `packages/providers/src/flutterwave/` | client, checkout, payouts, and a webhook that is not signed |
+| `apps/api/src/funding/flutterwave-webhook.service.ts` | verify, then re-read everything from the provider |
+| `apps/web/src/ui/shell.tsx` | the gate that stops a signed-out visitor seeing the dashboard |
+
+### The rail could not be chosen per currency
+
+`funding_provider` and `payout_provider` are one name each. A Paystack account
+registered in Nigeria settles in naira: asked for cedis it either refuses or
+accepts and converts at a rate nobody chose.
+
+1. **THE CUSTOMER SAW "Payments are unavailable right now" AND NOTHING COULD
+   SAY WHICH.** Add Money in Accra offers mobile money, which is a charge in
+   GHS, and that charge had only one place to go. The route is data now, per
+   operation and per currency.
+2. **A ROUTE NAMES WHO, NEVER WHETHER.** 009's four kill switches decide
+   whether a flow runs at all and stay separate on purpose: an operator
+   stopping something during an incident must not have to know which rail it
+   was on.
+3. **AN UNROUTED CURRENCY IS REFUSED BEFORE A ROW EXISTS.** A default would
+   send dollars at a rail that cannot take them, and the refusal would arrive
+   from the provider as something unrelated. `provider_route_coverage` reports
+   the gap in both directions — it is what says GBP and CAD can be paid and
+   cannot yet be collected.
+4. **THE RAIL IS RECORDED ON THE PAYMENT AND CANNOT CHANGE**, like
+   `bank_payouts.provider` since 046. Settling reads it off the row, so moving
+   a corridor cannot orphan a payment in flight.
+
+### Then: Flutterwave, and the unit that differs
+
+5. **PAYSTACK TAKES MINOR UNITS AND FLUTTERWAVE TAKES MAJOR.** Copying one
+   adapter's `amountMinor.toString()` into the other charges a payer a HUNDRED
+   TIMES the amount and neither API refuses it, because 5,000 cedis is a valid
+   charge. The port declares minor units across the boundary; each adapter
+   converts once through `toMajor`, the only code that knows an exponent is
+   per currency.
+6. **THEIR ENVELOPE IS A STRING WHERE PAYSTACK'S IS A BOOLEAN**, and
+   `successful` is not `success`. Two ways to record a refusal as a
+   collection, one directory apart, both pinned by tests.
+7. **THEIR WEBHOOK IS NOT SIGNED AT ALL** — a shared secret returned verbatim
+   in a header. Writing an HMAC there rejects every real event and reads as a
+   wrong secret; and because nothing covers the body, the header decides only
+   whether to listen. An unset secret REFUSES rather than being read as
+   verification switched off.
+8. **A MOBILE MONEY WALLET HAS NO NAME ENQUIRY.** 043 makes the beneficiary
+   lookup mandatory because the bank's answer is the only claim not coming from
+   the sender. No such call exists for a wallet, so `name_unavailable` is its
+   own refusal — and the one thing the adapter must never do is echo back the
+   name the sender typed, which confirms nothing while looking exactly like a
+   confirmation.
+9. **THE NETWORKS ARE A TABLE, NOT A CALL.** Their bank list answers banks; a
+   Ghanaian offered it is choosing a bank in order to pay an MTN wallet.
+
+### And what the screenshots showed
+
+10. **THE DASHBOARD FLASHED BEFORE THE SIGN IN PAGE.** Every screen painted
+    its chrome, then a hook 401'd, then the redirect ran. Measured in a
+    browser: 15 frames of dashboard on a signed-out load, 0 with the gate.
+    It lives in `Shell`, where nine screens cannot each forget it, and
+    `shell-gate.test.ts` fails the build on a tenth that draws chrome without
+    it.
+11. **THE SEND SCREEN OPENED ON NAIRA FOR EVERYBODY**, `useState('NGN')` — so
+    a customer in Accra was shown "You have no NGN" on the screen they opened
+    to pay somebody. It follows the session now, and `payout_method` is read
+    from the session rather than re-derived from the country list, which is
+    one fewer thing that has to have loaded before the answer is right.
+12. **THE CHECKOUT NAMED A PROVIDER AND FIXED A CURRENCY.** It offers what the
+    route table can actually collect, the amount label follows the choice, and
+    the payer can say what the payment is for — inert metadata that can never
+    touch the amount.
+13. **"Generate rates" WAS INDISTINGUISHABLE FROM A BUTTON THAT DOES
+    NOTHING.** With no ExchangeRate-API key every base fails, nothing
+    publishes, the table reloads unchanged and the screen says nothing. It
+    reports what it did, and names that key when everything failed. The
+    disabled state now says why on the page rather than in a tooltip, which
+    does not exist on a touch screen.
+14. **CI WAS APPLYING MIGRATIONS 050–058 TO ONE DATABASE AND NOT THE OTHER.**
+    Found while adding 059. `migrations-in-ci.test.ts` compares both chains in
+    both directions and in order — the failure it prevents is a suite that
+    passes on a developer's machine, where the database was migrated by hand,
+    and fails in CI for a reason that reads as flakiness.
+
+**Before Ghana or Kenya takes a real payment, an operator must:** apply
+migration **059**, run `scripts/verify-flutterwave-sandbox.mjs` against a TEST
+key — every constant in `packages/providers/src/flutterwave/` comes from
+Flutterwave's published v3 API and this repo has twice shipped plausible
+constants that failed on the first live call — then paste
+`flutterwave.secret_key` AND `flutterwave.webhook_hash` at `/admin/credentials`
+(they are different values; the second is set on Flutterwave's own dashboard),
+give Flutterwave the `/v1/webhooks/flutterwave/deposits` URL, and confirm the
+mobile money network codes in `FLUTTERWAVE_MOBILE_MONEY_NETWORKS` with their
+support before the first payout.

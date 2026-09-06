@@ -14,6 +14,7 @@ import { FundingService } from './funding.service.js';
 import type { DepositView, VirtualAccountView } from './funding.service.js';
 import { DepositWebhookService } from './deposit-webhook.service.js';
 import { PaystackWebhookService } from './paystack-webhook.service.js';
+import { FlutterwaveWebhookService } from './flutterwave-webhook.service.js';
 import { PaymentLinkService } from '../pay/payment-link.service.js';
 import { z } from 'zod';
 
@@ -119,6 +120,8 @@ export class DepositWebhookController {
     @Inject(DepositWebhookService) private readonly deposits: DepositWebhookService,
     @Inject(PaystackWebhookService)
     private readonly paystackDeposits: PaystackWebhookService,
+    @Inject(FlutterwaveWebhookService)
+    private readonly flutterwave: FlutterwaveWebhookService,
   ) {}
 
   /**
@@ -141,6 +144,38 @@ export class DepositWebhookController {
     }
 
     await this.paystackDeposits.handle(
+      raw.toString('utf8'),
+      request.headers as Record<string, string>,
+    );
+
+    // 200 and nothing else. A body here would be the only place a webhook
+    // could leak what we know about a customer to whoever can reach the URL.
+    return { received: true };
+  }
+
+  /**
+   * Flutterwave, the cedi and shilling rail.
+   *
+   * ITS OWN ROUTE, like Paystack's and for the same reason: the three are
+   * authenticated with different credentials by different schemes and carry
+   * no field in common, so one endpoint would be three handlers with a shared
+   * chance to run the wrong one against money-creating input.
+   *
+   * IT TAKES THE RAW BODY EVEN THOUGH NOTHING IS SIGNED OVER IT. Flutterwave
+   * compares a header against a shared secret and covers no bytes at all, so
+   * the raw body buys nothing here today — it is read this way so this
+   * handler cannot become the one that quietly parses first if they ever add
+   * a signature, and so all three webhooks read identically in review.
+   */
+  @Post('flutterwave/deposits')
+  @HttpCode(200)
+  async flutterwaveDeposits(@Req() request: Request): Promise<{ received: true }> {
+    const raw = (request as Request & { rawBody?: Buffer }).rawBody;
+    if (raw === undefined) {
+      throw new BadRequestException({ error: 'raw_body_unavailable' });
+    }
+
+    await this.flutterwave.handle(
       raw.toString('utf8'),
       request.headers as Record<string, string>,
     );

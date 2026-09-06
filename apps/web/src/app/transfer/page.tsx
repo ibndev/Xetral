@@ -10,6 +10,7 @@ import { Icon } from '@/ui/icon';
 import { Select } from '@/ui/select';
 import { CountryMark } from '@/ui/currency-mark';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/lib/hooks';
+import { codeOf } from '@/lib/errors';
 import { Toast } from '@/ui/toast';
 
 /** Zero, written the way this currency writes it — "0.00" for naira,
@@ -90,7 +91,19 @@ function Transfer() {
   const [bankCode, setBankCode] = useState('');
   const [accountNumber, setAccountNumber] = useState('');
   const [amount, setAmount] = useState('');
-  const [currency, setCurrency] = useState('NGN');
+  /*
+   * EMPTY UNTIL THE SESSION LOADS, then resolved rather than stored.
+   *
+   * It was `useState('NGN')`, so every customer's Send screen opened on naira
+   * — including one in Accra, who was then shown "You have no NGN" and "We
+   * cannot convert NGN to GHS yet" on the screen they opened in order to pay
+   * somebody. Seeding it from the session instead would capture whatever was
+   * there on the FIRST render, which is `undefined`; `sendCurrency` below
+   * falls back to the home currency, so the picker follows the customer the
+   * moment their session arrives and the commonest send needs no choice at
+   * all. Same fix, same reason, as the recipient's country picker below.
+   */
+  const [currency, setCurrency] = useState('');
   const [pin, setPin] = useState('');
 
   /*
@@ -179,8 +192,24 @@ function Transfer() {
    * 046 — the conservative answer, and the one Nigeria needs.
    */
   const countries = useLoad(() => client.session.countries(), [client]);
+  /*
+   * FROM THE SESSION FIRST, and the country list only as a fallback.
+   *
+   * The session already carries `payout_method` — the API reads it off the
+   * customer's OWN country row and it is what Add Money personalises on. This
+   * screen was deriving it a second time by finding the customer's country in
+   * the public list, which is one more thing that has to have loaded and one
+   * more place the answer can be missing: a deployment whose country list is
+   * behind, or a list that had not arrived yet, silently read 'bank' — and a
+   * customer in Accra was offered a Nigerian bank account form for money that
+   * moves on a phone number.
+   *
+   * One question, one answer, from the read that already has it.
+   */
   const payoutMethod =
-    countries.data?.find((c) => c.code === homeCountry)?.payout_method ?? 'bank';
+    session.data?.payout_method ??
+    countries.data?.find((c) => c.code === homeCountry)?.payout_method ??
+    'bank';
   const mobileMoney = payoutMethod === 'mobile_money';
   /*
    * The bank list, loaded only when it is needed.
@@ -236,7 +265,8 @@ function Transfer() {
    *
    * International is the Xetral-to-Xetral side, which keeps its picker.
    */
-  const sendCurrency = destination === 'bank' ? homeCurrency : currency;
+  const sendCurrency =
+    destination === 'bank' ? homeCurrency : currency === '' ? homeCurrency : currency;
 
   /*
    * WHAT THE RECIPIENT ACTUALLY RECEIVES, quoted by the server.
@@ -324,6 +354,22 @@ function Transfer() {
   const [beneficiary, setBeneficiary] = useState<string | undefined>(undefined);
   const [lookingUp, setLookingUp] = useState(false);
   const [lookupFailed, setLookupFailed] = useState(false);
+  /*
+   * A MOBILE MONEY WALLET HAS NO NAME ENQUIRY, and that is a fact about the
+   * rail rather than a failure of this request.
+   *
+   * A bank can be asked who holds an account number and its answer is the one
+   * claim about the beneficiary that does not come from the sender — which is
+   * why 043 makes the lookup mandatory there. No such call exists for a
+   * wallet. Collapsing the two would either block every mobile money send
+   * behind a name that can never arrive, or — far worse — invite somebody to
+   * "fix" it by echoing back the name the sender typed, which is a
+   * confirmation screen that confirms nothing while looking exactly like one.
+   *
+   * So it is its own state: the send is allowed, and the screen says plainly
+   * that the number is the only thing being checked.
+   */
+  const [nameUnavailable, setNameUnavailable] = useState(false);
 
   async function lookUp(code: string, number: string): Promise<void> {
     // Ten digits is a NUBAN, which is the point at which asking is useful
@@ -331,10 +377,12 @@ function Transfer() {
     if (code === '' || number.length < 10) {
       setBeneficiary(undefined);
       setLookupFailed(false);
+      setNameUnavailable(false);
       return;
     }
     setLookingUp(true);
     setLookupFailed(false);
+    setNameUnavailable(false);
     try {
       const found = await client.lookupBankAccount({
         country: homeCountry,
@@ -342,12 +390,20 @@ function Transfer() {
         accountNumber: number,
       });
       setBeneficiary(found.account_name);
-    } catch {
-      // Deliberately not distinguishing "no such account" from "the bank did
-      // not answer": a lookup that told them apart would let somebody map
-      // which numbers are live at which bank, one request at a time.
+    } catch (error: unknown) {
       setBeneficiary(undefined);
-      setLookupFailed(true);
+      /*
+       * ONE REFUSAL IS TOLD APART FROM THE OTHERS, and only this one.
+       *
+       * `name_unavailable` says the rail has no name enquiry at all — it is
+       * about mobile money as a product, not about this number, so it leaks
+       * nothing about which numbers exist. Everything else stays deliberately
+       * indistinguishable: a lookup that separated "no such account" from
+       * "the bank did not answer" would let somebody map which numbers are
+       * live at which bank, one request at a time.
+       */
+      if (codeOf(error) === 'name_unavailable') setNameUnavailable(true);
+      else setLookupFailed(true);
     } finally {
       setLookingUp(false);
     }
@@ -596,7 +652,11 @@ function Transfer() {
     <Shell>
       <form className="card" onSubmit={review}>
         <h1>Send money</h1>
-        <h2>{mobileMoney ? 'To a Xetral account or a Momo account' : 'To a Xetral account or a bank account'}</h2>
+        <h2>
+          {mobileMoney
+            ? 'To a Xetral account or a Mobile Money number'
+            : 'To a Xetral account or a bank account'}
+        </h2>
 
         {/* Two destinations, one screen. Deliberately NOT the `.choice`
             pattern that broke this page's layout once: the global button rule
@@ -616,7 +676,7 @@ function Transfer() {
               className={destination === 'bank' ? 'active' : ''}
               onClick={() => setDestination('bank')}
             >
-              {mobileMoney ? 'Momo account' : 'Bank account'}
+              {mobileMoney ? 'Mobile Money' : 'Bank account'}
             </button>
           </div>
         )}
@@ -624,7 +684,7 @@ function Transfer() {
         {destination === 'bank' ? (
           <>
             <label id="transfer-bank-label">
-              {mobileMoney ? 'Momo provider' : 'Bank'}
+              {mobileMoney ? 'Mobile Money provider' : 'Bank'}
               <Select
                 labelledBy="transfer-bank-label"
                 /* PASTE-OR-TYPE, because the list is long. Paystack returns
@@ -648,7 +708,7 @@ function Transfer() {
             </label>
 
             <label>
-              {mobileMoney ? 'Momo number' : 'Account number'}
+              {mobileMoney ? 'Mobile Money number' : 'Account number'}
               <input
                 type="text"
                 inputMode="numeric"
@@ -672,7 +732,15 @@ function Transfer() {
               )}
               {lookupFailed && (
                 <span className="hint">
-                  We could not find that account. Check the number and the bank.
+                  {mobileMoney
+                    ? 'We could not check that number. Check the provider and the number.'
+                    : 'We could not find that account. Check the number and the bank.'}
+                </span>
+              )}
+              {nameUnavailable && (
+                <span className="hint">
+                  Mobile Money does not confirm names. Check the number and the provider
+                  carefully — a transfer cannot be recalled.
                 </span>
               )}
             </label>
@@ -884,8 +952,15 @@ function Transfer() {
             !amountValid ||
             amount === '' ||
             (destination === 'bank'
-              ? // A payout cannot be reviewed without a name to review.
-                beneficiary === undefined
+              ? /*
+                 * A BANK PAYOUT CANNOT BE REVIEWED WITHOUT A NAME TO REVIEW,
+                 * and a mobile money one cannot have one — see
+                 * `nameUnavailable`. Requiring a name on a rail that has no
+                 * name enquiry would leave every customer in Accra and
+                 * Nairobi with a Review button that never enables, on the
+                 * screen they use to pay somebody.
+                 */
+                beneficiary === undefined && !nameUnavailable
               : // A phone number that `e164()` could not build from — no
                 // country picked, or no digits — is not somebody to pay, and
                 // advancing would put a review screen in front of a customer

@@ -67,6 +67,9 @@ export function testApiConfig(databaseUrl: string, overrides: Partial<ApiConfig>
     bitnobWebhookSecret: undefined,
     paystackSecretKey: undefined,
     paystackBaseUrl: 'https://api.paystack.co',
+    flutterwaveSecretKey: undefined,
+    flutterwaveWebhookHash: undefined,
+    flutterwaveBaseUrl: 'https://api.flutterwave.com',
     paystackPreferredBank: undefined,
     // Undefined by default, so a suite that does not name it gets the
     // production-shaped answer: the endpoint is not there at all.

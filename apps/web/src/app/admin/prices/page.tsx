@@ -53,10 +53,21 @@ export default function Prices() {
   const [pin, setPin] = useState('');
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
+  /*
+   * WHAT THE LAST GENERATE ACTUALLY DID.
+   *
+   * Without it the button is indistinguishable from a button that does
+   * nothing, which is exactly how it was reported: with no ExchangeRate-API
+   * key every base fails, the sweep publishes nothing, the table reloads
+   * unchanged, and the screen says NOTHING AT ALL. The report is four
+   * numbers the sweep already returns and nobody was reading.
+   */
+  const [report, setReport] = useState<string | undefined>();
 
   async function act(work: () => Promise<unknown>): Promise<void> {
     setBusy(true);
     setError(undefined);
+    setReport(undefined);
     try {
       await work();
       prices.reload();
@@ -188,14 +199,48 @@ export default function Prices() {
             disabled={busy || pin === ''}
             title={pin === '' ? 'Enter your transaction PIN above first' : undefined}
             onClick={() => {
-              // `act` reloads the table, so the feedback is the ages resetting
-              // to minutes — which is the number that matters here anyway.
-              void act(() => admin.refreshFxRates(pin));
+              void act(async () => {
+                const done = await admin.refreshFxRates(pin);
+                /*
+                 * SAID OUT LOUD, and the all-failed case names the cause.
+                 *
+                 * A sweep that fetched nothing is almost always a missing or
+                 * expired ExchangeRate-API key, and that is an operator's
+                 * problem with an operator's fix — the one thing worth
+                 * putting on screen rather than leaving in a log nobody has
+                 * open. Every other outcome is reported as counts, because
+                 * "nothing changed" and "nothing happened" look identical
+                 * and are not the same.
+                 */
+                setReport(
+                  done.published === 0 && done.failed > 0
+                    ? `No rates could be fetched (${done.failed} failed). Check the ` +
+                        `ExchangeRate-API key on Credentials — an unset or expired ` +
+                        `key fails exactly like this.`
+                    : `Published ${done.published}, unchanged ${done.unchanged}, ` +
+                        `held by an operator ${done.operatorHeld}, failed ${done.failed}.`,
+                );
+                return done;
+              });
             }}
           >
             <Icon name="swap" size={15} /> Generate rates
           </button>
         </div>
+        {/*
+          WHY THE BUTTON IS GREY, ON THE PAGE RATHER THAN IN A TOOLTIP.
+          
+          It is gated on the PIN, correctly — but a disabled control with its
+          reason hidden in a `title` reads as broken, and a tooltip does not
+          exist at all on a touch screen. That is the whole of what was
+          reported as "the button is not clickable and does nothing".
+        */}
+        {pin === '' && (
+          <p className="hint">
+            Enter your transaction PIN above to generate or publish rates.
+          </p>
+        )}
+        {report !== undefined && <p className="hint">{report}</p>}
         <p className="lead">
           What we sell a currency for, in the direction stated. A pair with a
           rate here is one we quote ourselves; a pair with none is quoted by

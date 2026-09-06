@@ -305,6 +305,11 @@ function sentenceFor(error: ApiError): string {
     case 'account_not_found':
     case 'not_found':
       return 'We could not find that.';
+    case 'name_unavailable':
+      // Not a failure. Mobile Money has no name enquiry on any of these
+      // rails, so the sender is told what IS being checked rather than being
+      // left waiting for a confirmation that cannot come.
+      return 'Mobile Money does not confirm names. Check the number carefully.';
     case 'recovery_unavailable':
       return 'Recovery is not available on this deployment yet — migration 049 has not been applied.';
     case 'not_recoverable':

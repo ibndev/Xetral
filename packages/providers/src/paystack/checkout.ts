@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ProviderContractError, ProviderRejectedError } from '../ports/errors.js';
+import type { CheckoutRequest, CheckoutSession } from '../ports/checkout.js';
 import type { PaystackClient } from './client.js';
 
 const PROVIDER = 'paystack';
@@ -73,33 +74,17 @@ const verifyResponse = z.object({
     .optional(),
 });
 
-export interface CheckoutRequest {
-  /**
-   * REQUIRED BY PAYSTACK, and it is the PAYER'S, not the payee's.
-   *
-   * They send the receipt there. A payment link is paid by strangers, so the
-   * page asks for it — and it is the only thing the page asks for beyond an
-   * amount, because every additional field on a checkout is a payer who
-   * changed their mind.
-   */
-  readonly payerEmail: string;
-  /** Minor units — kobo, pesewa, cent. The same unit the ledger holds. */
-  readonly amountMinor: bigint;
-  readonly currency: string;
-  /** OURS. See the header: this is what makes the webhook resolvable. */
-  readonly reference: string;
-  /** Where Paystack returns the payer after they pay. */
-  readonly callbackUrl?: string;
-  /** Shown to the payer on Paystack's own page, so they can see who they are
-   *  paying before they part with money. */
-  readonly payeeName?: string;
-}
-
-export interface CheckoutSession {
-  /** Where to send the payer. Paystack renders the method picker. */
-  readonly authorizationUrl: string;
-  readonly reference: string;
-}
+/*
+ * THE REQUEST AND SESSION TYPES LIVE ON THE PORT NOW.
+ *
+ * They were declared here when there was one rail, which was right then and
+ * became wrong the moment a second one existed: two structurally identical
+ * interfaces in two adapter directories are two things to keep in step, and
+ * the one that drifts is the one whose provider is having a quiet month.
+ * `ports/checkout.ts` is where the contract is, and it is what says amounts
+ * cross this boundary in MINOR units whatever a given provider wants on the
+ * wire.
+ */
 
 export async function initializeCheckout(
   client: PaystackClient,
@@ -119,13 +104,20 @@ export async function initializeCheckout(
     reference: request.reference,
     ...(request.callbackUrl === undefined ? {} : { callback_url: request.callbackUrl }),
     metadata: {
-      // Shown on Paystack's page and on their dashboard. The payer sees who
-      // they are paying before they pay, which is the whole difference
-      // between a checkout and a form that takes money.
-      ...(request.payeeName === undefined
-        ? {}
-        : { custom_fields: [{ display_name: 'Paying', variable_name: 'paying', value: request.payeeName }] }),
+      /*
+       * Shown on Paystack's page and on their dashboard. The payer sees who
+       * they are paying before they pay, which is the whole difference
+       * between a checkout and a form that takes money — and the note is
+       * what makes a list of payments readable to the person being paid.
+       *
+       * `custom_fields` is built as ONE array rather than two spreads: two
+       * spreads of the same key is the later one winning silently, so a
+       * payment carrying both a payee and a note would have shown only the
+       * note and nobody would have seen it happen.
+       */
+      ...(customFields(request).length === 0 ? {} : { custom_fields: customFields(request) }),
       xetral_reference: request.reference,
+      ...(request.note === undefined ? {} : { xetral_note: request.note }),
     },
   });
 
@@ -145,7 +137,20 @@ export async function initializeCheckout(
   };
 }
 
-export interface CheckoutOutcome {
+function customFields(
+  request: CheckoutRequest,
+): readonly { display_name: string; variable_name: string; value: string }[] {
+  const fields: { display_name: string; variable_name: string; value: string }[] = [];
+  if (request.payeeName !== undefined) {
+    fields.push({ display_name: 'Paying', variable_name: 'paying', value: request.payeeName });
+  }
+  if (request.note !== undefined) {
+    fields.push({ display_name: 'For', variable_name: 'note', value: request.note });
+  }
+  return fields;
+}
+
+export interface PaystackCheckoutOutcome {
   readonly status: 'success' | 'failed' | 'pending';
   readonly reference: string;
   /** Minor units, as text. Narrowed by the caller against what it asked for. */
@@ -167,7 +172,7 @@ export interface CheckoutOutcome {
 export async function verifyCheckout(
   client: PaystackClient,
   reference: string,
-): Promise<CheckoutOutcome> {
+): Promise<PaystackCheckoutOutcome> {
   const body = await client.request('GET', PAYSTACK_CHECKOUT_ENDPOINTS.verify(reference));
 
   const parsed = verifyResponse.safeParse(body);
