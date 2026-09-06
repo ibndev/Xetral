@@ -730,6 +730,21 @@ Schema: `packages/ledger/sql/059_provider_routing.sql`. Router in
   chose — so a customer in Accra tapping Add Money saw "Payments are
   unavailable right now", and nothing anywhere could say which of those two
   had happened. That is what the route table is for.
+- **PAYOUTS ROUTE ON THE DESTINATION'S CURRENCY, AND THAT WAS MISSED THE
+  FIRST TIME.** 059 wired collection and left `SwitchingPayoutPort` reading
+  the one global `payout_provider` — so every payout question, including "what
+  can a customer in Accra send to?", went to Paystack, which answers with
+  GHANAIAN BANKS. The Send screen showed a bank list under a heading saying
+  Mobile Money, and `FlutterwavePayoutAdapter` was registered NOWHERE and
+  asked nothing. 046 put `payout_method` on the country so the SCREEN would
+  stop offering a product the customer's money cannot reach; this is the half
+  that stops the SERVER doing it. `payout-routing.test.ts` pins all three
+  calls — the list, the lookup and the send — onto one rail, because a bank
+  code from one provider means nothing to another.
+- **THE GLOBAL SETTING IS STILL THE FALLBACK.** An unrouted currency, a
+  deployment behind 059, or a route naming an adapter this build lacks all
+  fall through to `payout_provider` rather than refusing — refusing would turn
+  one missing row into an outage on the screen customers send money from.
 - **A ROUTE NAMES WHO, NEVER WHETHER.** The four kill switches in 009 decide
   whether a flow runs; routing decides who serves it. They stay separate
   because an operator turning something off during an incident must not have to
@@ -1123,6 +1138,14 @@ Service in `apps/api/src/countries/`, screen at `/admin/countries`.
   Android's `Pressable` ripple is refused with `android_ripple={null}` on every
   icon button, and kept on the tab bar, where a full-width target lighting up
   is the platform convention rather than a disc behind a glyph.
+- **A FLAG DRAWN AS THREE EQUAL BANDS IS NOT ALWAYS THAT FLAG.** Kenya's is
+  black, WHITE, red, WHITE, green with a Maasai shield; drawn as three equal
+  stripes it was a generic tricolour that Kenyans did not recognise as theirs.
+  `weights` makes the white fimbriations thin, and the shield is an upright
+  red-and-white lozenge — as much of it as survives eighteen pixels, drawn as
+  an ellipse rather than as a traced path that would be mud at that size and a
+  lie about what is on screen. Ghana's star is `starRadius: 0.3`, because at a
+  fifth of the disc it was a speck and the flag became anonymous.
 - **NOT EMOJI FLAGS.** Windows ships no flag glyphs, so `🇳🇬` renders there as
   the letters "NG" in a box — on the currency selector, on the screen every
   customer opens. The marks are data in `@xetral/client` and drawn as SVG by
@@ -2577,6 +2600,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/056_reset_codes.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/057_reference_rates.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/058_payment_links.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/059_provider_routing.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/060_usd_collection.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql

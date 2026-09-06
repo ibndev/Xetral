@@ -151,9 +151,18 @@ export default function AddMoney() {
             money in sat hard against a line of text either side of it.
           */
           <View style={{ gap: space.lg, marginTop: space.md }}>
-            {/* NOT "your naira account" — see the web screen. The account is
-                the one for the customer's own country. */}
-            <Text style={[styles.h2, { marginBottom: 0 }]}>
+            {/*
+              NOT "your naira account" — see the web screen. The account is the
+              one for the customer's own country.
+
+              AND NOT `h2`, which is what it was. `h2` is 19pt display bold —
+              a SECTION HEADING — and this is a statement above a button. The
+              web draws the same line as `.activate-lead`: 15px, weight 600.
+              Using the heading style made the phone's copy visibly larger than
+              the web's on the same screen, which is what "the text under the
+              title is too big" was reporting.
+            */}
+            <Text style={[styles.lead, { marginBottom: 0, fontFamily: font.sansSemi, color: colors.text }]}>
               Your account is ready. Get it below.
             </Text>
             <Button
@@ -194,7 +203,9 @@ export default function AddMoney() {
         */}
         {!account.loading && usesMobileMoney && (
           <View style={{ gap: space.md, marginTop: space.md }}>
-            <Text style={[styles.h2, { marginBottom: 0 }]}>
+            {/* The same weight and size as the line above it, and as the
+                web's — see the note there. */}
+            <Text style={[styles.lead, { marginBottom: 0, fontFamily: font.sansSemi, color: colors.text }]}>
               Top up from mobile money{here === undefined ? '' : ` in ${here.name}`}
             </Text>
 

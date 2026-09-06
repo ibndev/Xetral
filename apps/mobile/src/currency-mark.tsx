@@ -1,7 +1,7 @@
 import { useId } from 'react';
 import { Text, View } from 'react-native';
 import { font } from '@/theme';
-import Svg, { Circle, ClipPath, Defs, G, Path, Rect } from 'react-native-svg';
+import Svg, { Circle, ClipPath, Defs, Ellipse, G, Path, Rect } from 'react-native-svg';
 import { countryMarkFor, markFor } from '@xetral/client';
 import type { CurrencyMark as Mark } from '@xetral/client';
 
@@ -71,8 +71,10 @@ function Drawn({ mark, size }: { readonly mark: Mark; readonly size: number }) {
     );
   }
 
-  const band = mark.direction === 'vertical' ? size / mark.bands.length : size;
-  const tall = mark.direction === 'vertical' ? size : size / mark.bands.length;
+  /* WEIGHTED, and Kenya is why — its two white stripes are thin
+   * fimbriations, not equal bands. Same arithmetic as the web's renderer,
+   * driven by the same data. */
+  const offsets = bandOffsets(mark, size);
 
   return (
     <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
@@ -85,14 +87,24 @@ function Drawn({ mark, size }: { readonly mark: Mark; readonly size: number }) {
         {mark.bands.map((colour, i) => (
           <Rect
             key={colour + String(i)}
-            x={mark.direction === 'vertical' ? i * band : 0}
-            y={mark.direction === 'vertical' ? 0 : i * tall}
-            width={band}
-            height={tall}
+            x={mark.direction === 'vertical' ? (offsets[i]?.start ?? 0) : 0}
+            y={mark.direction === 'vertical' ? 0 : (offsets[i]?.start ?? 0)}
+            width={mark.direction === 'vertical' ? (offsets[i]?.span ?? 0) : size}
+            height={mark.direction === 'vertical' ? size : (offsets[i]?.span ?? 0)}
             fill={colour}
           />
         ))}
-        {mark.star !== undefined && <Path d={starPath(r, r, size * 0.2)} fill={mark.star} />}
+        {/* Kenya's shield, as much of it as survives at this size — see the
+            web renderer, which explains why it is an ellipse and not a path. */}
+        {mark.shield !== undefined && (
+          <>
+            <Ellipse cx={r} cy={r} rx={size * 0.17} ry={size * 0.34} fill={mark.shield.edge} />
+            <Ellipse cx={r} cy={r} rx={size * 0.1} ry={size * 0.26} fill={mark.shield.body} />
+          </>
+        )}
+        {mark.star !== undefined && (
+          <Path d={starPath(r, r, size * (mark.starRadius ?? 0.2))} fill={mark.star} />
+        )}
       </G>
       {/* Keeps a white band off a white card. */}
       <Circle cx={r} cy={r} r={r - 0.5} fill="none" stroke="rgba(0,0,0,0.14)" strokeWidth={1} />
@@ -101,6 +113,23 @@ function Drawn({ mark, size }: { readonly mark: Mark; readonly size: number }) {
 }
 
 /** Five points, outer radius `outer`, inner at 40%. Identical to the web's. */
+/** Where each band starts and how wide it is. The web's renderer has the
+ *  same function; both are driven by `weights` in the shared data. */
+function bandOffsets(
+  mark: { readonly bands: readonly string[]; readonly weights?: readonly number[] },
+  size: number,
+): readonly { start: number; span: number }[] {
+  const weights = mark.weights ?? mark.bands.map(() => 1);
+  const total = weights.reduce((sum, w) => sum + w, 0);
+  let cursor = 0;
+  return mark.bands.map((_, i) => {
+    const span = (size * (weights[i] ?? 1)) / total;
+    const start = cursor;
+    cursor += span;
+    return { start, span };
+  });
+}
+
 function starPath(cx: number, cy: number, outer: number): string {
   const points: string[] = [];
   for (let i = 0; i < 10; i++) {

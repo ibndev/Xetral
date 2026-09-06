@@ -145,6 +145,7 @@ jobs:
             -f packages/ledger/sql/057_reference_rates.sql \
             -f packages/ledger/sql/058_payment_links.sql \
             -f packages/ledger/sql/059_provider_routing.sql \
+            -f packages/ledger/sql/060_usd_collection.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       - name: Ledger and identity invariants
@@ -310,6 +311,7 @@ jobs:
             -f packages/ledger/sql/057_reference_rates.sql \
             -f packages/ledger/sql/058_payment_links.sql \
             -f packages/ledger/sql/059_provider_routing.sql \
+            -f packages/ledger/sql/060_usd_collection.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       # ------------------------------------------------------------------

@@ -64,6 +64,38 @@ export default function Prices() {
    */
   const [report, setReport] = useState<string | undefined>();
 
+  /**
+   * Refresh every corridor from the feed, and SAY WHAT HAPPENED.
+   *
+   * ONE FUNCTION FOR BOTH BUTTONS — the one beside the PIN and the one in the
+   * Exchange rates header — because two copies of "what generating does" is
+   * two behaviours, and the copy that drifts is the one nobody presses.
+   */
+  async function generate(): Promise<void> {
+    await act(async () => {
+      const done = await admin.refreshFxRates(pin);
+      /*
+       * THE ALL-FAILED CASE NAMES THE CAUSE, because it is almost always one
+       * thing: no ExchangeRate-API key. Without this the button is
+       * indistinguishable from a button that does nothing — every base fails,
+       * nothing publishes, the table reloads unchanged and the screen says
+       * nothing at all. That is what "the button is not functioning" was.
+       */
+      setReport(
+        done.published === 0 && done.failed > 0
+          ? `No rates could be fetched (${done.failed} failed). Paste an ` +
+              `ExchangeRate-API key on the Credentials screen — an unset or ` +
+              `expired key fails exactly like this.`
+          : done.published === 0
+            ? `Nothing changed: ${done.unchanged} already current, ` +
+              `${done.operatorHeld} held by an operator.`
+            : `Published ${done.published}, unchanged ${done.unchanged}, ` +
+              `held by an operator ${done.operatorHeld}, failed ${done.failed}.`,
+      );
+      return done;
+    });
+  }
+
   async function act(work: () => Promise<unknown>): Promise<void> {
     setBusy(true);
     setError(undefined);
@@ -156,6 +188,34 @@ export default function Prices() {
             customers are charged. It is kept until you leave.
           </span>
         </label>
+
+        {/*
+          THE ACTION, BESIDE THE FIELD THAT AUTHORISES IT.
+          
+          It used to live only in the Exchange rates panel's header, which on a
+          phone is a scroll away — so an operator typed a PIN and there was
+          nothing to press. "When you enter your PIN there is no button to
+          select" is that, exactly: the button existed, somewhere else, below
+          the fold.
+          
+          Refreshing the rates is the thing this screen is opened to do, and it
+          is the only action that needs no other field filled in, so it belongs
+          where the PIN is. The per-panel buttons stay where they are: those
+          each need their own form completed first.
+        */}
+        <button
+          type="button"
+          disabled={busy || pin === ''}
+          onClick={() => void generate()}
+        >
+          <Icon name="swap" size={16} /> {busy ? 'Generating…' : 'Generate rates'}
+        </button>
+        {pin === '' && (
+          <p className="hint">
+            Enter your transaction PIN above to generate or publish rates.
+          </p>
+        )}
+        {report !== undefined && <p className="hint">{report}</p>}
         {error !== undefined && <p className="error">{error}</p>}
       </div>
 
@@ -198,31 +258,7 @@ export default function Prices() {
             className="small"
             disabled={busy || pin === ''}
             title={pin === '' ? 'Enter your transaction PIN above first' : undefined}
-            onClick={() => {
-              void act(async () => {
-                const done = await admin.refreshFxRates(pin);
-                /*
-                 * SAID OUT LOUD, and the all-failed case names the cause.
-                 *
-                 * A sweep that fetched nothing is almost always a missing or
-                 * expired ExchangeRate-API key, and that is an operator's
-                 * problem with an operator's fix — the one thing worth
-                 * putting on screen rather than leaving in a log nobody has
-                 * open. Every other outcome is reported as counts, because
-                 * "nothing changed" and "nothing happened" look identical
-                 * and are not the same.
-                 */
-                setReport(
-                  done.published === 0 && done.failed > 0
-                    ? `No rates could be fetched (${done.failed} failed). Check the ` +
-                        `ExchangeRate-API key on Credentials — an unset or expired ` +
-                        `key fails exactly like this.`
-                    : `Published ${done.published}, unchanged ${done.unchanged}, ` +
-                        `held by an operator ${done.operatorHeld}, failed ${done.failed}.`,
-                );
-                return done;
-              });
-            }}
+            onClick={() => void generate()}
           >
             <Icon name="swap" size={15} /> Generate rates
           </button>
@@ -235,12 +271,9 @@ export default function Prices() {
           exist at all on a touch screen. That is the whole of what was
           reported as "the button is not clickable and does nothing".
         */}
-        {pin === '' && (
-          <p className="hint">
-            Enter your transaction PIN above to generate or publish rates.
-          </p>
-        )}
-        {report !== undefined && <p className="hint">{report}</p>}
+        {/* The empty-PIN hint and the report of what a generate DID both live
+            beside the PIN field now, where the action is. Repeating them here
+            would say the same thing twice on one screen. */}
         <p className="lead">
           What we sell a currency for, in the direction stated. A pair with a
           rate here is one we quote ourselves; a pair with none is quoted by

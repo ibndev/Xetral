@@ -13,6 +13,8 @@ import {
   PaystackClient,
   PaystackFundingAdapter,
   PaystackPayoutAdapter,
+  FlutterwavePayoutAdapter,
+  FlutterwaveClient,
   BitnobPayoutAdapter,
   TwilioAdapter,
   VtpassAdapter,
@@ -571,6 +573,8 @@ export function createPayoutPort(
   config: ApiConfig,
   credentials?: ProviderCredentialService,
   settings?: SettingsService,
+  router?: ProviderRouterService,
+  currencyOf?: (country: string) => Promise<string | undefined>,
 ): PayoutPort {
   const adapters = new Map<string, PayoutPort>();
 
@@ -595,6 +599,33 @@ export function createPayoutPort(
           secretKey: paystackSecretKey(config, credentials),
         }),
       }),
+    );
+  }
+
+  /*
+   * FLUTTERWAVE, AND ITS ABSENCE HERE WAS THE BUG.
+   *
+   * The adapter was written for Ghana and Kenya — where money moves to a
+   * MOBILE MONEY WALLET rather than to a bank account — and then registered
+   * nowhere, so nothing could ever reach it. Every payout question, including
+   * "what can a customer in Accra send to?", went to whichever single rail
+   * `payout_provider` named; Paystack answers that with Ghanaian BANKS, and a
+   * customer was offered a product their money cannot reach under a heading
+   * that said Mobile Money.
+   *
+   * `provider_routes` decides which of these serves a currency. This map is
+   * only what the deployment CAN reach.
+   */
+  const { flutterwaveBaseUrl } = config;
+  if (flutterwaveBaseUrl !== undefined) {
+    adapters.set(
+      'flutterwave',
+      new FlutterwavePayoutAdapter(
+        new FlutterwaveClient({
+          baseUrl: flutterwaveBaseUrl,
+          secretKey: flutterwaveSecretKey(config, credentials),
+        }),
+      ),
     );
   }
 
@@ -635,7 +666,13 @@ export function createPayoutPort(
     };
   }
 
-  return new SwitchingPayoutPort({ adapters, settings, fallback: 'paystack' });
+  return new SwitchingPayoutPort({
+    adapters,
+    settings,
+    fallback: 'paystack',
+    ...(router === undefined ? {} : { router }),
+    ...(currencyOf === undefined ? {} : { currencyOf }),
+  });
 }
 
 export function createCryptoPort(
@@ -1179,16 +1216,41 @@ export class AppModule {
             health: ProviderHealthService,
             credentials: ProviderCredentialService,
             settings: SettingsService,
+            router: ProviderRouterService,
+            countries: CountriesService,
           ) =>
             watched(
-              options.payoutPort ?? createPayoutPort(options.config, credentials, settings),
+              options.payoutPort ??
+                createPayoutPort(
+                  options.config,
+                  credentials,
+                  settings,
+                  router,
+                  /*
+                   * A COUNTRY'S CURRENCY, READ FROM `countries`.
+                   *
+                   * Not a table in the switch: 040's rule is that a fact about
+                   * a country is a ROW, so an operator opening a fourth
+                   * country gets its payout routing without a release. The
+                   * route table is keyed on CURRENCY because that is what
+                   * decides which provider can move the money; this is the one
+                   * hop from where the customer is to what they hold.
+                   */
+                  async (code) => (await countries.byCode(code))?.currency,
+                ),
               // The rail that actually sent is recorded on the payout row;
               // this label is what `provider_health` buckets under, and the
               // switch reports its default — the same arrangement funding uses.
               'payouts',
               health,
             ),
-          inject: [ProviderHealthService, ProviderCredentialService, SettingsService],
+          inject: [
+            ProviderHealthService,
+            ProviderCredentialService,
+            SettingsService,
+            ProviderRouterService,
+            CountriesService,
+          ],
         },
         {
           provide: FX_PORT,

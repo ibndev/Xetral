@@ -298,11 +298,23 @@ function QuickAction({
           flexDirection: 'row',
           alignItems: 'center',
           justifyContent: 'center',
-          gap: 5,
-          // Padding, so the label is never flush against the edge of the
-          // shape behind it — the fault the web's version was reported for,
-          // where "Add money" ran out past its own background.
-          paddingHorizontal: 8,
+          gap: 4,
+          /*
+           * THE LABEL MUST FIT INSIDE THE SHAPE, and the first attempt did
+           * not make it. Three buttons share the card's width, so on a 360pt
+           * handset each gets about 112pt — and "Add money" at 13.5pt
+           * semibold, plus a 16pt icon, plus the gap, plus 8pt of padding
+           * either side, does not fit in that. It spilled past its own
+           * background, which is exactly the fault the web version was
+           * reported for and this was supposed to match.
+           *
+           * `adjustsFontSizeToFit` was doing the work, and it is unreliable
+           * for a single line of text on Android — it is a fallback, not a
+           * layout. The room is made properly instead: less padding, a
+           * tighter gap and a slightly smaller face, with the shrink left in
+           * underneath for the longest label on the narrowest screen.
+           */
+          paddingHorizontal: 6,
           minHeight: 46,
           borderRadius: radius.pill,
           backgroundColor: primary === true ? colors.brand : colors.surface2,
@@ -324,11 +336,13 @@ function QuickAction({
           // behind it, and `numberOfLines` is what makes it apply.
           numberOfLines={1}
           adjustsFontSizeToFit
-          minimumFontScale={0.85}
+          minimumFontScale={0.8}
           style={{
-            fontSize: 13.5,
+            fontSize: 13,
             fontFamily: font.sansSemi,
             color: primary === true ? colors.onBrand : colors.text,
+            // So the label yields to the shape rather than pushing past it.
+            flexShrink: 1,
           }}
         >
           {label}

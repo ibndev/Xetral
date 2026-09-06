@@ -60,6 +60,37 @@ export class CountriesService {
     return result.rows;
   }
 
+  /**
+   * One country, by its ISO code.
+   *
+   * WHAT ASKS: the payout switch, which has to turn "this customer is in
+   * Ghana" into "this money is cedis" before 059's route table — keyed on
+   * CURRENCY, because the currency is what decides which provider can move
+   * it — can answer who serves them.
+   *
+   * NEVER THROWS. A deployment behind 040 has no `countries` table, and the
+   * honest answer there is "we do not know", which the caller already handles
+   * by falling back to the global setting. Throwing would take out the screen
+   * customers send money from on the strength of a missing row.
+   */
+  async byCode(code: string): Promise<Country | undefined> {
+    try {
+      const result = await this.pool.query<Country>(
+        `SELECT code, name, dial_code, currency, enabled, payout_method, funding_methods
+           FROM countries WHERE code = $1`,
+        [code.trim().toUpperCase()],
+      );
+      return result.rows[0];
+    } catch (error: unknown) {
+      this.#logger.warn(
+        `could not read country ${code}: ${
+          error instanceof Error ? error.message : String(error)
+        }. Payout routing falls back to the payout_provider setting.`,
+      );
+      return undefined;
+    }
+  }
+
   /** Every row, for the operations screen. */
   async all(): Promise<readonly Country[]> {
     const result = await this.pool.query<Country>(

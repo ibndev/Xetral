@@ -21,14 +21,41 @@
  * statement about the currency rather than a shortcut.
  */
 
-/** Simple bands, which is what these three flags are. */
+/** Bands, and the two devices that make two of these flags themselves. */
 export interface FlagMark {
   readonly kind: 'flag';
   readonly direction: 'vertical' | 'horizontal';
   /** Left to right, or top to bottom. */
   readonly bands: readonly string[];
-  /** Centred over the bands. Ghana's star, and nothing else here. */
+  /**
+   * HOW WIDE EACH BAND IS, relative to the others. Absent means equal.
+   *
+   * KENYA IS WHY THIS EXISTS. Its flag is black, WHITE, red, WHITE, green —
+   * the two white stripes are thin fimbriations, not equal bands — and drawn
+   * as three equal ones it is a generic black/red/green tricolour that is not
+   * Kenya's flag at all. Equal fifths would be just as wrong in the other
+   * direction, so the widths are data.
+   */
+  readonly weights?: readonly number[];
+  /**
+   * Centred over the bands. Ghana's star.
+   *
+   * `radius` is a FRACTION OF THE DISC, because Ghana's star is a large,
+   * prominent device — drawn at a fifth of the width it reads as a speck and
+   * the flag becomes an anonymous tricolour.
+   */
   readonly star?: string;
+  readonly starRadius?: number;
+  /**
+   * Kenya's Maasai shield, as much of it as survives eighteen pixels.
+   *
+   * A shield and two crossed spears cannot be drawn at that size and would be
+   * mud if attempted. What DOES survive — and what makes the flag read as
+   * Kenya rather than as three stripes — is a red-and-white lozenge standing
+   * upright in the centre. Naming it as a shape rather than shipping a path
+   * keeps both renderers honest about what they are drawing.
+   */
+  readonly shield?: { readonly body: string; readonly edge: string };
 }
 
 /** A symbol on a tinted disc, for money that is not one country's. */
@@ -51,8 +78,21 @@ export const CURRENCY_MARKS: Readonly<Record<string, CurrencyMark>> = {
     direction: 'horizontal',
     bands: ['#CE1126', '#FCD116', '#006B3F'],
     star: '#000000',
+    // Ghana's black star is the flag. At a fifth of the disc it was a speck
+    // sitting in a red/gold/green tricolour, which is a description of
+    // several flags and a picture of none.
+    starRadius: 0.3,
   },
-  KES: { kind: 'flag', direction: 'horizontal', bands: ['#000000', '#BB0000', '#006600'] },
+  // Black, WHITE, red, WHITE, green, with the shield standing in the middle.
+  // Drawn as three equal bands this was not Kenya's flag — it was a generic
+  // tricolour, which is what was reported.
+  KES: {
+    kind: 'flag',
+    direction: 'horizontal',
+    bands: ['#000000', '#FFFFFF', '#BB0000', '#FFFFFF', '#006600'],
+    weights: [6, 1, 6, 1, 6],
+    shield: { body: '#BB0000', edge: '#FFFFFF' },
+  },
 
   // Symbols, because a dollar is not a country's. The greens and blues are
   // each currency's own, so two dollars never look like the same money.
@@ -104,13 +144,24 @@ export function markFor(currency: string): CurrencyMark {
  */
 export const COUNTRY_MARKS: Readonly<Record<string, CurrencyMark>> = {
   NG: { kind: 'flag', direction: 'vertical', bands: ['#008751', '#FFFFFF', '#008751'] },
+  /* THE SAME FLAGS AS THE CURRENCIES ABOVE, and they have to stay that way:
+     a customer sees the country mark on the dial-code picker and the currency
+     mark on the balance card, and two drawings of one flag is the kind of
+     difference nobody reports and everybody notices. */
   GH: {
     kind: 'flag',
     direction: 'horizontal',
     bands: ['#CE1126', '#FCD116', '#006B3F'],
     star: '#000000',
+    starRadius: 0.3,
   },
-  KE: { kind: 'flag', direction: 'horizontal', bands: ['#000000', '#BB0000', '#006600'] },
+  KE: {
+    kind: 'flag',
+    direction: 'horizontal',
+    bands: ['#000000', '#FFFFFF', '#BB0000', '#FFFFFF', '#006600'],
+    weights: [6, 1, 6, 1, 6],
+    shield: { body: '#BB0000', edge: '#FFFFFF' },
+  },
 };
 
 /** The mark for a country, or its code on a neutral disc. */
