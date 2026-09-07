@@ -85,7 +85,11 @@ class FakeFundingPort implements FundingPort {
       ),
       bankName: 'Providus Bank',
       accountName: 'XETRAL/TEST CUSTOMER',
-      currency: 'NGN',
+      // ECHOED, not hardcoded. It was 'NGN' whatever it was asked for — which
+      // is the same assumption the service itself was making, so no test here
+      // could have caught the service asking for naira on behalf of a customer
+      // in Accra: the fake agreed with it.
+      currency: req.currency,
       active: true,
     };
   }
@@ -136,11 +140,13 @@ interface Customer {
 
 /** Onboards a customer. `kyc` controls whether they have a Bitnob identity —
  *  without one, no bank account can be issued. */
-async function onboard(kyc = true): Promise<Customer> {
+async function onboard(kyc = true, country?: string): Promise<Customer> {
   const identifier = `fund-${randomUUID()}@example.ng`;
   const inserted = await pool.query<{ id: string }>(
-    `INSERT INTO users (email, status) VALUES ($1, 'active') RETURNING id`,
-    [identifier],
+    // `country` is what decides the CURRENCY the account is opened in, and
+    // therefore which rail 059 sends the request to.
+    `INSERT INTO users (email, status, country) VALUES ($1, 'active', $2) RETURNING id`,
+    [identifier, country ?? null],
   );
   const userId = inserted.rows[0]?.id;
   if (userId === undefined) throw new Error('failed to seed user');
@@ -245,6 +251,69 @@ describe('getting an account number', () => {
     expect(second.body.account_number).toBe(first.body.account_number);
     // And the provider was asked exactly once.
     expect(port.created).toHaveLength(1);
+  });
+
+  /*
+   * THE BUG THIS PINS. `#openAccount` called the port with a HARDCODED 'NGN',
+   * so `providerFor('collect', …)` — which picks the rail FROM the currency —
+   * was asked about naira on behalf of every customer on the platform and
+   * correctly answered Paystack. A customer in Accra pressing Activate was
+   * asking a Nigerian integration for a Nigerian account number, and what came
+   * back said nothing about why.
+   *
+   * Nothing could have caught it: the compiler is satisfied by a string
+   * literal, and the fake port echoed 'NGN' whatever it was asked for — so the
+   * test agreed with the service about the very thing that was wrong.
+   */
+  it("opens the account in the CUSTOMER'S OWN currency, not always naira", async () => {
+    const ghanaian = await onboard(true, 'GH');
+    const res = await getAccount(ghanaian).expect(200);
+
+    expect(res.body.currency).toBe('GHS');
+    expect(port.created.at(-1)?.currency).toBe('GHS');
+
+    const kenyan = await onboard(true, 'KE');
+    await getAccount(kenyan).expect(200);
+    expect(port.created.at(-1)?.currency).toBe('KES');
+
+    const nigerian = await onboard(true, 'NG');
+    await getAccount(nigerian).expect(200);
+    expect(port.created.at(-1)?.currency).toBe('NGN');
+  });
+
+  /*
+   * AND AN ACCOUNT WITH NO COUNTRY IS STILL NAIRA. 050's argument: such a row
+   * can only have been created when this platform operated in Nigeria alone,
+   * so the fallback is a claim about history rather than a guess — and
+   * refusing instead would break the one flow every existing customer already
+   * relies on.
+   */
+  it('falls back to naira for an account with no country', async () => {
+    const legacy = await onboard(true);
+    const res = await getAccount(legacy).expect(200);
+    expect(res.body.currency).toBe('NGN');
+    expect(port.created.at(-1)?.currency).toBe('NGN');
+  });
+
+  /*
+   * THE READ PATH FINDS IT TOO. `#accountOf` filtered on `currency = 'NGN'`,
+   * so a Ghanaian's own account was invisible to the screen that shows it —
+   * which would have offered to open one they already held, and the second
+   * request would have raced the partial unique index rather than reading the
+   * winner's row.
+   */
+  it('returns a non-naira account to the screen that reads it', async () => {
+    const ghanaian = await onboard(true, 'GH');
+    const opened = await getAccount(ghanaian).expect(200);
+
+    const read = await request(app.getHttpServer())
+      .get('/v1/funding/account')
+      .set('Authorization', `Bearer ${ghanaian.token}`)
+      .expect(200);
+
+    // The route wraps it: `{ account: … | null }`.
+    expect(read.body.account.account_number).toBe(opened.body.account_number);
+    expect(read.body.account.currency).toBe('GHS');
   });
 
   it('NAMES THE MISSING MIGRATION when the schema is behind the build', async () => {

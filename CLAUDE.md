@@ -804,6 +804,64 @@ Schema: `packages/ledger/sql/059_provider_routing.sql`. Router in
   in the header — and this repo has twice shipped a table of plausible
   constants that passed tests written from the same assumptions. Run it first.
 
+### Which rail opens an account — non-obvious rules
+
+Schema: `packages/ledger/sql/061_country_and_route_repair.sql`. Service in
+`apps/api/src/funding/funding.service.ts`, switch in
+`apps/api/src/funding/funding-provider.ts`.
+
+- **`#openAccount` ASKED FOR NAIRA WHOEVER PRESSED THE BUTTON.**
+  `createVirtualAccount({ currency: 'NGN' })`, hardcoded — and 059 picks the
+  rail FROM the currency, so `providerFor('collect', 'NGN')` was asked on
+  behalf of every customer on the platform and correctly answered Paystack. A
+  Ghanaian pressing Activate account was asking a Nigerian integration for a
+  Nigerian account number. The account is opened in the customer's OWN
+  currency now, which is what lets the route table do its job.
+- **A `router` PARAMETER THAT WAS NEVER PASSED ON.** `createFundingPort` named
+  it in its signature and built the switch without it, so every request fell
+  through to the global setting. The parameter being OPTIONAL on the options
+  object is exactly what let the compiler agree — an omitted optional is not a
+  missing argument. Same shape as `FlutterwavePayoutAdapter` being written,
+  tested and registered nowhere; `funding.e2e.test.ts` now asserts the
+  CURRENCY the port is asked for, per country, because that is the only place
+  the failure is observable.
+- **THE FAKE PORT AGREED WITH THE BUG.** It echoed `currency: 'NGN'` whatever
+  it was asked for — the same assumption the service was making — so no test
+  here could have caught it. It echoes `req.currency` now.
+- **`#accountOf` FILTERED ON `currency = 'NGN'`**, so a Ghanaian's own account
+  was invisible to the screen that reads it: they would have been offered one
+  they already held, and the second request would have raced the partial
+  unique index rather than reading the winner's row. Given a currency it is
+  the open path; omitted it is the read path, ordered so the customer's own
+  comes first.
+- **The `$9` IS APPENDED, NOT SLOTTED IN.** Renumbering the eight placeholders
+  above to make room is how one comes to name the wrong value — the fault 045
+  shipped, where a statement referenced `$9` against an array of eight and
+  every card issue answered 500 with the compiler entirely satisfied.
+- **NGN IS THE FALLBACK AND IT IS A CLAIM ABOUT HISTORY**, not a guess: 050's
+  argument is that a row with no country can only have been created when this
+  platform operated in Nigeria alone. Typed as a `Currency` and checked against
+  the registry rather than cast, because a code the money primitives do not
+  know has no exponent.
+- **THE LOG NAMED THE GLOBAL DEFAULT AND THAT WAS WORSE THAN SAYING NOTHING.**
+  "paystack is unreachable while opening a GHS account: [flutterwave] no
+  Flutterwave secret key is configured" — two provider names in one sentence,
+  the wrong one first, sending an operator to check a credential that had
+  nothing to do with it. `#railFor` asks the switch which rail the CURRENCY
+  routes to.
+- **061 REPAIRS RATHER THAN ASSERTS.** Three rows decide whether a customer in
+  Accra reads as Nigerian — a null `users.country`, `countries.payout_method`,
+  and a missing `provider_routes` row — and every one of them is DATA, which
+  is why three correct code fixes did not change what was on screen. Every
+  statement is idempotent and none overrules a decision: the backfill touches
+  only rows with no country at all, and the route seed still conflicts to
+  nothing, because a corridor pointed somewhere unusual was almost always
+  moved during an incident.
+- **`customers_without_a_country` is what nothing could say.** The fallback is
+  silent by construction, so an account falling through to the platform default
+  looked exactly like a screen that had never been fixed. It carries a count
+  and a code, never a name or an address.
+
 ### A link a stranger can pay — non-obvious rules
 
 Schema: `packages/ledger/sql/058_payment_links.sql`. Service in
@@ -2601,6 +2659,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/057_reference_rates.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/058_payment_links.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/059_provider_routing.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/060_usd_collection.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/061_country_and_route_repair.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -2659,6 +2718,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/056_reset_codes.test.sq
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/057_reference_rates.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/058_payment_links.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/059_provider_routing.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/061_country_and_route_repair.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

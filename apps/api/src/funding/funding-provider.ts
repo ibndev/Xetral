@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common';
+import type { ProviderRouterService } from '../routing/provider-router.service.js';
 import type {
   CreateVirtualAccountRequest,
   FundingPort,
@@ -22,6 +23,19 @@ import type { SettingsService } from '../settings/settings.service.js';
  * money in — CBN tier 1 permits the account, and `029_kyc_tiers.seed.sql` has
  * capped tier 0 at ₦50,000 a day since it landed.
  *
+ * ROUTED BY CURRENCY, NOT BY ONE GLOBAL NAME. `funding_provider` is a single
+ * word, so every account request went to whatever it said — and it says
+ * `paystack`, whose Nigerian registration cannot open an account that settles
+ * in cedis or shillings. A customer in Accra tapping Activate account was
+ * asking a Nigerian rail for a Ghanaian product, and the refusal arrived as
+ * "Payments are unavailable right now" with nothing able to say which.
+ *
+ * 059's `provider_routes` already answers "who collects this currency" for
+ * the checkout. Opening an account is the same question, so it reads the same
+ * table — and the GLOBAL SETTING REMAINS THE FALLBACK for an unrouted
+ * currency or a deployment behind the migration, because naira has always
+ * worked and must keep working unchanged.
+ *
  * WHAT SWITCHING DOES NOT DO is move anybody. A dedicated account number is
  * permanent and saved in somebody's banking app as a beneficiary, so every
  * account already issued keeps working at the provider that issued it. That
@@ -42,15 +56,44 @@ export class SwitchingFundingPort implements FundingPort {
   readonly #settings: SettingsService;
   readonly #fallback: string;
 
+  readonly #router: ProviderRouterService | undefined;
+
   constructor(options: {
     readonly adapters: ReadonlyMap<string, FundingPort>;
     readonly settings: SettingsService;
     /** Used when the setting names a rail this deployment has no adapter for. */
     readonly fallback: string;
+    /** 059's route table. Absent in the unit fixtures, which test the
+     *  single-rail behaviour this class had before routing existed. */
+    readonly router?: ProviderRouterService;
   }) {
     this.#adapters = options.adapters;
     this.#settings = options.settings;
     this.#fallback = options.fallback;
+    this.#router = options.router;
+  }
+
+  /**
+   * Which rail opens an account that settles in this CURRENCY.
+   *
+   * Falls back to the global setting for an unrouted currency, a deployment
+   * behind 059, or a route naming an adapter this build has not got — the
+   * same three cases the payout switch falls back on, and for the same
+   * reason: one missing row must not become an outage on the screen a
+   * customer opens in order to put money in.
+   */
+  async providerForCurrency(currency: string): Promise<string> {
+    if (this.#router !== undefined) {
+      const routed = await this.#router.providerFor('collect', currency);
+      if (routed !== undefined && this.#adapters.has(routed)) return routed;
+      if (routed !== undefined) {
+        this.#logger.warn(
+          `provider_routes collects ${currency} through '${routed}', which this ` +
+            `deployment has no adapter for. Falling back.`,
+        );
+      }
+    }
+    return this.activeProvider();
   }
 
   /**
@@ -87,7 +130,14 @@ export class SwitchingFundingPort implements FundingPort {
   }
 
   async createVirtualAccount(request: CreateVirtualAccountRequest): Promise<VirtualAccount> {
-    return this.#adapterFor(await this.activeProvider()).createVirtualAccount(request);
+    /*
+     * THE CURRENCY DECIDES THE RAIL. An account that settles in cedis cannot
+     * be opened by a Nigerian Paystack registration, and asking anyway is
+     * what produced "Payments are unavailable right now" in Accra.
+     */
+    return this.#adapterFor(
+      await this.providerForCurrency(request.currency),
+    ).createVirtualAccount(request);
   }
 
   async getVirtualAccount(

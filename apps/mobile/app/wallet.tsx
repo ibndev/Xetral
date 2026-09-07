@@ -1,4 +1,4 @@
-import { Pressable, Text, View } from 'react-native';
+import { Pressable, Text, useWindowDimensions, View } from 'react-native';
 import { Link } from 'expo-router';
 import { formatAmount, symbolFor } from '@xetral/client';
 import type { Balance, Transaction } from '@xetral/client';
@@ -33,6 +33,7 @@ export default function Home() {
   const client = useXetral();
   const styles = useStyles();
   const colors = useTheme();
+  const quick = useQuickMetrics();
 
   /*
    * REMEMBERED, and hidden is the fallback.
@@ -160,7 +161,14 @@ export default function Home() {
           order to be paid.
         */}
 
-        <View style={{ flexDirection: 'row', gap: 6, marginTop: space.lg }}>
+        <View
+          style={{
+            flexDirection: 'row',
+            flexWrap: 'wrap',
+            gap: quick.gap,
+            marginTop: space.lg,
+          }}
+        >
           <QuickAction href="/transfer" icon="send" label="Send" primary />
           <QuickAction href="/add-money" icon="plus" label="Add money" />
           <QuickAction href="/fx" icon="swap" label="Convert" />
@@ -266,8 +274,25 @@ export default function Home() {
                   })}
                 </Text>
               </View>
+              {/*
+                THE EYE HIDES THE BALANCE, NOT THE HISTORY — and this line
+                masked the history too, which the web has never done.
+                
+                What that produced was a list of transactions reading
+                "Bank payout failed  • • • • • •", with nothing on screen
+                connecting the dots to the eye toggle at the top of a card
+                somebody had tapped days earlier. It reads as broken data
+                rather than as a privacy setting, and the amount is the one
+                thing you open that list to find out.
+                
+                The balance is the figure worth hiding from somebody standing
+                behind you: it is large, it is at the top, and it is what a
+                glance reads. A single past transaction is not, and the web
+                already made that judgement — this is the phone catching up
+                rather than a new decision.
+              */}
               <Text style={[styles.amount, outgoing ? undefined : { color: colors.ok }]}>
-                {hidden ? MASK : formatAmount(t.amount, t.currency)}
+                {formatAmount(t.amount, t.currency)}
               </Text>
             </View>
           );
@@ -275,6 +300,30 @@ export default function Home() {
       </View>
     </Shell>
   );
+}
+
+/*
+ * THE WEB'S OWN NUMBERS, AT THE WEB'S OWN BREAKPOINTS.
+ *
+ * `.quick-actions` in `globals.css` is a wrapping flex row whose buttons are
+ * `flex: 1 0 auto` — they size to their LABEL and then grow to fill, and when
+ * three of them do not fit they wrap onto a second line. The phone had
+ * `flex: 1` instead, which is a different rule: it forces three equal thirds
+ * whatever the labels need, so "Add money" was squeezed into 92pt on a 360pt
+ * handset and pushed past the shape behind it. Shrinking the face was a way
+ * of hiding that rather than fixing it, and `adjustsFontSizeToFit` is
+ * unreliable for one line on Android anyway.
+ *
+ * So the geometry is the web's, read off the same three rules: the base, the
+ * 400px bump and the 520px one. A label that will not fit takes a second row,
+ * which is what the web has always done here and what "contained by the card"
+ * actually means.
+ */
+function useQuickMetrics() {
+  const { width } = useWindowDimensions();
+  if (width >= 520) return { gap: 10, padX: 18, inner: 8, size: 15 } as const;
+  if (width >= 400) return { gap: 8, padX: 12, inner: 6, size: 13.5 } as const;
+  return { gap: 6, padX: 7, inner: 5, size: 13 } as const;
 }
 
 function QuickAction({
@@ -289,33 +338,30 @@ function QuickAction({
   readonly primary?: boolean;
 }) {
   const colors = useTheme();
+  const quick = useQuickMetrics();
   return (
     <Link href={href as never} asChild>
       <Pressable
         accessibilityRole="link"
         style={{
-          flex: 1,
+          /*
+           * `flexGrow` WITHOUT `flexBasis: 0`, which is the whole point.
+           * `flex: 1` is shorthand for a zero basis — every button gets the
+           * same third of the row and the label is left to cope. The web's
+           * `flex: 1 0 auto` measures the label first and only then shares
+           * out what is left over, so a button is never narrower than the
+           * word inside it.
+           */
+          flexGrow: 1,
+          flexBasis: 'auto',
           flexDirection: 'row',
           alignItems: 'center',
           justifyContent: 'center',
-          gap: 4,
-          /*
-           * THE LABEL MUST FIT INSIDE THE SHAPE, and the first attempt did
-           * not make it. Three buttons share the card's width, so on a 360pt
-           * handset each gets about 112pt — and "Add money" at 13.5pt
-           * semibold, plus a 16pt icon, plus the gap, plus 8pt of padding
-           * either side, does not fit in that. It spilled past its own
-           * background, which is exactly the fault the web version was
-           * reported for and this was supposed to match.
-           *
-           * `adjustsFontSizeToFit` was doing the work, and it is unreliable
-           * for a single line of text on Android — it is a fallback, not a
-           * layout. The room is made properly instead: less padding, a
-           * tighter gap and a slightly smaller face, with the shrink left in
-           * underneath for the longest label on the narrowest screen.
-           */
-          paddingHorizontal: 6,
-          minHeight: 46,
+          gap: quick.inner,
+          paddingHorizontal: quick.padX,
+          // 48 on the web, and for the same reason: a smaller target is one
+          // people miss.
+          minHeight: 48,
           borderRadius: radius.pill,
           backgroundColor: primary === true ? colors.brand : colors.surface2,
           /*
@@ -331,18 +377,14 @@ function QuickAction({
       >
         <Icon name={icon} size={16} color={primary === true ? colors.onBrand : colors.text} />
         <Text
-          // ONE LINE, SHRUNK TO FIT rather than spilling. `adjustsFontSizeToFit`
-          // is the platform's own answer to a label that does not fit the shape
-          // behind it, and `numberOfLines` is what makes it apply.
+          // ONE LINE AND NOT SHRUNK. The web sets `white-space: nowrap` and
+          // lets the row wrap instead; the label keeps the size it was
+          // designed at, and a button that cannot fit takes the next line.
           numberOfLines={1}
-          adjustsFontSizeToFit
-          minimumFontScale={0.8}
           style={{
-            fontSize: 13,
+            fontSize: quick.size,
             fontFamily: font.sansSemi,
             color: primary === true ? colors.onBrand : colors.text,
-            // So the label yields to the shape rather than pushing past it.
-            flexShrink: 1,
           }}
         >
           {label}

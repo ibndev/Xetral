@@ -1657,6 +1657,39 @@ fieldset { border: 0; padding: 0; margin: 0; }
 }
 @media (min-width: 720px) { .scroll { margin: 0; padding: 0; } }
 
+/*
+ * A LONG TABLE, BOXED AND SCROLLED INSIDE ITSELF.
+ *
+ * The exchange rate list is one row per DIRECTION per pair — eight fiat
+ * currencies is fifty-six of them once the feed has run once — and a page
+ * that grows to fifty-six rows buries every control under it. The operator
+ * wanting to publish a spread has to scroll past the whole feed to reach the
+ * form.
+ *
+ * The height is in `rem` rather than rows, because a row's height is the type
+ * scale's business and not this rule's; it lands at roughly ten rows plus the
+ * header, which is enough to see what the feed did without the table becoming
+ * the page. The sticky header is what makes scrolling INSIDE the box legible
+ * — a column of numbers with the headings scrolled off is a column of numbers.
+ */
+.scroll.capped {
+  max-height: 26rem;
+  overflow-y: auto;
+  /* So the boxed area reads as a container rather than as the page simply
+     ending — the same hairline every other surface here uses. */
+  border: 1px solid var(--edge);
+  border-radius: var(--r-md);
+  padding: 0;
+  margin: 0;
+}
+.scroll.capped > table { margin: 0; }
+.scroll.capped thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+}
+
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
 th, td { text-align: left; padding: 11px 14px 11px 0; border-bottom: 1px solid var(--line); vertical-align: middle; }
 th {

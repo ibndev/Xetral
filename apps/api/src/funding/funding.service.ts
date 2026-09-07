@@ -19,7 +19,7 @@ import {
   ProviderUnavailableError,
 } from '@xetral/providers';
 import type { FundingCustomer, FundingPort } from '@xetral/providers';
-import { toMajor } from '@xetral/shared';
+import { CURRENCIES, toMajor } from '@xetral/shared';
 import type { Currency } from '@xetral/shared';
 import { API_CONFIG, DATABASE, FUNDING_PORT, LEDGER } from '../tokens.js';
 import { isMissingSchema, reportMissingSchema } from '../database-schema.js';
@@ -61,6 +61,20 @@ interface AccountRow {
   currency: string;
   status: string;
 }
+
+/**
+ * WHAT AN ACCOUNT IS OPENED IN when the platform cannot say where a customer
+ * is. Naira, for the reason 050 gives about a null `users.country`: such a row
+ * can only have been created when this platform operated in Nigeria alone, so
+ * it is a claim about history rather than a guess.
+ *
+ * TYPED AS A `Currency`, not as a string. `FundingRequest.currency` is the
+ * compile-time union, and a bare string there would let a country row naming a
+ * currency the money registry has never heard of reach a provider — which is
+ * finding 72 exactly: a currency with no EXPONENT is every amount in it wrong
+ * by a power of ten.
+ */
+const FALLBACK_ACCOUNT_CURRENCY: Currency = 'NGN';
 
 @Injectable()
 export class FundingService {
@@ -141,7 +155,7 @@ export class FundingService {
       if (error instanceof HttpException) throw error;
 
       this.#logger.error(
-        `OPENING A NAIRA ACCOUNT THREW SOMETHING THIS SERVICE DOES NOT CLASSIFY, ` +
+        `OPENING A DEPOSIT ACCOUNT THREW SOMETHING THIS SERVICE DOES NOT CLASSIFY, ` +
           `which is why the customer saw a generic failure: ` +
           `${error instanceof Error ? `${error.name}: ${error.message}` : String(error)}`,
       );
@@ -158,7 +172,23 @@ export class FundingService {
   async #openAccount(userUuid: string): Promise<VirtualAccountView> {
     const userId = await this.#activeUserId(userUuid);
 
-    const existing = await this.#accountOf(userId);
+    /*
+     * THE ACCOUNT IS OPENED IN THE CUSTOMER'S OWN CURRENCY.
+     *
+     * It was always naira, whoever asked — so `providerFor('collect', …)`,
+     * which picks the rail FROM the currency, was asked about NGN on behalf of
+     * every customer on the platform and correctly answered Paystack. A
+     * Paystack account registered in Nigeria settles in naira; asked to open
+     * one for a Ghanaian it either refuses or issues a number their money
+     * cannot reach, and both arrived on the screen as the same shrug.
+     *
+     * Naming the currency first is what lets 059 do its job: GHS and KES route
+     * to Flutterwave, NGN stays on Paystack, and a corridor with no route
+     * falls back to the global setting rather than becoming an outage.
+     */
+    const currency = await this.#homeCurrencyOf(userId);
+
+    const existing = await this.#accountOf(userId, currency);
     if (existing !== undefined) return toAccountView(existing);
 
     /*
@@ -188,10 +218,12 @@ export class FundingService {
     try {
       issued = await this.port.createVirtualAccount({
         customer,
-        currency: 'NGN',
-        // Derived from our user id, so a retry after a timeout asks for the
-        // same account rather than a second one.
-        idempotencyKey: `xetral-va-${userId}-NGN`,
+        currency,
+        // Derived from our user id AND the currency, so a retry after a
+        // timeout asks for the same account rather than a second one — and a
+        // customer who holds two currencies is not answered with the wrong
+        // account.
+        idempotencyKey: `xetral-va-${userId}-${currency}`,
       });
     } catch (error) {
       /*
@@ -237,10 +269,10 @@ export class FundingService {
        * integration and sometimes our merchant id. What the customer gets is
        * a code their app can turn into a real message.
        */
-      const rail = await this.#activeProviderName();
+      const rail = await this.#railFor(currency);
       if (error instanceof ProviderRejectedError) {
         this.#logger.error(
-          `${rail} REFUSED to open a naira account: ${error.message} ` +
+          `${rail} REFUSED to open a ${currency} account: ${error.message} ` +
             `(provider code ${error.providerCode ?? 'none'}). This is a refusal, not an ` +
             `outage — the credential is reaching them. Check that dedicated accounts are ` +
             `enabled on the integration and that paystack_preferred_bank names a bank it ` +
@@ -255,14 +287,16 @@ export class FundingService {
       }
       if (error instanceof ProviderContractError) {
         this.#logger.error(
-          `${rail} answered a shape this adapter does not accept while opening a naira ` +
-            `account: ${error.message}. Their API has changed, or the credential belongs ` +
-            `to a different product; waiting will not fix it.`,
+          `${rail} answered a shape this adapter does not accept while opening a ` +
+            `${currency} account: ${error.message}. Their API has changed, or the ` +
+            `credential belongs to a different product; waiting will not fix it.`,
         );
         throw new ServiceUnavailableException({ error: 'account_issue_unavailable' });
       }
       if (error instanceof ProviderUnavailableError) {
-        this.#logger.error(`${rail} is unreachable while opening a naira account: ${error.message}`);
+        this.#logger.error(
+          `${rail} is unreachable while opening a ${currency} account: ${error.message}`,
+        );
         throw new ServiceUnavailableException({ error: 'account_issue_unavailable' });
       }
       throw error;
@@ -291,7 +325,7 @@ export class FundingService {
         `INSERT INTO virtual_accounts
            (user_id, provider, provider_account_id, provider_customer_ref,
             account_number, bank_name, account_name, currency, status)
-         VALUES ($1::bigint, $2, $3, $4, $5, $6, $7, 'NGN', $8)
+         VALUES ($1::bigint, $2, $3, $4, $5, $6, $7, $9, $8)
          ON CONFLICT (user_id, currency) WHERE (status <> 'closed') DO NOTHING
          RETURNING id, user_id, provider_account_id, account_number, bank_name,
                    account_name, currency, status`,
@@ -309,11 +343,19 @@ export class FundingService {
           issued.bankName,
           issued.accountName,
           issued.active ? 'active' : 'pending',
+          /*
+           * $9, appended rather than slotted into reading order. Renumbering
+           * the eight above to make room is exactly how a placeholder comes to
+           * name the wrong value — the fault 045 shipped, where a statement
+           * referenced $9 against an array of eight and every card issue
+           * answered 500 with the compiler entirely satisfied.
+           */
+          currency,
         ],
       );
     } catch (error) {
       if (isMissingSchema(error)) {
-        reportMissingSchema(this.#logger, error, 'opening a naira account');
+        reportMissingSchema(this.#logger, error, `opening a ${currency} account`);
         this.#logger.error(
           `The rail may have opened account ${issued.accountNumber} for user ${userId} ` +
             `and this deployment could not record it. The adapter looks before it ` +
@@ -330,7 +372,7 @@ export class FundingService {
 
     // Two requests raced. The loser reads the winner's row rather than
     // failing — the customer asked once as far as they are concerned.
-    const raced = await this.#accountOf(userId);
+    const raced = await this.#accountOf(userId, currency);
     if (raced === undefined) throw new Error('virtual account insert returned no row');
     return toAccountView(raced);
   }
@@ -411,15 +453,74 @@ export class FundingService {
     return undefined;
   }
 
-  async #accountOf(userId: string): Promise<AccountRow | undefined> {
+  /**
+   * The customer's live account.
+   *
+   * IT SAID `currency = 'NGN'`, AND THAT WAS A STATEMENT ABOUT NIGERIA WRITTEN
+   * AS A STATEMENT ABOUT THE PLATFORM. A customer in Accra whose account is in
+   * cedis had no live account by this query, so the screen offered to open one
+   * they already held — the same shape as `HOME_CURRENCY` being read as a fact
+   * about the platform rather than about Nigeria, which 040 records.
+   *
+   * `currency` GIVEN: the open path, which must not find a cedi account and
+   * conclude a naira one exists. OMITTED: the read path, which wants whichever
+   * live account this customer holds — the partial unique index allows one per
+   * currency, and the ordering puts their own first.
+   */
+  async #accountOf(userId: string, currency?: string): Promise<AccountRow | undefined> {
+    if (currency !== undefined) {
+      const one = await this.pool.query<AccountRow>(
+        `SELECT id, user_id, provider_account_id, account_number, bank_name,
+                account_name, currency, status
+           FROM virtual_accounts
+          WHERE user_id = $1::bigint AND currency = $2 AND status <> 'closed'`,
+        [userId, currency],
+      );
+      return one.rows[0];
+    }
+
+    const home = await this.#homeCurrencyOf(userId);
     const result = await this.pool.query<AccountRow>(
       `SELECT id, user_id, provider_account_id, account_number, bank_name,
               account_name, currency, status
          FROM virtual_accounts
-        WHERE user_id = $1::bigint AND currency = 'NGN' AND status <> 'closed'`,
-      [userId],
+        WHERE user_id = $1::bigint AND status <> 'closed'
+        ORDER BY (currency = $2) DESC, id ASC`,
+      [userId, home],
     );
     return result.rows[0];
+  }
+
+  /**
+   * WHICH CURRENCY THIS CUSTOMER'S ACCOUNT IS IN, from the country they chose.
+   *
+   * Allowed to fail, for the reason `describeSession` splits its two reads:
+   * `countries` arrives in 040, and a deployment behind it must still be able
+   * to open the account it has always opened.
+   */
+  async #homeCurrencyOf(userId: string): Promise<Currency> {
+    try {
+      const found = await this.pool.query<{ currency: string | null }>(
+        `SELECT c.currency
+           FROM users u LEFT JOIN countries c ON c.code = u.country
+          WHERE u.id = $1::bigint`,
+        [userId],
+      );
+      const named = found.rows[0]?.currency;
+      /*
+       * CHECKED AGAINST THE REGISTRY rather than cast. `countries.currency` is
+       * a text column an operator writes, and a code the money primitives do
+       * not know has no exponent — so every amount in it would be wrong by a
+       * power of ten, which is the reason a currency is a compile-time union
+       * while a country is data.
+       */
+      if (named !== null && named !== undefined && CURRENCIES[named as Currency] !== undefined) {
+        return named as Currency;
+      }
+      return FALLBACK_ACCOUNT_CURRENCY;
+    } catch {
+      return FALLBACK_ACCOUNT_CURRENCY;
+    }
   }
 
   /**
@@ -445,16 +546,32 @@ export class FundingService {
    * these logs. Falls back to the default rather than failing: a diagnostic
    * that can itself throw makes an outage harder to read, not easier.
    */
-  async #activeProviderName(): Promise<string> {
+  /**
+   * AND IT MUST NAME THE RAIL THIS CURRENCY ROUTES TO, not the global default.
+   *
+   * Asking for the default produced a sentence that was actively misleading on
+   * the one line an operator reads to diagnose this: "paystack is unreachable
+   * while opening a GHS account: [flutterwave] no Flutterwave secret key is
+   * configured". Two provider names in one sentence, the wrong one first, and
+   * an operator sent to check a Paystack credential that had nothing to do
+   * with it.
+   */
+  async #railFor(currency: Currency): Promise<string> {
     const switching = this.port as FundingPort & {
+      providerForCurrency?: (currency: string) => Promise<string>;
       activeProvider?: () => Promise<string>;
     };
-    if (typeof switching.activeProvider !== 'function') return this.port.provider;
     try {
-      return await switching.activeProvider();
+      if (typeof switching.providerForCurrency === 'function') {
+        return await switching.providerForCurrency(currency);
+      }
+      if (typeof switching.activeProvider === 'function') {
+        return await switching.activeProvider();
+      }
     } catch {
-      return this.port.provider;
+      // A diagnostic that can itself throw makes an outage harder to read.
     }
+    return this.port.provider;
   }
 
   async #fundingCustomer(userId: string): Promise<FundingCustomer> {

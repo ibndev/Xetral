@@ -15,6 +15,7 @@ import {
   PaystackPayoutAdapter,
   FlutterwavePayoutAdapter,
   FlutterwaveClient,
+  FlutterwaveFundingAdapter,
   BitnobPayoutAdapter,
   TwilioAdapter,
   VtpassAdapter,
@@ -484,6 +485,7 @@ export function createFundingPort(
   config: ApiConfig,
   credentials?: ProviderCredentialService,
   settings?: SettingsService,
+  router?: ProviderRouterService,
 ): FundingPort {
   const adapters = new Map<string, FundingPort>();
 
@@ -514,6 +516,28 @@ export function createFundingPort(
             ? config.paystackPreferredBank
             : () => settings.paystackPreferredBank(config.paystackPreferredBank),
       }),
+    );
+  }
+
+  /*
+   * FLUTTERWAVE, for the currencies `provider_routes` sends here.
+   *
+   * Without it a routed cedi or shilling reached a switch with no adapter to
+   * hand the request to, so `providerForCurrency` fell back to the global
+   * setting and a customer in Accra was routed to Paystack — which cannot
+   * open an account that settles in cedis. See the adapter's own header for
+   * what is and is not established about virtual accounts on this rail.
+   */
+  const { flutterwaveBaseUrl } = config;
+  if (flutterwaveBaseUrl !== undefined) {
+    adapters.set(
+      'flutterwave',
+      new FlutterwaveFundingAdapter(
+        new FlutterwaveClient({
+          baseUrl: flutterwaveBaseUrl,
+          secretKey: flutterwaveSecretKey(config, credentials),
+        }),
+      ),
     );
   }
 
@@ -561,6 +585,24 @@ export function createFundingPort(
     // in which case falling back to a rail that cannot answer would be worse
     // than falling back to the one that can.
     fallback: adapters.has('paystack') ? 'paystack' : 'bitnob',
+    /*
+     * PASSED ON, AND THE FIRST VERSION OF THIS DID NOT.
+     *
+     * This function took `router`, named it in its signature, and then built
+     * a switch without it — so every account request fell through to the
+     * global setting and a Ghanaian was routed to Paystack however 059 was
+     * configured. The parameter being OPTIONAL on the options object is
+     * exactly what let the compiler agree: an omitted optional is not a
+     * missing argument, so the one thing this parameter exists for silently
+     * did not happen.
+     *
+     * The same shape as `FlutterwavePayoutAdapter` being written, tested and
+     * registered nowhere. A dependency threaded through three call sites and
+     * dropped at the fourth is invisible in a diff, so `funding.e2e.test.ts`
+     * asserts the CURRENCY the port is asked for, per country — which is the
+     * only place the failure is observable.
+     */
+    ...(router === undefined ? {} : { router }),
   });
 }
 
@@ -1187,10 +1229,11 @@ export class AppModule {
             health: ProviderHealthService,
             credentials: ProviderCredentialService,
             settings: SettingsService,
+            router: ProviderRouterService,
           ) =>
             watched(
               options.fundingPort ??
-                createFundingPort(options.config, credentials, settings),
+                createFundingPort(options.config, credentials, settings, router),
               // The rail that actually served is recorded on the account row;
               // this label is what `provider_health` buckets under, and the
               // switch reports its default. A deployment that flips to Bitnob
@@ -1198,7 +1241,12 @@ export class AppModule {
               'funding',
               health,
             ),
-          inject: [ProviderHealthService, ProviderCredentialService, SettingsService],
+          inject: [
+            ProviderHealthService,
+            ProviderCredentialService,
+            SettingsService,
+            ProviderRouterService,
+          ],
         },
         {
           provide: CRYPTO_PORT,

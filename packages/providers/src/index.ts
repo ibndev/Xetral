@@ -39,3 +39,4 @@ export * from './flutterwave/client.js';
 export * from './flutterwave/checkout-adapter.js';
 export * from './flutterwave/payout-adapter.js';
 export * from './flutterwave/webhooks.js';
+export * from './flutterwave/funding-adapter.js';

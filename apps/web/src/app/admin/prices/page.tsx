@@ -50,6 +50,8 @@ export default function Prices() {
     'USDT',
     'USDC',
   ]);
+  /* The PIN for the one action that lives on this panel — generating rates.
+   * Every other action owns its own, beside the form it authorises. */
   const [pin, setPin] = useState('');
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
@@ -165,57 +167,20 @@ export default function Prices() {
         )}
 
         {/*
-          ONE PIN FOR THE WHOLE SCREEN, AND NOTHING SUBMITS WITHOUT IT.
+          THE SHARED PIN PANEL IS GONE, and its removal is the fix rather than
+          a tidy-up.
           
-          Every action here — publish a spread, publish a rate, generate them
-          all, retire one — is gated on this field being filled, so the red
-          "Enter transaction pin" that was being reported cannot be reached at
-          all: there is no button to press until there is a PIN to send.
+          One field at the top of the page authorised five actions further
+          down, and NOTHING said so at the point of use. Retire was the worst
+          case: its button is disabled until a reason of ten characters AND a
+          PIN exist, so an operator who typed a perfectly good reason got a
+          dead button with its cause a full screen away — "I try to retire it,
+          the button is not responding".
           
-          It stays filled between actions. See `act` above for why.
+          Every action now carries its own PIN, beside the thing it
+          authorises. That is one more box to type in and it is the box the
+          operator is already looking at.
         */}
-        <label>
-          Your transaction PIN
-          <input
-            type="password"
-            inputMode="numeric"
-            autoComplete="off"
-            value={pin}
-            onChange={(e) => setPin(e.target.value)}
-          />
-          <span className="hint">
-            Required for every button on this page — each one changes what
-            customers are charged. It is kept until you leave.
-          </span>
-        </label>
-
-        {/*
-          THE ACTION, BESIDE THE FIELD THAT AUTHORISES IT.
-          
-          It used to live only in the Exchange rates panel's header, which on a
-          phone is a scroll away — so an operator typed a PIN and there was
-          nothing to press. "When you enter your PIN there is no button to
-          select" is that, exactly: the button existed, somewhere else, below
-          the fold.
-          
-          Refreshing the rates is the thing this screen is opened to do, and it
-          is the only action that needs no other field filled in, so it belongs
-          where the PIN is. The per-panel buttons stay where they are: those
-          each need their own form completed first.
-        */}
-        <button
-          type="button"
-          disabled={busy || pin === ''}
-          onClick={() => void generate()}
-        >
-          <Icon name="swap" size={16} /> {busy ? 'Generating…' : 'Generate rates'}
-        </button>
-        {pin === '' && (
-          <p className="hint">
-            Enter your transaction PIN above to generate or publish rates.
-          </p>
-        )}
-        {report !== undefined && <p className="hint">{report}</p>}
         {error !== undefined && <p className="error">{error}</p>}
       </div>
 
@@ -237,31 +202,6 @@ export default function Prices() {
       <div className="panel">
         <div className="section-head">
           <h2>Exchange rates</h2>
-          {/*
-            GENERATE THEM. The worker does this daily; this is the button for
-            the afternoon the market moves — and it is what makes typing a rate
-            by hand optional rather than the only way to have one.
-            
-            IT WAS THE ONE CONTROL ON THIS PAGE NOT GATED ON THE PIN, which is
-            the bug that was reported: pressing it with an empty box sent no
-            PIN, the server answered `transaction_pin_required`, and the
-            operator got "Enter your transaction PIN" in red beside a field
-            they had not been told they needed to fill first. Every other
-            action here has had `pin === ''` in its `disabled` since it was
-            written; this one was added later and missed it.
-            
-            It republishes only what changed and never touches a rate a person
-            published — a deliberate price outranks a market one.
-          */}
-          <button
-            type="button"
-            className="small"
-            disabled={busy || pin === ''}
-            title={pin === '' ? 'Enter your transaction PIN above first' : undefined}
-            onClick={() => void generate()}
-          >
-            <Icon name="swap" size={15} /> Generate rates
-          </button>
         </div>
         {/*
           WHY THE BUTTON IS GREY, ON THE PAGE RATHER THAN IN A TOOLTIP.
@@ -289,7 +229,7 @@ export default function Prices() {
           </p>
         )}
         {(rates.data?.length ?? 0) > 0 && (
-          <div className="scroll">
+          <div className="scroll capped">
             <table>
               <thead>
                 <tr>
@@ -341,10 +281,10 @@ export default function Prices() {
         )}
       </div>
 
-      <PublishFx pin={pin} busy={busy} onPublish={act} />
-      <PublishRate pin={pin} busy={busy} onPublish={act} />
+      <PublishFx busy={busy} onPublish={act} />
+      <PublishRate busy={busy} onPublish={act} />
 
-      <PublishFxRate pin={pin} busy={busy} onPublish={act} />
+      <PublishFxRate busy={busy} onPublish={act} />
 
 
       <div className="panel">
@@ -374,7 +314,7 @@ export default function Prices() {
                 <td>{row.published_by ?? <em>at a prompt</em>}</td>
                 <td>
                   {row.retired_at === null ? (
-                    <Retire uuid={row.uuid} kind="fx" pin={pin} busy={busy} onRetire={act} />
+                    <Retire uuid={row.uuid} kind="fx" busy={busy} onRetire={act} />
                   ) : (
                     <span className="badge">retired</span>
                   )}
@@ -418,7 +358,7 @@ export default function Prices() {
                 <td>{row.published_by ?? <em>at a prompt</em>}</td>
                 <td>
                   {row.retired_at === null ? (
-                    <Retire uuid={row.uuid} kind="giftcard" pin={pin} busy={busy} onRetire={act} />
+                    <Retire uuid={row.uuid} kind="giftcard" busy={busy} onRetire={act} />
                   ) : (
                     <span className="badge">retired</span>
                   )}
@@ -433,15 +373,14 @@ export default function Prices() {
 }
 
 function PublishFx({
-  pin,
   busy,
   onPublish,
 }: {
-  pin: string;
   busy: boolean;
   onPublish: (work: () => Promise<unknown>) => Promise<void>;
 }) {
   const admin = useAdmin();
+  const [pin, setPin] = useState('');
   const [base, setBase] = useState('NGN');
   const [quote, setQuote] = useState('USD');
   const [spread, setSpread] = useState('150');
@@ -503,6 +442,25 @@ function PublishFx({
           </span>
         </label>
       </div>
+      {/*
+        THE PIN, BESIDE THE THING IT AUTHORISES — and INLINE rather than in a
+        shared component, because `pin-fields.test.ts` recognises a PIN box
+        structurally (a numeric password field) and a wrapper hides it from
+        that check. The guard is right to be literal: what it is protecting
+        against is a control gated on a PIN with nowhere on screen to type
+        one, and a component that merely promises to render one is exactly
+        how that reappears.
+      */}
+      <label>
+        Transaction PIN
+        <input
+          type="password"
+          inputMode="numeric"
+          autoComplete="off"
+          value={pin}
+          onChange={(e) => setPin(e.target.value)}
+        />
+      </label>
       <button type="submit" disabled={busy || pin === ''}>
         Publish
       </button>
@@ -511,15 +469,14 @@ function PublishFx({
 }
 
 function PublishRate({
-  pin,
   busy,
   onPublish,
 }: {
-  pin: string;
   busy: boolean;
   onPublish: (work: () => Promise<unknown>) => Promise<void>;
 }) {
   const admin = useAdmin();
+  const [pin, setPin] = useState('');
   const [brand, setBrand] = useState('');
   const [country, setCountry] = useState('US');
   const [cardType, setCardType] = useState<'ecode' | 'physical'>('ecode');
@@ -630,6 +587,25 @@ function PublishRate({
           </span>
         </label>
       </div>
+      {/*
+        THE PIN, BESIDE THE THING IT AUTHORISES — and INLINE rather than in a
+        shared component, because `pin-fields.test.ts` recognises a PIN box
+        structurally (a numeric password field) and a wrapper hides it from
+        that check. The guard is right to be literal: what it is protecting
+        against is a control gated on a PIN with nowhere on screen to type
+        one, and a component that merely promises to render one is exactly
+        how that reappears.
+      */}
+      <label>
+        Transaction PIN
+        <input
+          type="password"
+          inputMode="numeric"
+          autoComplete="off"
+          value={pin}
+          onChange={(e) => setPin(e.target.value)}
+        />
+      </label>
       <button type="submit" disabled={busy || pin === ''}>
         Publish
       </button>
@@ -640,36 +616,66 @@ function PublishRate({
 function Retire({
   uuid,
   kind,
-  pin,
   busy,
   onRetire,
 }: {
   uuid: string;
   kind: 'fx' | 'giftcard';
-  pin: string;
   busy: boolean;
   onRetire: (work: () => Promise<unknown>) => Promise<void>;
 }) {
   const admin = useAdmin();
   const [reason, setReason] = useState('');
+  const [pin, setPin] = useState('');
+
+  /*
+   * BOTH FIELDS ARE HERE, AND THAT IS THE FIX.
+   *
+   * This button is disabled until a reason of at least ten characters AND a
+   * PIN exist. The reason was typed here; the PIN lived at the top of the
+   * page, a full screen away and unmentioned — so an operator with a good
+   * reason got a dead button and no way to see why. "I try to retire it, the
+   * button is not responding" is exactly that.
+   *
+   * `price.retire` is in 009's must-say-why list, so the reason is not
+   * negotiable: retiring looks like tidying and its effect is that the flow
+   * refuses every customer until a replacement is published.
+   */
+  const ready = reason.trim().length >= 10 && pin !== '';
 
   return (
-    <span style={{ display: 'flex', gap: 8 }}>
+    <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
       <input
         value={reason}
         onChange={(e) => setReason(e.target.value)}
         placeholder="Why (at least ten characters)"
       />
+      <input
+        type="password"
+        inputMode="numeric"
+        autoComplete="off"
+        value={pin}
+        onChange={(e) => setPin(e.target.value)}
+        placeholder="PIN"
+        style={{ maxWidth: 96 }}
+      />
       <button
         type="button"
         className="ghost small"
-        disabled={busy || pin === '' || reason.trim().length < 10}
+        disabled={busy || !ready}
         onClick={() => {
           void onRetire(() => admin.retirePrice(uuid, kind, reason, pin));
         }}
       >
         Retire
       </button>
+      {/* WHY IT IS GREY, ON THE PAGE. A disabled control whose reason is not
+          written down is a broken control to whoever is looking at it. */}
+      {!ready && (
+        <span className="hint">
+          {reason.trim().length < 10 ? 'Give a reason of ten characters or more' : 'Enter your PIN'}
+        </span>
+      )}
     </span>
   );
 }
@@ -692,15 +698,14 @@ function Retire({
  * works one way and refuses the other with nothing on screen saying so.
  */
 function PublishFxRate({
-  pin,
   busy,
   onPublish,
 }: {
-  pin: string;
   busy: boolean;
   onPublish: (work: () => Promise<unknown>) => Promise<void>;
 }) {
   const admin = useAdmin();
+  const [pin, setPin] = useState('');
   const [base, setBase] = useState('NGN');
   const [quote, setQuote] = useState('GHS');
   const [rate, setRate] = useState('');
@@ -760,6 +765,25 @@ function PublishFxRate({
           As many decimal places as it takes — 0.0078 is a legitimate rate in
           the direction where one unit buys very little.
         </span>
+      </label>
+      {/*
+        THE PIN, BESIDE THE THING IT AUTHORISES — and INLINE rather than in a
+        shared component, because `pin-fields.test.ts` recognises a PIN box
+        structurally (a numeric password field) and a wrapper hides it from
+        that check. The guard is right to be literal: what it is protecting
+        against is a control gated on a PIN with nowhere on screen to type
+        one, and a component that merely promises to render one is exactly
+        how that reappears.
+      */}
+      <label>
+        Transaction PIN
+        <input
+          type="password"
+          inputMode="numeric"
+          autoComplete="off"
+          value={pin}
+          onChange={(e) => setPin(e.target.value)}
+        />
       </label>
       <button type="submit" disabled={busy || pin === '' || rate === ''}>
         {busy ? 'Publishing…' : 'Publish rate'}
