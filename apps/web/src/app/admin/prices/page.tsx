@@ -185,6 +185,131 @@ export default function Prices() {
       </div>
 
       {/*
+        THE ORDER IS THE ORDER SOMEBODY WORKS IN, and it was not.
+
+        A pair is priced in two acts — a spread, then a rate — and the page
+        opened with the RATES TABLE, which is the output of both. So the
+        first thing on the screen was a result and the controls that produce
+        it were below the fold, in an order that matched neither.
+
+        Each publish form now sits directly above the table it writes into,
+        so pressing the button and reading the row are one movement; and the
+        rates table is last because it is the longest and the one an operator
+        reads rather than acts on.
+      */}
+      <PublishFx busy={busy} onPublish={act} />
+
+      <div className="panel">
+        <h2>FX spreads</h2>
+        <p className="lead">
+          Each direction is priced separately: publishing NGN→USD does not publish
+          USD→NGN.
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>Pair</th>
+              <th>Spread</th>
+              <th>Quoted at</th>
+              <th>Minimum</th>
+              <th>Published by</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {prices.data?.fx_policies.map((row) => (
+              <tr key={row.uuid} className={row.retired_at !== null ? 'muted' : undefined}>
+                <td>
+                  {row.base_currency}&rarr;{row.quote_currency}
+                </td>
+                <td>{(row.spread_basis_points / 100).toFixed(2)}%</td>
+                {/*
+                  WHAT A CUSTOMER IS ACTUALLY CHARGED, which is not always the
+                  column to its left.
+                  
+                  When the payout currency has strengthened since this pair's
+                  rate was last published, 062 widens the spread to put back the
+                  margin the stale rate is giving away. That changes a price, so
+                  it is shown: a mechanism that quietly charges more than the
+                  published number is the kind of thing nobody can audit
+                  afterwards. A widened row is also a pair overdue a republish,
+                  which is the action that clears it.
+                */}
+                <td>
+                  {row.retired_at !== null ||
+                  row.effective_basis_points == null ||
+                  row.effective_basis_points === row.spread_basis_points ? (
+                    <span className="hint">as published</span>
+                  ) : (
+                    <span className="badge warn">
+                      {(row.effective_basis_points / 100).toFixed(2)}% — payout currency up{' '}
+                      {((row.adverse_basis_points ?? 0) / 100).toFixed(2)}%
+                    </span>
+                  )}
+                </td>
+                <td>{formatMinor(row.min_base_minor, row.base_currency)}</td>
+                <td>{row.published_by ?? <em>at a prompt</em>}</td>
+                <td>
+                  {row.retired_at === null ? (
+                    <Retire uuid={row.uuid} kind="fx" busy={busy} onRetire={act} />
+                  ) : (
+                    <span className="badge">retired</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <PublishFxRate busy={busy} onPublish={act} />
+
+      <PublishRate busy={busy} onPublish={act} />
+
+      <div className="panel">
+        <h2>Gift card rates</h2>
+        <p className="lead">
+          Rates are banded by face value. Two live bands for one card may not
+          overlap.
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>Card</th>
+              <th>Band</th>
+              <th>Rate</th>
+              <th>Published by</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {prices.data?.rate_cards.map((row) => (
+              <tr key={row.uuid} className={row.retired_at !== null ? 'muted' : undefined}>
+                <td>
+                  {row.brand} {row.country} {row.card_type}
+                </td>
+                <td>
+                  {formatMinor(row.min_face_minor, row.face_currency)} &ndash;{' '}
+                  {formatMinor(row.max_face_minor, row.face_currency)}
+                </td>
+                <td>
+                  {formatMinor(row.payout_rate_minor, row.payout_currency)} per{' '}
+                  {row.face_currency}
+                </td>
+                <td>{row.published_by ?? <em>at a prompt</em>}</td>
+                <td>
+                  {row.retired_at === null ? (
+                    <Retire uuid={row.uuid} kind="giftcard" busy={busy} onRetire={act} />
+                  ) : (
+                    <span className="badge">retired</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {/*
         WHAT A CURRENCY IS WORTH, which nothing could set before.
 
         `fx_spread_policies` — the panel below — publishes a MARGIN, and the
@@ -204,16 +329,41 @@ export default function Prices() {
           <h2>Exchange rates</h2>
         </div>
         {/*
-          WHY THE BUTTON IS GREY, ON THE PAGE RATHER THAN IN A TOOLTIP.
+          GENERATE IS BACK, AND ITS REMOVAL WAS A REGRESSION RATHER THAN A
+          DECISION.
           
-          It is gated on the PIN, correctly — but a disabled control with its
-          reason hidden in a `title` reads as broken, and a tooltip does not
-          exist at all on a touch screen. That is the whole of what was
-          reported as "the button is not clickable and does nothing".
+          This button lived on a shared PIN panel at the top of the page. That
+          panel was removed — correctly, because one field a screen away was
+          authorising five actions and nothing said so at the point of use —
+          and the button went with it. Nothing failed: `generate()` stayed
+          defined, called by nobody, and the only way to refresh a corridor
+          became waiting for the worker.
+          
+          It carries its OWN PIN now, like every other action on this page, and
+          the reason it is grey is written beside it rather than in a `title` —
+          a tooltip does not exist on a touch screen, which is what "the button
+          is not clickable and does nothing" was the first time.
         */}
-        {/* The empty-PIN hint and the report of what a generate DID both live
-            beside the PIN field now, where the action is. Repeating them here
-            would say the same thing twice on one screen. */}
+        <div className="stack">
+          <label htmlFor="fx-refresh-pin">Transaction PIN</label>
+          <input
+            id="fx-refresh-pin"
+            type="password"
+            inputMode="numeric"
+            autoComplete="off"
+            value={pin}
+            onChange={(e) => setPin(e.target.value)}
+            placeholder="••••"
+          />
+          <button type="button" onClick={() => void generate()} disabled={busy || pin === ''}>
+            {busy ? 'Generating…' : 'Generate latest exchange rate'}
+          </button>
+          {pin === '' && <span className="hint">Enter your PIN to refresh from the market</span>}
+          {/* WHAT IT DID, because with no ExchangeRate-API key every base
+              fails, nothing publishes, the table reloads unchanged and the
+              screen would otherwise say nothing at all. */}
+          {report !== undefined && <p className="hint">{report}</p>}
+        </div>
         <p className="lead">
           What we sell a currency for, in the direction stated. A pair with a
           rate here is one we quote ourselves; a pair with none is quoted by
@@ -281,93 +431,6 @@ export default function Prices() {
         )}
       </div>
 
-      <PublishFx busy={busy} onPublish={act} />
-      <PublishRate busy={busy} onPublish={act} />
-
-      <PublishFxRate busy={busy} onPublish={act} />
-
-
-      <div className="panel">
-        <h2>FX spreads</h2>
-        <p className="lead">
-          Each direction is priced separately: publishing NGN→USD does not publish
-          USD→NGN.
-        </p>
-        <table>
-          <thead>
-            <tr>
-              <th>Pair</th>
-              <th>Spread</th>
-              <th>Minimum</th>
-              <th>Published by</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {prices.data?.fx_policies.map((row) => (
-              <tr key={row.uuid} className={row.retired_at !== null ? 'muted' : undefined}>
-                <td>
-                  {row.base_currency}&rarr;{row.quote_currency}
-                </td>
-                <td>{(row.spread_basis_points / 100).toFixed(2)}%</td>
-                <td>{formatMinor(row.min_base_minor, row.base_currency)}</td>
-                <td>{row.published_by ?? <em>at a prompt</em>}</td>
-                <td>
-                  {row.retired_at === null ? (
-                    <Retire uuid={row.uuid} kind="fx" busy={busy} onRetire={act} />
-                  ) : (
-                    <span className="badge">retired</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="panel">
-        <h2>Gift card rates</h2>
-        <p className="lead">
-          Rates are banded by face value. Two live bands for one card may not
-          overlap.
-        </p>
-        <table>
-          <thead>
-            <tr>
-              <th>Card</th>
-              <th>Band</th>
-              <th>Rate</th>
-              <th>Published by</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {prices.data?.rate_cards.map((row) => (
-              <tr key={row.uuid} className={row.retired_at !== null ? 'muted' : undefined}>
-                <td>
-                  {row.brand} {row.country} {row.card_type}
-                </td>
-                <td>
-                  {formatMinor(row.min_face_minor, row.face_currency)} &ndash;{' '}
-                  {formatMinor(row.max_face_minor, row.face_currency)}
-                </td>
-                <td>
-                  {formatMinor(row.payout_rate_minor, row.payout_currency)} per{' '}
-                  {row.face_currency}
-                </td>
-                <td>{row.published_by ?? <em>at a prompt</em>}</td>
-                <td>
-                  {row.retired_at === null ? (
-                    <Retire uuid={row.uuid} kind="giftcard" busy={busy} onRetire={act} />
-                  ) : (
-                    <span className="badge">retired</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
     </>
   );
 }

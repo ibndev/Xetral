@@ -981,10 +981,25 @@ export class AdminController {
     if (!parsed.success) throw invalid(parsed.error.issues);
 
     const actor = claims(request).sub;
+    /*
+     * READ BEFORE THE WRITE, so the entry can say OLD → NEW.
+     *
+     * It recorded only the new figure, which answers "what is it now" — a
+     * question the price tables already answer. What an audit is FOR is the
+     * other one: what did this person change it FROM. Reconstructing that
+     * afterwards means reading an append-only table and inferring which row
+     * this replaced, which is exactly the work a log exists to save.
+     */
+    const before = await this.pricing.previousFxSpread(
+      parsed.data.base_currency,
+      parsed.data.quote_currency,
+    );
     const published = await this.pricing.publishFxSpread(actor, parsed.data);
 
     const ip = ipOf(request);
     await this.audit.record({
+      // WHO comes from the session's own claims and can never be a field a
+      // caller sends. A free-text actor is a signature anybody can forge.
       actorId: actor,
       action: 'price.publish',
       subjectType: 'price',
@@ -992,7 +1007,13 @@ export class AdminController {
       detail: {
         kind: 'fx_spread',
         pair: `${parsed.data.base_currency}/${parsed.data.quote_currency}`,
-        spread_basis_points: parsed.data.spread_basis_points,
+        // NULL means this is the first price for the pair, which is a real
+        // answer and not a gap.
+        from: before,
+        to: {
+          spread_basis_points: parsed.data.spread_basis_points,
+          min_base_minor: parsed.data.min_base_minor,
+        },
       },
       ...(ip === undefined ? {} : { ip }),
     });
@@ -1018,6 +1039,10 @@ export class AdminController {
     if (!parsed.success) throw invalid(parsed.error.issues);
 
     const actor = claims(request).sub;
+    const before = await this.pricing.previousFxRate(
+      parsed.data.base_currency,
+      parsed.data.quote_currency,
+    );
     const published = await this.pricing.publishFxRate(actor, parsed.data);
 
     const ip = ipOf(request);
@@ -1029,9 +1054,10 @@ export class AdminController {
       detail: {
         kind: 'fx_rate',
         pair: `${parsed.data.base_currency}/${parsed.data.quote_currency}`,
+        from: before,
         // The typed figure rather than the ratio: it is what an operator can
         // check a log line against.
-        quote_per_base: parsed.data.quote_per_base,
+        to: { quote_per_base: parsed.data.quote_per_base },
       },
       ...(ip === undefined ? {} : { ip }),
     });
@@ -1059,8 +1085,44 @@ export class AdminController {
    */
   @Post('prices/fx-refresh')
   @HttpCode(200)
-  async refreshFxRates(): Promise<RateSyncReport> {
-    return this.rateFeed.sync();
+  async refreshFxRates(@Req() request: AuthenticatedRequest): Promise<RateSyncReport> {
+    const actor = claims(request).sub;
+    const report = await this.rateFeed.sync();
+
+    /*
+     * AND IT IS AUDITED, which it was not.
+     *
+     * This is the one price action that can reprice EVERY corridor at once,
+     * and it wrote nothing at all — so the audit log recorded the operator
+     * who changed one pair by hand and nothing about the operator who changed
+     * fifty-six with a button. The counts are what the sweep already knows;
+     * the per-pair before and after is in `fx_published_rates`, which is
+     * append-only and keeps both rows.
+     *
+     * Recorded AFTER the sweep so the figures are what actually happened
+     * rather than what was attempted, and best-effort: an audit write must
+     * not fail a sweep that has already published.
+     */
+    const ip = ipOf(request);
+    try {
+      await this.audit.record({
+        actorId: actor,
+        action: 'price.publish',
+        subjectType: 'price',
+        subjectId: 'fx-rate-refresh',
+        detail: {
+          kind: 'fx_rate_refresh',
+          published: report.published,
+          unchanged: report.unchanged,
+          operator_held: report.operatorHeld,
+          failed: report.failed,
+        },
+        ...(ip === undefined ? {} : { ip }),
+      });
+    } catch {
+      // Deliberately swallowed. The prices are already published.
+    }
+    return report;
   }
 
   /** Publishes a gift card rate for one brand, country, type and band. */
@@ -1074,6 +1136,7 @@ export class AdminController {
     if (!parsed.success) throw invalid(parsed.error.issues);
 
     const actor = claims(request).sub;
+    const before = await this.pricing.previousRateCard(parsed.data);
     const published = await this.pricing.publishRateCard(actor, parsed.data);
 
     const ip = ipOf(request);
@@ -1085,7 +1148,12 @@ export class AdminController {
       detail: {
         kind: 'giftcard_rate',
         card: `${parsed.data.brand} ${parsed.data.country} ${parsed.data.card_type}`,
-        payout_rate_minor: parsed.data.payout_rate_minor,
+        from: before,
+        to: {
+          payout_rate_minor: parsed.data.payout_rate_minor,
+          min_face_minor: parsed.data.min_face_minor,
+          max_face_minor: parsed.data.max_face_minor,
+        },
       },
       ...(ip === undefined ? {} : { ip }),
     });

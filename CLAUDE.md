@@ -804,6 +804,125 @@ Schema: `packages/ledger/sql/059_provider_routing.sql`. Router in
   in the header — and this repo has twice shipped a table of plausible
   constants that passed tests written from the same assumptions. Run it first.
 
+### A spread that widens when the payout currency strengthens — non-obvious rules
+
+Schema: `packages/ledger/sql/062_spread_pressure.sql`. Arithmetic in
+`packages/shared/src/money/spread.ts`, applied in `apps/api/src/fx/fx.service.ts`.
+
+- **A PUBLISHED RATE AND A PUBLISHED SPREAD BOTH STAND STILL.** Between one
+  publish and the next the market moves, and every quote struck in that gap
+  uses the old number. In one direction that costs nothing; in the other it
+  comes out of margin on every transaction until a person notices, and
+  nothing was watching.
+- **THE EXPOSURE IS ALWAYS ON THE CURRENCY BEING PAID OUT, which is why this
+  cannot be a rule about any one currency.** On USD→NGN we hand over naira, so
+  naira getting more expensive costs us; on NGN→USD we hand over dollars, so
+  DOLLARS getting more expensive costs us — opposite statements about the
+  naira.
+- **STATED AS THE PUBLISHED RATE THEY COLLAPSE INTO ONE TEST.** The payout
+  currency strengthening means fewer of it per unit of the other, so
+  `quote_per_base` FALLS. Both cases above are that same fall, and no part of
+  `widenedSpread()` needs to know which currencies it is looking at.
+- **IT WIDENS AND NEVER NARROWS.** When the payout currency weakens the base
+  spread already covers us and the quote is better than it needed to be;
+  narrowing automatically would be code deciding to charge less than the price
+  an operator published.
+- **TWO CEILINGS, AND THE LOWER WINS** — double the base, so a thinly priced
+  corridor stays comparatively thin, and a hard ceiling in basis points so a
+  spike cannot produce a quote nobody would accept. Double zero is zero, so it
+  cannot invent a margin on a pair priced at cost.
+- **THE BASELINE IS AN OBSERVATION TABLE, NOT THE PUBLISHED RATE READ TWICE.**
+  057 keeps the feed's rates in `fx_published_rates` itself, so where the feed
+  is running the live rate IS current and there is no gap. The gap exists
+  exactly where the feed did NOT republish — an operator-held rate, or a base
+  it could not fetch — and there the market's number is recorded nowhere else.
+  `fx_rate_observations` is written on EVERY sync, before either `continue`.
+- **It is the one table here deliberately NOT append-only.** It is not a price
+  and nothing quotes from it: it is the latest reading of an instrument.
+- **A MISSING OBSERVATION IS NOT A MOVE.** Reading it as one would widen every
+  corridor on the day the feed's key expires — 057's silent failure. "Never
+  observed" is told apart from "observed, unmoved" by the rate and the age
+  being NULL, not by the basis points, which are zero in both.
+- **THE VIEW REPEATS THE ARITHMETIC AND THAT COST IS DELIBERATE.** A view
+  cannot call a TypeScript function, and the alternative — a screen asking the
+  application what it would quote, pair by pair — is a page making fifty-six
+  calls to render a table. `062_spread_pressure.test.sql` asserts the same
+  numbers `spread.test.ts` does, so the copy cannot drift silently.
+- **WHAT A CUSTOMER IS CHARGED COMES FROM THE SHARED FUNCTION**, never the
+  view's copy.
+- **IT SHIPS OFF, and the FX spreads table shows every widened corridor.**
+  Turning it on changes what customers are quoted — a pricing decision, the
+  argument 032 makes about the transfer levy — and a mechanism that quietly
+  charges more than the published number is one nobody can audit afterwards.
+
+### The step-up on a staff action — non-obvious rules
+
+`packages/identity/src/policy.ts`, enforced in `apps/api/src/auth/auth.guard.ts`.
+
+- **A PRICE PUBLISH TOOK THREE FACTORS: a password, a rotating code and a
+  PIN.** Stacking them on a button an operator presses several times in a
+  sitting is the shape that ends in a shared authenticator on a desk — the
+  outcome 014 already records about demanding a fresh code per action.
+- **`stepUp: 'pin'` DROPS THE THIRD, NOT THE SECOND.** Enrolment in a second
+  factor is still checked on every staff route including the reads, so such a
+  route is reached only by an already-two-factor session; what goes is the
+  ten-minute elevation on top of a PIN verified on that very request.
+- **IT DEFAULTS TO THE STRICT ANSWER, and that direction is the whole safety
+  argument.** An omitted `stepUp` keeps both; losing one has to be written
+  down. Reading an absent field the other way would make a forgotten
+  declaration quietly weaker — 017's rule that forgetting must never be the
+  permissive direction.
+- **A single step-up on a route that takes NO PIN is refused at declaration.**
+  That combination asks for nothing beyond the session.
+- **`singleFactorRouteAudit()` lists every route that took it**, the way
+  `publicRouteAudit()` lists every public one: a surface where the factors were
+  deliberately reduced has to be enumerable, or nobody reviews it.
+
+### Linking a mobile money wallet — non-obvious rules
+
+Schema: `packages/ledger/sql/063_momo_accounts.sql`. Service in
+`apps/api/src/funding/momo.service.ts`, on the Add Money screen of both apps.
+
+- **ADD MONEY IN ACCRA ASKED FOR AN AMOUNT**, which starts a one-off charge
+  and leaves nothing behind — so the Send screen asked for a wallet number
+  again every time and nothing recorded which wallet belongs to this customer.
+  A linked number both funds and receives, which is how a mobile money account
+  works everywhere it is used.
+- **AND THE ACTIVATE BUTTON COULD NEVER HAVE WORKED THERE.** Flutterwave
+  issues dedicated account numbers in NGN ONLY, so every press answered "we
+  could not open your account number just now, try again shortly" about
+  something permanent. `countries.funding_methods` has said `{mobile_money}`
+  for GH and KE since 051 — the platform's own data already knew.
+  `account_not_supported_here` is its own code for that reason: the generic
+  one invites somebody to wait for a product that does not exist.
+- **VERIFICATION IS A STATE, NOT A CALL.** There is no way to ask who owns a
+  wallet — 043 records `name_unavailable` as its own refusal — and echoing
+  back the number the customer typed is a confirmation screen that confirms
+  nothing. So a number is CLAIMED when linked and VERIFIED when money actually
+  arrives from it, which is a fact rather than an assertion.
+- **CLAIMED MAY FUND AND DELIBERATELY MAY NOT RECEIVE.** Money arriving from
+  an unverified wallet costs nobody anything; money leaving to one is
+  unrecoverable.
+- **`noteFundedFrom` is the only path to verified**, called from a settlement
+  rather than an endpoint — a request that could mark itself verified would
+  verify nothing.
+- **THE NUMBER IS NORMALISED SERVER-SIDE and the destination is immutable.**
+  E.164 by CHECK, from the country's own dial code, because a unique index on
+  text cannot see that three spellings are one wallet; and an UPDATE moving it
+  would point authorised money at a wallet nobody named — 043's rule about a
+  bank destination.
+- **VERIFICATION IS ONE WAY AND REMOVAL IS FINAL, but a REMOVED row keeps its
+  `verified_at`.** The first CHECK was a biconditional and refused to unlink a
+  verified number — the schema erasing the fact that money once arrived in
+  order to record that the customer unlinked it. Both are true and both are
+  history.
+- **"Already linked" is ONE ANSWER TO TWO QUESTIONS** — this customer has a
+  wallet, or somebody else claimed that number. Telling them apart would make
+  the endpoint a way to learn which numbers are registered here.
+- **`MOMO_NETWORKS` in `@xetral/client` is bound to the adapter's list by
+  test.** A code offered here and refused there is a picker entry that cannot
+  be used; one accepted there and missing here is a wallet nobody can link.
+
 ### Which rail opens an account — non-obvious rules
 
 Schema: `packages/ledger/sql/061_country_and_route_repair.sql`. Service in
@@ -2660,6 +2779,8 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/058_payment_links.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/059_provider_routing.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/060_usd_collection.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/061_country_and_route_repair.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/062_spread_pressure.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/063_momo_accounts.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -2719,6 +2840,8 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/057_reference_rates.tes
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/058_payment_links.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/059_provider_routing.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/061_country_and_route_repair.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/062_spread_pressure.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/063_momo_accounts.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

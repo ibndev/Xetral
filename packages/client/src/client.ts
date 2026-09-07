@@ -198,6 +198,25 @@ export interface Transaction {
   readonly occurred_at: string;
 }
 
+/**
+ * A LINKED MOBILE MONEY WALLET.
+ *
+ * `status` is 'claimed' or 'verified'. There is no way to ask a provider who
+ * owns a wallet — 043 records `name_unavailable` as its own refusal — so a
+ * number is claimed when it is linked and becomes verified when money actually
+ * arrives from it. Until then it may fund and deliberately may not receive: a
+ * deposit from an unverified wallet costs nobody anything, and a payout to one
+ * is unrecoverable.
+ */
+export interface MomoAccount {
+  readonly uuid: string;
+  readonly network: string;
+  readonly msisdn: string;
+  readonly currency: string;
+  readonly status: string;
+  readonly verified_at: string | null;
+}
+
 export interface VirtualAccount {
   readonly account_number: string;
   readonly bank_name: string;
@@ -708,6 +727,52 @@ export class XetralClient {
   async existingFundingAccount(): Promise<VirtualAccount | null> {
     const body = await this.#get<{ account: VirtualAccount | null }>('/v1/funding/account');
     return body.account;
+  }
+
+  /* ------------------------ mobile money ------------------------ */
+
+  /**
+   * THE WALLET A CUSTOMER LINKS, in Ghana and Kenya.
+   *
+   * It both funds and receives, which is what makes it a link rather than a
+   * one-off charge: the Add Money screen there used to ask for an AMOUNT and
+   * leave nothing behind, so the Send screen asked for a wallet number again
+   * every time.
+   *
+   * `null` is the ordinary answer for a customer who has not linked one, and
+   * for every Nigerian — that rail issues a dedicated account number instead.
+   */
+  async linkedMomo(): Promise<MomoAccount | null> {
+    const body = await this.#get<{ momo: MomoAccount | null }>('/v1/funding/momo');
+    return body.momo;
+  }
+
+  /**
+   * Links one. Takes the transaction PIN, because this is the destination a
+   * payout later goes to — 043's argument about an immutable bank destination.
+   *
+   * The NUMBER is sent as the customer typed it, nationally. It is normalised
+   * to E.164 server-side from their own country's dialling code, so one wallet
+   * has one spelling wherever it is written down — the rule 040 states, and
+   * the reason the client does not build the string itself.
+   */
+  async linkMomo(input: {
+    readonly network: string;
+    readonly number: string;
+    readonly transactionPin: string;
+  }): Promise<MomoAccount> {
+    return this.#post('/v1/funding/momo', {
+      network: input.network,
+      number: input.number,
+      transaction_pin: input.transactionPin,
+    });
+  }
+
+  /** Unlinks it. Final: linking again is a new record, never a restore. */
+  async unlinkMomo(transactionPin: string): Promise<void> {
+    await this.#request<void>('DELETE', '/v1/funding/momo', {
+      transaction_pin: transactionPin,
+    });
   }
 
   /* -------------------------- purchases ------------------------- */

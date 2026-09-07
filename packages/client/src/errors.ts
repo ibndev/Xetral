@@ -189,6 +189,9 @@ const API_ERROR_CODES = [
   // integration, a preferred bank it is not approved for. An operator fixes
   // this, and the provider's own sentence is in the API log.
   'account_issue_refused',
+  'account_not_supported_here',
+  'momo_already_linked',
+  'momo_not_supported_here',
   'account_issue_unavailable',
   'deposit_not_found',
   'funding_provider_not_configured',

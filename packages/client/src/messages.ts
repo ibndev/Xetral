@@ -179,6 +179,27 @@ function sentenceFor(error: ApiError): string {
     case 'account_issue_refused':
     case 'account_issue_unavailable':
       return 'We could not open your account number just now. We are on it — try again shortly.';
+    /*
+     * NOT "TRY AGAIN SHORTLY", because it will never work.
+     *
+     * The rail serving this country does not issue dedicated account numbers
+     * in its currency at all — Flutterwave's are an NGN product, and in Ghana
+     * and Kenya money arrives by a mobile money charge instead. Telling
+     * somebody to wait for something permanent is the one answer that is
+     * certainly wrong, and it is what the generic sentence above was doing.
+     */
+    case 'account_not_supported_here':
+      return 'Account numbers are not available in your country. Add money with mobile money instead.';
+    /*
+     * ONE SENTENCE FOR TWO CASES, deliberately: either this customer already
+     * has a live wallet, or somebody else has claimed that number. Telling
+     * them apart would make this a way to learn which numbers are registered
+     * here, one request at a time — 043's rule about a bank account lookup.
+     */
+    case 'momo_already_linked':
+      return 'That number could not be linked. Remove the wallet on your account first, then try again.';
+    case 'momo_not_supported_here':
+      return 'Mobile money is not available in your country yet.';
     case 'funding_provider_not_configured':
       return 'Adding money is not available yet.';
     /* ------------------------------------------------------------------ *

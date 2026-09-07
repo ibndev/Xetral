@@ -274,16 +274,51 @@ export class FundingService {
         this.#logger.error(
           `${rail} REFUSED to open a ${currency} account: ${error.message} ` +
             `(provider code ${error.providerCode ?? 'none'}). This is a refusal, not an ` +
-            `outage — the credential is reaching them. Check that dedicated accounts are ` +
-            `enabled on the integration and that paystack_preferred_bank names a bank it ` +
-            `is approved for.`,
+            `outage — the credential is reaching them.` +
+            /*
+             * THE ADVICE ONLY WHERE IT APPLIES. It named `paystack_preferred_bank`
+             * on every refusal, including the one that means this rail has no
+             * such product in this currency at all — sending an operator to
+             * check a setting that has nothing to do with it, which is the same
+             * fault as the log line that named the wrong provider.
+             */
+            (error.providerCode === 'account_not_supported_here'
+              ? ''
+              : ' Check that dedicated accounts are enabled on the integration and that ' +
+                'paystack_preferred_bank names a bank it is approved for.'),
         );
         // `kyc_required` is a real answer a client already handles — Bitnob
         // returns it for an unverified customer — so it is passed through
         // rather than flattened into the generic code.
-        throw new UnprocessableEntityException({
-          error: error.providerCode === 'kyc_required' ? 'kyc_required' : 'account_issue_refused',
-        });
+        /*
+         * TWO PROVIDER CODES ARE PASSED THROUGH rather than flattened, and
+         * both for the same reason: they are PERMANENT facts a customer's app
+         * can turn into a true sentence, where the generic code invites
+         * somebody to try again shortly.
+         *
+         * WRITTEN AS THREE THROWS RATHER THAN A NESTED TERNARY, deliberately.
+         * `error-codes.test.ts` scans this source for the codes the API can
+         * emit, and its own header records that a code chosen by a ternary is
+         * invisible to it — two once reached customers with no client-side
+         * name while the scanner reported full coverage. A second level of
+         * nesting is the same trap one turn deeper, so the literals stay
+         * literal.
+         */
+        if (error.providerCode === 'kyc_required') {
+          // Bitnob's answer for a customer it has not verified a BVN for.
+          throw new UnprocessableEntityException({ error: 'kyc_required' });
+        }
+        if (error.providerCode === 'account_not_supported_here') {
+          /*
+           * The rail serving this currency does not issue dedicated account
+           * numbers in it AT ALL — the Ghana and Kenya case. Flutterwave's
+           * virtual accounts are an NGN product, and
+           * `countries.funding_methods` already records that money arrives
+           * there by a mobile money charge instead.
+           */
+          throw new UnprocessableEntityException({ error: 'account_not_supported_here' });
+        }
+        throw new UnprocessableEntityException({ error: 'account_issue_refused' });
       }
       if (error instanceof ProviderContractError) {
         this.#logger.error(

@@ -308,20 +308,20 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // work is the one who needs to know Bitnob has been timing out.
       .staff('GET', '/v1/admin/providers', { pin: false, role: 'support' })
       .staff('GET', '/v1/admin/prices', { pin: false, role: 'finance' })
-      .staff('POST', '/v1/admin/prices/fx', { pin: true, role: 'finance' })
+      .staff('POST', '/v1/admin/prices/fx', { pin: true, role: 'finance', stepUp: 'pin' })
       // THE RATE ITSELF, which nothing could set before — `prices/fx` above
       // publishes a MARGIN. Same role and the same PIN: publishing a rate is
       // deciding what a customer is quoted, and where no provider quotes the
       // pair it is also deciding that we are the counterparty.
-      .staff('POST', '/v1/admin/prices/fx-rate', { pin: true, role: 'finance' })
+      .staff('POST', '/v1/admin/prices/fx-rate', { pin: true, role: 'finance', stepUp: 'pin' })
       .staff('GET', '/v1/admin/prices/fx-rates', { pin: false, role: 'finance' })
       // FETCH THEM NOW, rather than waiting for the worker's next pass. Same
       // role and the same PIN as publishing one by hand, because that is what
       // it does: every corridor the feed answers for is repriced, and what a
       // customer is quoted changes on the next request.
-      .staff('POST', '/v1/admin/prices/fx-refresh', { pin: true, role: 'finance' })
-      .staff('POST', '/v1/admin/prices/giftcard', { pin: true, role: 'finance' })
-      .staff('POST', '/v1/admin/prices/:id/retire', { pin: true, role: 'finance' })
+      .staff('POST', '/v1/admin/prices/fx-refresh', { pin: true, role: 'finance', stepUp: 'pin' })
+      .staff('POST', '/v1/admin/prices/giftcard', { pin: true, role: 'finance', stepUp: 'pin' })
+      .staff('POST', '/v1/admin/prices/:id/retire', { pin: true, role: 'finance', stepUp: 'pin' })
       .staff('GET', '/v1/admin/stuck', { pin: false, role: 'support' })
       // `admin`, not `support`: it names every flow that is switched off and
       // every credential that is absent, which is a map of where this
@@ -555,6 +555,19 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // Reading whether one exists, which is a different question from
       // issuing one — see the controller.
       .authenticated('GET', '/v1/funding/account', { pin: false })
+      /*
+       * THE MOBILE MONEY WALLET A CUSTOMER LINKS, in Ghana and Kenya.
+       *
+       * Reading costs nothing. LINKING TAKES A PIN, and unlinking does too:
+       * this is the destination a payout later goes to, and 043's argument
+       * about an immutable bank destination applies with the same force — a
+       * stolen session that could point a wallet somewhere new would be
+       * pointing authorised money at a stranger. A lookup is free; naming
+       * where money may leave to is not.
+       */
+      .authenticated('GET', '/v1/funding/momo', { pin: false })
+      .authenticated('POST', '/v1/funding/momo', { pin: true })
+      .authenticated('DELETE', '/v1/funding/momo', { pin: true })
       /*
        * TOPPING UP THROUGH THE HOSTED CHECKOUT. No PIN: a transaction PIN
        * authorises money LEAVING an account, and this brings money in — the

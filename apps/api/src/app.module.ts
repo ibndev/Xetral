@@ -75,6 +75,7 @@ import {
   FundingController,
 } from './funding/funding.controller.js';
 import { FundingService } from './funding/funding.service.js';
+import { MomoService } from './funding/momo.service.js';
 import { DepositWebhookService } from './funding/deposit-webhook.service.js';
 import { DepositReconciliationService } from './funding/deposit-reconciliation.service.js';
 import { BitnobCryptoAdapter, BitnobFundingAdapter, BitnobFxAdapter } from '@xetral/providers';
@@ -1356,6 +1357,7 @@ export class AppModule {
         AdminService,
         KycService,
         FundingService,
+        MomoService,
         DepositWebhookService,
         PaystackWebhookService,
         FlutterwaveWebhookService,

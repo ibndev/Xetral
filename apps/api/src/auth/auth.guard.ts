@@ -127,11 +127,22 @@ export class AuthGuard implements CanActivate {
       // minutes. Same reasoning that reads roles fresh per request.
       await this.totp.assertEnrolled(claims.sub);
 
-      // And a FRESH CODE on anything that acts. `requiresPin` already marks
-      // exactly those routes — approving a payout, changing a fee, granting a
-      // role — so the two travel together rather than needing a second flag
-      // somebody could forget to set.
-      if (decision.requiresPin) {
+      /*
+       * And a FRESH CODE on anything that acts. `requiresPin` marks exactly
+       * those routes — approving a payout, changing a fee, granting a role —
+       * so the two travel together rather than needing a second flag somebody
+       * could forget to set.
+       *
+       * `requiresElevation` is the ONE deliberate exception, and it defaults
+       * to true: a route only loses the code by saying `stepUp: 'pin'` out
+       * loud, and `singleFactorRouteAudit()` lists every one that has. What
+       * such a route still costs a caller is a session that reached a staff
+       * path at all — which means a confirmed second factor, checked
+       * immediately above — plus a PIN verified on this request. What it drops
+       * is the THIRD factor on a button an operator presses repeatedly, which
+       * is the shape that ends in a shared authenticator on a desk.
+       */
+      if (decision.requiresPin && decision.requiresElevation) {
         await this.totp.assertElevated(claims.sub, claims.sid, optionalTotpFrom(request.body));
       }
     }

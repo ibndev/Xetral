@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Inject,
@@ -16,18 +17,87 @@ import { DepositWebhookService } from './deposit-webhook.service.js';
 import { PaystackWebhookService } from './paystack-webhook.service.js';
 import { FlutterwaveWebhookService } from './flutterwave-webhook.service.js';
 import { PaymentLinkService } from '../pay/payment-link.service.js';
+import { MomoService } from './momo.service.js';
+import type { MomoAccountView } from './momo.service.js';
 import { z } from 'zod';
 
 /** MAJOR units as a decimal STRING, parsed once by `fromMajor` — the rule
  *  every money field on this platform follows. */
 const topUpSchema = z.object({ amount: z.string().trim().min(1).max(32) }).strict();
 
+/*
+ * `.strict()`, so a caller-supplied currency or country is REFUSED rather than
+ * ignored — both are read from the customer's own country row, and anything a
+ * client can send a stolen session can send. 043's rule about a
+ * caller-supplied beneficiary name, applied to a wallet.
+ *
+ * The PIN travels in the body because `AuthGuard` reads it from there; it is
+ * not part of what this endpoint does with the number.
+ */
+const linkMomoSchema = z
+  .object({
+    network: z.string().trim().min(2).max(10),
+    number: z.string().trim().min(6).max(20),
+    transaction_pin: z.string().optional(),
+  })
+  .strict();
+
 @Controller('v1/funding')
 export class FundingController {
   constructor(
     @Inject(FundingService) private readonly funding: FundingService,
     @Inject(PaymentLinkService) private readonly links: PaymentLinkService,
+    @Inject(MomoService) private readonly momo: MomoService,
   ) {}
+
+  /**
+   * THE LINKED MOBILE MONEY WALLET, in Ghana and Kenya.
+   *
+   * `{ momo: null }` rather than a 404, for the reason the account read
+   * above gives: not having one is the resting state of every new customer,
+   * and a client that has to catch an error to render its ordinary case will
+   * eventually catch a real one with it.
+   */
+  @Get('momo')
+  async linkedMomo(
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ momo: MomoAccountView | null }> {
+    return { momo: (await this.momo.linked(claimsOf(request).sub)) ?? null };
+  }
+
+  /**
+   * Links one. TAKES A PIN — see the policy for why.
+   *
+   * It does NOT verify who owns the wallet, and cannot: 043 records that a
+   * mobile money number has no name enquiry on any of these rails. The link
+   * becomes verified when money actually arrives from it, which is a fact
+   * rather than an assertion.
+   */
+  @Post('momo')
+  @HttpCode(201)
+  async linkMomo(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: unknown,
+  ): Promise<MomoAccountView> {
+    const parsed = linkMomoSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException({
+        error: 'invalid_request',
+        fields: parsed.error.issues.map((i) => i.path.join('.')),
+      });
+    }
+    return this.momo.link(claimsOf(request).sub, {
+      network: parsed.data.network,
+      number: parsed.data.number,
+    });
+  }
+
+  /** Unlinks it. Final — linking again is a new row, never a restore. */
+  @Delete('momo')
+  @HttpCode(204)
+  async unlinkMomo(@Req() request: AuthenticatedRequest): Promise<void> {
+    await this.momo.unlink(claimsOf(request).sub);
+  }
 
   /**
    * The customer's dedicated account number.

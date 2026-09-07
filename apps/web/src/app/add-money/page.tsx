@@ -2,10 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import { formatAmount, nationalPhone, paymentLinkFor } from '@xetral/client';
-import type { Deposit } from '@xetral/client';
+import type { Deposit, MomoAccount, XetralClient, XetralCountry } from '@xetral/client';
+import { MOMO_NETWORKS } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { FormError } from '@/ui/form-error';
 import { Icon } from '@/ui/icon';
+import { Select } from '@/ui/select';
 import { useLoad, useSubmit, useXetral } from '@/lib/hooks';
 
 /**
@@ -83,6 +85,13 @@ export default function AddMoney() {
    * where a hidden button is a silence nobody can.
    */
   const usesMobileMoney = funding.includes('mobile_money');
+  /*
+   * WHERE AN ACCOUNT NUMBER IS ACTUALLY A PRODUCT. Falls back to TRUE while
+   * the country list loads and on an API predating 051 — Nigeria is the
+   * overwhelming majority and its rail works, so a moment of showing the
+   * button is better than a moment of hiding the only way in.
+   */
+  const usesVirtualAccount = countries.data === undefined || funding.includes('virtual_account');
 
   const has = account.data != null;
 
@@ -93,7 +102,13 @@ export default function AddMoney() {
    * not where they go when they need to be paid.
    */
   const profile = useLoad(() => client.profile(), [client]);
-  const [topUp, setTopUp] = useState('');
+  /*
+   * THE LINKED WALLET, loaded on every visit because it is what the panel
+   * below renders — a linked number or the form to link one. Its own load
+   * rather than a field on the account read: 063 is a later migration and a
+   * deployment without it must show the form rather than fail the page.
+   */
+  const momo = useLoad(() => client.linkedMomo(), [client]);
   const [copiedPhone, setCopiedPhone] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
 
@@ -184,7 +199,7 @@ export default function AddMoney() {
           a verified BVN. That requirement now lives in its adapter, and the
           default rail does not have it.
         */}
-        {!account.loading && !has && (
+        {!account.loading && !has && usesVirtualAccount && (
           /*
             EACH PIECE IN ITS OWN ROW, WITH ROOM AROUND IT.
 
@@ -195,6 +210,25 @@ export default function AddMoney() {
             button, then the ceiling — so the button is a deliberate act with
             space either side rather than the middle of a sentence.
           */
+          /*
+           * ACTIVATE IS OFFERED ONLY WHERE AN ACCOUNT NUMBER EXISTS, which is
+           * a correction of the previous reasoning rather than a restoration
+           * of the old gate.
+           *
+           * It was gated on `virtual_account` and then deliberately ungated,
+           * on the argument that a hidden button is a silence nobody can act
+           * on while a provider refusal is a sentence an operator can. That
+           * was right about refusals and wrong about this one: Flutterwave
+           * issues dedicated numbers in NGN ONLY, so in Accra and Nairobi the
+           * button could never succeed — and it answered "we could not open
+           * your account number just now, try again shortly" about something
+           * permanent. `funding_methods` has recorded which countries have
+           * this product since 051.
+           *
+           * The refusal is still relayed where it can happen: a country that
+           * DOES issue and a provider that refuses gets
+           * `account_issue_refused` with its own reason, unchanged.
+           */
           <div className="activate">
             {/* NOT "your naira account". The account this button opens is
                 the one for the customer's OWN country, and calling it a naira
@@ -247,45 +281,14 @@ export default function AddMoney() {
           verify and do not need.
         */}
         {!account.loading && usesMobileMoney && (
-          <div className="activate">
-            <p className="activate-lead">
-              Top up from mobile money{here === undefined ? '' : ` in ${here.name}`}
-            </p>
-
-            <div className="field">
-              <label htmlFor="topup">Amount ({here?.currency ?? ''})</label>
-              <input
-                id="topup"
-                // `text` with a decimal keypad, not `number`: money is a
-                // string on this platform from end to end.
-                type="text"
-                inputMode="decimal"
-                placeholder="0.00"
-                value={topUp}
-                onChange={(e) => setTopUp(e.target.value)}
-              />
-            </div>
-
-            <div>
-              <button
-                type="button"
-                disabled={busy || topUp.trim() === ''}
-                onClick={() =>
-                  void run(async () => {
-                    const { authorization_url } = await client.topUp(topUp.trim());
-                    // Paystack's own page. It renders mobile money, bank and
-                    // card for this customer's country, which is why no
-                    // payment detail passes through here.
-                    window.location.href = authorization_url;
-                    return undefined;
-                  })
-                }
-              >
-                {busy ? 'Opening…' : 'Continue'} <Icon name="arrowRight" size={18} />
-              </button>
-            </div>
-
-          </div>
+          <LinkMomo
+            country={here}
+            linked={momo.data ?? null}
+            busy={busy}
+            onDone={() => momo.reload()}
+            run={run}
+            client={client}
+          />
         )}
 
         {/* Anything that is NOT the verification gate. A provider outage or a
@@ -387,5 +390,172 @@ export default function AddMoney() {
         </div>
       )}
     </Shell>
+  );
+}
+
+/**
+ * LINKING A MOBILE MONEY WALLET, in Ghana and Kenya.
+ *
+ * WHAT THIS REPLACED. The panel here asked for an AMOUNT — "Top up from mobile
+ * money in Ghana / Amount (GHS)" — which starts a one-off charge and leaves
+ * nothing behind. So the Send screen asked for a wallet number again every
+ * time, and nothing on the account recorded which wallet belongs to this
+ * customer at all. A linked number both funds and receives, which is how a
+ * mobile money account works everywhere it is used.
+ *
+ * IT DOES NOT CLAIM TO VERIFY THE HOLDER, and says so. There is no name
+ * enquiry on this rail — 043 records `name_unavailable` as its own refusal —
+ * so the number is linked now and confirmed by the first payment that arrives
+ * from it. Printing "verified" off nothing would be a confirmation screen that
+ * confirms nothing, which is the one thing this codebase repeatedly refuses to
+ * build.
+ */
+function LinkMomo({
+  country,
+  linked,
+  busy,
+  onDone,
+  run,
+  client,
+}: {
+  readonly country: XetralCountry | undefined;
+  readonly linked: MomoAccount | null;
+  readonly busy: boolean;
+  readonly onDone: () => void;
+  readonly run: (work: () => Promise<string | undefined>) => void;
+  readonly client: XetralClient;
+}) {
+  const networks = MOMO_NETWORKS[country?.code ?? ''] ?? [];
+  const [network, setNetwork] = useState(networks[0]?.code ?? '');
+  const [number, setNumber] = useState('');
+  const [pin, setPin] = useState('');
+
+  if (linked !== null) {
+    return (
+      <div className="activate">
+        <p className="activate-lead">Your mobile money wallet</p>
+        <p className="mono">{linked.msisdn}</p>
+        <p className="hint">
+          {linked.network} ·{' '}
+          {linked.status === 'verified'
+            ? 'Confirmed — money can be sent to this wallet.'
+            : /* SAID PLAINLY. Until a payment arrives from it we know the
+                 number and not who holds it, and a customer deciding whether
+                 to send money to it needs that difference. */
+              'Not yet confirmed. It will be, the first time you add money from it.'}
+        </p>
+        <div className="field">
+          <label htmlFor="momo-remove-pin">Transaction PIN</label>
+          <input
+            id="momo-remove-pin"
+            type="password"
+            inputMode="numeric"
+            autoComplete="off"
+            value={pin}
+            onChange={(e) => setPin(e.target.value)}
+            placeholder="••••"
+          />
+        </div>
+        <div>
+          <button
+            type="button"
+            className="quiet"
+            disabled={busy || pin === ''}
+            onClick={() =>
+              void run(async () => {
+                await client.unlinkMomo(pin);
+                setPin('');
+                onDone();
+                return 'That wallet is no longer linked.';
+              })
+            }
+          >
+            {busy ? 'Removing…' : 'Remove this wallet'}
+          </button>
+          {pin === '' && <span className="hint">Enter your PIN to remove it</span>}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="activate">
+      <p className="activate-lead">
+        Link your mobile money{country === undefined ? '' : ` in ${country.name}`}
+      </p>
+      <p className="hint">
+        One number to add money and to be paid out to. We check the number, not
+        who holds it — the first payment you make from it confirms the wallet.
+      </p>
+
+      <div className="field">
+        <label htmlFor="momo-network">Network</label>
+        <Select
+          id="momo-network"
+          value={network}
+          onChange={setNetwork}
+          options={networks.map((n) => ({ value: n.code, label: n.name }))}
+        />
+      </div>
+
+      <div className="field">
+        <label htmlFor="momo-number">Mobile money number</label>
+        {/* THE DIAL CODE IS DRAWN, NOT ASKED FOR. It comes from the country
+            already on the account, so there is one place a country is stated
+            — 040's rule about a second picker letting somebody select Ghana
+            and +234. The number is normalised to E.164 server-side. */}
+        <div className="row">
+          <span className="badge mono">+{country?.dial_code ?? ''}</span>
+          <input
+            id="momo-number"
+            type="tel"
+            inputMode="numeric"
+            autoComplete="tel-national"
+            placeholder="0244123456"
+            value={number}
+            onChange={(e) => setNumber(e.target.value)}
+          />
+        </div>
+      </div>
+
+      <div className="field">
+        <label htmlFor="momo-pin">Transaction PIN</label>
+        <input
+          id="momo-pin"
+          type="password"
+          inputMode="numeric"
+          autoComplete="off"
+          value={pin}
+          onChange={(e) => setPin(e.target.value)}
+          placeholder="••••"
+        />
+      </div>
+
+      <div>
+        <button
+          type="button"
+          disabled={busy || network === '' || number.trim() === '' || pin === ''}
+          onClick={() =>
+            void run(async () => {
+              await client.linkMomo({ network, number: number.trim(), transactionPin: pin });
+              setNumber('');
+              setPin('');
+              onDone();
+              return 'Your mobile money wallet is linked.';
+            })
+          }
+        >
+          {busy ? 'Linking…' : 'Link Momo'} <Icon name="arrowRight" size={18} />
+        </button>
+        {/* WHY IT IS GREY, ON THE PAGE. A disabled control whose reason lives
+            in a `title` reads as broken, and a tooltip does not exist on a
+            touch screen. */}
+        {(number.trim() === '' || pin === '') && (
+          <span className="hint">
+            {number.trim() === '' ? 'Enter your mobile money number' : 'Enter your PIN'}
+          </span>
+        )}
+      </div>
+    </div>
   );
 }

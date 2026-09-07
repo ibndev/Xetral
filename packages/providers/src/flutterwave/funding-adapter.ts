@@ -68,6 +68,42 @@ export class FlutterwaveFundingAdapter implements FundingPort {
   async createVirtualAccount(request: CreateVirtualAccountRequest): Promise<VirtualAccount> {
     const { customer, currency } = request;
 
+    /*
+     * REFUSED BEFORE THE CALL, AND THIS IS THE ROOT CAUSE OF THE GENERIC
+     * FAILURE ON "ACTIVATE ACCOUNT" IN ACCRA AND NAIROBI.
+     *
+     * `POST /v3/virtual-account-numbers` issues a NIGERIAN NUBAN. It is an NGN
+     * product: there is no Ghanaian or Kenyan static account number on this
+     * API to ask for, and asking anyway produced a refusal or an unparseable
+     * shape that reached the customer as "We could not open your account
+     * number just now" — a sentence describing a temporary outage, for
+     * something that will never work however long anybody waits.
+     *
+     * The platform's own data already said so. `countries.funding_methods` is
+     * `{mobile_money}` for GH and KE and `{virtual_account}` for NG, which is
+     * 051 recording exactly this fact — so a Ghanaian was being offered a
+     * product their own country row says does not exist for them.
+     *
+     * SO IT IS A NAMED REFUSAL rather than a call. `ProviderRejectedError`
+     * because they would understand and refuse: it is not an outage, the
+     * credential is fine, and no amount of retrying helps. The code lets the
+     * API answer something a screen can turn into a true sentence instead of
+     * an apology.
+     *
+     * ENABLING IT LATER IS A ONE-LINE CHANGE HERE, and deliberately not a
+     * setting: if Flutterwave approves static accounts in a new market the
+     * adapter has to be re-verified against their response shape anyway.
+     */
+    if (currency !== 'NGN') {
+      throw new ProviderRejectedError(
+        PROVIDER,
+        `Flutterwave issues dedicated account numbers in NGN only; ${currency} was asked ` +
+          `for. In Ghana and Kenya money arrives by a mobile money charge rather than into ` +
+          `a static number, which is what countries.funding_methods already records.`,
+        'account_not_supported_here',
+      );
+    }
+
     const body = await this.#client.request('POST', '/v3/virtual-account-numbers', {
       email: customer.email,
       /* OURS AND STABLE ACROSS RETRIES. Without it a timeout followed by a

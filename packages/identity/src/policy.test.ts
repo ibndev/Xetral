@@ -29,13 +29,19 @@ describe('deny by default', () => {
       allow: true,
       mode: 'authenticated',
       requiresPin: false,
+      requiresElevation: true,
     });
   });
 
   it('carries the PIN requirement through to the decision', () => {
     const registry = new RoutePolicyRegistry().authenticated('POST', '/v1/transfers', { pin: true });
     const decision = registry.decide('POST', '/v1/transfers');
-    expect(decision).toEqual({ allow: true, mode: 'authenticated', requiresPin: true });
+    expect(decision).toEqual({
+      allow: true,
+      mode: 'authenticated',
+      requiresPin: true,
+      requiresElevation: true,
+    });
   });
 });
 
@@ -90,6 +96,7 @@ describe('unambiguous policy', () => {
       allow: true,
       mode: 'authenticated',
       requiresPin: true,
+      requiresElevation: true,
     });
   });
 
@@ -100,5 +107,58 @@ describe('unambiguous policy', () => {
       .authenticated('GET', '/v1/wallets', { pin: false })
       .public('GET', '/v1/status', 'uptime probe, returns no customer data');
     expect(registry.declaredRoutes()).toEqual(['GET /v1/status', 'GET /v1/wallets']);
+  });
+});
+
+describe('how many factors an acting staff route takes', () => {
+  it('demands the code by DEFAULT, so forgetting keeps the strict answer', () => {
+    /*
+     * THE DIRECTION THIS DEFAULTS IN IS THE WHOLE SAFETY ARGUMENT. A route
+     * that omits `stepUp` keeps both factors; losing one has to be written
+     * down. Reading an absent field the other way round would make a
+     * forgotten declaration quietly weaker — the rule 017 states about rate
+     * classes, where forgetting fails open and so must be impossible.
+     */
+    const registry = new RoutePolicyRegistry().staff('POST', '/v1/admin/settings/:key', {
+      pin: true,
+      role: 'admin',
+    });
+    const decision = registry.decide('POST', '/v1/admin/settings/:key');
+    expect(decision).toMatchObject({ requiresPin: true, requiresElevation: true });
+  });
+
+  it('drops the code only where a route says so out loud', () => {
+    const registry = new RoutePolicyRegistry().staff('POST', '/v1/admin/prices/fx', {
+      pin: true,
+      role: 'finance',
+      stepUp: 'pin',
+    });
+    // The PIN is still verified on the request. What goes is the THIRD factor
+    // on a button an operator presses several times in a sitting.
+    expect(registry.decide('POST', '/v1/admin/prices/fx')).toMatchObject({
+      requiresPin: true,
+      requiresElevation: false,
+    });
+  });
+
+  it('refuses a single step-up on a route that takes no PIN at all', () => {
+    // That combination asks for nothing beyond the session. Refused where it
+    // is declared rather than discovered in production.
+    const registry = new RoutePolicyRegistry();
+    expect(() =>
+      registry.staff('GET', '/v1/admin/prices', { pin: false, role: 'finance', stepUp: 'pin' }),
+    ).toThrow(RoutePolicyError);
+  });
+
+  it('lists every reduced-factor route, the way it lists every public one', () => {
+    // A surface where the factors were deliberately reduced has to be
+    // enumerable, or nobody reviews it.
+    const registry = new RoutePolicyRegistry()
+      .staff('POST', '/v1/admin/prices/fx', { pin: true, role: 'finance', stepUp: 'pin' })
+      .staff('POST', '/v1/admin/users/:id/freeze', { pin: true, role: 'compliance' });
+
+    expect(registry.singleFactorRouteAudit()).toEqual([
+      { method: 'POST', path: '/v1/admin/prices/fx' },
+    ]);
   });
 });

@@ -161,6 +161,24 @@ export class RateFeedService implements OnApplicationShutdown {
         const quoted = answered.rates.get(quote);
         if (quoted === undefined) continue;
 
+        /*
+         * RECORDED BEFORE ANY DECISION ABOUT PUBLISHING, and that ordering is
+         * the whole point.
+         *
+         * The two branches below both `continue`: a rate a person published is
+         * never overwritten, and an unchanged one is not rewritten. In exactly
+         * those cases the market's own number would otherwise be recorded
+         * NOWHERE — and the operator-held case is the one that matters, because
+         * that is a price deliberately pinned while the market walks away from
+         * it. 062's widening measures against this reading, so it has to exist
+         * even on the syncs that do nothing.
+         *
+         * Best-effort: a failure here must not stop the sweep publishing. An
+         * observation is a diagnostic, and a diagnostic that can take down the
+         * job it observes is worse than none.
+         */
+        await this.#observe(base, quote, quoted);
+
         // COMPARED AS TEXT, which is what the adapter's fixed six decimal
         // places are for. Comparing as numbers would reintroduce a float on
         // the one decision that writes a price.
@@ -194,6 +212,28 @@ export class RateFeedService implements OnApplicationShutdown {
          FROM fx_published_rates WHERE retired_at IS NULL`,
     );
     return new Map(rows.rows.map((r) => [`${r.base_currency}/${r.quote_currency}`, r]));
+  }
+
+  /**
+   * What the market said, whether or not we acted on it.
+   *
+   * One row per direction, overwritten in place — see 062 for why this is the
+   * one table here that is deliberately not append-only.
+   */
+  async #observe(base: string, quote: string, rate: string): Promise<void> {
+    try {
+      await this.pool.query(
+        `INSERT INTO fx_rate_observations (base_currency, quote_currency, quote_per_base)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (base_currency, quote_currency)
+         DO UPDATE SET quote_per_base = EXCLUDED.quote_per_base, observed_at = now()`,
+        [base, quote, rate],
+      );
+    } catch (error: unknown) {
+      // Including a deployment behind 062, where the table does not exist yet.
+      // The sweep's actual job — publishing — is unaffected.
+      this.#logger.warn(`could not record the ${base}/${quote} reading: ${describe(error)}`);
+    }
   }
 
   /**

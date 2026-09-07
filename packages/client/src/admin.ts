@@ -376,6 +376,16 @@ export interface AdminPrices {
     readonly effective_from: string;
     readonly retired_at: string | null;
     readonly published_by: string | null;
+    /**
+     * WHAT THIS PAIR IS ACTUALLY QUOTED AT, which is the published figure
+     * unless 062's automatic widening is acting on it. Optional so a client
+     * built against an API predating that migration still parses; absent and
+     * `spread_basis_points` is the whole answer.
+     */
+    readonly effective_basis_points?: number | null;
+    /** How far the payout currency has strengthened since this pair's rate was
+     *  last published, in basis points. Zero or absent means no pressure. */
+    readonly adverse_basis_points?: number | null;
   }[];
   readonly rate_cards: readonly {
     readonly uuid: string;

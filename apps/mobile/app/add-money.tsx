@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { Linking, Share, Text, TextInput, View } from 'react-native';
 import { formatAmount, nationalPhone, paymentLinkFor } from '@xetral/client';
-import type { Deposit } from '@xetral/client';
+import type { Deposit, MomoAccount, XetralClient, XetralCountry } from '@xetral/client';
+import { MOMO_NETWORKS } from '@xetral/client';
+import { Select } from '@/select';
 import { Shell } from '@/shell';
 import { Button, FormError, Loading, Panel } from '@/ui';
 import { useLoad, useSubmit, useXetral } from '@/hooks';
@@ -50,8 +52,10 @@ export default function AddMoney() {
    * effect of being looked at, and it was survivable only because issuing is
    * idempotent. Opening one is a BUTTON now, which is what it is.
    */
-  const [topUp, setTopUp] = useState('');
   const account = useLoad(() => client.existingFundingAccount(), [client]);
+  /* The linked wallet. Its own load: 063 is a later migration and a deployment
+   * without it must show the link form rather than fail the screen. */
+  const momo = useLoad(() => client.linkedMomo(), [client]);
   const deposits = useLoad<readonly Deposit[]>(() => client.deposits(), [client]);
 
   /*
@@ -81,6 +85,13 @@ export default function AddMoney() {
    * operator can act on, where a hidden button is a silence nobody can.
    */
   const usesMobileMoney = funding.includes('mobile_money');
+  /*
+   * WHERE AN ACCOUNT NUMBER IS ACTUALLY A PRODUCT — see the web screen.
+   * Flutterwave issues dedicated numbers in NGN only, so in Accra and Nairobi
+   * Activate could never succeed and answered "try again shortly" about
+   * something permanent. Falls back to TRUE while the country list loads.
+   */
+  const usesVirtualAccount = countries.data === undefined || funding.includes('virtual_account');
 
   const has = account.data != null;
 
@@ -142,7 +153,7 @@ export default function AddMoney() {
           The requirement now lives in the Bitnob adapter, where it is true.
           The default rail opens an account from what signup already holds.
         */}
-        {!account.loading && !has && (
+        {!account.loading && !has && usesVirtualAccount && (
           /*
             EACH PIECE IN ITS OWN ROW, WITH ROOM AROUND IT — the web's
             `.activate`, and the same reason. These were three siblings of a
@@ -182,63 +193,28 @@ export default function AddMoney() {
         )}
 
         {/*
-          MOBILE MONEY, AS A TOP-UP THAT ACTUALLY MOVES MONEY — the web's,
-          and the same reasoning.
+          LINKING A MOBILE MONEY WALLET — the web's panel, same reasoning.
 
-          THIS SCREEN USED TO LIST THREE THINGS AND OFFER NONE OF THEM. It
-          said money reaches your wallet "these ways today" and then named
-          another Xetral customer, a payment link and crypto — three routes
-          that are all somebody ELSE paying you. A customer who opened Add
-          Money in order to put their OWN money in was given a reading list.
+          IT ASKED FOR AN AMOUNT, which starts a one-off charge and leaves
+          nothing behind. So the Send screen asked for a wallet number again
+          every time and nothing on the account recorded which wallet belongs
+          to this customer. A linked number both funds and receives, which is
+          how a mobile money account works everywhere it is used.
 
-          What was missing was not a button, it was a rail: Paystack's mobile
-          money is a CHARGE CHANNEL rather than an account we can issue, so
-          there was nothing to "link". A charge is what the payment link
-          already is, so this is the same checkout with the customer as their
-          own payer.
-
-          THE MOMO NUMBER IS TYPED ON PAYSTACK'S PAGE, not here. They ask for
-          it, send the prompt to the handset and confirm it; asking on this
-          screen would be collecting a credential we cannot verify.
+          IT DOES NOT CLAIM TO VERIFY THE HOLDER, and says so on screen. There
+          is no name enquiry on this rail — 043 records `name_unavailable` as
+          its own refusal — so the number is linked now and confirmed by the
+          first payment that arrives from it.
         */}
         {!account.loading && usesMobileMoney && (
-          <View style={{ gap: space.md, marginTop: space.md }}>
-            {/* The same weight and size as the line above it, and as the
-                web's — see the note there. */}
-            <Text style={[styles.lead, { marginBottom: 0, fontFamily: font.sansSemi, color: colors.text }]}>
-              Top up from mobile money{here === undefined ? '' : ` in ${here.name}`}
-            </Text>
-
-            <Text style={styles.label}>Amount ({here?.currency ?? ''})</Text>
-            <TextInput
-              style={styles.input}
-              value={topUp}
-              onChangeText={setTopUp}
-              // `decimal-pad`, and the value stays TEXT: money is a string on
-              // this platform from end to end.
-              keyboardType="decimal-pad"
-              placeholder="0.00"
-              placeholderTextColor={colors.text3}
-            />
-
-            <Button
-              label={busy ? 'Opening…' : 'Continue'}
-              icon="arrowRight"
-              busy={busy}
-              disabled={topUp.trim() === ''}
-              onPress={() =>
-                void run(async () => {
-                  const { authorization_url } = await client.topUp(topUp.trim());
-                  // Paystack's own page, in the system browser. It renders
-                  // mobile money, bank and card for this country, which is why
-                  // no payment detail passes through the app.
-                  await Linking.openURL(authorization_url);
-                  return undefined;
-                })
-              }
-            />
-
-          </View>
+          <LinkMomo
+            country={here}
+            linked={momo.data ?? null}
+            busy={busy}
+            onDone={() => momo.reload()}
+            run={run}
+            client={client}
+          />
         )}
 
         <FormError error={account.error} code={account.code} />
@@ -388,5 +364,141 @@ function RequestPayment() {
 
       <FormError error={profile.error} code={profile.code} />
     </Panel>
+  );
+}
+
+/**
+ * LINKING A MOBILE MONEY WALLET — the web's component, screen for screen.
+ *
+ * See `apps/web/src/app/add-money/page.tsx` for why this replaced an amount
+ * field: a one-off charge leaves nothing behind, so the Send screen asked for
+ * a wallet number again every time and nothing recorded which wallet belongs
+ * to this customer.
+ */
+function LinkMomo({
+  country,
+  linked,
+  busy,
+  onDone,
+  run,
+  client,
+}: {
+  readonly country: XetralCountry | undefined;
+  readonly linked: MomoAccount | null;
+  readonly busy: boolean;
+  readonly onDone: () => void;
+  readonly run: (work: () => Promise<string | undefined>) => void;
+  readonly client: XetralClient;
+}) {
+  const styles = useStyles();
+  const colors = useTheme();
+  const networks = MOMO_NETWORKS[country?.code ?? ''] ?? [];
+  const [network, setNetwork] = useState(networks[0]?.code ?? '');
+  const [number, setNumber] = useState('');
+  const [pin, setPin] = useState('');
+
+  if (linked !== null) {
+    return (
+      <View style={{ gap: space.md, marginTop: space.md }}>
+        <Text style={[styles.lead, { marginBottom: 0, fontFamily: font.sansSemi, color: colors.text }]}>
+          Your mobile money wallet
+        </Text>
+        <Text style={styles.amount}>{linked.msisdn}</Text>
+        <Text style={styles.hint}>
+          {linked.network} ·{' '}
+          {linked.status === 'verified'
+            ? 'Confirmed — money can be sent to this wallet.'
+            : 'Not yet confirmed. It will be, the first time you add money from it.'}
+        </Text>
+
+        <Text style={styles.label}>Transaction PIN</Text>
+        <TextInput
+          style={styles.input}
+          value={pin}
+          onChangeText={setPin}
+          keyboardType="number-pad"
+          secureTextEntry
+          placeholder="••••"
+          placeholderTextColor={colors.text3}
+        />
+        <Button
+          label={busy ? 'Removing…' : 'Remove this wallet'}
+          quiet
+          busy={busy}
+          disabled={pin === ''}
+          onPress={() =>
+            void run(async () => {
+              await client.unlinkMomo(pin);
+              setPin('');
+              onDone();
+              return 'That wallet is no longer linked.';
+            })
+          }
+        />
+      </View>
+    );
+  }
+
+  return (
+    <View style={{ gap: space.md, marginTop: space.md }}>
+      <Text style={[styles.lead, { marginBottom: 0, fontFamily: font.sansSemi, color: colors.text }]}>
+        Link your mobile money{country === undefined ? '' : ` in ${country.name}`}
+      </Text>
+      <Text style={styles.hint}>
+        One number to add money and to be paid out to. We check the number, not
+        who holds it — the first payment you make from it confirms the wallet.
+      </Text>
+
+      <Text style={styles.label}>Network</Text>
+      <Select
+        label="Network"
+        value={network}
+        onChange={setNetwork}
+        options={networks.map((n) => ({ value: n.code, label: n.name }))}
+      />
+
+      {/* THE DIAL CODE IS DRAWN, NOT ASKED FOR — it comes from the country
+          already on the account, so there is one place a country is stated.
+          The number is normalised to E.164 server-side. */}
+      <Text style={styles.label}>Mobile money number</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+        <Text style={[styles.amount, { color: colors.text2 }]}>+{country?.dial_code ?? ''}</Text>
+        <TextInput
+          style={[styles.input, { flex: 1 }]}
+          value={number}
+          onChangeText={setNumber}
+          keyboardType="number-pad"
+          placeholder="0244123456"
+          placeholderTextColor={colors.text3}
+        />
+      </View>
+
+      <Text style={styles.label}>Transaction PIN</Text>
+      <TextInput
+        style={styles.input}
+        value={pin}
+        onChangeText={setPin}
+        keyboardType="number-pad"
+        secureTextEntry
+        placeholder="••••"
+        placeholderTextColor={colors.text3}
+      />
+
+      <Button
+        label={busy ? 'Linking…' : 'Link Momo'}
+        icon="arrowRight"
+        busy={busy}
+        disabled={network === '' || number.trim() === '' || pin === ''}
+        onPress={() =>
+          void run(async () => {
+            await client.linkMomo({ network, number: number.trim(), transactionPin: pin });
+            setNumber('');
+            setPin('');
+            onDone();
+            return 'Your mobile money wallet is linked.';
+          })
+        }
+      />
+    </View>
   );
 }

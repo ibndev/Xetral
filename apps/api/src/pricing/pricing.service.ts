@@ -56,17 +56,50 @@ export class PricingService {
   /** Every FX policy including retired ones, newest first. The retired rows
    *  are the point: they are what explains a quote somebody was given last
    *  month. */
+  /**
+   * The spreads, and — for a live one — what it is ACTUALLY being quoted at.
+   *
+   * WHY THE EFFECTIVE FIGURE IS ON THIS LIST. 062 widens a spread when the
+   * payout currency has strengthened since that pair's rate was last
+   * published. That changes what a customer is charged, so a screen showing
+   * only the published number would be showing a price nobody is being
+   * quoted — the exact shape of failure this codebase keeps recording, a
+   * control or a figure that nothing reads.
+   *
+   * The join is LEFT and the whole thing is guarded: a deployment behind 062
+   * has no such view, and the spreads must still list.
+   */
   async fxPolicies(): Promise<readonly Record<string, unknown>[]> {
-    const rows = await this.pool.query(
-      `SELECT p.uuid, p.base_currency, p.quote_currency,
-              p.spread_basis_points, p.min_base_minor::text AS min_base_minor,
-              p.effective_from, p.retired_at, u.email AS published_by
-         FROM fx_spread_policies p
-         LEFT JOIN users u ON u.id = p.created_by
-        ORDER BY p.retired_at IS NOT NULL, p.effective_from DESC
-        LIMIT 200`,
-    );
-    return rows.rows as Record<string, unknown>[];
+    const withPressure = `
+      SELECT p.uuid, p.base_currency, p.quote_currency,
+             p.spread_basis_points, p.min_base_minor::text AS min_base_minor,
+             p.effective_from, p.retired_at, u.email AS published_by,
+             pr.effective_basis_points, pr.adverse_basis_points,
+             pr.observed_rate, pr.published_rate
+        FROM fx_spread_policies p
+        LEFT JOIN users u ON u.id = p.created_by
+        LEFT JOIN fx_spread_pressure pr
+          ON p.retired_at IS NULL
+         AND pr.base_currency = p.base_currency
+         AND pr.quote_currency = p.quote_currency
+       ORDER BY p.retired_at IS NOT NULL, p.effective_from DESC
+       LIMIT 200`;
+
+    try {
+      const rows = await this.pool.query(withPressure);
+      return rows.rows as Record<string, unknown>[];
+    } catch {
+      const rows = await this.pool.query(
+        `SELECT p.uuid, p.base_currency, p.quote_currency,
+                p.spread_basis_points, p.min_base_minor::text AS min_base_minor,
+                p.effective_from, p.retired_at, u.email AS published_by
+           FROM fx_spread_policies p
+           LEFT JOIN users u ON u.id = p.created_by
+          ORDER BY p.retired_at IS NOT NULL, p.effective_from DESC
+          LIMIT 200`,
+      );
+      return rows.rows as Record<string, unknown>[];
+    }
   }
 
   async rateCards(): Promise<readonly Record<string, unknown>[]> {
@@ -151,6 +184,88 @@ export class PricingService {
         throw new ConflictException({ error: 'price_already_published' });
       }
       throw error;
+    }
+  }
+
+  /**
+   * WHAT THIS PAIR OR CARD WAS PRICED AT BEFORE, so an audit entry can say
+   * old → new rather than just new.
+   *
+   * WHY THE MOST RECENTLY RETIRED ROW rather than a live one. Every publish
+   * path here REFUSES while a live price exists — changing a price is retiring
+   * one and publishing another, which is what keeps every past quote
+   * reproducible. So at the moment of a publish there is by construction no
+   * live predecessor, and the value being replaced is the newest retired row.
+   *
+   * NULL IS A REAL ANSWER and means this is the first price for that subject.
+   * Reading it as anything else would put a fabricated "from" in an
+   * append-only table.
+   *
+   * THREE READERS RATHER THAN ONE GENERIC ONE, written out. A helper that took
+   * a table name and a set of key columns would be a query whose behaviour
+   * changes with its arguments, over the tables that decide what customers are
+   * charged — the argument `erase_customer_personal_data()` makes about naming
+   * the rows it touches.
+   *
+   * Each is allowed to fail: an audit detail must never be what stops a price
+   * being published.
+   */
+  async previousFxSpread(
+    base: string,
+    quote: string,
+  ): Promise<Record<string, unknown> | null> {
+    try {
+      const found = await this.pool.query(
+        `SELECT spread_basis_points, min_base_minor::text AS min_base_minor,
+                effective_from, retired_at
+           FROM fx_spread_policies
+          WHERE base_currency = $1 AND quote_currency = $2 AND retired_at IS NOT NULL
+          ORDER BY retired_at DESC, id DESC
+          LIMIT 1`,
+        [base, quote],
+      );
+      return (found.rows[0] as Record<string, unknown> | undefined) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  async previousFxRate(base: string, quote: string): Promise<Record<string, unknown> | null> {
+    try {
+      const found = await this.pool.query(
+        `SELECT quote_per_base, source, effective_from, retired_at
+           FROM fx_published_rates
+          WHERE base_currency = $1 AND quote_currency = $2 AND retired_at IS NOT NULL
+          ORDER BY retired_at DESC, id DESC
+          LIMIT 1`,
+        [base, quote],
+      );
+      return (found.rows[0] as Record<string, unknown> | undefined) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  async previousRateCard(input: {
+    readonly brand: string;
+    readonly country: string;
+    readonly card_type: string;
+  }): Promise<Record<string, unknown> | null> {
+    try {
+      const found = await this.pool.query(
+        `SELECT payout_rate_minor::text AS payout_rate_minor,
+                min_face_minor::text AS min_face_minor,
+                max_face_minor::text AS max_face_minor,
+                effective_from, retired_at
+           FROM giftcard_rate_cards
+          WHERE brand = $1 AND country = $2 AND card_type = $3 AND retired_at IS NOT NULL
+          ORDER BY retired_at DESC, id DESC
+          LIMIT 1`,
+        [input.brand, input.country, input.card_type],
+      );
+      return (found.rows[0] as Record<string, unknown> | undefined) ?? null;
+    } catch {
+      return null;
     }
   }
 

@@ -14,7 +14,9 @@ import { InsufficientFundsError, LedgerService, posting } from '@xetral/ledger';
 import type { PostingIntent } from '@xetral/ledger';
 import { convertWithSpread, displayRate, ProviderTimeoutError } from '@xetral/providers';
 import type { FxPort, FxRate } from '@xetral/providers';
-import { exponentOf, fromMajor, money, toMajor } from '@xetral/shared';
+import { exponentOf, fromMajor, money, toMajor,
+  widenedSpread,
+} from '@xetral/shared';
 import type { Currency, Money } from '@xetral/shared';
 import { API_CONFIG, DATABASE, FX_PORT, LEDGER } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
@@ -127,7 +129,7 @@ export class FxService {
     }
 
     const { rate } = await this.#rateFor(from, to);
-    const converted = this.#convert(amount, rate, policy.spread_basis_points);
+    const converted = this.#convert(amount, rate, await this.#effectiveSpread(from, to, policy));
 
     return {
       from: body.from,
@@ -214,7 +216,7 @@ export class FxService {
     await this.affordability.assertWalletCanCover(userId, amount);
 
     const { rate, ours } = await this.#rateFor(from, to);
-    const converted = this.#convert(amount, rate, policy.spread_basis_points);
+    const converted = this.#convert(amount, rate, await this.#effectiveSpread(from, to, policy));
 
     if (body.min_received !== undefined) {
       const floor = this.#parseAmount(body.min_received, to);
@@ -412,6 +414,88 @@ export class FxService {
         throw new UnprocessableEntityException({ error: 'not_convertible', detail: error.message });
       }
       throw error;
+    }
+  }
+
+  /**
+   * THE SPREAD ACTUALLY QUOTED, which is the base unless the market has moved
+   * against us since this pair's rate was last published.
+   *
+   * WHY THIS EXISTS. A published rate and a published spread are both
+   * append-only and neither moves on its own, so every quote struck between
+   * one publish and the next uses the old number. Where the currency we PAY
+   * OUT has strengthened in that gap, the difference comes out of margin on
+   * every transaction until somebody republishes — see 062 and
+   * `widenedSpread()` for why that is one rule rather than one per currency.
+   *
+   * OFF BY DEFAULT, and read per call rather than cached: the reason to turn
+   * this off is that it is doing something an operator did not expect, and a
+   * switch that keeps acting for another thirty seconds has not been turned
+   * off. Same argument 044 makes about the funding rail.
+   *
+   * IT CANNOT FAIL A QUOTE. A deployment behind 062 has no observations
+   * table, an unpriced pair has no reading, and both mean the base spread —
+   * which is exactly what was quoted before this existed.
+   */
+  async #effectiveSpread(
+    from: Currency,
+    to: Currency,
+    policy: SpreadPolicy,
+  ): Promise<number> {
+    let enabled: boolean;
+    try {
+      enabled = await this.settings.boolean('fx_auto_spread_enabled', false);
+    } catch {
+      return policy.spread_basis_points;
+    }
+    if (!enabled) return policy.spread_basis_points;
+
+    try {
+      const found = await this.pool.query<{
+        published_rate: string | null;
+        observed_rate: string | null;
+      }>(
+        `SELECT published_rate, observed_rate
+           FROM fx_spread_pressure
+          WHERE base_currency = $1 AND quote_currency = $2`,
+        [from, to],
+      );
+      const row = found.rows[0];
+      if (row?.published_rate == null) return policy.spread_basis_points;
+
+      const ceiling = await this.settings.integer(
+        'fx_auto_spread_ceiling_basis_points',
+        600,
+      );
+      /*
+       * THE ARITHMETIC IS THE SHARED FUNCTION, not the view's copy of it. The
+       * view exists so an operator can SEE which corridors are under
+       * pressure; what a customer is charged comes from one tested place, and
+       * `062_spread_pressure.test.sql` asserts the two agree.
+       */
+      const pressure = widenedSpread({
+        baseBasisPoints: policy.spread_basis_points,
+        publishedRate: row.published_rate,
+        ...(row.observed_rate === null ? {} : { currentRate: row.observed_rate }),
+        ceilingBasisPoints: ceiling,
+      });
+
+      if (pressure.effectiveBasisPoints !== pressure.baseBasisPoints) {
+        // SAID OUT LOUD, because this is the mechanism charging a customer
+        // more than the number on the prices screen. A quiet one is the
+        // control nobody can audit after the fact.
+        this.#logger.log(
+          `${from}/${to} quoted at ${String(pressure.effectiveBasisPoints)}bp rather than ` +
+            `${String(pressure.baseBasisPoints)}bp: the payout currency has strengthened ` +
+            `${String(pressure.adverseBasisPoints)}bp since the rate was published` +
+            (pressure.capped ? ' (at the ceiling)' : ''),
+        );
+      }
+      return pressure.effectiveBasisPoints;
+    } catch {
+      // A deployment behind 062. The base spread is what was quoted before
+      // this feature existed, so falling back to it is exactly correct.
+      return policy.spread_basis_points;
     }
   }
 

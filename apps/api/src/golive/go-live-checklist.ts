@@ -888,6 +888,27 @@ export const SETTINGS: readonly Item[] = [
       'that threshold — moving either is a deliberate act.',
   },
   {
+    name: 'fx_auto_spread_enabled',
+    kind: 'setting',
+    failure: 'default-is-deliberate',
+    ifMissed:
+      'SHIPS OFF. On, an FX spread widens automatically when the payout ' +
+      'currency has strengthened since that pair\'s rate was last published — ' +
+      'which CHANGES WHAT CUSTOMERS ARE QUOTED, and is therefore a pricing ' +
+      'decision rather than a default. It never narrows a spread, and ' +
+      '`fx_spread_pressure` shows every corridor it is acting on.',
+  },
+  {
+    name: 'fx_auto_spread_ceiling_basis_points',
+    kind: 'setting',
+    failure: 'wrong-by-default',
+    ifMissed:
+      'The hard ceiling on an automatically widened spread. The effective ' +
+      'figure is the LOWER of this and double the published base, so a thinly ' +
+      'priced corridor stays thin. 600 is a starting point, not a number ' +
+      'anybody reviewed for this business.',
+  },
+  {
     name: 'vat_basis_points',
     kind: 'setting',
     failure: 'wrong-by-default',

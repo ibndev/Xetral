@@ -61,6 +61,32 @@ export type RouteAuth =
        * every line.
        */
       readonly role?: StaffRole;
+      /**
+       * HOW MANY FACTORS A STAFF ACTION TAKES, on top of the session.
+       *
+       * 'code+pin' — the default and the strict one. A fresh TOTP code
+       *   elevates the session for ten minutes AND the transaction PIN is
+       *   verified on every acting request inside that window.
+       *
+       * 'pin' — ONE step-up, the PIN, checked immediately before the action
+       *   executes. Enrolment in a second factor is still required to reach
+       *   any staff route at all, so this narrows what an ACTING request adds
+       *   on top of an already-two-factor session; it does not make the
+       *   surface single-factor.
+       *
+       * WHY THE OPTION EXISTS. Stacking a password, a rotating code and a PIN
+       * on one button is the shape that produces a shared authenticator on a
+       * desk — the outcome 014 already records about demanding a fresh code
+       * per action. Where an operator performs the same action several times
+       * in a sitting, as they do setting prices, the third factor buys very
+       * little and costs the discipline of the first two.
+       *
+       * IT IS DECLARED, NOT INFERRED, and `singleFactorRouteAudit()` lists
+       * every route that takes it — the same argument `publicRouteAudit()`
+       * makes about opting out of authentication. A reduced-factor surface
+       * that cannot be enumerated is one nobody reviews.
+       */
+      readonly stepUp?: 'code+pin' | 'pin';
     }
   | {
       readonly mode: 'public';
@@ -76,6 +102,9 @@ export type AccessDecision =
       readonly requiresPin: boolean;
       /** Undefined means any authenticated customer. */
       readonly requiresRole: StaffRole | undefined;
+      /** Whether an acting staff request also needs a fresh TOTP code. False
+       *  only where the route declared `stepUp: 'pin'`. */
+      readonly requiresElevation: boolean;
     }
   | { readonly allow: false; readonly reason: 'undeclared_route' };
 
@@ -130,12 +159,27 @@ export class RoutePolicyRegistry {
   staff(
     method: HttpMethod,
     path: string,
-    options: { readonly pin: boolean; readonly role: StaffRole },
+    options: {
+      readonly pin: boolean;
+      readonly role: StaffRole;
+      /** See `RouteAuth.stepUp`. Omitted means 'code+pin', the strict one:
+       *  reducing the factors on an action has to be written down. */
+      readonly stepUp?: 'code+pin' | 'pin';
+    },
   ): this {
+    if (options.stepUp === 'pin' && !options.pin) {
+      // A route that acts without a PIN and also declines the code would be
+      // asking for nothing at all beyond the session. Refused at declaration
+      // rather than discovered in production.
+      throw new RoutePolicyError(
+        `route '${method} ${path}' declares a single PIN step-up but takes no PIN`,
+      );
+    }
     return this.#declare(method, path, {
       mode: 'authenticated',
       pin: options.pin,
       role: options.role,
+      ...(options.stepUp === undefined ? {} : { stepUp: options.stepUp }),
     });
   }
 
@@ -169,7 +213,29 @@ export class RoutePolicyRegistry {
       mode: 'authenticated',
       requiresPin: auth.pin,
       requiresRole: auth.role,
+      // Absent means the strict default. Reading it the other way round would
+      // make a forgotten declaration LOSE a factor, and forgetting must never
+      // be the permissive direction — the rule 017 states about rate classes.
+      requiresElevation: auth.stepUp !== 'pin',
     };
+  }
+
+  /**
+   * Every staff route that takes ONE step-up factor instead of two.
+   *
+   * The same list `publicRouteAudit()` is, for the same reason: a surface
+   * where the factors were deliberately reduced is one a reviewer has to be
+   * able to enumerate, rather than find by reading the options object of
+   * every line. `route-coverage.test.ts` prints it.
+   */
+  singleFactorRouteAudit(): readonly { readonly method: string; readonly path: string }[] {
+    const out: { method: string; path: string }[] = [];
+    for (const [key, auth] of this.#routes) {
+      if (auth.mode !== 'authenticated' || auth.stepUp !== 'pin') continue;
+      const [method, ...rest] = key.split(' ');
+      out.push({ method: method ?? '', path: rest.join(' ') });
+    }
+    return out;
   }
 
   /**
