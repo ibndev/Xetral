@@ -1,8 +1,38 @@
 import { z } from 'zod';
+import { CURRENCIES } from '@xetral/shared';
+import type { Currency } from '@xetral/shared';
 
-/** The currencies a customer can hold. Crypto converts through the crypto
- *  routes; this is fiat-to-fiat and fiat-to-stablecoin. */
-const CONVERTIBLE = ['NGN', 'USD', 'GBP', 'EUR', 'USDT'] as const;
+/**
+ * WHAT THE FX ROUTES WILL PARSE — every currency the money primitives know,
+ * READ FROM THE REGISTRY rather than written out again here.
+ *
+ * IT WAS A HAND-WRITTEN LIST OF FIVE — NGN, USD, GBP, EUR, USDT — and it had
+ * been left behind by three migrations. GHS and KES arrived with Ghana and
+ * Kenya, USDC with 038, CAD with 055, and none of them was added here. So
+ * `GET /v1/fx/quote?from=NGN&to=GHS` answered `400 invalid_request` on the
+ * field `to`, BEFORE reading a single row of `fx_spread_policies` — and the
+ * Send screen, which catches a failed quote and says one sentence about it,
+ * rendered "We cannot convert NGN to GHS yet".
+ *
+ * That sentence was false and it was unfalsifiable from the outside: an
+ * operator could publish the spread, publish the rate, watch both appear on
+ * the prices screen, and the customer would still be told the pair does not
+ * exist. Exactly the shape `historyQuerySchema` had — it accepted NGN and USD
+ * while the home screen showed a USDT balance, so every transaction behind
+ * that balance 400'd.
+ *
+ * THE REGISTRY IS THE RIGHT SOURCE because of what this validation is FOR: it
+ * answers "is this a currency this system can represent", which is a question
+ * about exponents and arithmetic. Whether a PAIR can actually be traded is a
+ * different question with a different answer — `fx_spread_policies` decides
+ * it, and refuses an unpublished pair with `pair_not_supported`, which is a
+ * code the screen can turn into a true sentence. Collapsing the two into one
+ * hand-written array is what produced a lie.
+ *
+ * `fx-currencies.test.ts` binds this to the registry and to the client's
+ * `TRANSFER_CURRENCIES` in both directions.
+ */
+const CONVERTIBLE = Object.keys(CURRENCIES) as [Currency, ...Currency[]];
 
 export const fxQuoteSchema = z.object({
   from: z.enum(CONVERTIBLE),

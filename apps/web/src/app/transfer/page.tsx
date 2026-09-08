@@ -300,6 +300,21 @@ function Transfer() {
     recipientCurrency !== undefined &&
     recipientCurrency !== sendCurrency;
 
+  /*
+   * THE REASON IS KEPT, AND SWALLOWING IT WAS HALF THE BUG.
+   *
+   * This was `.catch(() => undefined)`, so every failure — an unpublished
+   * pair, an amount below the minimum, a provider outage, a validation
+   * refusal — rendered the same sentence: "We cannot convert NGN to GHS yet."
+   *
+   * That sentence was FALSE for the case that actually happened. The API's own
+   * currency list had been left behind by three migrations and did not contain
+   * GHS, so the quote was refused as `invalid_request` before a single price
+   * was read — and an operator who had published both the spread and the rate,
+   * and could see them on the prices screen, had no way to learn that. The
+   * list is derived from the money registry now; keeping the code here is what
+   * stops the next such refusal hiding behind a claim about pricing.
+   */
   const quote = useLoad(async () => {
     if (!converting || recipientCurrency === undefined) return undefined;
     // A rate is quoted against an amount, so an empty box asks for one unit —
@@ -307,8 +322,15 @@ function Transfer() {
     const forAmount = amount === '' || !isValidAmount(amount, exponentFor(sendCurrency))
       ? '1'
       : amount;
-    return client.fxQuote(sendCurrency, recipientCurrency, forAmount).catch(() => undefined);
+    return client.fxQuote(sendCurrency, recipientCurrency, forAmount);
   }, [client, converting, recipientCurrency, sendCurrency, amount]);
+  /*
+   * ONLY `pair_not_supported` MEANS "we do not trade this". It is the code
+   * `fx_spread_policies` produces for a pair nobody has published, which is
+   * the one case that sentence is true of. `below_minimum` is a real quote
+   * against too small an amount and must not read as an unpriced corridor.
+   */
+  const pairUnpriced = quote.code === 'pair_not_supported';
   /*
    * ONLY WHEN WE KNOW. `has_pin` is `boolean | null` and null means the server
    * could not tell — which must NOT route somebody into creating a PIN they
@@ -877,9 +899,14 @@ function Transfer() {
             <span className="hint">
               {quote.loading
                 ? 'Getting today\u2019s rate…'
-                : quote.data === undefined
-                  ? `We cannot convert ${sendCurrency} to ${recipientCurrency ?? ''} yet.`
-                  : `1 ${sendCurrency} = ${quote.data.rate} ${recipientCurrency ?? ''} today.`}
+                : quote.data !== undefined
+                  ? `1 ${sendCurrency} = ${quote.data.rate} ${recipientCurrency ?? ''} today.`
+                  : pairUnpriced
+                    ? `We cannot convert ${sendCurrency} to ${recipientCurrency ?? ''} yet.`
+                    : /* NOT a claim about pricing. Whatever went wrong, saying
+                         the corridor does not exist is the one answer that
+                         sends an operator to check something already correct. */
+                      (quote.error ?? 'We could not get a rate just now.')}
             </span>
           )}
         </label>
@@ -927,7 +954,9 @@ function Transfer() {
               {quote.loading
                 ? 'Working out what they receive…'
                 : quote.data === undefined
-                  ? 'We cannot say what they would receive yet.'
+                  ? pairUnpriced
+                    ? 'We cannot say what they would receive yet.'
+                    : 'We could not work that out just now.'
                   : `They receive about ${formatAmount(
                       quote.data.receives,
                       recipientCurrency ?? sendCurrency,

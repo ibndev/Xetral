@@ -147,4 +147,38 @@ describe('button styling specificity', () => {
         bare.map((r) => r.selector).join('\n'),
     ).toEqual([]);
   });
+
+  it('EVERY .xselect-trigger state RESTATES its own background, unguarded', () => {
+    /*
+     * THE SAME COLLISION, ONE COMPONENT OVER, AND IT REACHED A CUSTOMER.
+     *
+     * `.xselect-trigger` is a <button>, so `button:hover:where(:not(:disabled))`
+     * paints it `--brand-700` — which is #FFFFFF in the dark theme. The
+     * neutralising rule existed but sat inside `@media (hover: hover)`, so on
+     * a touch device reporting `hover: none` it did not exist at all while the
+     * generic rule still applied through the sticky `:hover` a tap leaves
+     * behind. Tapping the network picker on Add Money turned it into a SOLID
+     * WHITE PILL with its label barely legible on top.
+     *
+     * A guard on the FIX and none on the FAULT is worse than no guard: it
+     * removes the correction on exactly the devices that need it. So at least
+     * one unguarded state rule must restate the field background.
+     */
+    const css = readFileSync(CSS, 'utf8').replace(/\/\*[\s\S]*?\*\//g, ' ');
+
+    // Everything inside a hover query is exactly what cannot be relied on.
+    const unguarded = css.replace(/@media \(hover: hover\) \{[\s\S]*?\n\}/g, ' ');
+
+    const states = Array.from(
+      unguarded.matchAll(/\.xselect-trigger(:[a-z-]+(?:\([^)]*\))?)+[^{]*\{([^}]*)\}/g),
+      (m) => ({ selector: m[0].slice(0, m[0].indexOf('{')).trim(), body: m[2] ?? '' }),
+    );
+    const restates = states.filter((r) => /background:\s*var\(--field\)/.test(r.body));
+
+    expect(
+      restates.length,
+      'no unguarded .xselect-trigger state rule sets `background: var(--field)`, so ' +
+        '`button:hover` paints the picker --brand-700 (white in dark) on a touch device',
+    ).toBeGreaterThan(0);
+  });
 });

@@ -214,8 +214,18 @@ export default function Transfer() {
     if (!converting || recipientCurrency === undefined) return undefined;
     const forAmount =
       amount === '' || !isValidAmount(amount, exponentFor(sendCurrency)) ? '1' : amount;
-    return client.fxQuote(sendCurrency, recipientCurrency, forAmount).catch(() => undefined);
+    /*
+     * THE REASON IS KEPT — see the web screen. Swallowing it made every
+     * failure read as "we do not trade this pair", which was FALSE for the one
+     * that happened: the API's currency list had been left behind by three
+     * migrations and refused GHS before reading any price.
+     */
+    return client.fxQuote(sendCurrency, recipientCurrency, forAmount);
   }, [client, converting, recipientCurrency, sendCurrency, amount]);
+  /* Only `pair_not_supported` means "we do not trade this" — the code an
+   * unpublished `fx_spread_policies` row produces. Everything else is a
+   * different problem and must not read as one about pricing. */
+  const pairUnpriced = quote.code === 'pair_not_supported';
 
   // Against the currency actually being SENT. On the payout side there is no
   // picker and the rail decides, so checking the picked one would count
@@ -671,9 +681,11 @@ export default function Transfer() {
               <Text style={styles.hint}>
                 {quote.loading
                   ? 'Getting today\u2019s rate…'
-                  : quote.data === undefined
-                    ? `We cannot convert ${sendCurrency} to ${recipientCurrency ?? ''} yet.`
-                    : `1 ${sendCurrency} = ${quote.data.rate} ${recipientCurrency ?? ''} today.`}
+                  : quote.data !== undefined
+                    ? `1 ${sendCurrency} = ${quote.data.rate} ${recipientCurrency ?? ''} today.`
+                    : pairUnpriced
+                      ? `We cannot convert ${sendCurrency} to ${recipientCurrency ?? ''} yet.`
+                      : (quote.error ?? 'We could not get a rate just now.')}
               </Text>
             )}
           </>
@@ -711,7 +723,9 @@ export default function Transfer() {
             {quote.loading
               ? 'Working out what they receive…'
               : quote.data === undefined
-                ? 'We cannot say what they would receive yet.'
+                ? pairUnpriced
+                  ? 'We cannot say what they would receive yet.'
+                  : 'We could not work that out just now.'
                 : `They receive about ${formatAmount(
                     quote.data.receives,
                     recipientCurrency ?? sendCurrency,

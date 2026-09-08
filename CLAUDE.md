@@ -804,6 +804,83 @@ Schema: `packages/ledger/sql/059_provider_routing.sql`. Router in
   in the header — and this repo has twice shipped a table of plausible
   constants that passed tests written from the same assumptions. Run it first.
 
+### What the FX routes will parse — non-obvious rules
+
+`apps/api/src/fx/dto.ts`, bound by `fx-currencies.test.ts`.
+
+- **`CONVERTIBLE` WAS A HAND-WRITTEN LIST OF FIVE and had been left behind by
+  three migrations.** GHS and KES arrived with Ghana and Kenya, USDC with 038,
+  CAD with 055, and none was added. So `GET /v1/fx/quote?from=NGN&to=GHS`
+  answered `400 invalid_request` on the field `to`, BEFORE reading a row of
+  `fx_spread_policies`.
+- **THE SENTENCE IT PRODUCED WAS FALSE AND UNFALSIFIABLE.** The Send screen
+  caught a failed quote and said "We cannot convert NGN to GHS yet" — so an
+  operator could publish the spread, publish the rate, see both on the prices
+  screen, and have no way to learn the pair was never reaching the price
+  table. Exactly `historyQuerySchema`'s shape, which accepted NGN and USD while
+  the home screen showed a USDT balance.
+- **THE REGISTRY IS THE SOURCE, because of what the validation is FOR.** It
+  answers "can this system represent this currency" — a question about
+  exponents. Whether a PAIR is tradeable is a different question that
+  `fx_spread_policies` answers, and it refuses with `pair_not_supported`, a
+  code a screen can turn into a true sentence. Collapsing the two into one
+  array is what produced the lie.
+- **THE SCREENS NO LONGER SWALLOW THE REASON.** `.catch(() => undefined)` made
+  every failure — a validation refusal, an outage, `below_minimum` — read as an
+  unpriced corridor. Only `pair_not_supported` means "we do not trade this".
+
+### The picker that turned white, and the row that was not one — non-obvious rules
+
+- **`button:hover` IS NOT INSIDE A HOVER QUERY AND THE NEUTRALISING RULE WAS.**
+  `.xselect-trigger` is a `<button>`, so the base `button:hover` fill applies
+  to it; the `.xselect-trigger:hover` override sat in `@media (hover: hover)`,
+  which a touch device reporting `hover: none` does not match. In dark
+  `--brand` is #FFFFFF, so tapping the network picker turned it into a SOLID
+  WHITE PILL. A guard on the FIX and none on the FAULT is worse than no guard.
+  `button-specificity.test.ts` now requires an unguarded state rule that
+  restates `background: var(--field)`.
+- **`.row` IS A LABEL-AND-VALUE ROW, not a field layout.** `display: flex;
+  align-items: baseline; justify-content: space-between` pushed the dial code
+  to one edge and the input to the other, so the momo number field rendered as
+  a stranded box nobody could see was typeable — which is what "I put a number,
+  Link Momo is not working" was. `.input-affix.dial` is the app's own
+  construction and has drawn a code in front of a number since 040.
+- **`.activate` IS A PANEL GRID, NOT A FORM'S.** Its `--s-4` gap is right for a
+  statement and one button and wrong for four fields, where it leaves most of a
+  handset screen empty between them. `.momo-form` keeps the panel and lets
+  `.field` carry the rhythm.
+
+### Shipping to Play — non-obvious rules
+
+`apps/mobile/plugins/with-release-signing.js`, `.github/workflows/mobile-aab.yml`,
+guarded by `play-release.test.ts`.
+
+- **EXPO'S TEMPLATE POINTS `buildTypes.release` AT `signingConfigs.debug`** — a
+  key published in every Expo project, password `android`. Play rejects it; and
+  the FIRST key an app is uploaded with becomes the upload key for the life of
+  the listing, so one that slipped through would make a public private key the
+  only thing allowed to update a banking app.
+- **THE SIGNING CONFIG IS CONDITIONAL ON THE KEYSTORE EXISTING**, so a
+  developer without one still gets a working local build rather than a Gradle
+  error about a file they were never given.
+- **THE PLUGIN LOCATES THE RELEASE BLOCK, IT DOES NOT PATTERN-MATCH.**
+  `signingConfig signingConfigs.debug` appears TWICE — the debug build type's
+  is correct and must stay. The first version anchored on what followed it and
+  broke on two comment lines the template carries.
+- **IT REFUSES RATHER THAN FALLING BACK.** When the template moves, the safe
+  failure is a build that stops, not one that quietly emits a debug-signed
+  bundle.
+- **AND THE ARTIFACT ITSELF IS INTERROGATED**, not the configuration that made
+  it: the signing config is conditional on a Gradle property, so a missing one
+  would SUCCEED and be found at the Play Console. The workflow reads the
+  certificate out of the `.aab` and fails on the debug key.
+- **AN AAB IS AN ARTIFACT, NEVER A RELEASE ASSET.** It cannot be installed by
+  tapping it, so putting one on a page beside installable APKs invites somebody
+  to try.
+- **A `versionCode` ONLY GOES UP**, and it defaults to the workflow run number
+  — the one figure here that cannot go backwards. A hand-typed repeat is
+  refused by Play and wastes an upload.
+
 ### A spread that widens when the payout currency strengthens — non-obvious rules
 
 Schema: `packages/ledger/sql/062_spread_pressure.sql`. Arithmetic in

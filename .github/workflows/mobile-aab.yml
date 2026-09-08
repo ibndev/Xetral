@@ -1,0 +1,332 @@
+# =============================================================================
+#  Android App Bundle — the artifact Google Play takes
+#
+#  WHY THIS IS NOT THE APK WORKFLOW WITH A FLAG. The two produce different
+#  things for different people, and every input differs:
+#
+#    * An APK is installed by tapping it. It is signed with Expo's DEBUG key —
+#      published, password `android` — which is fine for showing somebody a
+#      screen and is rejected outright by Play.
+#    * An AAB is UPLOADED. It cannot be installed on a phone at all, so
+#      publishing one as a GitHub release asset would put a file on a page
+#      where every other file is tappable and this one silently is not.
+#
+#  AND THE SIGNING IS THE PART THAT MUST NOT BE SHARED. The FIRST key an app is
+#  uploaded with becomes the upload key for the life of the listing. A bundle
+#  that slipped through signed with the debug key would mean a key whose
+#  private half is public is the only thing allowed to publish updates to a
+#  banking app — so this workflow REFUSES to emit an unsigned or debug-signed
+#  bundle rather than uploading one and finding out at review.
+#
+#  WHAT AN OPERATOR MUST DO ONCE, before the first run. Generate an upload
+#  keystore and put it in this repository's secrets:
+#
+#    keytool -genkeypair -v -keystore xetral-upload.jks -alias xetral-upload \
+#            -keyalg RSA -keysize 4096 -validity 10000
+#
+#    base64 -w0 xetral-upload.jks        -> secret ANDROID_KEYSTORE_BASE64
+#    the store password                  -> secret ANDROID_KEYSTORE_PASSWORD
+#    xetral-upload                       -> secret ANDROID_KEY_ALIAS
+#    the key password                    -> secret ANDROID_KEY_PASSWORD
+#
+#  KEEP THE .jks FILE. Losing it means losing the ability to update the app,
+#  and the only way back is a Play support request. It belongs in a password
+#  manager, not in this repository — nothing here writes it to disk outside the
+#  runner, and the runner is destroyed after the job.
+# =============================================================================
+name: Android AAB (Play Store)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: >-
+          What a person sees in the Play listing — "0.1.0". Must be bumped for
+          a release Play will accept alongside the previous one.
+        required: true
+        default: '0.1.0'
+        type: string
+      version_code:
+        description: >-
+          The integer Play orders uploads by. It MUST be higher than every code
+          already uploaded to this listing, and Play refuses a repeat. Leave it
+          blank to use this workflow run's own number, which only ever
+          increases.
+        required: false
+        type: string
+      api_url:
+        description: >-
+          Where the phone reaches the API. LEAVE BLANK for the deployed address
+          in app.json. A Play build must be https — an http address here is
+          refused below, because a store build that talks to a laptop on
+          somebody's Wi-Fi is a build that works for nobody who installs it.
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  aab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      # ---------------------------------------------------------------------
+      #  Everything that can be known before a 40-minute build starts.
+      #
+      #  NO WORKFLOW INPUT REACHES A SHELL THROUGH `${{ }}`. An expression in a
+      #  `run:` block is pasted in as TEXT before bash sees it, so a value
+      #  carrying a quote and a semicolon is a command. Through `env:` it is
+      #  data. The same rule the APK workflow follows, and CodeQL flagged it
+      #  there as high.
+      # ---------------------------------------------------------------------
+      - name: Refuse a build Play would reject
+        env:
+          API_URL: ${{ inputs.api_url }}
+          VERSION_NAME: ${{ inputs.version_name }}
+          VERSION_CODE: ${{ inputs.version_code }}
+          HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+          HAS_STORE_PW: ${{ secrets.ANDROID_KEYSTORE_PASSWORD != '' }}
+          HAS_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS != '' }}
+          HAS_KEY_PW: ${{ secrets.ANDROID_KEY_PASSWORD != '' }}
+        run: |
+          fail=0
+
+          # THE SIGNING SECRETS, ALL FOUR, CHECKED FIRST. Discovering a missing
+          # one after Gradle has run is forty minutes for a message that was
+          # knowable in a second — and the failure mode without this check is
+          # worse than a slow one: the conditional signing config falls back to
+          # the DEBUG key, the build succeeds, and Play rejects the upload.
+          for pair in "ANDROID_KEYSTORE_BASE64:$HAS_KEYSTORE" \
+                      "ANDROID_KEYSTORE_PASSWORD:$HAS_STORE_PW" \
+                      "ANDROID_KEY_ALIAS:$HAS_ALIAS" \
+                      "ANDROID_KEY_PASSWORD:$HAS_KEY_PW"; do
+            name=${pair%%:*}; present=${pair##*:}
+            if [ "$present" != 'true' ]; then
+              echo "::error::the repository secret $name is not set. See the header of this workflow for how to make an upload keystore."
+              fail=1
+            fi
+          done
+
+          # A STORE BUILD MUST BE https. The cleartext plugin adds an exception
+          # for an http host, which is right for a build going onto one phone
+          # on one Wi-Fi and wrong for every install from Play.
+          case "$API_URL" in
+            '') : ;;
+            https://*) : ;;
+            *) echo "::error::api_url must be an https address for a Play build; got '$API_URL'"; fail=1 ;;
+          esac
+
+          case "$VERSION_NAME" in
+            *[!0-9.]*|''|.*|*.) echo "::error::version_name must be digits and dots, like 0.1.0"; fail=1 ;;
+          esac
+
+          case "$VERSION_CODE" in
+            ''|*[0-9]*) : ;;
+          esac
+          if [ -n "$VERSION_CODE" ]; then
+            case "$VERSION_CODE" in
+              *[!0-9]*) echo "::error::version_code must be a whole number"; fail=1 ;;
+            esac
+          fi
+
+          exit $fail
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up the JDK this React Native expects
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - run: npm ci
+
+      - name: Typecheck the app and the client it uses
+        # A bundle that does not compile is forty minutes of Gradle to find out
+        # what tsc says in seconds.
+        run: |
+          npx tsc --noEmit -p packages/client/tsconfig.json
+          npx tsc --noEmit -p apps/mobile/tsconfig.json
+
+      - name: Stamp the version Play will order this by
+        env:
+          VERSION_NAME: ${{ inputs.version_name }}
+          VERSION_CODE: ${{ inputs.version_code }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          # WRITTEN INTO app.json BEFORE PREBUILD, because prebuild is what
+          # generates the Gradle file these end up in. Setting them afterwards
+          # edits a file the next prebuild throws away.
+          #
+          # The run number is the default because it is the only number here
+          # that cannot go backwards. A hand-typed one that repeats is refused
+          # by Play with a message about a code already in use, which is
+          # recoverable but wastes an upload.
+          code="${VERSION_CODE:-$RUN_NUMBER}"
+          node - "$VERSION_NAME" "$code" <<'JS'
+          const { readFileSync, writeFileSync } = require('node:fs');
+          const [name, code] = process.argv.slice(2);
+          const path = 'apps/mobile/app.json';
+          const config = JSON.parse(readFileSync(path, 'utf8'));
+          config.expo.version = name;
+          config.expo.android.versionCode = Number(code);
+          writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`);
+          console.log(`version ${name}, versionCode ${code}`);
+          JS
+
+      - name: Generate the native project from app.json
+        run: npx expo prebuild --platform android --clean --no-install
+        working-directory: apps/mobile
+
+      - name: The bundle asks for nothing it does not use
+        # The same assertion the APK workflow makes, and it matters more here:
+        # a permission list is the first thing a Play reviewer reads, and
+        # "Display over other apps" on a banking app is a rejection or a
+        # question. These three come from Expo's TEMPLATE rather than from any
+        # package in this repo, so no diff ever shows them.
+        run: |
+          manifest=apps/mobile/android/app/src/main/AndroidManifest.xml
+          fail=0
+          for perm in SYSTEM_ALERT_WINDOW READ_EXTERNAL_STORAGE WRITE_EXTERNAL_STORAGE; do
+            if grep -q "android.permission.$perm" "$manifest"; then
+              echo "::error::the manifest still asks for $perm"; fail=1
+            fi
+          done
+          # The other direction: a typo in `blockedPermissions` would remove
+          # something the app needs and present as "Face ID does not work".
+          if ! grep -q 'android.permission.USE_BIOMETRIC' "$manifest"; then
+            echo "::error::the manifest lost USE_BIOMETRIC; biometric unlock would silently fail"; fail=1
+          fi
+          exit $fail
+
+      - name: Put the upload keystore where Gradle can read it
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          # OUTSIDE THE REPOSITORY TREE, so no later step can archive it by
+          # globbing the workspace. The runner is destroyed after the job; this
+          # is about not writing it somewhere a careless `path:` would catch.
+          store="$RUNNER_TEMP/xetral-upload.jks"
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$store"
+          if [ ! -s "$store" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 did not decode to a file. Re-run base64 -w0 on the .jks."
+            exit 1
+          fi
+
+          # gradle.properties in the ANDROID project, which is generated and
+          # gitignored — so this cannot be committed by accident.
+          props=apps/mobile/android/gradle.properties
+          {
+            echo "RELEASE_STORE_FILE=$store"
+            echo "RELEASE_STORE_PASSWORD=$STORE_PASSWORD"
+            echo "RELEASE_KEY_ALIAS=$KEY_ALIAS"
+            echo "RELEASE_KEY_PASSWORD=$KEY_PASSWORD"
+          } >> "$props"
+          echo "keystore staged; $(keytool -list -keystore "$store" -storepass "$STORE_PASSWORD" 2>/dev/null | grep -c 'PrivateKeyEntry') private key entry/entries"
+
+      - name: Build the bundle
+        env:
+          # Read by apps/mobile/src/session.ts. NOT a secret and must not be:
+          # anything in an EXPO_PUBLIC_ variable ships to the device and can be
+          # read straight back out of the bundle.
+          EXPO_PUBLIC_API_URL: ${{ inputs.api_url }}
+        run: |
+          if [ -n "$EXPO_PUBLIC_API_URL" ]; then
+            echo "baking in api_url from the workflow input: $EXPO_PUBLIC_API_URL"
+          else
+            echo "baking in the address from app.json: $(node -p "require('./apps/mobile/app.json').expo.extra.apiUrl")"
+          fi
+          cd apps/mobile/android
+          chmod +x gradlew
+          ./gradlew bundleRelease --no-daemon
+
+      - name: Prove it is signed with the upload key and not the debug one
+        env:
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          # THE CHECK THAT MAKES THE REST WORTH ANYTHING. The signing config is
+          # conditional on a Gradle property; if that property were ever missing
+          # the build would SUCCEED, quietly signed with Expo's debug key, and
+          # the first anybody would know is a Play rejection. So the artifact
+          # itself is interrogated rather than the configuration that made it.
+          aab=$(find apps/mobile/android/app/build/outputs/bundle -name '*.aab' | head -1)
+          if [ -z "$aab" ]; then echo "::error::gradle produced no .aab"; exit 1; fi
+          echo "aab=$aab" >> "$GITHUB_ENV"
+
+          signer=$(unzip -p "$aab" 'META-INF/*.RSA' 2>/dev/null | keytool -printcert 2>/dev/null || true)
+          if [ -z "$signer" ]; then
+            # jarsigner reads the whole container and is the authority; the
+            # unzip above is only a faster first look.
+            signer=$(jarsigner -verify -verbose:summary -certs "$aab" 2>/dev/null || true)
+          fi
+          echo "$signer" | head -20
+
+          if printf '%s' "$signer" | grep -qi 'androiddebugkey\|CN=Android Debug'; then
+            echo "::error::this bundle is signed with the ANDROID DEBUG KEY. Play will reject it, and it must never become the upload key. Check that all four ANDROID_* secrets are set."
+            exit 1
+          fi
+          if ! printf '%s' "$signer" | grep -qi "$KEY_ALIAS\|PrivateKeyEntry\|CN="; then
+            echo "::error::could not read a signing certificate out of the bundle; refusing to publish an artifact that may be unsigned."
+            exit 1
+          fi
+          echo "signed with something other than the debug key"
+
+      - name: Name it after what is in it
+        id: bundle
+        env:
+          VERSION_NAME: ${{ inputs.version_name }}
+        run: |
+          name="xetral-${VERSION_NAME}-${GITHUB_SHA::7}.aab"
+          cp "$aab" "$name"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      # AN ARTIFACT AND DELIBERATELY NOT A RELEASE ASSET. An AAB cannot be
+      # installed by tapping it, so putting one on a release page next to
+      # installable APKs invites somebody to try. It goes to a laptop, and from
+      # there to the Play Console.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.bundle.outputs.name }}
+          path: ${{ steps.bundle.outputs.name }}
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Say what to do with it
+        env:
+          NAME: ${{ steps.bundle.outputs.name }}
+          VERSION_NAME: ${{ inputs.version_name }}
+          VERSION_CODE: ${{ inputs.version_code }}
+          RUN_NUMBER: ${{ github.run_number }}
+          API_URL: ${{ inputs.api_url }}
+        run: |
+          code="${VERSION_CODE:-$RUN_NUMBER}"
+          talks="${API_URL:-$(node -p "require('./apps/mobile/app.json').expo.extra.apiUrl")}"
+          {
+            echo "### Bundle ready for Play"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| File | \`$NAME\` |"
+            echo "| Size | $(du -h "$NAME" | cut -f1) |"
+            echo "| Version | \`$VERSION_NAME\` (code \`$code\`) |"
+            echo "| Package | \`$(node -p "require('./apps/mobile/app.json').expo.android.package")\` |"
+            echo "| Talks to | \`$talks\` |"
+            echo
+            echo "1. Download the artifact above and unzip it."
+            echo "2. Play Console → **Testing → Closed testing** → create or open a track."
+            echo "3. **Create new release**, upload the \`.aab\`, and add testers by email."
+            echo "4. The first upload of a listing also needs the store entry finished:"
+            echo "   privacy policy URL, data safety form, content rating and screenshots."
+            echo
+            echo "A version code can only go up. This one is \`$code\`."
+          } >> "$GITHUB_STEP_SUMMARY"

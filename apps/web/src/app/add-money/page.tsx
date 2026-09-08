@@ -432,7 +432,7 @@ function LinkMomo({
 
   if (linked !== null) {
     return (
-      <div className="activate">
+      <div className="activate momo-form">
         <p className="activate-lead">Your mobile money wallet</p>
         <p className="mono">{linked.msisdn}</p>
         <p className="hint">
@@ -479,15 +479,19 @@ function LinkMomo({
   }
 
   return (
-    <div className="activate">
+    /*
+      `.activate` IS A ROOMY GRID — it holds a one-line statement and a single
+      button, with generous space either side so the primary action on the
+      screen is not jammed against text. A FORM inside it inherits that gap
+      between every field, which on a handset is most of a screen of empty
+      space between "Mobile money number" and "Transaction PIN".
+      
+      `.momo-form` keeps the panel and tightens the rhythm to a form's.
+    */
+    <div className="activate momo-form">
       <p className="activate-lead">
         Link your mobile money{country === undefined ? '' : ` in ${country.name}`}
       </p>
-      <p className="hint">
-        One number to add money and to be paid out to. We check the number, not
-        who holds it — the first payment you make from it confirms the wallet.
-      </p>
-
       <div className="field">
         <label htmlFor="momo-network">Network</label>
         <Select
@@ -500,12 +504,23 @@ function LinkMomo({
 
       <div className="field">
         <label htmlFor="momo-number">Mobile money number</label>
-        {/* THE DIAL CODE IS DRAWN, NOT ASKED FOR. It comes from the country
-            already on the account, so there is one place a country is stated
-            — 040's rule about a second picker letting somebody select Ghana
-            and +234. The number is normalised to E.164 server-side. */}
-        <div className="row">
-          <span className="badge mono">+{country?.dial_code ?? ''}</span>
+        {/*
+          `.input-affix.dial`, THE APP'S OWN PATTERN — and `.row` was the bug.
+          
+          `.row` is `display: flex; align-items: baseline; justify-content:
+          space-between`, which is a LABEL-AND-VALUE row: it pushed the dial
+          code to one edge and the input to the other, so the field rendered as
+          a stranded box with the digits jammed against its right side and no
+          part of it looking like something to type in. The signup screen and
+          Request payment have drawn a dial code in front of a number correctly
+          since 040; this is that construction, not a second one.
+          
+          The code itself is DRAWN, NOT ASKED FOR — it comes from the country
+          already on the account, so there is one place a country is stated.
+          The number is normalised to E.164 server-side.
+        */}
+        <div className="input-affix dial">
+          <span className="dial-fixed">+{country?.dial_code ?? ''}</span>
           <input
             id="momo-number"
             type="tel"

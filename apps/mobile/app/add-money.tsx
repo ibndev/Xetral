@@ -399,7 +399,7 @@ function LinkMomo({
 
   if (linked !== null) {
     return (
-      <View style={{ gap: space.md, marginTop: space.md }}>
+      <View style={{ gap: space.sm, marginTop: space.md }}>
         <Text style={[styles.lead, { marginBottom: 0, fontFamily: font.sansSemi, color: colors.text }]}>
           Your mobile money wallet
         </Text>
@@ -440,15 +440,17 @@ function LinkMomo({
   }
 
   return (
-    <View style={{ gap: space.md, marginTop: space.md }}>
+    /*
+      A FORM'S RHYTHM, NOT A PANEL'S. `space.md` between every field is the
+      spacing a statement-and-a-button panel wants; with four fields in it,
+      most of a handset screen sits empty between "Mobile money number" and
+      "Transaction PIN" — which is what was reported. `space.sm` is what the
+      other forms in this app use between a label and the next field.
+    */
+    <View style={{ gap: space.sm, marginTop: space.md }}>
       <Text style={[styles.lead, { marginBottom: 0, fontFamily: font.sansSemi, color: colors.text }]}>
         Link your mobile money{country === undefined ? '' : ` in ${country.name}`}
       </Text>
-      <Text style={styles.hint}>
-        One number to add money and to be paid out to. We check the number, not
-        who holds it — the first payment you make from it confirms the wallet.
-      </Text>
-
       <Text style={styles.label}>Network</Text>
       <Select
         label="Network"

@@ -1498,6 +1498,44 @@ select {
 .input-affix.dial input:focus { border: 0; box-shadow: none; }
 
 /*
+ * A DIALLING CODE THAT IS SHOWN RATHER THAN CHOSEN.
+ *
+ * On Add Money the country is already decided — it is the customer's own, and
+ * a second picker is what 040 refuses, because it lets somebody select Ghana
+ * and +234. So this is the same field with the trigger replaced by text: the
+ * padding matches `.dial-select`'s so the digits begin in the same place, and
+ * the hairline is the same one, so the two fields line up on a screen that
+ * shows both.
+ */
+.input-affix.dial .dial-fixed {
+  flex: 0 0 auto;
+  padding: 0 6px 0 8px;
+  color: var(--text-2);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* The same divider `.dial-select` draws, positioned against this affix rather
+   than against a trigger inside it. */
+.input-affix.dial .dial-fixed + input { border-left: 1px solid var(--line-strong); padding-left: 12px; }
+
+/*
+ * A FORM INSIDE `.activate`, WHICH IS NOT WHAT `.activate` IS FOR.
+ *
+ * That grid holds a one-line statement and a single button, with `--s-4`
+ * between them so the primary action on the screen is not jammed against
+ * text. Put four fields in it and every gap between them is that same
+ * generous figure — on a handset, most of a screen of empty space between
+ * "Mobile money number" and "Transaction PIN", which is what was reported.
+ *
+ * A form has its own rhythm and `.field` already carries it, so the grid gap
+ * comes down and the fields keep their own margin instead of being spaced
+ * twice.
+ */
+.activate.momo-form { gap: var(--s-2); }
+.activate.momo-form .field { margin-bottom: 0; }
+
+/*
  * THE DIALLING CODE IS THE COUNTRY PICKER, and there is no longer a second
  * one above it.
  *
@@ -2617,9 +2655,30 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
 }
 @media (min-width: 720px) { .xselect-trigger { font-size: 15px; } }
 
-/* The button rules above set a background, and `button:hover` in the base
-   layer sets `--brand-700`. Without this a currency picker turns solid orange
-   under a cursor — the same cascade collision the icon buttons had. */
+/*
+ * THE BACKGROUND IS STATED IN EVERY STATE, AND THE HOVER GUARD WAS THE BUG.
+ *
+ * `button:hover:where(:not(:disabled))` in the base layer sets `--brand-700`
+ * on every button in the product, and it is NOT inside a hover media query.
+ * This override was — so on a touch device that reports `hover: none` the
+ * override did not exist at all, while the generic rule still applied through
+ * the sticky `:hover` a tap leaves behind. In the dark theme `--brand` is
+ * #FFFFFF, so tapping the network picker turned it into a SOLID WHITE PILL
+ * with near-invisible text on it.
+ *
+ * That is the same cascade collision the icon buttons had, one component
+ * over: omitting a property is not the same as neutralising one, and a
+ * `@media (hover: hover)` guard on the NEUTRALISING half makes it worse than
+ * useless — it removes the fix on exactly the devices that need it.
+ *
+ * So the resting background is restated unguarded, and only the border colour
+ * — which is genuinely a hover affordance — stays behind the query.
+ */
+.xselect-trigger:hover:where(:not(:disabled)),
+.xselect-trigger:active:where(:not(:disabled)),
+.xselect-trigger:focus:where(:not(:disabled)) {
+  background: var(--field);
+}
 @media (hover: hover) {
   .xselect-trigger:hover:where(:not(:disabled)) {
     background: var(--field);
