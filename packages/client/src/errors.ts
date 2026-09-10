@@ -205,6 +205,14 @@ const API_ERROR_CODES = [
    * database saying so to anything that asks anyway.
    */
   'price_is_live',
+  /*
+   * `broadcast_not_found` — an announcement id that names nothing.
+   *
+   * Reachable only from the operations dashboard, which is why it exists at
+   * all: a staff screen rendering "Something went wrong" for a row somebody
+   * removed teaches an operator to distrust the whole surface.
+   */
+  'broadcast_not_found',
   'purchase_not_found',
   'verification_not_supported',
 

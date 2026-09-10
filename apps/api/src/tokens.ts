@@ -39,6 +39,7 @@ export const NOTIFICATION_PORT = Symbol('NOTIFICATION_PORT');
  *  Separate from `FX_PORT`, which quotes a price we can execute against — see
  *  `ports/reference-rate.ts` for why the two must not be one. */
 export const REFERENCE_RATE_PORT = Symbol('REFERENCE_RATE_PORT');
+export const PUSH_PORT = Symbol('PUSH_PORT');
 export const CLOCK = Symbol('CLOCK');
 
 /** Injected rather than read from Date.now() so expiry and rate-limit windows

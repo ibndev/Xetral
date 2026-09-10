@@ -7,6 +7,7 @@ import { Button, Done, Field, FormError, Loading, Panel } from '@/ui';
 import { useLoad, useSubmit, useXetral } from '@/hooks';
 import { resetXetral, xetral } from '@/session';
 import { forget } from '@/biometrics';
+import { unregisterFromPush } from '@/push';
 import { font, space, useStyles, useTheme, useThemeChoice } from '@/theme';
 
 /**
@@ -38,6 +39,11 @@ export default function Settings() {
      * this device, and the secret must still be gone.
      */
     await forget();
+    // AND THE HANDSET STOPS BEING AN ADDRESS FOR THIS ACCOUNT, for the reason
+    // the stored PIN is forgotten: a phone somebody hands over must not go on
+    // showing the previous account's notifications on its lock screen. Before
+    // the tokens go, because retiring it is an authenticated request.
+    await unregisterFromPush();
     await xetral().session.signOut();
     resetXetral();
     router.replace('/signin');

@@ -16,6 +16,7 @@ import { z } from 'zod';
 import type { AuthenticatedRequest } from '../auth/auth.guard.js';
 import { AdminService } from './admin.service.js';
 import { StaffService } from '../auth/staff.service.js';
+import { PushService } from '../push/push.service.js';
 import { AuditService } from './audit.service.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { ConsentService } from '../consent/consent.service.js';
@@ -229,6 +230,38 @@ const deleteRateSchema = z.object({
   transaction_pin: z.string().optional(),
 });
 
+/**
+ * An announcement to every customer, or to one country.
+ *
+ * THE LENGTHS ARE 065's CHECKS, RESTATED. A push notification is truncated by
+ * the operating system long before either ceiling, and a title that reads as
+ * a sentence cut in half on a lock screen is worse than a shorter one — so
+ * these bounds are what the database holds and this is the readable refusal.
+ *
+ * THERE IS NO CLASS FIELD, deliberately. Every broadcast is consent-gated,
+ * because a message TYPED INTO A BOX and sent to everybody is an announcement
+ * whatever it says — a transactional message is about one customer's own
+ * transaction and is enqueued by the flow that owed it. A dropdown here is how
+ * every message becomes a service message on the afternoon somebody is in a
+ * hurry.
+ */
+const broadcastSchema = z
+  .object({
+    title: z.string().trim().min(3).max(80),
+    body: z.string().trim().min(3).max(240),
+    /* Absent means every country. A code is checked against `countries` by the
+       foreign key, so a typo is refused rather than sent to nobody and
+       reported as "0 devices". */
+    country: z
+      .string()
+      .trim()
+      .toUpperCase()
+      .regex(/^[A-Z]{2}$/)
+      .optional(),
+    transaction_pin: z.string().optional(),
+  })
+  .strict();
+
 const resolveDataRequestSchema = z.object({
   status: z.enum(['completed', 'refused']),
   /* Twenty characters, matching the CHECK. A queue cleared with one-word
@@ -267,6 +300,7 @@ export class AdminController {
     private readonly diagnostics: FundingDiagnosticsService,
     @Inject(RecoveryService) private readonly recovery: RecoveryService,
     @Inject(StaffService) private readonly staffRoles: StaffService,
+    @Inject(PushService) private readonly push: PushService,
   ) {}
 
   /**
@@ -1367,6 +1401,69 @@ export class AdminController {
       claims(request).sub,
       ipOf(request),
     );
+  }
+
+  /* ------------------------------ broadcasts ---------------------------- */
+
+  /**
+   * How many handsets an announcement would reach, before it is sent.
+   *
+   * READ FROM `push_audience`, the same view the worker sends to — one
+   * definition of who may be told, so what an operator is shown and what
+   * actually happens cannot differ.
+   */
+  @Get('broadcasts/audience')
+  async broadcastAudience(@Query('country') country?: string): Promise<unknown> {
+    return this.push.estimate(country === undefined || country === '' ? undefined : country);
+  }
+
+  @Get('broadcasts')
+  async broadcasts(): Promise<{ broadcasts: readonly unknown[] }> {
+    return { broadcasts: await this.push.history() };
+  }
+
+  /**
+   * Queues one.
+   *
+   * IT IS A ROW AND NOT A SEND, so this answers in milliseconds and the worker
+   * drains it. An operator's click must not wait on thousands of HTTP calls,
+   * and a process dying halfway through one must not leave nobody able to say
+   * who was reached.
+   *
+   * A PIN, and `admin` rather than `support`: this is the one action on the
+   * dashboard that writes to every customer's lock screen at once, and it
+   * cannot be undone by appending — the handsets have it.
+   */
+  @Post('broadcasts')
+  @HttpCode(201)
+  async queueBroadcast(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: unknown,
+  ): Promise<unknown> {
+    const parsed = broadcastSchema.safeParse(body);
+    if (!parsed.success) throw invalid(parsed.error.issues);
+
+    const actor = claims(request).sub;
+    const queued = await this.push.queue(actor, {
+      title: parsed.data.title,
+      body: parsed.data.body,
+      ...(parsed.data.country === undefined ? {} : { country: parsed.data.country }),
+    });
+
+    const ip = ipOf(request);
+    await this.audit.record({
+      actorId: actor,
+      action: 'push.broadcast',
+      subjectType: 'broadcast',
+      subjectId: queued.uuid,
+      // The words themselves, in the log. What was announced to every customer
+      // of the platform is exactly the sort of thing somebody later asks to
+      // see, and `push_broadcasts` holding it is not a reason for the audit
+      // trail to be vaguer than the thing it audits.
+      detail: { title: queued.title, country: queued.country },
+      ...(ip === undefined ? {} : { ip }),
+    });
+    return queued;
   }
 
   /* -------------------------------- audit ------------------------------ */

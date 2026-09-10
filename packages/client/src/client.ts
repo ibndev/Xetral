@@ -705,6 +705,27 @@ export class XetralClient {
   }
 
   /**
+   * Records the handset this app is running on, so it can be reached.
+   *
+   * NO PIN. A push token is an ADDRESS and not a credential: it lets its
+   * holder send a notification to one handset and nothing else. Demanding the
+   * factor that authorises spending would also mean a customer who has not set
+   * a PIN could never be told anything.
+   */
+  async registerPushDevice(token: string, platform: 'ios' | 'android'): Promise<void> {
+    await this.#post('/v1/push/devices', { token, platform });
+  }
+
+  /**
+   * Retires it — part of signing out, for the reason the stored PIN is
+   * forgotten: a phone somebody hands over must stop showing the previous
+   * account's notifications on its lock screen.
+   */
+  async revokePushDevice(token: string): Promise<void> {
+    await this.#post('/v1/push/devices/revoke', { token });
+  }
+
+  /**
    * Confirms a transaction PIN without moving money.
    *
    * The server's guard does the verifying, so a 204 here means the PIN is

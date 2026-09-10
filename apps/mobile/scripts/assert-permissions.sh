@@ -61,4 +61,33 @@ for perm in INTERNET USE_BIOMETRIC; do
   fi
 done
 
+
+# AND THE THIRD DIRECTION: NOTHING THE APP DID NOT ASK FOR.
+#
+# The two loops above name permissions somebody already thought of, which is
+# exactly the gap 036 records about `admin_work_queue` — an incomplete list
+# that looks complete is trusted. Adding `expo-notifications` pulled VIBRATE
+# into the manifest, and no check anywhere would have said so; the next module
+# could pull in something a customer reads on the install screen and refuses
+# over.
+#
+# So every permission is compared against a list, and one that is not on it
+# fails the build. The fix when that happens is to decide — add it here with a
+# reason, or block it in `app.json` — which is the point.
+known="INTERNET USE_BIOMETRIC USE_FINGERPRINT VIBRATE \
+       SYSTEM_ALERT_WINDOW READ_EXTERNAL_STORAGE WRITE_EXTERNAL_STORAGE"
+
+for perm in $(grep -o 'android:name="android.permission.[A-Z_]*"' "$manifest" \
+              | sed 's/.*permission\.//; s/"//' | sort -u); do
+  case " $known " in
+    *" $perm "*) ;;
+    *)
+      echo "::error::$perm is in the manifest and nothing here decided it should be."
+      echo "          A native module pulled it in. Either add it to \$known in"
+      echo "          this script with a reason, or block it in app.json."
+      fail=1
+      ;;
+  esac
+done
+
 exit $fail

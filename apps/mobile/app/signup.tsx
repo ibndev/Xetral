@@ -14,6 +14,7 @@ import type { XetralCountry } from '@xetral/client';
 import { Link, router } from 'expo-router';
 import { deviceDescriptor } from '@/device';
 import { resetXetral, xetral } from '@/session';
+import { registerForPush } from '@/push';
 import { messageFor } from '@/errors';
 import { radius, space, useStyles, useTheme } from '@/theme';
 import { Select } from '@/select';
@@ -109,6 +110,11 @@ export default function SignUp() {
         phone,
         device: await deviceDescriptor(),
       });
+      // Asked once the account exists rather than during the form: a
+      // permission prompt while somebody is still working out what this app is
+      // gets refused, and on both platforms that refusal is permanent from the
+      // customer's point of view.
+      void registerForPush();
       // `replace`, not `push`: there is no back to a signup form once the
       // account exists.
       router.replace('/wallet');

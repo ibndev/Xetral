@@ -370,6 +370,14 @@ export interface ApiConfig {
    * day, so a shorter interval spends quota to be told the same thing.
    */
   readonly fxRateSyncIntervalSeconds: number | undefined;
+  /**
+   * How often the queued-broadcast worker drains `push_broadcasts`.
+   *
+   * ON EXACTLY ONE INSTANCE, and its absence is the silent failure: the row
+   * is written, the endpoint answers, the screen says "queued", and nothing is
+   * ever delivered. Nothing errors, because writing the row succeeded.
+   */
+  readonly pushBroadcastIntervalSeconds: number | undefined;
 
   readonly requestRateLimit: {
     readonly windowSeconds: number;
@@ -404,6 +412,17 @@ export interface ApiConfig {
    * whatever was last published by hand, which is not an error anywhere.
    */
   readonly exchangeRateApiKey: string | undefined;
+  /**
+   * Expo's push access token, needed ONLY when the Expo account has Enhanced
+   * Security switched on.
+   *
+   * Absent is the ordinary case. Expo's push API is unauthenticated by
+   * default — a token is an unguessable address and possession of one is the
+   * authorisation to send to it — so requiring this would refuse every
+   * deployment that has not turned that on, over a credential they were never
+   * issued.
+   */
+  readonly expoAccessToken: string | undefined;
   readonly notificationFrom: string | undefined;
   readonly notificationReplyTo: string | undefined;
   /**
@@ -882,6 +901,7 @@ export function loadConfig(env: Env): ApiConfig {
     balanceReconcileIntervalSeconds: optionalInteger(env, 'BALANCE_RECONCILE_INTERVAL_SECONDS'),
     riskMonitorIntervalSeconds: optionalInteger(env, 'RISK_MONITOR_INTERVAL_SECONDS'),
     fxRateSyncIntervalSeconds: optionalInteger(env, 'FX_RATE_SYNC_INTERVAL_SECONDS'),
+    pushBroadcastIntervalSeconds: optionalInteger(env, 'PUSH_BROADCAST_INTERVAL_SECONDS'),
     requestRateLimit: {
       windowSeconds: integer(env, 'REQUEST_RATE_LIMIT_WINDOW_SECONDS', 60),
       // Generous, because an unauthenticated request has only an address to
@@ -917,6 +937,7 @@ export function loadConfig(env: Env): ApiConfig {
     },
     brevoApiKey: optional(env, 'BREVO_API_KEY'),
     exchangeRateApiKey: optional(env, 'EXCHANGERATE_API_KEY'),
+    expoAccessToken: optional(env, 'EXPO_ACCESS_TOKEN'),
     notificationFrom: optional(env, 'NOTIFICATION_FROM'),
     notificationReplyTo: optional(env, 'NOTIFICATION_REPLY_TO'),
     notificationIntervalSeconds: optionalInteger(env, 'NOTIFICATION_INTERVAL_SECONDS'),

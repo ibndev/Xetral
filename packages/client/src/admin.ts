@@ -593,6 +593,39 @@ export interface AdminNotifications {
   }[];
 }
 
+/**
+ * An announcement an operator queued for customer handsets.
+ *
+ * `sent_at` NULL IS THE WHOLE STATE MACHINE: queued until the worker drains
+ * it. There is no status enum, because a second copy of "has this been sent?"
+ * is a second thing to keep in step.
+ */
+export interface AdminBroadcast {
+  readonly uuid: string;
+  readonly title: string;
+  readonly body: string;
+  /** Null means every country. */
+  readonly country: string | null;
+  readonly created_at: string;
+  readonly sent_at: string | null;
+  readonly devices: number;
+  readonly accepted: number;
+  readonly rejected: number;
+  /**
+   * How many customers matched the audience and were SKIPPED for having no
+   * live marketing grant. Shown rather than hidden: an operator seeing far
+   * fewer handsets than they expected must be able to learn the difference is
+   * consent and not a broken integration.
+   */
+  readonly without_consent: number;
+  readonly failure_reason: string | null;
+}
+
+export interface AdminAudienceEstimate {
+  readonly devices: number;
+  readonly customers: number;
+}
+
 export interface AdminProviderHealth {
   readonly degraded: readonly {
     readonly provider: string;
@@ -1092,6 +1125,45 @@ export class AdminClient {
       `/v1/admin/prices/fx-rate/${encodeURIComponent(uuid)}`,
       { reason, transaction_pin: pin },
     );
+  }
+
+  /* ------------------------------ broadcasts ---------------------------- */
+
+  /**
+   * How many handsets an announcement would reach.
+   *
+   * ASKED BEFORE SENDING, from the same view the worker sends to. An operator
+   * about to write to every customer's lock screen at once should see the
+   * number first — and when it is smaller than they expected, `customers`
+   * against `devices` is what says whether the difference is consent or
+   * handsets.
+   */
+  async broadcastAudience(country?: string): Promise<AdminAudienceEstimate> {
+    const query = country === undefined || country === '' ? '' : `?country=${encodeURIComponent(country)}`;
+    return this.#get(`/v1/admin/broadcasts/audience${query}`);
+  }
+
+  async broadcasts(): Promise<readonly AdminBroadcast[]> {
+    const body = await this.#get<{ broadcasts: AdminBroadcast[] }>('/v1/admin/broadcasts');
+    return body.broadcasts;
+  }
+
+  /**
+   * Queues one. It is a ROW and not a send, so this returns immediately and
+   * the screen can say what happens next honestly.
+   */
+  async queueBroadcast(input: {
+    title: string;
+    body: string;
+    country?: string;
+    pin: string;
+  }): Promise<AdminBroadcast> {
+    return this.#request('POST', '/v1/admin/broadcasts', {
+      title: input.title,
+      body: input.body,
+      ...(input.country === undefined || input.country === '' ? {} : { country: input.country }),
+      transaction_pin: input.pin,
+    });
   }
 
   async retirePrice(

@@ -177,6 +177,11 @@ describe('the privileged surface is declared as privileged', () => {
       // irreversible surface.
       'DELETE /v1/admin/prices/fx-rate/:id (admin)',
       'GET /v1/admin/audit (admin)',
+      // Announcements to customer handsets. The two reads are `support`, the
+      // widest staff role: "did it go out?" is a question the person taking
+      // the call needs to answer, and neither read carries a customer name.
+      'GET /v1/admin/broadcasts (support)',
+      'GET /v1/admin/broadcasts/audience (support)',
       // A card's whole life, for the agent on the phone.
       'GET /v1/admin/cards/:id (support)',
       // Provider credentials. `admin` on all three: the write decides whether
@@ -259,6 +264,11 @@ describe('the privileged surface is declared as privileged', () => {
       // PIN and — through the guard — a fresh second factor.
       // Freezing only. There is deliberately no staff terminate: it moves the
       // customer's money and cannot be undone.
+      // SENDING is `admin` and takes a PIN. It writes to every customer's lock
+      // screen at once and cannot be undone by appending — the handsets have
+      // it. `stepUp` is left at the strict default, because an operator
+      // publishes prices weekly and announces something rarely.
+      'POST /v1/admin/broadcasts (admin)',
       'POST /v1/admin/cards/:id/freeze (compliance)',
       'POST /v1/admin/countries (admin)',
       'POST /v1/admin/countries/:code (admin)',

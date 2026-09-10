@@ -86,6 +86,11 @@ export const GROUPS: readonly Group[] = [
       // silent by construction: with the worker interval unset the outbox
       // fills, the API keeps saying "check your email", and nothing errors.
       { href: '/admin/notifications', label: 'Notifications', icon: 'bell' },
+      // Announcements to customer handsets. Beside Notifications and not
+      // inside it: that screen answers "is email being sent", this one is
+      // where somebody WRITES something, and its own silent failure is a
+      // different unset interval.
+      { href: '/admin/broadcasts', label: 'Announcements', icon: 'bell' },
       { href: '/admin/audit', label: 'Audit', icon: 'clock' },
       { href: '/admin/readiness', label: 'Readiness', icon: 'check' },
       // Beside Readiness, and distinct from it: Readiness asks whether a

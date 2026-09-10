@@ -613,6 +613,31 @@ export const PROVIDERS: readonly Item[] = [
       'natural value: the feed itself refreshes once a day.',
   },
   {
+    name: 'PUSH_BROADCAST_INTERVAL_SECONDS',
+    kind: 'env',
+    failure: 'silent',
+    singleInstance: true,
+    flow: 'announcements to customer handsets',
+    ifMissed:
+      'NOTHING IS EVER SENT. The row is written, the endpoint answers, the ' +
+      'dashboard says "queued", and no handset is told anything — nothing ' +
+      'errors, because writing the row succeeded. The same shape as ' +
+      '`NOTIFICATION_INTERVAL_SECONDS`, and `push_broadcasts_stuck` is the ' +
+      'only thing that sees it.',
+  },
+  {
+    name: 'EXPO_ACCESS_TOKEN',
+    kind: 'env',
+    failure: 'default-is-deliberate',
+    flow: 'announcements to customer handsets',
+    ifMissed:
+      'nothing. Expo\'s push API is unauthenticated by default — a token is ' +
+      'an unguessable address and possession of one is the authorisation to ' +
+      'send to it — so this is needed ONLY if the Expo account has Enhanced ' +
+      'Security switched on. The credential store is authoritative and this ' +
+      'is the fallback.',
+  },
+  {
     name: 'NOTIFICATION_FROM',
     kind: 'env',
     failure: 'silent',
@@ -1375,6 +1400,15 @@ export const SETTINGS: readonly Item[] = [
       'about which rows are still evidence of a takeover.',
   },
   {
+    name: 'retention_push_devices_days',
+    kind: 'setting',
+    failure: 'default-is-deliberate',
+    ifMissed:
+      'a revoked push token is kept for a year. Measured from revocation and ' +
+      'never from creation, so a handset still in somebody\'s pocket is not ' +
+      'aged out and left unreachable.',
+  },
+  {
     name: 'retention_totp_steps_hours',
     kind: 'setting',
     failure: 'default-is-deliberate',
@@ -1520,6 +1554,18 @@ export const CREDENTIALS: readonly Item[] = [
     ifMissed:
       'enqueueing still succeeds and nothing sends. `available` is not '  +
       '`deliverable`.',
+  },
+  {
+    name: 'expo.access_token',
+    kind: 'credential',
+    failure: 'default-is-deliberate',
+    flow: 'announcements to customer handsets',
+    ifMissed:
+      'nothing, in the ordinary case. Expo\'s push API is unauthenticated by ' +
+      'default — a token is an unguessable address and possession of one is ' +
+      'the authorisation to send to it — so this is needed ONLY if the Expo ' +
+      'account has Enhanced Security switched on. Leaving it empty is the ' +
+      'normal state, not a gap.',
   },
   {
     name: 'exchangerate.api_key',

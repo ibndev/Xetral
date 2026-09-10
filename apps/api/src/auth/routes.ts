@@ -179,6 +179,22 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // them. None of the three is a text box.
       .authenticated('GET', '/v1/auth/profile/details', { pin: false })
       .authenticated('POST', '/v1/auth/profile/name', { pin: false })
+      /*
+       * THE HANDSET A CUSTOMER IS SIGNED IN ON.
+       *
+       * No PIN on either. A push token is an ADDRESS and not a credential —
+       * it lets its holder send a notification to one handset and nothing
+       * else — so registering one moves no money. Demanding the factor that
+       * authorises spending in order to become reachable would also mean a
+       * customer who has not set a PIN could never be told anything.
+       *
+       * Revoking is what signing out calls, and it answers 204 whether or not
+       * it matched: a sign-out must never fail because the handset was
+       * already retired, and an endpoint that answered differently for "not
+       * yours" and "not here" would say which tokens exist.
+       */
+      .authenticated('POST', '/v1/push/devices', { pin: false })
+      .authenticated('POST', '/v1/push/devices/revoke', { pin: false })
 
       .authenticated('GET', '/v1/auth/devices', { pin: false })
       // Acting on it does. All three are reachable with a stolen access token,
@@ -355,6 +371,29 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
         role: 'admin',
         stepUp: 'pin',
       })
+      /*
+       * ANNOUNCEMENTS TO CUSTOMER HANDSETS.
+       *
+       * The two reads are `support`, the widest staff role: "did the
+       * announcement go out?" is a question the person taking the call needs
+       * to answer, and the audience estimate carries counts and no names.
+       *
+       * SENDING IS `admin` AND TAKES A PIN. It is the one action on this
+       * dashboard that writes to every customer's lock screen at once, and it
+       * cannot be undone by appending — the handsets have it. `stepUp` is left
+       * at the strict default, so it also wants a live elevation: an operator
+       * publishes prices weekly and announces something rarely, which is the
+       * shape 054 says a full step-up belongs on.
+       *
+       * There is no `push.broadcast` entry in 009's must-say-why list, and
+       * that is deliberate: the TITLE AND BODY are the reason, recorded on the
+       * row and in the audit detail. Asking for prose on top of the words
+       * themselves is how a required field becomes the word "update" — 035's
+       * argument for leaving `price.publish` off it.
+       */
+      .staff('GET', '/v1/admin/broadcasts', { pin: false, role: 'support' })
+      .staff('GET', '/v1/admin/broadcasts/audience', { pin: false, role: 'support' })
+      .staff('POST', '/v1/admin/broadcasts', { pin: true, role: 'admin' })
       .staff('GET', '/v1/admin/stuck', { pin: false, role: 'support' })
       // `admin`, not `support`: it names every flow that is switched off and
       // every credential that is absent, which is a map of where this

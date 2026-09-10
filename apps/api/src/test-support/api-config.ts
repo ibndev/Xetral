@@ -106,6 +106,7 @@ export function testApiConfig(databaseUrl: string, overrides: Partial<ApiConfig>
     // tell the assertion is about the rules rather than about the schedule.
     riskMonitorIntervalSeconds: undefined,
     fxRateSyncIntervalSeconds: undefined,
+    pushBroadcastIntervalSeconds: undefined,
     reconcileIntervalSeconds: undefined,
     // No grace either — a test that had to wait two minutes for a row to become
     // eligible is a test nobody runs. Zero rather than undefined, which would
@@ -144,6 +145,7 @@ export function testApiConfig(databaseUrl: string, overrides: Partial<ApiConfig>
     },
     brevoApiKey: undefined,
     exchangeRateApiKey: undefined,
+    expoAccessToken: undefined,
     notificationFrom: undefined,
     notificationReplyTo: undefined,
     notificationIntervalSeconds: undefined,

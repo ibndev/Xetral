@@ -4,6 +4,7 @@ import { Link, router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { deviceDescriptor } from '@/device';
 import { resetXetral, xetral } from '@/session';
+import { registerForPush } from '@/push';
 import { messageFor } from '@/errors';
 import { Logo } from '@/logo';
 import { Icon } from '@/icon';
@@ -41,6 +42,11 @@ export default function SignIn() {
     try {
       resetXetral();
       await xetral().session.signIn(identifier, password, await deviceDescriptor());
+      // NOT AWAITED, and every failure inside it is swallowed. Being reachable
+      // by notification is not a precondition for signing in, and a permission
+      // sheet in front of the wallet would be a customer's first sight of the
+      // app after typing a password.
+      void registerForPush();
       router.replace('/wallet');
     } catch (cause) {
       setError(messageFor(cause));

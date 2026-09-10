@@ -70,7 +70,8 @@ export type AdminAction =
   | 'price.retire'
   /* Deleting a retired published rate. On 064's must-say-why list: a retired
      rate can be republished, a deleted one cannot be recovered. */
-  | 'price.delete';
+  | 'price.delete'
+  | 'push.broadcast';
 
 export interface AuditEntry {
   /** The actor's UUID, as it appears in an access token. Resolved to the
@@ -90,6 +91,7 @@ export interface AuditEntry {
     | 'card'
     | 'dispute'
     | 'data_request'
+    | 'broadcast'
     | 'price';
   readonly subjectId: string;
   readonly detail?: Record<string, unknown>;

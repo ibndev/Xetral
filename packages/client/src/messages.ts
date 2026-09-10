@@ -339,6 +339,8 @@ function sentenceFor(error: ApiError): string {
     /* purchases */
     case 'purchase_failed':
       return 'That purchase did not go through. You have not been charged.';
+    case 'broadcast_not_found':
+      return 'That announcement is no longer here.';
     case 'price_is_live':
       return 'That rate is still in force. Retire it first — deleting a live rate would leave the corridor unpriced.';
     case 'payout_provider_unavailable':

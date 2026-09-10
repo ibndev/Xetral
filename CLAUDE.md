@@ -1141,6 +1141,95 @@ and the Send screen of both apps.
   file rather than by what they mean, which is how a view becomes unreadable
   one migration at a time. `DROP VIEW` then `CREATE VIEW`.
 
+### Telling customers something — non-obvious rules
+
+Schema: `packages/ledger/sql/065_push.sql`. Port in
+`packages/providers/src/ports/push.ts`, adapter in
+`packages/providers/src/expo/`, worker in
+`apps/api/src/push/push-broadcast.service.ts`, screen at `/admin/broadcasts`.
+
+- **THERE WAS EXACTLY ONE WAY TO REACH A CUSTOMER AND IT WAS EMAIL.** 012's
+  outbox is right for a receipt, a reset code or a new-device alert — each
+  about one customer's own account, enqueued by the flow that owed it. What
+  nothing could do was tell everybody something: the app is down for an hour, a
+  new corridor is open. An operator with news had a database and no way to say
+  it.
+- **EXPO'S PUSH SERVICE, AND THE REASON IS THAT IT IS FREE AT EVERY SIZE.** It
+  is a queue in front of APNs and FCM, both of which are also free; what paid
+  products sell on top is segmentation, scheduling and analytics, none of which
+  is what "the app is down tonight" needs. It is also the only one this app can
+  use without a native module it does not have. **AND THE WAY OUT IS ONE
+  ADAPTER** — the tokens are in our own table and the audience is our own view,
+  so moving to FCM directly or to a paid product changes nothing above the port.
+- **A NOTIFICATION IS READ OFF A LOCK SCREEN, so `PushMessage` carries no
+  amount.** Everything sent here lands on a surface a stranger can read without
+  unlocking anything — the same argument `screen-privacy.tsx` makes about the
+  app switcher photographing a balance, applied to where a notification arrives.
+- **A TOKEN IS AN ADDRESS AND NOT A CREDENTIAL.** It identifies one
+  installation and lets its holder send to that handset — nothing more. So it
+  is stored in the clear under a SHAPE check rather than as a hash, and
+  registering one takes no PIN: demanding the factor that authorises spending
+  would mean a customer with no PIN could never be told anything.
+- **THE UPSERT IS ON THE TOKEN AND REASSIGNS THE OWNER.** A person has a phone
+  and a tablet, so one customer holds several tokens; and a handset somebody
+  else used before signing out has a token that must now belong to the new
+  account. Leaving it pointed at the old one sends one person's notifications
+  to another person's lock screen.
+- **RETIREMENT IS A COLUMN, NOT A DELETE**, and the retention window is
+  measured from `revoked_at` and never from `created_at`. A handset registered
+  three years ago and still in somebody's pocket is an address we need; aged
+  out on creation date, that customer silently stops being reachable.
+- **EVERY BROADCAST IS CONSENT-GATED AND THERE IS DELIBERATELY NO CLASS
+  FIELD.** The line that survives contact with a form is this: a transactional
+  message is about one customer's own transaction and is enqueued by the FLOW
+  that owed it, never typed into a box. Anything typed into a box and sent to
+  everybody is an announcement whatever it says — and a "service" option in a
+  dropdown is how every message becomes a service message on the afternoon
+  somebody is in a hurry. Security mail is untouched, because it is not sent
+  from here.
+- **THE SKIPPED COUNT IS REPORTED, NOT HIDDEN.** An operator seeing four
+  thousand devices where they expected twelve must be able to learn the
+  difference is consent rather than a broken integration.
+- **A BROADCAST IS A ROW AND A WORKER DRAINS IT** — 012's rule, and it matters
+  more at this size: an operator's click must not wait on thousands of HTTP
+  calls, and a process dying halfway must not leave nobody able to say who was
+  reached. `sent_at IS NULL` is the whole state machine, with no status enum,
+  and the trigger refuses a second write so a redelivery cannot become a second
+  announcement to every customer on the platform.
+- **`PUSH_BROADCAST_INTERVAL_SECONDS` UNSET IS THE SILENT FAILURE.** The row is
+  written, the endpoint answers, the screen says "queued", and nothing is ever
+  delivered — nothing errors, because writing the row succeeded. The exact
+  shape `NOTIFICATION_INTERVAL_SECONDS` has. `push_broadcasts_stuck` is the
+  only thing that sees it, and the screen renders "queued" rather than a zero
+  for that reason.
+- **A WHOLE-SEND FAILURE LEAVES THE ROW QUEUED**, which is the opposite of the
+  money rule and is 012's one inversion applied here: the cost of asking again
+  is somebody seeing an announcement twice, and the cost of not asking is
+  nobody hearing anything.
+- **POSITION IS THE ONLY THING THAT ATTRIBUTES AN EXPO TICKET TO A HANDSET** —
+  there is no token in a ticket. The adapter sends one chunk at a time and zips
+  the answer back to the chunk it sent, and a short or long array is a
+  CONTRACT ERROR rather than a guess: guessing retires one customer's handset
+  because a different customer uninstalled the app.
+- **`DeviceNotRegistered` IS THE ONE REFUSAL THAT MEANS RETIRE.** Every other
+  one is retried. Kept, a dead token is a permanent error on every future
+  broadcast, and a report that always says "417 failed" is one nobody reads.
+- **THE EAS `projectId` CANNOT BE INVENTED, so an absent one REFUSES.** Since
+  SDK 49 a token is minted against a specific EAS project, and one minted
+  against the wrong project is stored, looks valid, and delivers to nothing —
+  silently, in both directions. An operator runs `eas init`, which writes
+  `extra.eas.projectId`, and the same build then works.
+- **`expo-notifications` IS PINNED TO WHAT SDK 54 BUNDLES**, `~0.32.x`. `npm
+  install` resolved 57.x, which is for a later SDK — a mismatched native module
+  is a failure forty minutes into a build rather than in a test. Expo's own
+  `bundledNativeModules.json` is the source, and `push.test.ts` pins it.
+- **AND ADDING IT PULLED IN A PERMISSION NOTHING WAS WATCHING FOR.**
+  `assert-permissions.sh` checked three template permissions and two the app
+  needs; VIBRATE arrived with the module and no check anywhere would have said
+  so — the gap 036 records about `admin_work_queue`, in a manifest. It now
+  compares EVERY permission against a list and fails on one nothing decided
+  about.
+
 ### The customer's own account — non-obvious rules
 
 `apps/api/src/auth/profile.service.ts`, on the settings screen of both apps.
@@ -3041,6 +3130,8 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/060_usd_collection.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/061_country_and_route_repair.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/062_spread_pressure.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/063_momo_accounts.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/064_retired_rate_delete.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/065_push.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -3102,6 +3193,8 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/059_provider_routing.te
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/061_country_and_route_repair.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/062_spread_pressure.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/063_momo_accounts.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/064_retired_rate_delete.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/065_push.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

@@ -111,8 +111,8 @@ import { MetricsController } from './observability/metrics.controller.js';
 import { ErrorRecordingFilter } from './observability/error.filter.js';
 import { ErrorAlertService } from './observability/error-alert.service.js';
 import { NotificationWorker } from './notifications/notification.worker.js';
-import { BrevoNotificationAdapter, ExchangeRateAdapter } from '@xetral/providers';
-import type { NotificationPort, ReferenceRatePort } from '@xetral/providers';
+import { BrevoNotificationAdapter, ExchangeRateAdapter, ExpoPushAdapter } from '@xetral/providers';
+import type { NotificationPort, PushPort, ReferenceRatePort } from '@xetral/providers';
 import { LoginRateLimitGuard, PasswordResetRateLimitGuard } from './auth/login-rate-limit.guard.js';
 import { RequestRateLimiter } from './auth/request-rate-limit.service.js';
 import { AdminDisputeController, DisputeController } from './disputes/dispute.controller.js';
@@ -121,6 +121,9 @@ import { RetentionService } from './retention/retention.service.js';
 import { BalanceReconciliationService } from './reconciliation/balance-reconciliation.service.js';
 import { MonitoringService } from './risk/monitoring.service.js';
 import { RateFeedService } from './fx/rate-feed.service.js';
+import { PushService } from './push/push.service.js';
+import { PushBroadcastService } from './push/push-broadcast.service.js';
+import { PushController } from './push/push.controller.js';
 import { PayController } from './pay/pay.controller.js';
 import { PaymentLinkService } from './pay/payment-link.service.js';
 import { ProviderRouterService } from './routing/provider-router.service.js';
@@ -147,6 +150,7 @@ import {
   LEDGER,
   NOTIFICATION_PORT,
   REFERENCE_RATE_PORT,
+  PUSH_PORT,
   PROVIDER_BALANCE_PORT,
   RATE_LIMIT_STORE,
   ROUTE_POLICY,
@@ -182,6 +186,7 @@ export interface AppModuleOptions {
   readonly notificationPort?: NotificationPort;
   /** Swapped in by the tests, which must not reach a live rate feed. */
   readonly referenceRatePort?: ReferenceRatePort;
+  readonly pushPort?: PushPort;
 }
 
 /**
@@ -883,6 +888,28 @@ export function createReferenceRatePort(
 }
 
 /**
+ * The push service, which needs no credential in the ordinary case.
+ *
+ * EXPO'S PUSH API IS UNAUTHENTICATED BY DEFAULT — a token is an unguessable
+ * address, and possession of one is the authorisation to send to it. An
+ * access token is required only when the Expo account has Enhanced Security
+ * switched on, which is why the slot exists and why an absent one is not a
+ * refusal. Making it mandatory would break every deployment that has not
+ * turned that on, with a message about a credential they were never issued.
+ */
+export function createPushPort(
+  config: ApiConfig,
+  credentials?: ProviderCredentialService,
+): PushPort {
+  return new ExpoPushAdapter({
+    accessToken:
+      credentials === undefined
+        ? (config.expoAccessToken ?? '')
+        : () => credentials.secretFor('expo', 'access_token', config.expoAccessToken),
+  });
+}
+
+/**
  * Chooses the rate-limit backend, and says out loud when it picks the one that
  * only works on a single box.
  *
@@ -1098,6 +1125,22 @@ export class RateFeedLifecycle implements OnApplicationBootstrap {
 }
 
 /**
+ * Starts the worker that drains queued announcements.
+ *
+ * Its own lifecycle, like every other sweep, and for this one the absence is
+ * the failure worth naming: unset on every instance, a broadcast is written,
+ * answered and never delivered, and nothing errors anywhere.
+ */
+@Injectable()
+export class PushBroadcastLifecycle implements OnApplicationBootstrap {
+  constructor(@Inject(PushBroadcastService) private readonly broadcasts: PushBroadcastService) {}
+
+  onApplicationBootstrap(): void {
+    this.broadcasts.start();
+  }
+}
+
+/**
  * Starts the retention sweep.
  *
  * Its own lifecycle rather than sharing one, for the same reason every other
@@ -1160,6 +1203,7 @@ export class AppModule {
         CountriesController,
         AdminCountriesController,
         PayController,
+        PushController,
       ],
       providers: [
         { provide: API_CONFIG, useValue: options.config },
@@ -1313,6 +1357,12 @@ export class AppModule {
           inject: [ProviderHealthService, ProviderCredentialService],
         },
         {
+          provide: PUSH_PORT,
+          useFactory: (health: ProviderHealthService, credentials: ProviderCredentialService) =>
+            watched(options.pushPort ?? createPushPort(options.config, credentials), 'expo', health),
+          inject: [ProviderHealthService, ProviderCredentialService],
+        },
+        {
           provide: REFERENCE_RATE_PORT,
           useFactory: (health: ProviderHealthService, credentials: ProviderCredentialService) =>
             watched(
@@ -1405,6 +1455,9 @@ export class AppModule {
         BalanceReconciliationService,
         MonitoringService,
         RateFeedService,
+        PushService,
+        PushBroadcastService,
+        PushBroadcastLifecycle,
         PaymentLinkService,
         ProviderRouterService,
         CaseService,
