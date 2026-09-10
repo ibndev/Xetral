@@ -45,6 +45,7 @@ export default function Settings() {
 
   return (
     <Shell back="/more" title="Account">
+      <YourDetails />
       <SetPin />
 
       <Panel title="Appearance">
@@ -110,6 +111,97 @@ function Choice({
  * could replace the very factor meant to stop it. Setting the first one
  * cannot, because requiring the PIN to set the PIN is circular.
  */
+/**
+ * The customer's own details, and the one field they may change.
+ *
+ * THE WEB'S `YourDetails`, on the phone. Four of the five are read-only and
+ * each says what changes it in words rather than as a disabled input — a box
+ * somebody taps that does nothing has given them no way forward.
+ *
+ * The name is editable because it is a GREETING: 040 keeps `users.full_name`
+ * and `kyc_submissions.full_name` apart so this one can be personal on day
+ * one, and 058 calls it "a greeting on a checkout page". Nothing that moves
+ * money reads it, which is why there is no PIN on saving it.
+ */
+function YourDetails() {
+  const client = useXetral();
+  const styles = useStyles();
+  const details = useLoad(() => client.accountDetails(), [client]);
+  const { busy, error, code, done, run } = useSubmit();
+  const [name, setName] = useState<string | undefined>(undefined);
+
+  // `undefined` until the customer types, so the field is controlled by what
+  // the server holds rather than by an empty string that would blank a name
+  // they already have while the request is in flight.
+  const value = name ?? details.data?.full_name ?? '';
+
+  return (
+    <Panel
+      title="Your details"
+      subtitle={
+        details.data !== undefined && details.data.full_name === null
+          ? 'We do not have your name yet'
+          : 'What we hold about your account'
+      }
+    >
+      <Field
+        label="Name"
+        value={value}
+        onChangeText={setName}
+        placeholder="Your full name"
+        autoComplete="name"
+        hint="How we greet you, and what somebody paying your link sees. Not your verified name — that comes from your identity documents."
+      />
+      <Button
+        label="Save"
+        busy={busy}
+        disabled={value.trim().length < 2}
+        onPress={() =>
+          void run(async () => {
+            const saved = await client.updateName(value.trim());
+            // Taken back off the response rather than off the form: the
+            // database trims, and its CHECK is what actually holds.
+            setName(saved.full_name ?? '');
+            details.reload();
+            return 'Saved.';
+          })
+        }
+      />
+      <FormError error={error} code={code} />
+      <Done message={done} />
+
+      <View style={styles.row}>
+        <Text style={[styles.muted, { flex: 1 }]}>Email</Text>
+        <Text style={styles.muted}>{details.data?.email ?? '—'}</Text>
+      </View>
+      <View style={styles.row}>
+        <Text style={[styles.muted, { flex: 1 }]}>Phone</Text>
+        <Text style={styles.muted}>{details.data?.phone ?? '—'}</Text>
+      </View>
+      <View style={styles.row}>
+        <Text style={[styles.muted, { flex: 1 }]}>Country</Text>
+        <Text style={styles.muted}>
+          {details.data?.country_name ?? details.data?.country ?? '—'}
+        </Text>
+      </View>
+      <View style={styles.row}>
+        <Text style={[styles.muted, { flex: 1 }]}>Member since</Text>
+        <Text style={styles.muted}>
+          {details.data === undefined
+            ? '—'
+            : new Date(details.data.created_at).toLocaleDateString()}
+        </Text>
+      </View>
+
+      <Text style={styles.hint}>
+        Your email and phone number identify your account, and your country
+        decides which payment rails serve you — so none of the three can be
+        changed here. Contact support to change your email or phone number.
+      </Text>
+    </Panel>
+  );
+}
+
 function SetPin() {
   const client = useXetral();
   const styles = useStyles();

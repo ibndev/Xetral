@@ -1141,6 +1141,48 @@ and the Send screen of both apps.
   file rather than by what they mean, which is how a view becomes unreadable
   one migration at a time. `DROP VIEW` then `CREATE VIEW`.
 
+### The customer's own account — non-obvious rules
+
+`apps/api/src/auth/profile.service.ts`, on the settings screen of both apps.
+
+- **THERE WAS NO SCREEN AT ALL.** Settings carried the PIN, the theme, consent
+  and the two data rights, and nothing anywhere showed a customer what the
+  account holds about them. So an account whose `full_name` is null — every
+  account opened before 040, and any created by a path that did not set one —
+  was greeted as "there" for ever, with no way to fill it in.
+- **`AccountDetails` IS A SECOND ROUTE, NOT MORE FIELDS ON `profile`.** That
+  one is read by Add Money to draw a payment link; widening it would put the
+  email address into every response that renders one, which is exactly the
+  harvester `payable_links` is shaped to avoid by carrying a name and no email.
+- **FOUR OF THE FIVE ARE READ-ONLY AND EACH SAYS WHAT CHANGES IT.** A disabled
+  input reads as a bug — somebody taps it, nothing happens, and the screen has
+  given them no way forward. A line of text is the same restriction stated as a
+  next step.
+- **THE NAME IS EDITABLE BECAUSE IT IS A GREETING.** 040 keeps
+  `users.full_name` and `kyc_submissions.full_name` apart precisely so this one
+  can be personal on day one while only the reviewed one informs a money
+  decision, and `058_payment_links.sql` calls it "a greeting on a checkout
+  page". So there is NO PIN on saving it — a PIN authorises money leaving, and
+  this moves nothing: the call 018 makes about raising a dispute and 033 about
+  withdrawing consent.
+- **THE EMAIL, THE PHONE AND THE COUNTRY HAVE NO ENDPOINT**, and
+  `renameSchema` is `.strict()` so naming one is REFUSED rather than ignored.
+  The email is what `users_email_unique` refuses a duplicate account on; the
+  phone is the one identifier this product uses and every per-customer control
+  assumes one person holds one; the country decides which rails serve them. A
+  field silently ignored is a field somebody will one day wire up.
+- **THE READ'S JOIN TO `countries` IS LEFT AND IS ITS OWN QUERY'S PROBLEM.**
+  That join is what took `describeSession` down — one query reading the name,
+  the phone AND `u.country` meant a database behind 040 returned EVERY FIELD AS
+  NULL. Here it serves a screen rather than a session, so a missing country
+  costs the country row and nothing else.
+- **`renameSchema` WAS PARSED WITH `.parse()` AND ANSWERED 500.** Every other
+  handler in that controller uses `safeParse` and raises `invalid_request`; a
+  bare `.parse()` throws a `ZodError`, which is not an `HttpException` and
+  therefore reaches the customer as "something went wrong" with a reference. It
+  compiled, it typechecked, and the e2e caught it on its first run — the same
+  shape as the `TypeError` the elevation Proxy threw through a cast.
+
 ### Which rail opens an account — non-obvious rules
 
 Schema: `packages/ledger/sql/061_country_and_route_repair.sql`. Service in

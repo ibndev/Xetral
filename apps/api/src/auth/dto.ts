@@ -142,3 +142,24 @@ export const totpCodeSchema = z.object({
 
 export type TotpCodeRequest = z.infer<typeof totpCodeSchema>;
 
+
+/**
+ * The one field on the account a customer may change themselves.
+ *
+ * THE BOUNDS ARE THE DATABASE'S, restated. `users_full_name_check` demands
+ * 2..120 characters after trimming, so a longer or emptier name is refused by
+ * the CHECK whether it arrives through this schema, through a script or
+ * through psql — this is the early, readable refusal, not the rule.
+ *
+ * `.strict()`, so a caller cannot smuggle an `email`, a `phone` or a `country`
+ * into the update by naming one. Those are read-only on this screen for
+ * reasons that are not about validation, and a field silently ignored is a
+ * field somebody will one day wire up.
+ */
+export const renameSchema = z
+  .object({
+    full_name: z.string().trim().min(2).max(120),
+  })
+  .strict();
+
+export type RenameRequest = z.infer<typeof renameSchema>;

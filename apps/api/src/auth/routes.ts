@@ -165,6 +165,20 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // that CHANGES it — the link is the account's phone number, and that is
       // changed by changing the number rather than by a text box.
       .authenticated('GET', '/v1/auth/profile', { pin: false })
+      // The account itself, on the customer's own settings screen. No PIN on
+      // either: reading your own details moves nothing, and the name is a
+      // GREETING — on the home screen and on a checkout page — never the
+      // verified name a money decision may read, which lives in
+      // `kyc_submissions` and is untouched by this. The same call 018 makes
+      // about raising a dispute and 033 about withdrawing consent.
+      //
+      // There is deliberately no route here for the email, the phone or the
+      // country. The first is what `users_email_unique` refuses a duplicate
+      // account on; the second is the identifier every per-customer control
+      // assumes one person holds one of; the third decides which rails serve
+      // them. None of the three is a text box.
+      .authenticated('GET', '/v1/auth/profile/details', { pin: false })
+      .authenticated('POST', '/v1/auth/profile/name', { pin: false })
 
       .authenticated('GET', '/v1/auth/devices', { pin: false })
       // Acting on it does. All three are reachable with a stolen access token,

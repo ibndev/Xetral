@@ -39,6 +39,55 @@ export interface ProfileView {
 }
 
 /**
+ * What the customer's own account holds, on the one screen that shows it back
+ * to them.
+ *
+ * SEPARATE FROM `ProfileView` DELIBERATELY. That one is the payment link and
+ * is read by the Add Money screen; this is the account itself. Collapsing them
+ * would put the email address on every response that renders a link — and the
+ * whole argument for `payable_links` carrying a name and NOT an email is that
+ * a link resolver must not become a harvester.
+ */
+export interface AccountDetails {
+  /**
+   * What somebody typed about themselves. NOT the verified name — 040 keeps
+   * `users.full_name` and `kyc_submissions.full_name` apart precisely so this
+   * one can be personal on day one while only the reviewed one informs a money
+   * decision. It is also what a payer reads on a checkout page, which
+   * `058_payment_links.sql` calls "a greeting on a checkout page".
+   *
+   * Null on an account that predates the column, which is exactly the "missing
+   * info" this screen exists to let somebody fill in.
+   */
+  readonly full_name: string | null;
+  /**
+   * The login identifier. READ ONLY here: `users_email_unique` is what refuses
+   * a duplicate account, and an endpoint that could move an address between
+   * accounts is an account-takeover primitive with a text box in front of it.
+   */
+  readonly email: string | null;
+  /**
+   * The Xetral-to-Xetral identifier, in E.164. READ ONLY for the reason the
+   * handle was removed: a number is changed by changing the number on the
+   * account, which is a verified action rather than a text box. Every per
+   * customer control assumes one person is one number.
+   */
+  readonly phone: string | null;
+  /** ISO-3166 alpha-2, or null on an account created before 040. */
+  readonly country: string | null;
+  /** What that country is called, for a screen rather than for a decision. */
+  readonly country_name: string | null;
+  /** When the account was opened. */
+  readonly created_at: string;
+  /**
+   * 0 registered, 1 KYC approved, 2 enhanced. Shown because the ceiling in
+   * force is the LOWER of the tier's and the flow's, and a customer refused
+   * with no way to learn what would change is a support ticket.
+   */
+  readonly kyc_tier: number;
+}
+
+/**
  * A customer's payment link, built from the ONE identifier this product has.
  *
  * THE IDENTIFIER IS THE PHONE NUMBER. It used to be an `@handle`, minted from
@@ -91,6 +140,80 @@ export class ProfileService {
      * other out.
      */
     return this.#view(row.phone, await this.links.slugFor(userUuid));
+  }
+
+  /**
+   * The account, for the customer's own settings screen.
+   *
+   * ONE QUERY OVER `users` AND A LEFT JOIN, and the join is to `countries`
+   * which arrives in 040. That is the join that took the session read down —
+   * `describeSession` read `u.country` and joined `countries` in the query
+   * that also read the name and the phone, so a database behind 040 returned
+   * EVERY FIELD AS NULL and greeted the customer as "there". Here the join is
+   * LEFT and this method serves a screen rather than a session, so a missing
+   * country costs the country row and nothing else.
+   */
+  async details(userUuid: string): Promise<AccountDetails> {
+    const result = await this.pool.query<{
+      full_name: string | null;
+      email: string | null;
+      phone: string | null;
+      country: string | null;
+      country_name: string | null;
+      created_at: Date;
+      kyc_tier: number;
+    }>(
+      `SELECT u.full_name,
+              u.email,
+              u.phone,
+              u.country,
+              c.name AS country_name,
+              u.created_at,
+              u.kyc_tier
+         FROM users u
+         LEFT JOIN countries c ON c.code = u.country
+        WHERE u.uuid = $1`,
+      [userUuid],
+    );
+    const row = result.rows[0];
+    if (row === undefined) throw new Error('profile requested for a user that does not exist');
+
+    return {
+      full_name: row.full_name,
+      email: row.email,
+      phone: row.phone,
+      country: row.country,
+      country_name: row.country_name,
+      created_at: row.created_at.toISOString(),
+      kyc_tier: Number(row.kyc_tier),
+    };
+  }
+
+  /**
+   * Changes the name the customer is greeted by, and nothing else.
+   *
+   * NO TRANSACTION PIN, and that follows the rule rather than relaxing it. A
+   * PIN authorises money leaving a customer's own account; this moves nothing,
+   * and 018 makes the same call about raising a dispute and 033 about
+   * withdrawing consent. What it changes is a greeting — on the home screen and
+   * on a checkout page, both of which have said `users.full_name` since 040 and
+   * neither of which may inform a money decision. The name a reviewer read off
+   * a document is `kyc_submissions.full_name` and is untouched by this.
+   *
+   * THE SHAPE IS THE DATABASE'S. `users_full_name_check` demands 2..120
+   * characters after trimming, so the request schema states the same bounds and
+   * the CHECK is what actually holds — a rule enforced only in application code
+   * is a rule that holds until the first 3am manual fix.
+   */
+  async rename(userUuid: string, fullName: string): Promise<AccountDetails> {
+    const result = await this.pool.query<{ id: string }>(
+      `UPDATE users SET full_name = $2 WHERE uuid = $1 RETURNING id`,
+      [userUuid, fullName.trim()],
+    );
+    if (result.rowCount === 0) {
+      throw new Error('rename requested for a user that does not exist');
+    }
+    return this.details(userUuid);
   }
 
   #view(phone: string | null, slug: string | undefined): ProfileView {

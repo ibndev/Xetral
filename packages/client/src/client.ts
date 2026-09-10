@@ -383,6 +383,32 @@ export interface CryptoQuote {
  * so there is no field here to hold one even if a future handler were careless
  * — the type is the second half of that guarantee.
  */
+/**
+ * The customer's own account, as their settings screen shows it back to them.
+ *
+ * THREE OF THESE FIVE ARE READ-ONLY AND THAT IS THE DESIGN, not a gap. The
+ * email is what `users_email_unique` refuses a duplicate account on; the phone
+ * is the one identifier this product uses, and every per-customer control —
+ * the daily ceiling, the velocity rules, the BVN uniqueness — assumes one
+ * person holds one; the country decides which rails serve them and which
+ * currency their wallet opens in. None of the three is a text box, and the
+ * screen says what changes each rather than showing a disabled field.
+ */
+export interface AccountDetails {
+  /** What somebody typed about themselves, and the only editable field here.
+   *  Null on an account that predates the column — which is exactly the
+   *  missing information this screen exists to let them fill in. */
+  readonly full_name: string | null;
+  readonly email: string | null;
+  /** E.164, so it carries the country code. */
+  readonly phone: string | null;
+  readonly country: string | null;
+  readonly country_name: string | null;
+  readonly created_at: string;
+  /** 0 registered, 1 KYC approved, 2 enhanced. */
+  readonly kyc_tier: number;
+}
+
 export interface KycStatus {
   readonly id: string;
   readonly status: string;
@@ -650,6 +676,32 @@ export class XetralClient {
     slug?: string | null;
   }> {
     return this.#get('/v1/auth/profile');
+  }
+
+  /**
+   * The customer's own account details, for their settings screen.
+   *
+   * A SECOND CALL RATHER THAN MORE FIELDS ON `profile()`. That one is read by
+   * Add Money to draw a payment link; widening it would put the email address
+   * into every response that renders one, which is the harvester the payment
+   * link view is shaped to avoid.
+   */
+  async accountDetails(): Promise<AccountDetails> {
+    return this.#get('/v1/auth/profile/details');
+  }
+
+  /**
+   * Changes the name the customer is greeted by.
+   *
+   * No PIN: this moves no money. The name is a greeting on the home screen and
+   * on a checkout page, never the verified name — that one is read off a
+   * document by a reviewer and lives with the KYC submission.
+   *
+   * Returns the account as the server now holds it, so a screen renders what
+   * was written rather than what the form believed it sent.
+   */
+  async updateName(fullName: string): Promise<AccountDetails> {
+    return this.#post('/v1/auth/profile/name', { full_name: fullName });
   }
 
   /**

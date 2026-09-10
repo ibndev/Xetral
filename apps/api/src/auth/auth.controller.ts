@@ -24,13 +24,14 @@ import {
   loginSchema,
   registerSchema,
   refreshSchema,
+  renameSchema,
   resetPasswordSchema,
   totpCodeSchema,
 } from './dto.js';
 import { PasswordResetService } from './password-reset.service.js';
 import { StaffTotpService } from './staff-totp.service.js';
 import { ProfileService } from './profile.service.js';
-import type { ProfileView } from './profile.service.js';
+import type { AccountDetails, ProfileView } from './profile.service.js';
 import type { TotpEnrolment } from './staff-totp.service.js';
 import { AccountSecurityService } from './account-security.service.js';
 import type { DeviceView } from './account-security.service.js';
@@ -388,6 +389,46 @@ export class AuthController {
     const auth = request.auth;
     if (auth === undefined) throw new UnauthorizedException({ error: 'invalid_token' });
     return this.profile.mine(auth.sub);
+  }
+
+  /**
+   * The account itself, for the customer's own settings screen.
+   *
+   * A SECOND ROUTE RATHER THAN MORE FIELDS ON `profile`. That one is read by
+   * Add Money to draw a payment link, and widening it would put the email
+   * address into every response that renders one — the harvester argument
+   * `payable_links` already makes about carrying a name and no email.
+   */
+  @Get('profile/details')
+  async profileDetails(@Req() request: AuthenticatedRequest): Promise<AccountDetails> {
+    const auth = request.auth;
+    if (auth === undefined) throw new UnauthorizedException({ error: 'invalid_token' });
+    return this.profile.details(auth.sub);
+  }
+
+  /**
+   * Changes the name the customer is greeted by.
+   *
+   * Returns the whole account rather than 204, so the screen renders what the
+   * database now holds instead of what the form believed it sent — the round
+   * trip that caught the card finish being written by a statement naming `$9`
+   * against an array of eight.
+   */
+  @Post('profile/name')
+  async renameMine(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: unknown,
+  ): Promise<AccountDetails> {
+    const auth = request.auth;
+    if (auth === undefined) throw new UnauthorizedException({ error: 'invalid_token' });
+    const parsed = renameSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException({
+        error: 'invalid_request',
+        fields: parsed.error.issues.map((issue) => issue.path.join('.')),
+      });
+    }
+    return this.profile.rename(auth.sub, parsed.data.full_name);
   }
 
   @Post('totp/elevate')

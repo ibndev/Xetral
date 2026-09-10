@@ -65,10 +65,114 @@ export default function Settings() {
         </p>
       </div>
 
+      <YourDetails />
       <SetPin />
       <Consents />
       <YourData />
     </Shell>
+  );
+}
+
+/**
+ * The customer's own details, and the one field they may change.
+ *
+ * FOUR OF THE FIVE ARE READ-ONLY AND EACH SAYS WHAT CHANGES IT. A disabled
+ * input reads as a bug — somebody taps it, nothing happens, and the screen has
+ * given them no way forward. A line of text saying "verify your identity to
+ * change this" is the same restriction stated as a next step.
+ *
+ * The name is editable because it is a GREETING: `040_countries.sql` keeps
+ * `users.full_name` and `kyc_submissions.full_name` apart precisely so this one
+ * can be personal on day one, and `058_payment_links.sql` calls it "a greeting
+ * on a checkout page". Nothing that moves money reads it.
+ */
+function YourDetails() {
+  const client = useXetral();
+  const details = useLoad(() => client.accountDetails(), [client]);
+  const { busy, error, code, done, run } = useSubmit();
+  const [name, setName] = useState<string | undefined>(undefined);
+
+  // `undefined` until the first render after the load, so the input is
+  // controlled by what the server holds rather than by an empty string that
+  // would blank a name the customer already has while the request is in
+  // flight.
+  const value = name ?? details.data?.full_name ?? '';
+  const missing = details.data !== undefined && details.data.full_name === null;
+
+  return (
+    <form
+      id="your-details"
+      className="card"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void run(async () => {
+          const saved = await client.updateName(value.trim());
+          // Take the name back off the response rather than trusting the form:
+          // the database trims and its CHECK is what actually holds.
+          setName(saved.full_name ?? '');
+          details.reload();
+          return 'Saved.';
+        });
+      }}
+    >
+      <h2>Your details</h2>
+      <p className="lead">
+        {missing
+          ? 'We do not have your name yet. It is how we greet you, and what somebody paying your link sees.'
+          : 'What we hold about your account.'}
+      </p>
+
+      <label>
+        Name
+        <input
+          value={value}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Your full name"
+          autoComplete="name"
+          minLength={2}
+          maxLength={120}
+          required
+        />
+        <span className="hint">
+          How we greet you, and what somebody paying your link sees. Not your
+          verified name — that comes from your identity documents.
+        </span>
+      </label>
+
+      <button type="submit" disabled={busy || value.trim().length < 2}>
+        {busy ? 'Saving…' : 'Save'}
+      </button>
+
+      <FormError error={error} code={code} />
+      {done !== undefined && <p className="ok">{done}</p>}
+
+      <div className="row">
+        <span className="muted">Email</span>
+        <span>{details.data?.email ?? '—'}</span>
+      </div>
+      <div className="row">
+        <span className="muted">Phone</span>
+        <span>{details.data?.phone ?? '—'}</span>
+      </div>
+      <div className="row">
+        <span className="muted">Country</span>
+        <span>{details.data?.country_name ?? details.data?.country ?? '—'}</span>
+      </div>
+      <div className="row">
+        <span className="muted">Member since</span>
+        <span>
+          {details.data === undefined
+            ? '—'
+            : new Date(details.data.created_at).toLocaleDateString()}
+        </span>
+      </div>
+
+      <p className="hint">
+        Your email and phone number identify your account, and your country
+        decides which payment rails serve you — so none of the three can be
+        changed here. Contact support to change your email or phone number.
+      </p>
+    </form>
   );
 }
 
