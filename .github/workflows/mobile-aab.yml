@@ -313,7 +313,7 @@ jobs:
       # installed by tapping it, so putting one on a release page next to
       # installable APKs invites somebody to try. It goes to a laptop, and from
       # there to the Play Console.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.bundle.outputs.name }}
           path: ${{ steps.bundle.outputs.name }}
