@@ -186,25 +186,15 @@ jobs:
         working-directory: apps/mobile
 
       - name: The bundle asks for nothing it does not use
-        # The same assertion the APK workflow makes, and it matters more here:
-        # a permission list is the first thing a Play reviewer reads, and
-        # "Display over other apps" on a banking app is a rejection or a
-        # question. These three come from Expo's TEMPLATE rather than from any
-        # package in this repo, so no diff ever shows them.
-        run: |
-          manifest=apps/mobile/android/app/src/main/AndroidManifest.xml
-          fail=0
-          for perm in SYSTEM_ALERT_WINDOW READ_EXTERNAL_STORAGE WRITE_EXTERNAL_STORAGE; do
-            if grep -q "android.permission.$perm" "$manifest"; then
-              echo "::error::the manifest still asks for $perm"; fail=1
-            fi
-          done
-          # The other direction: a typo in `blockedPermissions` would remove
-          # something the app needs and present as "Face ID does not work".
-          if ! grep -q 'android.permission.USE_BIOMETRIC' "$manifest"; then
-            echo "::error::the manifest lost USE_BIOMETRIC; biometric unlock would silently fail"; fail=1
-          fi
-          exit $fail
+        # THE SAME SCRIPT THE APK WORKFLOW RUNS, and this step used to be a
+        # hand-written second copy of it. It grepped for the permission NAME —
+        # but `blockedPermissions` marks a line `tools:node="remove"` rather
+        # than deleting it, so the first ever run of this workflow reported all
+        # three as failures on a build that was entirely correct.
+        #
+        # It matters more here than on the APK: a permission list is the first
+        # thing a Play reviewer reads.
+        run: ./apps/mobile/scripts/assert-permissions.sh
 
       - name: Put the upload keystore where Gradle can read it
         env:

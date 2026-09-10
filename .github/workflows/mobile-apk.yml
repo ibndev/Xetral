@@ -185,44 +185,11 @@ jobs:
         working-directory: apps/mobile
 
       - name: The APK asks for nothing it does not use
-        # Expo's android template ships SYSTEM_ALERT_WINDOW, READ_EXTERNAL_
-        # STORAGE and WRITE_EXTERNAL_STORAGE in the main manifest, and every
-        # APK this repository built carried all three. None is used by any
-        # code here — and "display over other apps" on a banking app is a
-        # permission a customer can see and reasonably refuse to install over.
-        #
-        # `android.blockedPermissions` in app.json removes them. Asserted
-        # rather than trusted, because it is one key in a config file whose
-        # effect is three lines deep in generated XML nobody reads.
-        run: |
-          manifest=apps/mobile/android/app/src/main/AndroidManifest.xml
-          fail=0
-          for perm in SYSTEM_ALERT_WINDOW READ_EXTERNAL_STORAGE WRITE_EXTERNAL_STORAGE; do
-            line=$(grep "permission.$perm" "$manifest" || true)
-            if [ -z "$line" ]; then
-              echo "ok: $perm is absent"
-            elif echo "$line" | grep -q 'tools:node="remove"'; then
-              echo "ok: $perm is marked for removal"
-            else
-              echo "::error::$perm would ship in this APK and nothing uses it"
-              fail=1
-            fi
-          done
-          # The other direction: what the app genuinely needs must survive.
-          # A blockedPermissions entry with a typo would otherwise take out
-          # biometrics and present as "Face ID does not work on Android".
-          for perm in INTERNET USE_BIOMETRIC; do
-            if grep "permission.$perm" "$manifest" | grep -q 'tools:node="remove"'; then
-              echo "::error::$perm is blocked, and the app needs it"
-              fail=1
-            elif grep -q "permission.$perm" "$manifest"; then
-              echo "ok: $perm is requested"
-            else
-              echo "::error::$perm is missing from the manifest"
-              fail=1
-            fi
-          done
-          exit $fail
+        # WHICH permissions and WHY are in the script, deliberately — naming
+        # them here too is how the AAB workflow came to have its own wrong
+        # copy of this check. One place, and `play-release.test.ts` fails the
+        # build on a workflow that starts spelling it out again.
+        run: ./apps/mobile/scripts/assert-permissions.sh
 
       - name: Build the APK
         # EXPO_PUBLIC_API_URL is read by apps/mobile/src/session.ts. It is not

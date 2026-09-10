@@ -26,6 +26,78 @@ const CONFIG = JSON.parse(
 
 const pluginNames = CONFIG.expo.plugins.map((p) => (Array.isArray(p) ? String(p[0]) : String(p)));
 
+const APK_WORKFLOW = readFileSync(
+  new URL('../../../.github/workflows/mobile-apk.yml', import.meta.url),
+  'utf8',
+);
+const AAB_WORKFLOW = readFileSync(
+  new URL('../../../.github/workflows/mobile-aab.yml', import.meta.url),
+  'utf8',
+);
+const PERMISSION_SCRIPT = 'apps/mobile/scripts/assert-permissions.sh';
+
+describe('both workflows check the manifest the same way', () => {
+  /*
+   * ONE ASSERTION, TWO WORKFLOWS, AND THE SECOND COPY IS WHY THIS TEST EXISTS.
+   *
+   * `mobile-apk.yml` had the permission check written out inline and
+   * `mobile-aab.yml` grew a hand-written second version of "the same" thing.
+   * It was not the same: it grepped for the permission NAME and treated a hit
+   * as a failure — but `blockedPermissions` marks a line `tools:node="remove"`
+   * rather than deleting it, so the AAB workflow's FIRST EVER RUN reported all
+   * three template permissions as errors against a build that was entirely
+   * correct, and no bundle could be uploaded.
+   *
+   * The same argument the fulfilment port makes about three hand-written
+   * contract suites: copies drift into checking different things while both
+   * read as green. So the check is a script, and this fails the build on a
+   * workflow that stops calling it or starts spelling one out again.
+   */
+  it('both call the shared script and neither spells the check out again', () => {
+    for (const [name, workflow] of [
+      ['mobile-apk.yml', APK_WORKFLOW],
+      ['mobile-aab.yml', AAB_WORKFLOW],
+    ] as const) {
+      expect(workflow, `${name} no longer runs ${PERMISSION_SCRIPT}`).toContain(
+        PERMISSION_SCRIPT,
+      );
+      /*
+       * A workflow that names a permission in a `run:` block is writing its
+       * own copy again. The script is the only place these belong — and the
+       * one that got it wrong got it wrong precisely by naming them.
+       */
+      expect(
+        workflow.includes('SYSTEM_ALERT_WINDOW'),
+        `${name} names SYSTEM_ALERT_WINDOW itself instead of leaving it to the script`,
+      ).toBe(false);
+    }
+  });
+
+  it('the script refuses a permission that would ship AND one that is blocked', () => {
+    // BOTH DIRECTIONS, because the failing one is not the obvious one: a typo
+    // in `blockedPermissions` marks something the app NEEDS for removal, the
+    // line is still in the file, and a name-only check calls that fine. It
+    // presents as "Face ID does not work on Android".
+    const script = readFileSync(
+      new URL('../scripts/assert-permissions.sh', import.meta.url),
+      'utf8',
+    );
+    expect(script).toContain('tools:node="remove"');
+    expect(script).toContain('is blocked, and the app needs it');
+    expect(script).toContain('would ship and nothing uses it');
+    // Every permission the two directions rest on.
+    for (const perm of [
+      'SYSTEM_ALERT_WINDOW',
+      'READ_EXTERNAL_STORAGE',
+      'WRITE_EXTERNAL_STORAGE',
+      'INTERNET',
+      'USE_BIOMETRIC',
+    ]) {
+      expect(script, `the script stopped checking ${perm}`).toContain(perm);
+    }
+  });
+});
+
 describe('the app config is one Play will take', () => {
   it('has a versionCode, and it is a whole number', () => {
     /*
