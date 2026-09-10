@@ -67,7 +67,10 @@ export type AdminAction =
      it priced refuses them until a replacement exists — so retiring is in
      009's list of actions that must say why. */
   | 'price.publish'
-  | 'price.retire';
+  | 'price.retire'
+  /* Deleting a retired published rate. On 064's must-say-why list: a retired
+     rate can be republished, a deleted one cannot be recovered. */
+  | 'price.delete';
 
 export interface AuditEntry {
   /** The actor's UUID, as it appears in an access token. Resolved to the

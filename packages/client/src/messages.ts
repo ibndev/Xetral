@@ -339,6 +339,13 @@ function sentenceFor(error: ApiError): string {
     /* purchases */
     case 'purchase_failed':
       return 'That purchase did not go through. You have not been charged.';
+    case 'price_is_live':
+      return 'That rate is still in force. Retire it first — deleting a live rate would leave the corridor unpriced.';
+    case 'payout_provider_unavailable':
+      // Not the customer's number and not their account. Saying "we could not
+      // find that account" for a rail that was never reachable sends somebody
+      // to re-check details that were right.
+      return 'Transfers are unavailable right now. Nothing has left your account — try again shortly.';
     case 'payout_failed':
       // The money is already back — the API reverses the reservation before
       // it refuses — so this says so rather than leaving somebody watching a

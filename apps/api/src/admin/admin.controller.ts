@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Inject,
@@ -14,6 +15,7 @@ import {
 import { z } from 'zod';
 import type { AuthenticatedRequest } from '../auth/auth.guard.js';
 import { AdminService } from './admin.service.js';
+import { StaffService } from '../auth/staff.service.js';
 import { AuditService } from './audit.service.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { ConsentService } from '../consent/consent.service.js';
@@ -220,6 +222,13 @@ const retirePriceSchema = z.object({
   transaction_pin: z.string().optional(),
 });
 
+/* A reason, the same ten characters retiring takes. See the handler: this is
+   the one action on the prices screen that cannot be undone by appending. */
+const deleteRateSchema = z.object({
+  reason: z.string().trim().min(10).max(500),
+  transaction_pin: z.string().optional(),
+});
+
 const resolveDataRequestSchema = z.object({
   status: z.enum(['completed', 'refused']),
   /* Twenty characters, matching the CHECK. A queue cleared with one-word
@@ -257,7 +266,27 @@ export class AdminController {
     @Inject(FundingDiagnosticsService)
     private readonly diagnostics: FundingDiagnosticsService,
     @Inject(RecoveryService) private readonly recovery: RecoveryService,
+    @Inject(StaffService) private readonly staffRoles: StaffService,
   ) {}
+
+  /**
+   * WHO THE CALLER IS, in terms of what they may do.
+   *
+   * The dashboard could not ask this, so no screen could hide a control the
+   * operator is not allowed to use. The only alternative is showing every
+   * button to everybody and letting the route refuse — which teaches people
+   * that controls on the operations surface may or may not work, and that is
+   * how a real refusal stops being read.
+   *
+   * `support` is the widest staff role and this is deliberately behind it:
+   * every staff member needs to know their OWN roles, and the answer says
+   * nothing they do not already know about themselves. `GET /v1/admin/staff`,
+   * which is everybody's, stays behind `admin`.
+   */
+  @Get('me')
+  async me(@Req() request: AuthenticatedRequest): Promise<{ roles: readonly string[] }> {
+    return { roles: await this.staffRoles.rolesOf(claims(request).sub) };
+  }
 
   /* ------------------------------ overview ----------------------------- */
 
@@ -1191,6 +1220,49 @@ export class AdminController {
       ...(ip === undefined ? {} : { ip }),
     });
     return retired;
+  }
+
+  /**
+   * DELETING a retired published rate. `admin` ONLY.
+   *
+   * Every other price route is `finance`, and this one deliberately is not.
+   * Retiring is reversible by publishing again; this is the one action on the
+   * prices screen that takes a row away for good, so it sits with the role
+   * that already holds every other irreversible action rather than with the
+   * role that sets numbers weekly. The dashboard hides the button for anybody
+   * else — and the POLICY is what actually enforces it, because a hidden
+   * button is a decision about a screen and a route is a decision about the
+   * system.
+   *
+   * A REASON IS REQUIRED, the same as retiring. 009's list is about actions
+   * that cannot be undone by appending, and this is the only one here that
+   * qualifies: a retired rate can be republished, a deleted one cannot be
+   * recovered from anything this application holds.
+   */
+  @Delete('prices/fx-rate/:id')
+  @HttpCode(200)
+  async deleteFxRate(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ): Promise<unknown> {
+    const parsed = deleteRateSchema.safeParse(body);
+    if (!parsed.success) throw invalid(parsed.error.issues);
+
+    const actor = claims(request).sub;
+    const removed = await this.pricing.deleteRate(id);
+
+    const ip = ipOf(request);
+    await this.audit.record({
+      actorId: actor,
+      action: 'price.delete',
+      subjectType: 'price',
+      subjectId: id,
+      detail: { kind: 'fx_rate' },
+      reason: parsed.data.reason,
+      ...(ip === undefined ? {} : { ip }),
+    });
+    return removed;
   }
 
   /* ---------------------------- provider health ------------------------- */

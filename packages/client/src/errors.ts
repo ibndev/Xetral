@@ -185,6 +185,26 @@ const API_ERROR_CODES = [
    * sentence names our integration and belongs on the row an operator reads.
    */
   'payout_failed',
+  /*
+   * `payout_provider_unavailable` — the rail could not be ASKED.
+   *
+   * An unconfigured key, an expired one, a transfers product not yet approved:
+   * each of those answered `internal_error` with a reference, so a customer
+   * read "something went wrong" about the one class of failure an operator can
+   * fix in a minute. It carries no detail, because the provider's sentence
+   * names our integration and belongs in the log.
+   */
+  'payout_provider_unavailable',
+  /*
+   * `price_is_live` — 064 refuses to delete a rate that is still in force.
+   *
+   * Deleting one unprices the corridor, and an unpublished pair is REFUSED
+   * rather than quoted from a default, so the next customer on it is told the
+   * conversion cannot be done with nothing on screen saying a row was removed.
+   * The dashboard does not draw the button for a live rate at all; this is the
+   * database saying so to anything that asks anyway.
+   */
+  'price_is_live',
   'purchase_not_found',
   'verification_not_supported',
 

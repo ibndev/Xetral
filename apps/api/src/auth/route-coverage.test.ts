@@ -171,6 +171,11 @@ describe('the privileged surface is declared as privileged', () => {
 
   it('lists exactly the routes only staff can reach', () => {
     expect(staffRoutes.map((r) => `${r.method} ${r.path} (${r.role})`).sort()).toEqual([
+      // Deleting a RETIRED published rate. `admin`, not `finance` like every
+      // other price route: retiring can be undone by publishing again and
+      // this cannot, so it sits with the role that holds the rest of the
+      // irreversible surface.
+      'DELETE /v1/admin/prices/fx-rate/:id (admin)',
       'GET /v1/admin/audit (admin)',
       // A card's whole life, for the agent on the phone.
       'GET /v1/admin/cards/:id (support)',
@@ -205,6 +210,12 @@ describe('the privileged surface is declared as privileged', () => {
       'GET /v1/admin/funding/diagnostics (admin)',
       'GET /v1/admin/giftcards/queue (giftcard_reviewer)',
       'GET /v1/admin/kyc (compliance)',
+      // Which staff roles the caller holds, so a dashboard can hide a
+      // control it knows the server will refuse. `support` rather than
+      // `admin`: it is the LEAST privileged staff role, so every operator
+      // can read their own roles — a route only an administrator could
+      // call would leave everybody else's screen unable to ask.
+      'GET /v1/admin/me (support)',
       // Whether anything is actually being sent. `support`, because this is
       // the screen somebody opens when a customer says a reset link never
       // arrived — and it carries no message body: 012 seals every payload and

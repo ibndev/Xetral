@@ -338,6 +338,13 @@ export interface AdminFxRate {
   readonly denominator: string;
   readonly quote_per_base: string;
   readonly effective_from: string;
+  /**
+   * Set once the rate has been retired. OPTIONAL for the reason `source` is:
+   * an API predating 064 does not send it, and a screen that treated its
+   * absence as a crash would break during a rolling deploy rather than show
+   * one column fewer.
+   */
+  readonly retired_at?: string | null;
   readonly spread_basis_points: number | null;
   readonly created_by: string | null;
   /**
@@ -1063,6 +1070,30 @@ export class AdminClient {
    * this priced REFUSES every customer — an unpublished FX pair is not quoted
    * from a default.
    */
+  /**
+   * The caller's OWN staff roles, so a screen can hide what they may not use.
+   *
+   * Reads live, never from a token: 007's rule is that a role withdrawn is
+   * withdrawn now, and a dashboard caching this would keep offering a control
+   * for the rest of a session after somebody's access was removed.
+   */
+  async myRoles(): Promise<readonly string[]> {
+    const body = await this.#get<{ roles: string[] }>('/v1/admin/me');
+    return body.roles;
+  }
+
+  /**
+   * Delete a RETIRED published rate. `admin` only, and the route is what
+   * enforces that — this method existing does not make it callable.
+   */
+  async deleteFxRate(uuid: string, reason: string, pin: string): Promise<Record<string, unknown>> {
+    return this.#request(
+      'DELETE',
+      `/v1/admin/prices/fx-rate/${encodeURIComponent(uuid)}`,
+      { reason, transaction_pin: pin },
+    );
+  }
+
   async retirePrice(
     uuid: string,
     kind: 'fx' | 'giftcard',

@@ -149,6 +149,7 @@ jobs:
             -f packages/ledger/sql/061_country_and_route_repair.sql \
             -f packages/ledger/sql/062_spread_pressure.sql \
             -f packages/ledger/sql/063_momo_accounts.sql \
+            -f packages/ledger/sql/064_retired_rate_delete.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       - name: Ledger and identity invariants
@@ -219,6 +220,7 @@ jobs:
                    packages/ledger/sql/061_country_and_route_repair.test.sql \
                    packages/ledger/sql/062_spread_pressure.test.sql \
                    packages/ledger/sql/063_momo_accounts.test.sql \
+                   packages/ledger/sql/064_retired_rate_delete.test.sql \
                    packages/ledger/sql/099_least_privilege.test.sql; do
             echo "== $f"
             psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
@@ -321,6 +323,7 @@ jobs:
             -f packages/ledger/sql/061_country_and_route_repair.sql \
             -f packages/ledger/sql/062_spread_pressure.sql \
             -f packages/ledger/sql/063_momo_accounts.sql \
+            -f packages/ledger/sql/064_retired_rate_delete.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       # ------------------------------------------------------------------

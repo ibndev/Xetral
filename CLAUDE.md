@@ -1091,6 +1091,56 @@ and the Send screen of both apps.
   tab saying "Bank" over a Mobile Money form is the same product offered under
   the wrong name.
 
+### The two beneficiary lookups, and deleting a price — non-obvious rules
+
+`apps/api/src/payouts/payout.service.ts`,
+`packages/ledger/sql/064_retired_rate_delete.sql`.
+
+- **THERE WERE TWO TRANSLATIONS OF ONE PROVIDER REFUSAL AND THE SCREEN CALLED
+  THE WRONG ONE.** `lookup()` served the name-enquiry box; `lookupOrRefuse()`
+  served the send. They asked the same port the same question and disagreed
+  about the answer, so a Ghanaian typing a momo number was told the NAME could
+  not be found — `account_not_found`, which reads as "you typed it wrong" —
+  where the send path would have said `name_unavailable`, which is 043's own
+  refusal meaning a wallet HAS no name enquiry and never will. Two customers
+  reporting "it says it cannot find the user name, meanwhile nothing is wrong
+  with the name" were reading a sentence about a product that does not exist.
+  `lookup()` delegates now: one translation, the same shape as the two
+  recipient resolvers and the three contract suites.
+- **A PROVIDER FAILURE ON A PAYOUT WAS A BARE 500.** Listing banks and looking
+  up a beneficiary let every `ProviderError` fall through to the generic
+  handler, so a missing credential, an unreachable rail and a genuine outage
+  all reached the customer as "something went wrong" with a reference nobody
+  could act on. `#relay()` applies 006's rule here: the provider's sentence
+  goes to the LOG because it names our integration, and the customer gets
+  `payout_provider_unavailable`, which their app turns into words that say
+  nothing has left their account.
+- **A RETIRED RATE MAY BE DELETED AND A LIVE ONE MAY NOT**, by the same
+  trigger that already refused every edit. 057 made rates append-only for
+  035's reason — a price edited in place rewrites every past quote — and that
+  is a statement about a rate somebody was QUOTED at, which a retired row no
+  longer is. Nothing references `fx_published_rates`: `fx_trades` names its
+  `spread_policy_id` and carries its own `applied_numerator` and
+  `applied_denominator`, so deleting a retired rate loses an offer nobody took
+  rather than the price of any transaction. A retired POLICY is a different
+  question and stays undeletable, because a trade points at it.
+- **DELETING IS `admin`, WHERE EVERY OTHER PRICE ROUTE IS `finance`.**
+  Retiring can be undone by publishing again; this cannot. It sits with the
+  role that holds the rest of the irreversible surface, and `price.delete` is
+  in 009's must-say-why list for the reason `price.retire` is.
+- **THE BUTTON IS HIDDEN BY READING THE ROLES, NEVER BY GUESSING THEM.**
+  `GET /v1/admin/me` returns the caller's live `staff_roles`, so the dashboard
+  hides a control the server would refuse instead of offering one that 403s.
+  It is declared `support` — the LEAST privileged staff role — because a route
+  only an administrator could call would leave every other operator's screen
+  unable to ask. Hiding is a courtesy; the refusal is the control.
+- **THE VIEW HAD TO BE DROPPED, NOT REPLACED.** `published_fx_rates` gained
+  `retired_at` and lost its `WHERE retired_at IS NULL`, and
+  `CREATE OR REPLACE VIEW` can only APPEND a column — so the tempting fix is to
+  put the new one last. That would order the columns by the history of the
+  file rather than by what they mean, which is how a view becomes unreadable
+  one migration at a time. `DROP VIEW` then `CREATE VIEW`.
+
 ### Which rail opens an account — non-obvious rules
 
 Schema: `packages/ledger/sql/061_country_and_route_repair.sql`. Service in

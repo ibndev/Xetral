@@ -307,6 +307,9 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // widest role: the person taking the call about a card that will not
       // work is the one who needs to know Bitnob has been timing out.
       .staff('GET', '/v1/admin/providers', { pin: false, role: 'support' })
+      /* The caller's own roles, so a screen can hide what they may not use.
+         `support` is the widest staff role: everybody needs their own. */
+      .staff('GET', '/v1/admin/me', { pin: false, role: 'support' })
       .staff('GET', '/v1/admin/prices', { pin: false, role: 'finance' })
       .staff('POST', '/v1/admin/prices/fx', { pin: true, role: 'finance', stepUp: 'pin' })
       // THE RATE ITSELF, which nothing could set before — `prices/fx` above
@@ -322,6 +325,22 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       .staff('POST', '/v1/admin/prices/fx-refresh', { pin: true, role: 'finance', stepUp: 'pin' })
       .staff('POST', '/v1/admin/prices/giftcard', { pin: true, role: 'finance', stepUp: 'pin' })
       .staff('POST', '/v1/admin/prices/:id/retire', { pin: true, role: 'finance', stepUp: 'pin' })
+      /*
+       * DELETING a retired rate — `admin`, not `finance`, and that is the
+       * whole point of the route existing separately.
+       *
+       * Every other price action is reversible by publishing again. This one
+       * removes a row for good, so it sits with the role that holds the rest
+       * of the irreversible surface. The dashboard hides the button from
+       * anybody else, and this line is what actually refuses them: a hidden
+       * control is a decision about a screen, a policy is a decision about the
+       * system.
+       */
+      .staff('DELETE', '/v1/admin/prices/fx-rate/:id', {
+        pin: true,
+        role: 'admin',
+        stepUp: 'pin',
+      })
       .staff('GET', '/v1/admin/stuck', { pin: false, role: 'support' })
       // `admin`, not `support`: it names every flow that is switched off and
       // every credential that is absent, which is a map of where this

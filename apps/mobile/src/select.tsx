@@ -130,8 +130,25 @@ export function Select({
                 gap: dial ? 5 : 6,
                 paddingLeft: dial ? 8 : 12,
                 paddingRight: dial ? 6 : 10,
-                height: dial ? 42 : 40,
+                /*
+                 * THE DIAL BOX IS EXACTLY AS TALL AS THE FIELD BESIDE IT.
+                 *
+                 * It was 42 against `styles.input`'s 50, so the code sat eight
+                 * points short of the number it belongs to and read as a
+                 * smaller, separate control — "slim in height" beside the
+                 * web, where the two share ONE bordered affix box. A pill in a
+                 * card header can be its own size; a thing drawn in front of
+                 * an input is part of that input, and the only way that reads
+                 * is if they measure the same.
+                 *
+                 * The border matches for the same reason: the field has one at
+                 * rest and this did not, so even at equal heights they would
+                 * have been two different objects side by side.
+                 */
+                height: dial ? 50 : 40,
                 borderRadius: dial ? radius.md : radius.pill,
+                borderWidth: dial ? 1 : 0,
+                borderColor: colors.edgeStrong,
                 backgroundColor: dial ? colors.field : colors.surface2,
               }
             : {

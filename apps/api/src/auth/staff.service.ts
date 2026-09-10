@@ -48,6 +48,36 @@ export class StaffService {
     return result.rows.length > 0;
   }
 
+  /**
+   * The caller's OWN live roles.
+   *
+   * The dashboard had no way to ask this, so a screen could not hide a control
+   * an operator is not allowed to use — and the only alternative is showing it
+   * to everybody and letting the route refuse, which teaches people that
+   * buttons on the operations surface may or may not work.
+   *
+   * It reads the same rows `hasRole` does, live, for the reason 007 gives
+   * about roles never being carried in a token: a role withdrawn is withdrawn
+   * now, not in fifteen minutes.
+   *
+   * It answers only about the caller, so it says nothing a signed-in operator
+   * does not already know about themselves — unlike `listStaff`, which is the
+   * whole privileged surface and stays behind `admin`.
+   */
+  async rolesOf(userUuid: string): Promise<readonly string[]> {
+    const result = await this.pool.query<{ role: string }>(
+      `SELECT r.role
+         FROM staff_roles r
+         JOIN users u ON u.id = r.user_id
+        WHERE u.uuid = $1
+          AND u.status = 'active'
+          AND r.revoked_at IS NULL
+        ORDER BY r.role`,
+      [userUuid],
+    );
+    return result.rows.map((r) => r.role);
+  }
+
   /** The whole privileged surface, for review. Mirrors publicRouteAudit(). */
   async listStaff(): Promise<readonly { user_uuid: string; role: string; granted_at: string }[]> {
     const result = await this.pool.query<{

@@ -393,6 +393,48 @@ export class PricingService {
    * both refuse to un-retire — because bringing one back would make the
    * history say a price was in force during a period when it was not.
    */
+  /**
+   * DELETING A RETIRED RATE, which only an `admin` may do.
+   *
+   * A prices screen accumulates every mistyped rate for ever: publish 16500
+   * where you meant 1650, retire it in the next second, and then look at it
+   * for the life of the deployment. 064 permits the delete and the DATABASE
+   * is what refuses a live one — deleting that unprices the corridor, and an
+   * unpublished pair is refused rather than quoted, so the next customer is
+   * told it cannot be converted with nothing on screen saying a row went
+   * missing.
+   *
+   * WHAT IS LOST IS AN OFFER NOBODY TOOK. `fx_trades` carries its own
+   * `applied_numerator`/`applied_denominator`, so a trade is self-describing
+   * about the price it was struck at and nothing references a rate row by key.
+   * That is the whole reason this can be permitted at all; if a trade read its
+   * price back through this table it could not be.
+   *
+   * The refusal is relayed from the trigger rather than pre-checked here. A
+   * check around the delete is a second, weaker copy of the rule plus a race,
+   * which is the argument the ledger makes about never pre-checking a balance.
+   */
+  async deleteRate(uuid: string): Promise<{ uuid: string }> {
+    const removed = await this.pool.query<{ uuid: string }>(
+      `DELETE FROM fx_published_rates WHERE uuid = $1 RETURNING uuid`,
+      [uuid],
+    ).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : '';
+      if (message.includes('LIVE published rate cannot be deleted')) {
+        throw new UnprocessableEntityException({ error: 'price_is_live' });
+      }
+      throw error;
+    });
+
+    const row = removed.rows[0];
+    // One answer for "no such rate" and "already gone", the same reasoning
+    // `retire` records: the next step is identical and the list says which.
+    if (row === undefined) throw new NotFoundException({ error: 'price_not_found' });
+
+    this.#logger.log(`published rate deleted: ${uuid}`);
+    return row;
+  }
+
   async retire(
     table: 'fx' | 'giftcard',
     uuid: string,

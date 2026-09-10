@@ -5,11 +5,12 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  ServiceUnavailableException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import type { Pool, PoolClient } from 'pg';
 import { InsufficientFundsError, LedgerService, posting } from '@xetral/ledger';
-import { ProviderRejectedError, ProviderTimeoutError } from '@xetral/providers';
+import { ProviderError, ProviderRejectedError, ProviderTimeoutError } from '@xetral/providers';
 import type { PayoutBank, PayoutPort, PayoutReceipt } from '@xetral/providers';
 import { applyBasisPoints, fromMajor, money, toMajor } from '@xetral/shared';
 import type { Currency, Money } from '@xetral/shared';
@@ -111,9 +112,16 @@ export class PayoutService {
     @Inject(NotificationService) private readonly notifications: NotificationService,
   ) {}
 
-  /** Banks a customer may send to. */
+  /** Banks — or Mobile Money networks — a customer may send to. */
   async banks(country: string): Promise<readonly PayoutBank[]> {
-    return this.port.banks(country);
+    try {
+      return await this.port.banks(country);
+    } catch (error) {
+      // See `#relay`. "The bank list could not be loaded" with a 500 behind it
+      // is the exact shape 046 records: nothing broken except a credential
+      // nobody had, and no way to learn that from either side of the screen.
+      throw this.#relay(error, 'listing payout destinations');
+    }
   }
 
   /**
@@ -125,23 +133,29 @@ export class PayoutService {
    * the ordinary authenticated ceiling — a lookup endpoint with no limit is a
    * way to walk a bank's account space and harvest names.
    */
+  /**
+   * THE SAME TRANSLATION `send` USES, AND THERE WERE TWO.
+   *
+   * This method — the one the SCREEN calls — collapsed every
+   * `ProviderRejectedError` to `account_not_found`, while `lookupOrRefuse`
+   * below, reached only from `send`, correctly told `name_unavailable` apart.
+   *
+   * THAT MEANT NOBODY IN GHANA OR KENYA COULD SEND MONEY AT ALL. A mobile
+   * money wallet has no name enquiry, so the adapter refuses with
+   * `name_unavailable` by design — and this turned that into "we could not
+   * find that account". Both Send screens enable Review on
+   * `beneficiary !== undefined || nameUnavailable`, so with the refusal
+   * mislabelled the button never enabled, on the one screen a customer opens
+   * to pay somebody. The rail was right, the adapter was right, the fact was
+   * relayed as its opposite one layer up.
+   *
+   * One translation now. Two copies of "what a provider refusal means" is the
+   * shape that put two recipient resolvers in this codebase, and the copy that
+   * drifts is always the one fewer callers exercise.
+   */
   async lookup(query: LookupQuery): Promise<{ account_name: string }> {
-    try {
-      const found = await this.port.lookup(
-        query.country,
-        query.bank_code,
-        query.account_number,
-      );
-      return { account_name: found.accountName };
-    } catch (error) {
-      if (error instanceof ProviderRejectedError) {
-        // Their refusal, relayed as "no such account" rather than as a fault.
-        // A rejection is not ill health — 037's rule — and a customer's typo
-        // must not count toward a provider's failure rate.
-        throw new NotFoundException({ error: 'account_not_found' });
-      }
-      throw error;
-    }
+    const found = await this.lookupOrRefuse(query);
+    return { account_name: found.accountName };
   }
 
   async list(userUuid: string): Promise<readonly PayoutView[]> {
@@ -269,7 +283,7 @@ export class PayoutService {
    * sender typed confirms nothing — so where the rail cannot answer, the
    * answer is an empty string and a screen that says so, never an echo.
    */
-  async lookupOrRefuse(body: PayoutBody): Promise<{ accountName: string }> {
+  async lookupOrRefuse(body: LookupQuery): Promise<{ accountName: string }> {
     try {
       const found = await this.port.lookup(
         body.country,
@@ -284,8 +298,36 @@ export class PayoutService {
         }
         throw new NotFoundException({ error: 'account_not_found' });
       }
-      throw error;
+      throw this.#relay(error, 'looking up a beneficiary');
     }
+  }
+
+  /**
+   * A PROVIDER THAT COULD NOT BE ASKED IS NOT A BUG IN THIS APPLICATION, and
+   * answering 500 said it was.
+   *
+   * An unconfigured key, an expired one, a rail whose transfers product is not
+   * approved yet: each arrives as a `ProviderError` carrying the provider's
+   * own sentence, and each fell through to a bare `internal_error` with a
+   * reference. The customer read "something went wrong" and the operator read
+   * a stack trace — on the screen money leaves from, about the one class of
+   * failure an operator can actually fix.
+   *
+   * 006's rule, which the funding rail has followed since it was written and
+   * this one never did: the provider's sentence goes to the LOG, because it
+   * names our integration, and the customer gets a CODE their app turns into
+   * words.
+   */
+  #relay(error: unknown, doing: string): never {
+    if (!(error instanceof ProviderError)) throw error;
+    this.#logger.error(
+      `${doing} failed at the payout rail, so the customer saw a generic ` +
+        `refusal: ${error.name}: ${error.message}`,
+    );
+    throw new ServiceUnavailableException(
+      { error: 'payout_provider_unavailable' },
+      { cause: error },
+    );
   }
 
   /**

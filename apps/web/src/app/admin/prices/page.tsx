@@ -41,6 +41,21 @@ export default function Prices() {
    * up this table on the next load rather than in whichever release somebody
    * remembers this file in.
    */
+  /*
+   * WHAT THIS OPERATOR MAY DO, so a control they cannot use is not drawn.
+   *
+   * Only `admin` may DELETE a retired rate, and the ROUTE is what enforces
+   * that — this read decides whether the button appears, never whether it
+   * works. Showing it to everybody and letting the server refuse is the shape
+   * that teaches people controls here may or may not do anything, and then a
+   * real refusal stops being read.
+   *
+   * Its own load, allowed to fail: an API predating `/v1/admin/me` answers
+   * 404 and this screen must still render every panel it already had.
+   */
+  const me = useLoad(() => admin.myRoles().catch(() => [] as readonly string[]), [admin]);
+  const isAdmin = (me.data ?? []).includes('admin');
+
   const countries = useLoad(() => admin.countries(), [admin]);
   const operating = new Set<string>([
     ...(countries.data?.countries ?? []).filter((c) => c.enabled).map((c) => c.currency),
@@ -388,11 +403,20 @@ export default function Prices() {
                   <th>Our margin</th>
                   <th>Published by</th>
                   <th>Age</th>
+                  {/* Empty header: the column holds one action and only for
+                      some rows, so a label would name a thing most rows do
+                      not have. */}
+                  <th />
                 </tr>
               </thead>
               <tbody>
                 {ratesInOperationFirst(rates.data ?? [], operating).map((row) => (
-                  <tr key={row.uuid}>
+                  <tr
+                    key={row.uuid}
+                    /* Greyed the way the spreads table above greys a retired
+                       policy, so "not in force" reads the same in both. */
+                    className={row.retired_at != null ? 'muted' : undefined}
+                  >
                     <td>
                       {row.base_currency}&rarr;{row.quote_currency}
                     </td>
@@ -423,6 +447,40 @@ export default function Prices() {
                       renders, and customers are quoted whatever it last said.
                     */}
                     <td className="mono">{ageOf(row.age_seconds)}</td>
+                    {/*
+                      DELETE, and only for a RETIRED rate, and only for an
+                      `admin`.
+
+                      A live rate has no button at all rather than a disabled
+                      one: 064 refuses it in the DATABASE because deleting one
+                      unprices the corridor, and offering a control whose only
+                      outcome is a refusal is worse than not offering it.
+
+                      What is lost is an offer nobody took — `fx_trades`
+                      carries its own applied ratio, so no transaction reads
+                      its price back through this table. That is the whole
+                      reason this can exist.
+                    */}
+                    <td>
+                      {isAdmin && row.retired_at != null && (
+                        <button
+                          type="button"
+                          className="btn small danger"
+                          disabled={busy || pin === ''}
+                          onClick={() =>
+                            void act(async () => {
+                              await admin.deleteFxRate(
+                                row.uuid,
+                                'removed a retired rate from the prices screen',
+                                pin,
+                              );
+                            })
+                          }
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
