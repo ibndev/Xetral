@@ -290,6 +290,25 @@ jobs:
           other.
           EOF
 
+      # BEFORE THE RELEASE, AND THE ORDER IS THE WHOLE POINT.
+      #
+      # This step's comment already said "always, release or not… the fallback"
+      # and it sat AFTER the release step, so a release that failed took the
+      # fallback down with it. That is not hypothetical: a run whose Gradle
+      # build succeeded after thirteen minutes ended with no downloadable file
+      # anywhere, because `gh release create` answered 403 and the job stopped
+      # one step short of keeping what it had just built.
+      #
+      # The APK exists by now. Nothing after this point can make it not exist.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.apk.outputs.name }}
+          path: ${{ steps.apk.outputs.name }}
+          # Long enough to reinstall after a weekend, short enough that build
+          # outputs are not kept for ever.
+          retention-days: 30
+          if-no-files-found: error
+
       - name: Publish it where a phone can reach it
         if: ${{ inputs.publish_release }}
         # A RELEASE ASSET, NOT AN ARTIFACT, and that is the whole point of this
@@ -310,11 +329,22 @@ jobs:
           # Deleted first, so re-running for the same commit replaces the file
           # rather than failing on a tag that already exists.
           gh release delete "$tag" --yes --cleanup-tag 2>/dev/null || true
-          gh release create "$tag" "$APK_NAME" \
+
+          # A 403 HERE IS A REPOSITORY SETTING, NOT THIS WORKFLOW. The job
+          # declares `contents: write`, and a `permissions:` block can only
+          # NARROW what Settings → Actions → General → Workflow permissions
+          # allows — it cannot widen it. Set to read-only, the runner's token
+          # has no write however this file is written, and `gh` reports
+          # "Resource not accessible by integration", which names neither the
+          # setting nor the remedy.
+          if ! gh release create "$tag" "$APK_NAME" \
             --prerelease \
             --target "$GITHUB_SHA" \
             --title "Xetral $VARIANT build ${GITHUB_SHA::7}" \
-            --notes-file /tmp/notes.md
+            --notes-file /tmp/notes.md; then
+            echo "::error::could not create the release. If that was a 403: Settings → Actions → General → Workflow permissions must be 'Read and write permissions'. The APK itself is fine and is attached to this run as an artifact."
+            exit 1
+          fi
           url=$(gh release view "$tag" --json url --jq .url)
           {
             echo "### APK published"
@@ -322,17 +352,6 @@ jobs:
             echo "**[Open the release page]($url)** on the phone and tap"
             echo "\`$APK_NAME\`."
           } >> "$GITHUB_STEP_SUMMARY"
-
-      # Always, release or not. The artifact is the audit trail and the
-      # fallback for anybody who would rather not create a release.
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ steps.apk.outputs.name }}
-          path: ${{ steps.apk.outputs.name }}
-          # Long enough to reinstall after a weekend, short enough that build
-          # outputs are not kept for ever.
-          retention-days: 30
-          if-no-files-found: error
 
       - name: Say what was built and what to do with it
         env:
