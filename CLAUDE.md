@@ -880,6 +880,39 @@ guarded by `play-release.test.ts`.
 - **A `versionCode` ONLY GOES UP**, and it defaults to the workflow run number
   — the one figure here that cannot go backwards. A hand-typed repeat is
   refused by Play and wastes an upload.
+- **THE MANIFEST CHECK IS ONE SCRIPT BOTH WORKFLOWS RUN, and the second
+  hand-written copy is why.** `blockedPermissions` DOES NOT DELETE THE LINE —
+  it rewrites it as `tools:node="remove"` and the manifest merger strips it at
+  BUILD time. The APK workflow always checked for that marker; the AAB workflow
+  grew its own version that grepped for the permission NAME, so its FIRST EVER
+  RUN reported all three template permissions as errors against a build that
+  was entirely correct, and no bundle could be made at all. Copies of one check
+  drifting into checking different things while both read green is the argument
+  the fulfilment port makes about three contract suites.
+- **The name-only check was weaker in the direction that matters more.** A typo
+  in `blockedPermissions` marks something the app NEEDS for removal — the line
+  is still in the file, so "is it present?" says yes — and it reaches a customer
+  as "Face ID does not work on Android". `assert-permissions.sh` checks INTERNET
+  and USE_BIOMETRIC for the marker as well as for the name, and
+  `play-release.test.ts` fails the build on a workflow that stops calling it or
+  starts naming a permission in a `run:` block again.
+- **`shell: bash -e` ABORTS A STEP BEFORE ITS OWN ERROR MESSAGE.** The keystore
+  step had a sentence naming the secret and the remedy written directly under
+  the decode, and it had never once been reachable: `base64` exits non-zero and
+  the step ends there. Four words — "base64: invalid input" — were the whole of
+  what an operator got. Every command whose failure has something to say needs
+  the `if ! …; then` guard.
+- **Whitespace is stripped from the keystore secret before decoding, and that
+  is not laxity.** The base64 alphabet contains no space, tab, newline or
+  carriage return, so removing them cannot change what the value decodes to —
+  and each of them is what a person pasting a secret adds by accident (`base64`
+  without `-w0` wraps at 76 columns; a Windows clipboard adds `\r`).
+- **The keystore is INTERROGATED at the point it is staged**, not left to
+  Gradle: is it a keystore this password opens, and does it hold the alias
+  named. Both are knowable in a second and both otherwise arrive forty minutes
+  later as a stack trace about a file format, which reads as a broken build
+  rather than a wrong secret. A wrong password and a wrong file answer
+  identically, deliberately.
 
 ### A spread that widens when the payout currency strengthens — non-obvious rules
 
