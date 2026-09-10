@@ -2017,6 +2017,26 @@ td.right, th.right { text-align: right; padding-right: 0; }
   color: var(--on-brand);
 }
 
+/*
+ * A SWITCH ACROSS THE CARD, not a badge floating in the middle of it.
+ *
+ * `.segmented` is an inline-flex, so two short words — Xetral, Bank — made a
+ * pill about a third of the card wide, sitting under the heading with nothing
+ * to align to. Equal halves across the full width read as the two-way choice
+ * they are, which is what the Send screen's own mock-up shows and what the
+ * phone now draws.
+ *
+ * Only where it is asked for: the activity rail below is five filters and
+ * must stay content-width and scrollable.
+ */
+.segmented.wide {
+  display: flex;
+  width: 100%;
+}
+.segmented.wide button {
+  flex: 1;
+}
+
 /* ONE LINE, AND IT SCROLLS RATHER THAN WRAPPING OR PUSHING THE PAGE.
  *
  * `.segmented` is an inline-flex with no wrap, which is right for two or three

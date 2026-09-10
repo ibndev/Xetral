@@ -432,9 +432,27 @@ describe('when the provider does not answer', () => {
     await fund(customer.userId, 1_000_000n);
     port.sendAnswer = new ProviderRejectedError('bitnob', 'beneficiary bank unreachable', undefined);
 
-    const res = await pay(customer).expect(200);
-    expect(res.body.status).toBe('failed');
-    expect(res.body.failure_reason).toContain('beneficiary bank unreachable');
+    /*
+     * A REFUSAL, NOT A 200 CARRYING `status: "failed"`.
+     *
+     * It was the second, and both apps read the amount off that body and told
+     * the customer "Sent ₦5,000" — a success, an unchanged balance and nothing
+     * at the bank. Refusing here is what fixes every client at once, including
+     * the ones not written yet.
+     *
+     * AND IT CARRIES NO DETAIL. The provider's own sentence names our
+     * integration, so it belongs on the row an operator reads — asserted
+     * below, where it still is — and not on a customer's screen.
+     */
+    const res = await pay(customer).expect(422);
+    expect(res.body.error).toBe('payout_failed');
+    expect(JSON.stringify(res.body)).not.toContain('beneficiary bank unreachable');
+
+    const listed = await request(app.getHttpServer())
+      .get('/v1/payouts')
+      .set('Authorization', `Bearer ${customer.token}`)
+      .expect(200);
+    expect(listed.body.payouts[0].failure_reason).toContain('beneficiary bank unreachable');
 
     const balance = await nairaBalance(customer);
     expect(balance.spendable).toBe('10000.00');

@@ -18,6 +18,7 @@ import { SpendingLimitService } from './spending-limits.service.js';
 import { NotificationService } from '../notifications/notification.service.js';
 import { TaxService } from '../tax/tax.service.js';
 import type { TransferRequest } from './dto.js';
+import { RecipientService } from './recipient.service.js';
 
 export interface TransferResult {
   readonly entry_id: string;
@@ -96,6 +97,7 @@ export class WalletService {
     @Inject(SpendingLimitService) private readonly limits: SpendingLimitService,
     @Inject(NotificationService) private readonly notifications: NotificationService,
     @Inject(TaxService) private readonly tax: TaxService,
+    @Inject(RecipientService) private readonly recipients: RecipientService,
   ) {}
 
   /**
@@ -245,15 +247,88 @@ export class WalletService {
      * fourth country gets this rule for free — the same reason the offered
      * set is derived rather than written down.
      */
+    /*
+     * EVERY CURRENCY THE PLATFORM CAN ACTUALLY MOVE BOTH WAYS.
+     *
+     * 059 routes GHS and KES to Flutterwave for collection AND payout, which
+     * is the whole of what makes them wallets rather than labels: a customer
+     * in Lagos can be paid in cedis and can pay a cedi wallet. They were on
+     * nobody's home screen but a Ghanaian's, so cedis arriving for a Nigerian
+     * landed in a currency the screen had never said existed — and the
+     * customer's first sight of it was money appearing under a code that had
+     * not been there the day before.
+     *
+     * READ FROM THE ROUTE TABLE, never listed here, for the reason the local
+     * set is read from `countries`: an operator opening a fourth corridor
+     * publishes two rows and gets this for free.
+     *
+     * BOTH DIRECTIONS ARE REQUIRED, and that is the entire test. A currency
+     * we can collect and cannot pay out is one a customer could be given and
+     * could not spend, which is worse than not offering it at all — GBP and
+     * CAD are exactly that today, and stay off.
+     */
+    const movable = await this.#movableCurrencies();
+    for (const code of movable) if (isCurrency(code)) offered.add(code);
+
+    /*
+     * ANOTHER COUNTRY'S LOCAL CURRENCY IS STILL NOT A WALLET, where we cannot
+     * move it. The FX loop adds both sides of every published pair, so
+     * publishing NGN→GBP so a Nigerian can be paid in London would otherwise
+     * hand every customer a sterling wallet nothing can pay out.
+     */
     const local = await this.#localCurrencies();
     for (const code of offered) {
-      if (code !== home && code !== SETTLEMENT_CURRENCY && local.has(code)) {
+      if (
+        code !== home &&
+        code !== SETTLEMENT_CURRENCY &&
+        local.has(code) &&
+        !movable.has(code)
+      ) {
         offered.delete(code);
       }
     }
 
     return [...offered];
   }
+
+  /**
+   * Every currency 059 says this platform can BOTH collect and pay out.
+   *
+   * Not "is routed" — routed in both directions. A route names who serves an
+   * operation, so a currency with only a `collect` row is one money can enter
+   * and never leave, and a wallet offered on that basis is a trap rather than
+   * a product.
+   *
+   * A deployment behind 059 has no table at all, and the answer there is the
+   * empty set: nothing extra is offered, which is exactly the behaviour this
+   * screen had before routing existed. A home screen must not fail to render
+   * because a migration has not been applied.
+   *
+   * Cached for five seconds, alongside the local set and for the same reason.
+   */
+  async #movableCurrencies(): Promise<ReadonlySet<string>> {
+    const now = Date.now();
+    if (this.#movableCache !== undefined && this.#movableCache.until > now) {
+      return this.#movableCache.codes;
+    }
+    let codes: ReadonlySet<string> = new Set<string>();
+    try {
+      const rows = await this.pool.query<{ currency: string }>(
+        `SELECT currency FROM provider_routes
+          WHERE operation IN ('collect', 'payout')
+          GROUP BY currency
+         HAVING count(DISTINCT operation) = 2`,
+      );
+      codes = new Set(rows.rows.map((r) => r.currency));
+    } catch {
+      // 059 has not been applied here. See above: the empty set is the old
+      // behaviour, and the old behaviour renders.
+    }
+    this.#movableCache = { codes, until: now + 5_000 };
+    return codes;
+  }
+
+  #movableCache: { codes: ReadonlySet<string>; until: number } | undefined;
 
   /**
    * Every currency some OPEN country calls its own.
@@ -334,7 +409,7 @@ export class WalletService {
     const amount = this.#parseAmount(request.amount, currency);
 
     const sender = await this.#activeUser(senderUuid);
-    const recipient = await this.#recipientByIdentifier(request.recipient);
+    const recipient = await this.recipients.resolve(request.recipient);
 
     if (recipient.id === sender.id) {
       throw new BadRequestException({ error: 'cannot_transfer_to_self' });
@@ -606,192 +681,6 @@ export class WalletService {
     return { id: row.id, email: row.email };
   }
 
-  /**
-   * Who to pay, from whatever the customer pasted.
-   *
-   * FOUR SHAPES, ONE FIELD. An email, a phone number, an `@handle`, or a whole
-   * profile URL copied out of a message — `https://app.xetral.com/pay/olawale`
-   * and every variation of it somebody's keyboard produces. The alternative is
-   * a second form field the customer has to classify their own input into,
-   * which is asking them to do the parsing.
-   *
-   * The handle is matched against `payable_handles`, which excludes closed
-   * accounts and carries no contact detail — so resolving a link cannot be
-   * turned into a way to read the address behind it.
-   */
-  async #recipientByIdentifier(raw: string): Promise<{ id: string }> {
-    /*
-     * A PAYMENT LINK NOW CARRIES A PHONE NUMBER, and a link somebody shared
-     * last year still carries a handle.
-     *
-     * The identifier of an account is the phone number, so
-     * `https://app.xetral.com/pay/2348031234567` is what this product
-     * generates. Unwrapping the link FIRST is what lets one segment be read
-     * two ways: all digits is a number, anything else is a handle from a link
-     * already in the world — which must go on paying the same person, because
-     * nobody re-reads a link they have already sent.
-     */
-    const identifier = payLinkTarget(raw);
-
-    /*
-     * A CHECKOUT SLUG, WHICH IS WHAT A PAYMENT LINK CARRIES NOW.
-     *
-     * The link is public and pays whoever it belongs to, so a Xetral customer
-     * who pastes a friend's link into Send should pay that friend rather than
-     * be told there is no such person. `payable_links` excludes closed
-     * accounts and carries no contact detail, which is why the lookup can be
-     * this direct — and an unknown slug answers exactly as an unknown email
-     * does, so it cannot be walked to learn which links are real.
-     *
-     * BEFORE the handle branch, because 039's handle shape and a slug overlap:
-     * both are lowercase letters and digits. A slug is what this product
-     * generates today, so it is the reading that must win.
-     */
-    if (/^[a-z0-9]{8,32}$/.test(identifier)) {
-      const bySlug = await this.pool.query<{ id: string }>(
-        `SELECT u.id FROM users u
-           JOIN payable_links p ON p.user_uuid = u.uuid
-          WHERE p.slug = $1`,
-        [identifier],
-      );
-      const row = bySlug.rows[0];
-      if (row !== undefined) return { id: row.id };
-      // Falls THROUGH rather than refusing: an eight-character string is also
-      // a legal handle, and a link shared before the identifier settled must
-      // go on paying the same person.
-    }
-
-    const handle = handleIn(identifier);
-    if (handle !== undefined) {
-      const byHandle = await this.pool.query<{ id: string }>(
-        `SELECT u.id FROM users u
-           JOIN payable_handles p ON p.user_uuid = u.uuid
-          WHERE p.handle = $1`,
-        [handle],
-      );
-      const row = byHandle.rows[0];
-      // The SAME refusal as an unknown email. A link that answered differently
-      // from an address would say which handles exist.
-      if (row === undefined) throw new NotFoundException({ error: 'recipient_not_found' });
-      return { id: row.id };
-    }
-
-    /*
-     * A PHONE NUMBER IN ANY OF THE THREE SHAPES IT GETS TYPED.
-     *
-     * `users.phone` is E.164 and the match was `phone = $1` — exact — so a
-     * sender who typed the number the way they have it saved, with the trunk
-     * zero every Nigerian writes, was told there was no such customer. The
-     * account existed; the string did not match. That is the one refusal on
-     * this screen a customer cannot act on, because nothing tells them the
-     * shape is what is wrong.
-     *
-     * So the identifier is ALSO compared as digits, which makes
-     * `+2348031234567` and `2348031234567` one person — a plus somebody
-     * dropped, or a share sheet stripped.
-     *
-     * IT DELIBERATELY DOES NOT MATCH `08031234567`. A national number has no
-     * country in it, and the only ways to supply one are to assume the
-     * SENDER's — wrong for exactly the cross-border payments this screen
-     * exists for — or to match on a suffix, which on a money path can pay a
-     * stranger in another country who happens to share the digits. The
-     * dialling-code picker in front of the field is what makes the national
-     * form work: both apps build E.164 from it through `e164()`, so the
-     * customer types the number the way they have it saved and the server
-     * still gets one canonical string.
-     *
-     * The digits are computed rather than stored, so this cannot use an index
-     * — but it is guarded by `$2 <> ''`, false for every email address and
-     * every handle, so the scan only happens for something shaped like a
-     * number at all.
-     */
-    const digits = identifier.replace(/[^0-9]/g, '').replace(/^0+/, '');
-    const result = await this.pool.query<{ id: string; status: string }>(
-      `SELECT id, status FROM users
-        WHERE lower(email) = lower($1)
-           OR phone = $1
-           OR ($2 <> '' AND regexp_replace(phone, '[^0-9]', '', 'g') = $2)
-        LIMIT 1`,
-      [identifier, digits],
-    );
-    const row = result.rows[0];
-
-    // "No such recipient" and "that recipient is closed" are the same answer.
-    // Distinguishing them turns a transfer form into a way to test which phone
-    // numbers belong to customers.
-    if (row === undefined || row.status === 'closed') {
-      throw new NotFoundException({ error: 'recipient_not_found' });
-    }
-    return { id: row.id };
-  }
-}
-
-/**
- * The handle inside whatever was pasted, or undefined if this is not one.
- *
- * Deliberately permissive about the WRAPPER and strict about the handle. A
- * customer copying a payment link gets whatever their app decided to include —
- * a scheme or not, a trailing slash, a query string a share sheet appended —
- * and none of that is their mistake to fix. What is not permissive is the
- * handle itself: it must match the same shape the database enforces, so a
- * malformed one is a clean "no such recipient" rather than a query.
- */
-export function handleIn(raw: string): string | undefined {
-  let value = raw.trim();
-  if (value === '' || value.includes('@') === false && value.startsWith('http') === false
-      && !/^[a-z0-9_]+$/i.test(value)) {
-    return undefined;
-  }
-
-  // A URL, in any of the forms a share sheet produces.
-  const asUrl = value.match(/^(?:https?:\/\/)?[^\s/]+\/pay\/([^/?#\s]+)/i);
-  if (asUrl !== null) {
-    value = asUrl[1] ?? '';
-  } else if (value.startsWith('@')) {
-    value = value.slice(1);
-  } else if (value.includes('@') || value.startsWith('http')) {
-    // An email address, or a URL that is not a payment link. Neither is a
-    // handle, and guessing at one would turn a mistyped address into a
-    // transfer to somebody else entirely.
-    return undefined;
-  }
-
-  const handle = value.toLowerCase();
-  // ALL DIGITS IS A PHONE NUMBER, NOT A HANDLE, and the handle pattern accepts
-  // one — `2348031234567` matches it exactly. Without this, every link this
-  // product now generates would be looked up in `payable_handles`, miss, and
-  // answer "no such recipient" for a customer whose number is right there in
-  // the link.
-  if (/^[0-9]+$/.test(handle)) return undefined;
-  return /^[a-z0-9](?:[a-z0-9_]{1,18})[a-z0-9]$/.test(handle) ? handle : undefined;
-}
-
-/**
- * Whatever was pasted, with a payment link unwrapped to the thing it names.
- *
- * THREE GENERATIONS OF LINK RESOLVE THROUGH HERE, and that is the whole
- * reason it exists rather than being one regex at the call site. A link is
- * forwarded and cannot be recalled, so every shape this product has ever
- * printed on a screen goes on working:
- *
- *   /pay/<slug>              the checkout, and what is generated today
- *   /pay/<digits>            the phone number, generated for one release
- *   /pay/<handle>            the `@handle`, retired with 039's identifier
- *
- * The digits get their `+` back, because the link deliberately dropped it — a
- * plus in a URL is a space to half the software that will touch it — and that
- * is what makes the unwrapped value an E.164 number again.
- *
- * Anything that is not a payment link is returned UNCHANGED — an email, a bare
- * number, an `@handle` typed by hand — because this function's only job is the
- * wrapper.
- */
-export function payLinkTarget(raw: string): string {
-  const value = raw.trim();
-  const asUrl = value.match(/^(?:https?:\/\/)?[^\s/]+\/pay\/([^/?#\s]+)/i);
-  const segment = asUrl?.[1];
-  if (segment === undefined) return value;
-  return /^[0-9]{7,15}$/.test(segment) ? `+${segment}` : segment;
 }
 
 function negate<C extends Currency>(amount: Money<C>): Money<C> {

@@ -315,15 +315,37 @@ function Transfer() {
    * list is derived from the money registry now; keeping the code here is what
    * stops the next such refusal hiding behind a claim about pricing.
    */
+  // A rate is quoted against an amount, so an empty box asks for one unit —
+  // enough to render the rate line before the customer has typed anything.
+  //
+  // COMPUTED OUT HERE so it can be both the dependency and the thing the
+  // answer is checked against. Inside the loader it was neither: every
+  // keystroke that left it unchanged — a trailing space, a second decimal
+  // point — still fired a quote.
+  const forAmount =
+    amount === '' || !isValidAmount(amount, exponentFor(sendCurrency)) ? '1' : amount;
+
   const quote = useLoad(async () => {
     if (!converting || recipientCurrency === undefined) return undefined;
-    // A rate is quoted against an amount, so an empty box asks for one unit —
-    // enough to render the rate line before the customer has typed anything.
-    const forAmount = amount === '' || !isValidAmount(amount, exponentFor(sendCurrency))
-      ? '1'
-      : amount;
-    return client.fxQuote(sendCurrency, recipientCurrency, forAmount);
-  }, [client, converting, recipientCurrency, sendCurrency, amount]);
+    // STAMPED WITH WHAT IT IS A QUOTE FOR. See `priced` below.
+    return { forAmount, ...(await client.fxQuote(sendCurrency, recipientCurrency, forAmount)) };
+  }, [client, converting, recipientCurrency, sendCurrency, forAmount]);
+
+  /*
+   * THE FIGURE ONLY COUNTS WHEN IT IS A FIGURE FOR THIS AMOUNT.
+   *
+   * `useLoad` keeps the last successful result while the next request is in
+   * flight AND after one fails — which is right for a balance and wrong for a
+   * rate. Type 25, clear it, type 20, and the "they receive" line went on
+   * showing what 25 converts to: correct arithmetic about an amount the
+   * customer had already replaced. A refusal in between — a rate limit hit by
+   * quoting on every keystroke, a moment of no signal — pinned it there.
+   *
+   * So the answer carries the question. A quote whose `forAmount` is not what
+   * is on screen is not this customer's quote, and showing nothing is the only
+   * honest alternative to showing the wrong number about their money.
+   */
+  const priced = quote.data?.forAmount === forAmount ? quote.data : undefined;
   /*
    * ONLY `pair_not_supported` MEANS "we do not trade this". It is the code
    * `fx_spread_policies` produces for a pair nobody has published, which is
@@ -477,10 +499,24 @@ function Transfer() {
                 pin,
                 idempotencyKey: attempt.key,
               })
-              // One shape for the success line below. A payout answers with
-              // its own view, and mapping it here keeps the two branches from
-              // each growing their own copy of the wording.
-              .then((p) => ({ amount: p.amount, fee: p.fee, currency: p.currency }))
+              /*
+               * One shape for the success line below. A payout answers with
+               * its own view, and mapping it here keeps the two branches from
+               * each growing their own copy of the wording.
+               *
+               * `pending` IS THE HALF THAT WAS MISSING. A payout the provider
+               * never answered for stays `reserved` — the money is held, the
+               * sweep will ask, and nothing has reached the bank yet — and
+               * this line said "Sent" for it. (A payout that FAILED now
+               * arrives as a refusal rather than as a view, so it cannot
+               * reach this branch at all.)
+               */
+              .then((p) => ({
+                amount: p.amount,
+                fee: p.fee,
+                currency: p.currency,
+                pending: p.status === 'reserved',
+              }))
           : converting && recipientCurrency !== undefined
             ? /*
                * ACROSS CURRENCIES IS A REMITTANCE, NOT A TRANSFER.
@@ -501,14 +537,21 @@ function Transfer() {
                   pin,
                   idempotencyKey: attempt.key,
                 })
-                .then((t) => ({ amount: t.amount, fee: '0.00', currency: t.from }))
-            : await client.transfer({
-                recipient: payee,
-                amount,
-                currency: sendCurrency,
-                pin,
-                idempotencyKey: attempt.key,
-              });
+                .then((t) => ({
+                  amount: t.amount,
+                  fee: '0.00',
+                  currency: t.from,
+                  pending: false,
+                }))
+            : await client
+                .transfer({
+                  recipient: payee,
+                  amount,
+                  currency: sendCurrency,
+                  pin,
+                  idempotencyKey: attempt.key,
+                })
+                .then((t) => ({ ...t, pending: false }));
       // The attempt is over, so the next Send is a new transfer and needs a
       // new key — reusing this one would have the server replay this transfer
       // and report success for money that never moved.
@@ -525,9 +568,15 @@ function Transfer() {
       setRecipientPhone('');
       setAccountNumber('');
       setBeneficiary(undefined);
-      return `Sent ${formatAmount(result.amount, result.currency)}${
+      const moved = `${formatAmount(result.amount, result.currency)}${
         result.fee === '0.00' ? '' : ` (fee ${formatAmount(result.fee, result.currency)})`
-      }.`;
+      }`;
+      // NOT "Sent" for a payout still in the air. Saying it left when the
+      // bank has not answered is the sentence that made a stuck transfer
+      // read as a delivered one.
+      return result.pending
+        ? `${moved} is on its way. We are waiting for the bank to confirm it.`
+        : `Sent ${moved}.`;
     });
   }
 
@@ -624,11 +673,11 @@ function Transfer() {
             new claim — it is the same quote, repeated where the decision is
             actually made.
           */}
-          {converting && quote.data !== undefined && (
+          {converting && priced !== undefined && (
             <div className="row">
               <span className="muted">They receive</span>
               <span className="mono">
-                {formatAmount(quote.data.receives, recipientCurrency ?? sendCurrency)}
+                {formatAmount(priced.receives, recipientCurrency ?? sendCurrency)}
               </span>
             </div>
           )}
@@ -676,8 +725,8 @@ function Transfer() {
         <h1>Send money</h1>
         <h2>
           {mobileMoney
-            ? 'To a Xetral account or a Mobile Money number'
-            : 'To a Xetral account or a bank account'}
+            ? 'Send to a Xetral account or Mobile Money number.'
+            : 'Send to a Xetral account or bank account.'}
         </h2>
 
         {/* Two destinations, one screen. Deliberately NOT the `.choice`
@@ -685,7 +734,7 @@ function Transfer() {
             sets `white-space: nowrap`, so a button holding a sentence forced
             the page 41px wider than a 360px handset. These hold one word. */}
         {arrivedWith === '' && (
-          <div className="segmented" role="group" aria-label="Where the money is going">
+          <div className="segmented wide" role="group" aria-label="Where the money is going">
             <button
               type="button"
               className={destination === 'xetral' ? 'active' : ''}
@@ -698,7 +747,7 @@ function Transfer() {
               className={destination === 'bank' ? 'active' : ''}
               onClick={() => setDestination('bank')}
             >
-              {mobileMoney ? 'Mobile Money' : 'Bank account'}
+              {mobileMoney ? 'Mobile Money' : 'Bank'}
             </button>
           </div>
         )}
@@ -897,10 +946,10 @@ function Transfer() {
           */}
           {converting && (
             <span className="hint">
-              {quote.loading
+              {quote.loading || (priced === undefined && quote.error === undefined)
                 ? 'Getting today\u2019s rate…'
-                : quote.data !== undefined
-                  ? `1 ${sendCurrency} = ${quote.data.rate} ${recipientCurrency ?? ''} today.`
+                : priced !== undefined
+                  ? `1 ${sendCurrency} = ${priced.rate} ${recipientCurrency ?? ''} today.`
                   : pairUnpriced
                     ? `We cannot convert ${sendCurrency} to ${recipientCurrency ?? ''} yet.`
                     : /* NOT a claim about pricing. Whatever went wrong, saying
@@ -951,14 +1000,14 @@ function Transfer() {
           */}
           {converting && amount !== '' && amountValid && (
             <span className="hint">
-              {quote.loading
+              {quote.loading || (priced === undefined && quote.error === undefined)
                 ? 'Working out what they receive…'
-                : quote.data === undefined
+                : priced === undefined
                   ? pairUnpriced
                     ? 'We cannot say what they would receive yet.'
                     : 'We could not work that out just now.'
                   : `They receive about ${formatAmount(
-                      quote.data.receives,
+                      priced.receives,
                       recipientCurrency ?? sendCurrency,
                     )}.`}
             </span>

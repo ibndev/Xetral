@@ -262,6 +262,92 @@ export function Button({
   );
 }
 
+/**
+ * TWO OR THREE CHOICES AS TABS, not as a dropdown.
+ *
+ * The Send screen asked "Where is it going?" through a `Select`, which on a
+ * phone is a sheet that slides up over the form: two taps and a covered screen
+ * to answer a question with two answers, and the answer itself is then a line
+ * of text among the other fields rather than a visible state. The web has had
+ * `.segmented` for this since the screen was built; the phone had the same
+ * decision drawn as the same control as "which bank", which is a list of a
+ * hundred.
+ *
+ * IT IS FULL WIDTH AND THE HALVES ARE EQUAL. A pill that only spans its own
+ * text sits somewhere in the middle of the card and reads as a badge; equal
+ * halves across the card read as a switch, which is what it is.
+ *
+ * THE SELECTED PILL IS INK, NOT PAPER — the web's own correction, for the same
+ * reason and in the same words: white on off-white, distinguished only by a
+ * slightly darker label, made "which one is selected?" a question a customer
+ * had to squint at on the one control where being wrong sends money somewhere
+ * else. `android_ripple` is refused, as it is on every other non-tabbar
+ * control here: a disc lighting up behind a word reads as a shape rather than
+ * as a state.
+ */
+export function Segmented<T extends string>({
+  value,
+  onChange,
+  options,
+  label,
+}: {
+  readonly value: T;
+  readonly onChange: (next: T) => void;
+  readonly options: readonly { readonly value: T; readonly label: string }[];
+  /** For a screen reader. There is deliberately no visible label: the two
+   *  words ARE the question, and a caption above them is a line of text
+   *  saying what the control already says. */
+  readonly label: string;
+}) {
+  const colors = useTheme();
+  return (
+    <View
+      accessibilityRole="tablist"
+      accessibilityLabel={label}
+      style={{
+        flexDirection: 'row',
+        padding: 4,
+        gap: 2,
+        borderRadius: radius.pill,
+        backgroundColor: colors.surface2,
+      }}
+    >
+      {options.map((option) => {
+        const on = option.value === value;
+        return (
+          <Pressable
+            key={option.value}
+            onPress={() => onChange(option.value)}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: on }}
+            android_ripple={null}
+            style={{
+              flex: 1,
+              minHeight: 38,
+              alignItems: 'center',
+              justifyContent: 'center',
+              paddingHorizontal: 12,
+              borderRadius: radius.pill,
+              backgroundColor: on ? colors.brand700 : 'transparent',
+            }}
+          >
+            <Text
+              numberOfLines={1}
+              style={{
+                fontSize: 13.5,
+                fontFamily: font.sansSemi,
+                color: on ? colors.onBrand : colors.text2,
+              }}
+            >
+              {option.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 /** A card with a heading and a quiet subtitle — the web's `.card > h1 + h2`. */
 export function Panel({
   title,

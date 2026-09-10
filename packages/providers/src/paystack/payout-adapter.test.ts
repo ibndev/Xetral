@@ -165,11 +165,26 @@ describe('what became of it', () => {
       ['failed', 'failed'],
       ['reversed', 'failed'],
       ['pending', 'sent'],
-      ['otp', 'sent'],
+      // `otp` IS NOT SENT. Paystack returns it when the business has Transfers
+      // OTP enabled — the default — and the transfer then sits unauthorised
+      // until somebody submits a code. Nothing is debited at either end.
+      // Calling it `sent` told customers their money had gone when it had not
+      // moved at all, so it is a refusal: the reservation is reversed and they
+      // get their money back.
+      ['otp', 'failed'],
     ] as const) {
       const { adapter } = adapterWith([{ status: true, data: { id: 5, status } }]);
       expect((await adapter.status('5')).state).toBe(state);
     }
+  });
+
+  it('says WHICH SETTING left an OTP transfer unauthorised', async () => {
+    // The reason lands on `bank_payouts.failure_reason`, which is where an
+    // operator looks — and without it they read "the transfer failed" against
+    // a Paystack dashboard showing a transfer that looks perfectly fine.
+    const { adapter } = adapterWith([{ status: true, data: { id: 7, status: 'otp' } }]);
+    const receipt = await adapter.status('7');
+    expect(receipt.failureReason).toContain('OTP');
   });
 
   it('THROWS on a status it does not recognise, rather than guessing', async () => {

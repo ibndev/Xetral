@@ -4,7 +4,7 @@ import { router } from 'expo-router';
 import { e164, exponentFor, formatAmount, isValidAmount, sendableFor } from '@xetral/client';
 import { codeOf } from '@xetral/client';
 import { Shell } from '@/shell';
-import { Button, Done, Field, FormError, Loading, Panel, Toast } from '@/ui';
+import { Button, Done, Field, FormError, Loading, Panel, Segmented, Toast } from '@/ui';
 import { Select } from '@/select';
 import { Icon } from '@/icon';
 import { CountryMark } from '@/currency-mark';
@@ -210,18 +210,38 @@ export default function Transfer() {
    * pair is REFUSED rather than quoted from a default, and saying so before
    * the PIN is far better than after it.
    */
+  // An empty box asks for one unit, which is enough to draw the rate line
+  // before anything is typed. COMPUTED OUT HERE so it can be both the
+  // dependency and the thing the answer is checked against.
+  const forAmount =
+    amount === '' || !isValidAmount(amount, exponentFor(sendCurrency)) ? '1' : amount;
+
   const quote = useLoad(async () => {
     if (!converting || recipientCurrency === undefined) return undefined;
-    const forAmount =
-      amount === '' || !isValidAmount(amount, exponentFor(sendCurrency)) ? '1' : amount;
     /*
      * THE REASON IS KEPT — see the web screen. Swallowing it made every
      * failure read as "we do not trade this pair", which was FALSE for the one
      * that happened: the API's currency list had been left behind by three
      * migrations and refused GHS before reading any price.
+     *
+     * STAMPED WITH WHAT IT IS A QUOTE FOR. See `priced` below.
      */
-    return client.fxQuote(sendCurrency, recipientCurrency, forAmount);
-  }, [client, converting, recipientCurrency, sendCurrency, amount]);
+    return { forAmount, ...(await client.fxQuote(sendCurrency, recipientCurrency, forAmount)) };
+  }, [client, converting, recipientCurrency, sendCurrency, forAmount]);
+
+  /*
+   * THE FIGURE ONLY COUNTS WHEN IT IS A FIGURE FOR THIS AMOUNT.
+   *
+   * `useLoad` keeps the last successful result while the next request is in
+   * flight AND after one fails — right for a balance, wrong for a rate. Type
+   * 25, clear it, type 20, and the "they receive" line went on showing what 25
+   * converts to: correct arithmetic about an amount the customer had already
+   * replaced, and a refusal in between pinned it there.
+   *
+   * So the answer carries the question, and one that does not match what is on
+   * screen is not shown at all.
+   */
+  const priced = quote.data?.forAmount === forAmount ? quote.data : undefined;
   /* Only `pair_not_supported` means "we do not trade this" — the code an
    * unpublished `fx_spread_policies` row produces. Everything else is a
    * different problem and must not read as one about pricing. */
@@ -371,11 +391,11 @@ export default function Transfer() {
           </View>
           {/* THE LAST PLACE THE CONVERSION CAN BE CHECKED. Nothing new — the
               same quote, repeated where the decision is actually made. */}
-          {converting && quote.data !== undefined && (
+          {converting && priced !== undefined && (
             <View style={styles.row}>
               <Text style={styles.muted}>They receive</Text>
               <Text style={styles.amount}>
-                {formatAmount(quote.data.receives, recipientCurrency ?? sendCurrency)}
+                {formatAmount(priced.receives, recipientCurrency ?? sendCurrency)}
               </Text>
             </View>
           )}
@@ -410,12 +430,22 @@ export default function Transfer() {
                           pin,
                           idempotencyKey: attempt.key,
                         })
-                        // One shape for the success line below, so the two
-                        // branches do not each grow a copy of the wording.
+                        /*
+                         * One shape for the success line below, so the two
+                         * branches do not each grow a copy of the wording.
+                         *
+                         * `pending` IS THE HALF THAT WAS MISSING. A payout the
+                         * provider never answered for stays `reserved` — held,
+                         * not sent, and the sweep will ask — and this line
+                         * said "Sent" for it. A payout that FAILED now arrives
+                         * as a refusal rather than as a view, so it cannot
+                         * reach this branch at all.
+                         */
                         .then((p) => ({
                           amount: p.amount,
                           fee: p.fee,
                           currency: p.currency,
+                          pending: p.status === 'reserved',
                         }))
                     : converting && recipientCurrency !== undefined
                       ? /*
@@ -438,14 +468,21 @@ export default function Transfer() {
                             pin,
                             idempotencyKey: attempt.key,
                           })
-                          .then((t) => ({ amount: t.amount, fee: '0.00', currency: t.from }))
-                      : await client.transfer({
-                          recipient: payee,
-                          amount,
-                          currency: sendCurrency,
-                          pin,
-                          idempotencyKey: attempt.key,
-                        });
+                          .then((t) => ({
+                            amount: t.amount,
+                            fee: '0.00',
+                            currency: t.from,
+                            pending: false,
+                          }))
+                      : await client
+                          .transfer({
+                            recipient: payee,
+                            amount,
+                            currency: sendCurrency,
+                            pin,
+                            idempotencyKey: attempt.key,
+                          })
+                          .then((t) => ({ ...t, pending: false }));
                 // The attempt is over, so the next Send is a new transfer and
                 // needs a new key — reusing this one would have the server
                 // replay this transfer and report success for money that
@@ -462,9 +499,17 @@ export default function Transfer() {
                 setRecipientPhone('');
                 setAccountNumber('');
                 setBeneficiary(undefined);
-                return `Sent ${formatAmount(result.amount, result.currency)}${
-                  result.fee === '0.00' ? '' : ` (fee ${formatAmount(result.fee, result.currency)})`
-                }.`;
+                const moved = `${formatAmount(result.amount, result.currency)}${
+                  result.fee === '0.00'
+                    ? ''
+                    : ` (fee ${formatAmount(result.fee, result.currency)})`
+                }`;
+                // NOT "Sent" for a payout still in the air. Saying it left
+                // when the bank has not answered is the sentence that made a
+                // stuck transfer read as a delivered one.
+                return result.pending
+                  ? `${moved} is on its way. We are waiting for the bank to confirm it.`
+                  : `Sent ${moved}.`;
               })
             }
           />
@@ -506,24 +551,31 @@ export default function Transfer() {
         title="Send money"
         subtitle={
           mobileMoney
-            ? 'To a Xetral account or a Mobile Money number'
-            : 'To a Xetral account or a bank account'
+            ? 'Send to a Xetral account or Mobile Money number.'
+            : 'Send to a Xetral account or bank account.'
         }
       >
-        {/* Two destinations, one screen. `Select` rather than a pair of
-            buttons: this app already draws every choice that way, and a
-            hand-rolled segmented control would be one more thing whose
-            pressed state has to be kept in step with the theme. */}
-        <Select
-          label="Where is it going?"
+        {/*
+          TWO DESTINATIONS, TWO TABS — the web's control, on the phone.
+
+          It was a `Select`, which is the right drawing for "which bank" and
+          the wrong one here: a sheet over the form, two taps, to answer a
+          question with two answers whose answer is then invisible except as a
+          line of text. The two words are the question, so there is no caption
+          above them.
+
+          THE SECOND TAB SAYS "Mobile Money" WHERE THAT IS THE RAIL. 046 puts
+          `payout_method` on the country because in Accra and Nairobi money
+          does not move to a bank account, and a tab saying "Bank" over a
+          Mobile Money form is the same product offered under the wrong name.
+        */}
+        <Segmented
+          label="Where the money is going"
           value={destination}
-          onChange={(next) => setDestination(next as 'xetral' | 'bank')}
+          onChange={setDestination}
           options={[
-            { value: 'xetral', label: 'A Xetral account' },
-            {
-              value: 'bank',
-              label: mobileMoney ? 'Mobile Money' : 'A bank account',
-            },
+            { value: 'xetral', label: 'Xetral' },
+            { value: 'bank', label: mobileMoney ? 'Mobile Money' : 'Bank' },
           ]}
         />
 
@@ -679,10 +731,10 @@ export default function Transfer() {
             */}
             {converting && (
               <Text style={styles.hint}>
-                {quote.loading
+                {quote.loading || (priced === undefined && quote.error === undefined)
                   ? 'Getting today\u2019s rate…'
-                  : quote.data !== undefined
-                    ? `1 ${sendCurrency} = ${quote.data.rate} ${recipientCurrency ?? ''} today.`
+                  : priced !== undefined
+                    ? `1 ${sendCurrency} = ${priced.rate} ${recipientCurrency ?? ''} today.`
                     : pairUnpriced
                       ? `We cannot convert ${sendCurrency} to ${recipientCurrency ?? ''} yet.`
                       : (quote.error ?? 'We could not get a rate just now.')}
@@ -720,14 +772,14 @@ export default function Transfer() {
         */}
         {converting && amount !== '' && amountValid && (
           <Text style={styles.hint}>
-            {quote.loading
+            {quote.loading || (priced === undefined && quote.error === undefined)
               ? 'Working out what they receive…'
-              : quote.data === undefined
+              : priced === undefined
                 ? pairUnpriced
                   ? 'We cannot say what they would receive yet.'
                   : 'We could not work that out just now.'
                 : `They receive about ${formatAmount(
-                    quote.data.receives,
+                    priced.receives,
                     recipientCurrency ?? sendCurrency,
                   )}.`}
           </Text>

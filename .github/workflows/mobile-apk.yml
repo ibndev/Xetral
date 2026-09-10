@@ -300,9 +300,17 @@ jobs:
           shake the phone for the dev menu.
           EOF
           else
+            # RESOLVED THE SAME WAY THE BUILD STEP RESOLVES IT, and printing the
+            # raw input was a small lie on the page somebody reads before
+            # installing. `api_url` is blank for the ordinary case — the
+            # deployed address in app.json — and the build step falls back to
+            # it correctly, so the APK was always right. The notes were not:
+            # they rendered an empty pair of backticks, which says the app
+            # talks to nothing.
+            talks="${API_URL:-$(node -p "require('./apps/mobile/app.json').expo.extra.apiUrl")}"
             cat > /tmp/notes.md <<EOF
           Standalone: the JavaScript is inside it, and it talks to
-          \`${API_URL}\`. Nothing else needs to be running.
+          \`${talks}\`. Nothing else needs to be running.
           EOF
           fi
           cat >> /tmp/notes.md <<EOF

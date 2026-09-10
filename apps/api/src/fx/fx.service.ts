@@ -22,6 +22,7 @@ import { API_CONFIG, DATABASE, FX_PORT, LEDGER } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
 import type { ConvertBody, FxQuoteBody } from './dto.js';
 import { PublishedRateService } from './published-rate.service.js';
+import { RecipientService } from '../wallet/recipient.service.js';
 import { AffordabilityService } from '../wallet/affordability.service.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { SpendingLimitService } from '../wallet/spending-limits.service.js';
@@ -95,6 +96,7 @@ export class FxService {
     @Inject(SettingsService) private readonly settings: SettingsService,
     @Inject(SpendingLimitService) private readonly limits: SpendingLimitService,
     @Inject(PublishedRateService) private readonly published: PublishedRateService,
+    @Inject(RecipientService) private readonly recipients: RecipientService,
   ) {}
 
   /**
@@ -515,10 +517,30 @@ export class FxService {
     return row;
   }
 
+  /**
+   * WHO TO PAY, THROUGH THE SHARED RESOLVER — and this asked the wrong
+   * question for as long as remittance has existed.
+   *
+   * It was `WHERE lower(email) = lower($1)`, written in Phase 10 when an email
+   * address was the only identifier there was, and never revisited while the
+   * identifier became a handle, then a phone number, then a checkout slug.
+   * `wallet.service.ts` learned all three; this did not.
+   *
+   * WHICH MEANT IT FAILED ON EXACTLY THE CORRIDOR IT EXISTS FOR. A transfer
+   * that converts currency is routed here rather than to the wallet path — so
+   * paying a Nigerian by phone worked, and paying a Ghanaian by phone, on the
+   * same screen with the same field, answered `recipient_not_found`. The
+   * account existed; nothing on the screen could say what was wrong.
+   *
+   * `RecipientService` is the one resolver now. What stays here is what is
+   * genuinely this path's own: an inactive recipient, and refusing to remit to
+   * yourself.
+   */
   async #recipientId(identifier: string, senderId: string): Promise<string> {
+    const { id } = await this.recipients.resolve(identifier);
     const result = await this.pool.query<{ id: string; status: string }>(
-      `SELECT id, status FROM users WHERE lower(email) = lower($1)`,
-      [identifier],
+      `SELECT id, status FROM users WHERE id = $1::bigint`,
+      [id],
     );
     const row = result.rows[0];
     if (row === undefined) throw new NotFoundException({ error: 'recipient_not_found' });

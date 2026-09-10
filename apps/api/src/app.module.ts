@@ -34,6 +34,7 @@ import { PinService } from './auth/pin.service.js';
 import { PasswordResetService } from './auth/password-reset.service.js';
 import { WalletController } from './wallet/wallet.controller.js';
 import { WalletService } from './wallet/wallet.service.js';
+import { RecipientService } from './wallet/recipient.service.js';
 import { SpendingLimitService } from './wallet/spending-limits.service.js';
 import { CardController, CardWebhookController } from './cards/card.controller.js';
 import { CardService } from './cards/card.service.js';
@@ -1334,6 +1335,7 @@ export class AppModule {
         SignInEventService,
         PinService,
         WalletService,
+        RecipientService,
         SpendingLimitService,
         CardService,
         CardWebhookService,

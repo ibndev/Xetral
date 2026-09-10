@@ -339,6 +339,11 @@ function sentenceFor(error: ApiError): string {
     /* purchases */
     case 'purchase_failed':
       return 'That purchase did not go through. You have not been charged.';
+    case 'payout_failed':
+      // The money is already back — the API reverses the reservation before
+      // it refuses — so this says so rather than leaving somebody watching a
+      // balance and wondering.
+      return 'That transfer did not go through. Your money has been returned.';
     case 'purchase_not_found':
       return 'We could not find that purchase.';
     case 'verification_not_supported':

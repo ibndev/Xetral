@@ -174,6 +174,17 @@ const API_ERROR_CODES = [
 
   /* purchases */
   'purchase_failed',
+  /*
+   * `payout_failed` IS A REFUSAL, and it used to arrive as a 201.
+   *
+   * A bank payout the provider would not send is reversed by the API — the
+   * money is back in the customer's wallet — and the row that came back said
+   * `status: "failed"` on a successful response. Both apps read the amount off
+   * it and said "Sent ₦5,000", so a customer saw a success, an unchanged
+   * balance and nothing at the bank. It carries NO detail: the provider's
+   * sentence names our integration and belongs on the row an operator reads.
+   */
+  'payout_failed',
   'purchase_not_found',
   'verification_not_supported',
 

@@ -251,12 +251,39 @@ export class PaystackPayoutAdapter implements PayoutPort {
      * already on its way to somebody, the other tells a customer money left
      * when it did not. Neither is a safe guess.
      */
+    /*
+     * `otp` IS NOT SENT, AND CALLING IT SENT TOLD CUSTOMERS THEIR MONEY HAD
+     * GONE WHEN IT HAD NOT MOVED AT ALL.
+     *
+     * Paystack's own documentation for Initiate Transfer: a business with
+     * Transfers OTP enabled — which is the DEFAULT — gets back
+     * `status: "otp"`, and the transfer sits there until somebody submits a
+     * one-time code to Finalize Transfer. Nothing is debited, at their end or
+     * the beneficiary's. It is a request that has not been authorised.
+     *
+     * There is no operator standing in the request path to type that code,
+     * and there never can be: a payout is made by a customer on a phone. So
+     * this rail either has OTP switched off, in which case a transfer is
+     * authorised by the API call itself, or it cannot send money at all —
+     * and the honest answer to the second is a REFUSAL, which returns the
+     * customer's money and records a reason an operator can act on.
+     *
+     * It is `failed` rather than a thrown error so both callers resolve it
+     * the same way: `send()` and the reconciliation sweep both go through
+     * `applyReceipt`, and a failed receipt is what reverses the reservation.
+     * Nothing is lost by refusing — an unfinalised transfer expires at
+     * Paystack, and the alternative is a customer's money held for ever
+     * against a code nobody will ever enter.
+     */
     const mapped: PayoutReceipt['state'] | undefined =
       state === 'success'
         ? 'completed'
-        : state === 'failed' || state === 'reversed' || state === 'abandoned'
+        : state === 'failed' ||
+            state === 'reversed' ||
+            state === 'abandoned' ||
+            state === 'otp'
           ? 'failed'
-          : state === 'pending' || state === 'otp' || state === 'processing' || state === 'received'
+          : state === 'pending' || state === 'processing' || state === 'received'
             ? 'sent'
             : undefined;
 
@@ -268,10 +295,23 @@ export class PaystackPayoutAdapter implements PayoutPort {
       );
     }
 
+    /*
+     * THE REASON NAMES THE SETTING, because the alternative is an operator
+     * reading "the transfer failed" against a Paystack dashboard showing a
+     * transfer that looks fine. It is a fact about our own integration and
+     * carries no credential, so it is safe on a row an operator reads — and
+     * `bank_payouts.failure_reason` is exactly where they will look.
+     */
+    const reason =
+      state === 'otp'
+        ? 'Paystack is set to require an OTP for transfers, so this one was ' +
+          'never authorised. Disable Transfers OTP on the Paystack dashboard.'
+        : row.reason;
+
     return {
       providerPayoutId: String(row.id),
       state: mapped,
-      ...(row.reason === undefined ? {} : { failureReason: row.reason }),
+      ...(reason === undefined ? {} : { failureReason: reason }),
     };
   }
 }

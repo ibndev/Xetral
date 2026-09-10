@@ -167,7 +167,7 @@ export class PayoutService {
     const currency = body.currency as Currency;
 
     const existing = await this.#byKey(userId, body.idempotency_key);
-    if (existing !== undefined) return toView(existing);
+    if (existing !== undefined) return refuseIfFailed(toView(existing));
 
     const amount = this.#parseAmount(body.amount, currency);
 
@@ -242,11 +242,11 @@ export class PayoutService {
       }
       // A definite refusal. Nothing left.
       await this.fail(reserved, describe(error));
-      return toView(await this.#reload(reserved.id));
+      return refuseIfFailed(toView(await this.#reload(reserved.id)));
     }
 
     await this.applyReceipt(await this.#reload(reserved.id), receipt);
-    return toView(await this.#reload(reserved.id));
+    return refuseIfFailed(toView(await this.#reload(reserved.id)));
   }
 
   /**
@@ -636,4 +636,35 @@ function toView(row: PayoutRow): PayoutView {
 
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : 'the provider refused';
+}
+
+/**
+ * A PAYOUT THAT FAILED IS NOT A SUCCESSFUL REQUEST, and answering 201 with a
+ * row saying `failed` is how both apps came to report one as sent.
+ *
+ * The service was already correct about the money: the provider refuses, the
+ * reservation is reversed, and the customer's balance is whole again. What it
+ * did was hand that back as an ordinary payout view — and both screens read
+ * only the amount off it and said "Sent ₦5,000." So the customer saw a
+ * success, saw nothing leave their balance, and saw nothing arrive at the
+ * bank. Three true observations and no way to reconcile them.
+ *
+ * Refusing here fixes both clients at once, and it fixes the ones not written
+ * yet, which a sentence in two screens does not.
+ *
+ * It is deliberately NOT applied to `reserved`. A payout we timed out on may
+ * still be in flight — the row stays held and the sweep asks — so refusing it
+ * would tell a customer their money is back when it is not. The screens say
+ * "on its way" for that one.
+ */
+function refuseIfFailed(view: PayoutView): PayoutView {
+  if (view.status !== 'failed') return view;
+  /*
+   * NO DETAIL. The provider's own sentence names our integration — "Paystack
+   * is set to require an OTP for transfers" is exactly the shape of it — and
+   * 006's rule is that such a sentence goes to the log and to the row an
+   * operator reads, never to the customer. `bank_payouts.failure_reason` has
+   * it, and the client turns the code into words a customer can act on.
+   */
+  throw new UnprocessableEntityException({ error: 'payout_failed' });
 }

@@ -1000,6 +1000,64 @@ Schema: `packages/ledger/sql/063_momo_accounts.sql`. Service in
   test.** A code offered here and refused there is a picker entry that cannot
   be used; one accepted there and missing here is a wallet nobody can link.
 
+### Sending across a border, and what a payout really did — non-obvious rules
+
+`apps/api/src/wallet/recipient.service.ts`, `apps/api/src/payouts/payout.service.ts`,
+and the Send screen of both apps.
+
+- **THERE WERE TWO RECIPIENT RESOLVERS AND THE SECOND ONLY KNEW EMAIL
+  ADDRESSES.** `wallet.service.ts` learned the identifier as it changed — an
+  email, then a handle, then a phone number, then a checkout slug —
+  while `fx.service.ts` kept `WHERE lower(email) = lower($1)`, written in
+  Phase 10 and never revisited. A transfer that CONVERTS CURRENCY is routed to
+  the remittance path, so paying a Nigerian by phone worked and paying a
+  Ghanaian by phone — same screen, same field, same typing — answered
+  `recipient_not_found`. It failed on exactly the corridor it exists for. One
+  `RecipientService` now, and `pay-link.ts` holds the two helpers both
+  services need.
+- **A PAYOUT THAT FAILED CAME BACK AS A 201.** The API was already right about
+  the money — the provider refuses, the reservation is reversed, the balance is
+  whole — and it handed that back as an ordinary payout view whose `status`
+  said `failed`. Both apps read the amount off it and said "Sent ₦5,000", so a
+  customer saw a success, an unchanged balance, and nothing at the bank: three
+  true observations and no way to reconcile them. `payout_failed` is a refusal
+  now, which fixes both clients at once and the ones not written yet.
+- **IT CARRIES NO DETAIL, and `reserved` is deliberately NOT refused.** The
+  provider's sentence names our integration, so it goes to the row an operator
+  reads — 006's rule. And a payout we timed out on may still be in flight, so
+  refusing it would tell a customer their money is back when it is not: the
+  screens say "on its way" for that one, and the sweep asks.
+- **PAYSTACK'S `otp` IS NOT `sent`, and calling it that was the quiet half of
+  the same bug.** A business with Transfers OTP enabled — THE DEFAULT — gets
+  `status: "otp"` back from Initiate Transfer, and the transfer sits
+  unauthorised until somebody submits a code. Nothing is debited at either end.
+  There is no operator in the request path to type it and there never can be, so
+  this rail either has OTP switched off or it cannot send money at all — and the
+  honest answer to the second is a refusal that returns the customer's money and
+  names the setting on `bank_payouts.failure_reason`.
+- **A QUOTE CARRIES THE AMOUNT IT IS A QUOTE FOR.** `useLoad` keeps the last
+  successful result while the next request is in flight AND after one fails,
+  which is right for a balance and wrong for a rate: type 25, clear it, type
+  20, and "they receive" went on showing what 25 converts to — correct
+  arithmetic about an amount the customer had already replaced. Stamping the
+  answer with `forAmount` and rendering only on a match is structural; a
+  debounce is not, because the stale figure comes back on the next refusal
+  either way.
+- **A LOCAL CURRENCY IS A WALLET WHERE THE PLATFORM CAN MOVE IT BOTH WAYS.**
+  Hiding another country's money was right while nothing could reach it and
+  stopped being right when 059 routed GHS and KES to Flutterwave for collection
+  AND payout. Read from the route table, never listed here — and BOTH
+  directions are the whole test: a currency we can collect and cannot pay out
+  is one a customer could be given and could not spend, which is worse than not
+  offering it. GBP and CAD are exactly that today.
+- **TWO DESTINATIONS ARE TABS, NOT A DROPDOWN.** The phone asked "Where is it
+  going?" through a `Select` — a sheet over the form, two taps, to answer a
+  question with two answers whose answer is then invisible except as a line of
+  text. `Segmented` is the web's own control, full width with equal halves,
+  and the second tab says **Mobile Money** where 046 says that is the rail: a
+  tab saying "Bank" over a Mobile Money form is the same product offered under
+  the wrong name.
+
 ### Which rail opens an account — non-obvious rules
 
 Schema: `packages/ledger/sql/061_country_and_route_repair.sql`. Service in
