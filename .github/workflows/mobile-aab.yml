@@ -207,9 +207,38 @@ jobs:
           # globbing the workspace. The runner is destroyed after the job; this
           # is about not writing it somewhere a careless `path:` would catch.
           store="$RUNNER_TEMP/xetral-upload.jks"
-          printf '%s' "$KEYSTORE_B64" | base64 -d > "$store"
+
+          # WHITESPACE STRIPPED FIRST, and that is not laxity. The base64
+          # alphabet contains no space, tab, newline or carriage return, so
+          # removing them cannot change what the value decodes to — and every
+          # one of them is something a person pasting a secret does by
+          # accident. `base64` without -w0 wraps at 76 columns; a Windows
+          # clipboard adds \r; a text box adds a trailing newline.
+          cleaned=$(printf '%s' "$KEYSTORE_B64" | tr -d ' \t\r\n')
+
+          # `shell: bash -e` aborts the step the instant base64 exits non-zero,
+          # so the message below never printed and the whole diagnosis a person
+          # got was "base64: invalid input". The decode is guarded for exactly
+          # that reason.
+          if ! printf '%s' "$cleaned" | base64 -d > "$store" 2>/dev/null; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 is not valid base64. It should be the OUTPUT of 'base64 -w0 xetral-upload.jks' — the whole line, nothing else. Pasting the .jks itself, or a path to it, fails here."
+            exit 1
+          fi
           if [ ! -s "$store" ]; then
-            echo "::error::ANDROID_KEYSTORE_BASE64 did not decode to a file. Re-run base64 -w0 on the .jks."
+            echo "::error::ANDROID_KEYSTORE_BASE64 decoded to an empty file. Re-run 'base64 -w0 xetral-upload.jks' and paste all of it."
+            exit 1
+          fi
+
+          # IS IT A KEYSTORE, AND DOES THE PASSWORD OPEN IT. Both are knowable
+          # in a second and both otherwise surface forty minutes later as a
+          # Gradle stack trace about a file format, which reads as a broken
+          # build rather than a wrong secret.
+          if ! keytool -list -keystore "$store" -storepass "$STORE_PASSWORD" >/dev/null 2>&1; then
+            echo "::error::the decoded file is not a keystore ANDROID_KEYSTORE_PASSWORD opens. Check both secrets: a wrong password and a wrong file fail identically here, deliberately."
+            exit 1
+          fi
+          if ! keytool -list -keystore "$store" -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null 2>&1; then
+            echo "::error::the keystore has no entry called ANDROID_KEY_ALIAS. 'keytool -list -keystore xetral-upload.jks' names the aliases it does have."
             exit 1
           fi
 
