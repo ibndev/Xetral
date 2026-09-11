@@ -114,6 +114,46 @@ export function exponentFor(currency: string): number {
 }
 
 /**
+ * WHAT A CURRENCY IS CALLED, from the same small copy `EXPONENTS` is.
+ *
+ * A picker showing bare codes asks a customer to know that GHS is the cedi, so
+ * the Send flow's currency step needs a display name. These live HERE for the
+ * reason `EXPONENTS` does, one comment up: the client keeps a small explicit
+ * copy of the server's registry rather than importing `@xetral/shared`, so a
+ * browser bundle does not pull the whole money package — with its bigint
+ * arithmetic and rounding — in to format a label.
+ *
+ * That boundary is real and it broke a production build: the Send screen
+ * imported `CURRENCIES` from `@xetral/shared` directly, `apps/web` does not
+ * declare that package, and only a hoisted local `node_modules` made it
+ * resolve — the pruned Docker install did not. The apps go through
+ * `@xetral/client` and nothing else; this is what lets them.
+ *
+ * The names mirror `packages/shared/src/money/currency.ts`. They are
+ * display-only and drift is cosmetic, so — like `EXPONENTS` — the copy is
+ * explicit rather than test-bound to the registry.
+ */
+export const CURRENCY_NAMES: Record<string, string> = {
+  NGN: 'Nigerian Naira',
+  USD: 'US Dollar',
+  GBP: 'Pound Sterling',
+  EUR: 'Euro',
+  GHS: 'Ghanaian Cedi',
+  KES: 'Kenyan Shilling',
+  CAD: 'Canadian Dollar',
+  JPY: 'Japanese Yen',
+  BTC: 'Bitcoin',
+  USDT: 'Tether',
+  USDC: 'USD Coin',
+};
+
+/** A currency's display name, falling back to the code itself for one this
+ *  copy does not name — a bare `GHS` reads, where nothing at all does not. */
+export function currencyName(currency: string): string {
+  return CURRENCY_NAMES[currency] ?? currency;
+}
+
+/**
  * Formats MINOR units — an integer string, the way the ledger stores money.
  *
  * SEPARATE FROM `formatAmount`, which takes major units, and the separation is

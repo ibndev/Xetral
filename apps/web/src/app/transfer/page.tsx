@@ -3,8 +3,13 @@
 import { Suspense, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { exponentFor, formatAmount, isValidAmount, sendableFor } from '@xetral/client';
-import { CURRENCIES } from '@xetral/shared';
+import {
+  currencyName,
+  exponentFor,
+  formatAmount,
+  isValidAmount,
+  sendableFor,
+} from '@xetral/client';
 import type {
   Recipient,
   RecipientKind,
@@ -52,19 +57,6 @@ export default function TransferPage() {
 }
 
 type Step = 'who' | 'currency' | 'details' | 'amount';
-
-/**
- * What a currency is CALLED, from the money registry rather than a second list.
- *
- * A picker showing bare codes asks a customer to know that GHS is the cedi.
- * The registry is where every currency this system can represent is already
- * described — a hand-written map here would be the fourth copy of the asset
- * list `crypto-networks.test.ts` exists to bind, and the one nobody updates.
- */
-function nameOf(code: string): string {
-  const known = (CURRENCIES as Record<string, { name?: string } | undefined>)[code];
-  return known?.name ?? code;
-}
 
 function Transfer() {
   const client = useXetral();
@@ -354,13 +346,13 @@ function ChooseCurrency({
   const matches = (code: string): boolean =>
     needle === '' ||
     code.toLowerCase().includes(needle) ||
-    nameOf(code).toLowerCase().includes(needle);
+    currencyName(code).toLowerCase().includes(needle);
 
   const favourites = all.filter((c) => (c === home || c === 'USD') && matches(c));
   const stablecoins = all.filter((c) => (c === 'USDT' || c === 'USDC') && matches(c));
   const rest = all
     .filter((c) => !favourites.includes(c) && !stablecoins.includes(c) && matches(c))
-    .sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
+    .sort((a, b) => currencyName(a).localeCompare(currencyName(b)));
 
   return (
     <section className="card send-step">
@@ -408,7 +400,7 @@ function CurrencyGroup({
                 <CurrencyMark currency={code} size={22} />
               </span>
               <span className="row-main">
-                <span className="row-title">{nameOf(code)}</span>
+                <span className="row-title">{currencyName(code)}</span>
                 <span className="row-sub">{code}</span>
               </span>
             </button>
