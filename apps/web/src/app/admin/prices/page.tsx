@@ -288,22 +288,7 @@ export default function Prices() {
                     <span className="row-actions">
                       <span className="badge">retired</span>
                       {isAdmin && (
-                        <button
-                          type="button"
-                          className="btn small danger"
-                          disabled={busy || pin === ''}
-                          onClick={() =>
-                            void act(async () => {
-                              await admin.deleteFxSpread(
-                                row.uuid,
-                                'removed a retired spread from the prices screen',
-                                pin,
-                              );
-                            })
-                          }
-                        >
-                          Delete
-                        </button>
+                        <DeletePrice uuid={row.uuid} kind="fx_spread" busy={busy} onDelete={act} />
                       )}
                     </span>
                   )}
@@ -440,6 +425,7 @@ export default function Prices() {
                   <th>Our margin</th>
                   <th>Published by</th>
                   <th>Age</th>
+                  <th />
                 </tr>
               </thead>
               <tbody>
@@ -480,6 +466,33 @@ export default function Prices() {
                       renders, and customers are quoted whatever it last said.
                     */}
                     <td className="mono">{ageOf(row.age_seconds)}</td>
+                    {/*
+                      A RETIRED RATE MAY BE DELETED, AND THIS TABLE IS WHERE
+                      THAT HAS TO BE POSSIBLE.
+
+                      064 exists for exactly this row and the control was put
+                      on the SPREADS table instead, on a reading of "retired FX"
+                      that turned out to be the wrong one. The consequence was
+                      the worst kind: retired rates accumulated here, greyed
+                      out, with nothing anywhere able to remove them and no
+                      sign that anything was missing.
+
+                      A LIVE RATE HAS NO BUTTON AT ALL rather than a disabled
+                      one, because deleting one unprices the corridor and 008
+                      then refuses every quote on it — a control whose only
+                      outcome is a refusal is worse than no control.
+                    */}
+                    <td>
+                      {row.retired_at == null ? null : isAdmin ? (
+                        <DeletePrice uuid={row.uuid} kind="fx_rate" busy={busy} onDelete={act} />
+                      ) : (
+                        /* HIDING IS A COURTESY AND THE REFUSAL IS THE CONTROL,
+                           but a blank cell tells an operator nothing. The route
+                           is `admin` because deleting cannot be undone by
+                           publishing again, unlike retiring. */
+                        <span className="hint">admin only</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -730,6 +743,102 @@ function PublishRate({
         Publish
       </button>
     </form>
+  );
+}
+
+/**
+ * Removing a retired price for good.
+ *
+ * THE PIN IS HERE, BESIDE THE BUTTON, and that is the whole point of this
+ * component existing rather than an inline `<button>`.
+ *
+ * The first version of these Delete controls read the PAGE-LEVEL `pin`, which
+ * since the shared PIN panel was removed is filled only by a box inside the
+ * Exchange rates panel further down. So an administrator hovering Delete found
+ * it dead, with its cause in a different panel and nothing anywhere saying so
+ * — the EXACT complaint this page's own comment already records about Retire,
+ * reintroduced by the control added to fix something else.
+ *
+ * `price.delete` is in 009's must-say-why list for the reason `price.retire`
+ * is, and more so: retiring can be undone by publishing again and this cannot.
+ * That is also why the route is `admin` where every other price route is
+ * `finance`.
+ */
+function DeletePrice({
+  uuid,
+  kind,
+  busy,
+  onDelete,
+}: {
+  uuid: string;
+  kind: 'fx_rate' | 'fx_spread';
+  busy: boolean;
+  onDelete: (work: () => Promise<unknown>) => Promise<void>;
+}) {
+  const admin = useAdmin();
+  const [reason, setReason] = useState('');
+  const [pin, setPin] = useState('');
+  const [armed, setArmed] = useState(false);
+
+  const ready = reason.trim().length >= 10 && pin !== '';
+
+  /*
+   * TWO PRESSES, BECAUSE ONE CANNOT BE TAKEN BACK. Not a modal: an operator
+   * clearing five retired rows should not have a dialog thrown over the table
+   * five times, and the second press is in the same place as the first.
+   */
+  if (!armed) {
+    return (
+      <button type="button" className="btn small danger" disabled={busy} onClick={() => setArmed(true)}>
+        Delete
+      </button>
+    );
+  }
+
+  return (
+    <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+      <input
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        placeholder="Why (at least ten characters)"
+      />
+      <input
+        type="password"
+        inputMode="numeric"
+        autoComplete="off"
+        value={pin}
+        onChange={(e) => setPin(e.target.value)}
+        placeholder="PIN"
+        style={{ maxWidth: 96 }}
+      />
+      <button
+        type="button"
+        className="btn small danger"
+        disabled={busy || !ready}
+        onClick={() => {
+          void onDelete(async () => {
+            if (kind === 'fx_rate') await admin.deleteFxRate(uuid, reason, pin);
+            else await admin.deleteFxSpread(uuid, reason, pin);
+            setArmed(false);
+            setReason('');
+            setPin('');
+          });
+        }}
+      >
+        Delete for good
+      </button>
+      <button type="button" className="ghost small" onClick={() => setArmed(false)}>
+        Cancel
+      </button>
+      {/* WHY IT IS GREY, ON THE PAGE. A disabled control whose reason is not
+          written down is a broken control to whoever is looking at it — and
+          this is the second time that lesson has had to be applied here. */}
+      {!ready && (
+        <span className="hint">
+          {reason.trim().length < 10 ? 'Give a reason of ten characters or more' : 'Enter your PIN'}
+        </span>
+      )}
+    </span>
   );
 }
 

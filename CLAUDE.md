@@ -1141,6 +1141,146 @@ and the Send screen of both apps.
   file rather than by what they mean, which is how a view becomes unreadable
   one migration at a time. `DROP VIEW` then `CREATE VIEW`.
 
+### Why a mobile money payout was refused BY US — non-obvious rules
+
+Schema: `packages/ledger/sql/067_wallet_payouts_and_missing_details.sql`.
+Normalisation in `apps/api/src/phone.ts`, applied in
+`apps/api/src/payouts/payout.service.ts`.
+
+- **`send()` CALLED THE LOOKUP UNCONDITIONALLY AND TREATED ITS REFUSAL AS A
+  REASON NOT TO SEND.** A mobile money wallet has no name enquiry on any
+  network — 043 records `name_unavailable` and 059 repeats it — so the one
+  answer that rail can ever give was the one answer that stopped the payout.
+  Every cedi and shilling send was refused BEFORE THE RAIL WAS ASKED, on
+  exactly the corridor the Ghana and Kenya integration exists for. The
+  previous round fixed the SCREEN, which is why the button then worked and
+  the send still did not.
+- **REQUIRING A CLAIM THAT CANNOT EXIST IS NOT A CONTROL, IT IS AN OUTAGE.**
+  043's rule holds where it applies: where a rail CAN answer, the name is
+  re-fetched, stored and sent, and is never the sender's. Where no such call
+  exists, the answer is NOTHING — `accountName` is optional on the port and
+  `account_name` is nullable by 067.
+- **NULL IS THE HONEST VALUE AND THE SENDER'S OWN TEXT IS THE TEMPTING ONE.**
+  A required column invites somebody under deadline to write what the customer
+  typed into it, which is a confirmation screen that confirms nothing while
+  looking exactly like one. A present name must still be a name, by CHECK, so
+  "no name" and "blank name" cannot be the same row.
+- **`0501234567` IS NOT A NUMBER FLUTTERWAVE CAN ROUTE.** It is how a number
+  is written in Accra; their transfers API takes `233501234567` and has no
+  idea what a trunk zero is. The refusal comes back as a sentence about an
+  invalid ACCOUNT, which reads to the customer as their own number being
+  wrong.
+- **NORMALISATION IS SERVER-SIDE AND HAPPENS BEFORE THE ROW IS WRITTEN.**
+  `bank_payouts.account_number` is immutable once the row exists (043), so a
+  row recording what the customer typed rather than what was SENT is a payout
+  nothing could reconcile against the provider afterwards.
+- **WHICH RAIL IT IS COMES FROM `countries.payout_method`, not from the bank
+  code and not from a list in the service.** 046 put that column there so the
+  SCREEN would stop offering a product the customer's money cannot reach; this
+  is the server reading the same row.
+- **A NUMBER THAT CANNOT BE NORMALISED IS REFUSED, NEVER SENT AS TYPED.** This
+  is the direction that cannot be recalled, and "we sent it to whatever you
+  wrote" is not a recovery story.
+- **ALREADY-INTERNATIONAL IS LEFT ALONE**, which is why the dialling code is
+  compared rather than blindly prefixed: a pasted `+233501234567` would
+  otherwise become `233233501234567`, a number belonging to nobody.
+- **`internationalDigits` AND `e164` DIFFER BY ONE CHARACTER AND BOTH ARE
+  NEEDED.** A stored number is E.164; a payout rail's wire format and our own
+  `^[0-9]{6,20}$` CHECK are digits. `MomoService.e164` DELEGATES rather than
+  repeating — three places needed to agree about one number and only two did,
+  which is the shape the two recipient resolvers and the two beneficiary
+  lookups already record.
+- **THE SCREENS NO LONGER ASK AT ALL.** A lookup for a wallet is a round trip
+  whose answer is known before it is sent, on the screen money leaves from.
+
+### A verified customer whose own details were blank — non-obvious rules
+
+`apps/api/src/auth/profile.service.ts`, schema in
+`packages/ledger/sql/067_wallet_payouts_and_missing_details.sql`.
+
+- **AN ACCOUNT CAN HOLD THE VERIFIED NAME AND NOT THE ACCOUNT'S OWN.** 040
+  keeps `users.full_name` and `kyc_submissions.full_name` apart for a good
+  reason and nothing noticed the consequence: every account opened before 040
+  has a null name, every account opened before the phone was collected has a
+  null number, and then the customer submits documents carrying BOTH and a
+  reviewer approves them. The admin dashboard reads the submission and shows
+  them; the customer's own screen read `users` and showed an em dash. Same
+  person, same database, two answers — and the customer is the one told
+  nothing is there.
+- **VERIFIED LOCKS WHAT IS THERE. IT NEVER LOCKS A BLANK.** The first version
+  refused a verified customer every field, on sound reasoning that says
+  nothing about an EMPTY one: nothing was attested about a blank, so there is
+  nothing for filling it in to contradict.
+- **AND THE COST WAS NOT COSMETIC.** The number is the Xetral-to-Xetral
+  identifier. A verified customer without one cannot be found on the Send
+  screen, so NOBODY CAN PAY THEM, and their Request payment panel has nothing
+  to share — and they were being told that state was correct.
+- **`editable` IS PER FIELD AND THE SERVER NAMES IT.** Both screens draw from
+  it rather than each re-deriving the rule, and `update()` refuses per field
+  against the same list. A field posted UNCHANGED is not a change, so a form
+  that submits everything it rendered is not refused for the parts it is not
+  editing — the phone compared on DIGITS, because what a customer reads is the
+  national spelling and what is stored is E.164.
+- **THE READ COALESCES; THE MIGRATION BACKFILLS.** Belt and braces
+  deliberately: the read fixes the screen, and only the COLUMN fixes being
+  payable, because that is what the Send screen resolves a recipient against.
+- **THE BACKFILL NEVER OVERWRITES AND NEVER GUESSES.** 061's rule — repair,
+  do not assert. Only rows holding nothing are touched; a number is built from
+  the country's own dialling code and a row with no country is LEFT, because
+  assuming the platform default would write a Nigerian number for a Ghanaian
+  and `users_phone_unique` would then hold a string nobody can be reached on.
+  A collision is left for a person: taking either side silently decides whose
+  number it is.
+- **`customers_without_a_phone` is what nothing could say.** The failure is
+  silent by construction — no error, an empty panel, and every sender told
+  there is no such customer. It carries a COUNT and no address.
+
+### Why a checkout said "Payment error" — non-obvious rules
+
+`apps/api/src/pay/payment-link.service.ts`.
+
+- **ONE CODE COVERED THREE DIFFERENT PROBLEMS.** A missing credential, a rail
+  that UNDERSTOOD and refused, and a genuine outage all reached the payer as
+  `checkout_unavailable` — "try again shortly", which is false for two of the
+  three.
+- **A REFUSAL IS NOT AN OUTAGE.** `ProviderRejectedError` means the rail
+  answered: this merchant is not enabled for cedis, this amount is below their
+  floor, this product is not on the integration. None improves by waiting.
+  037 draws the same line for provider health and it is the same line.
+- **THE REASON IS RECORDED ON THE ROW, not only in a log line.** That line is
+  written the moment a stranger presses a button, and an operator cannot page
+  back through application logs looking for the afternoon somebody tried to
+  pay a customer they have never heard of. `checkout_refusals` is where it
+  becomes answerable.
+- **THE PAYER STILL GETS A CODE AND NEVER THE SENTENCE.** That part names our
+  integration — 006's rule — and the view carries no payer email either, because
+  who the stranger was is not part of diagnosing a credential.
+- **RECORDING IS BEST EFFORT.** A failure to write down why a checkout failed
+  must not become a second failure on top of it.
+
+### Deleting a retired price, and the button that was dead — non-obvious rules
+
+`apps/web/src/app/admin/prices/page.tsx`.
+
+- **THE DELETE WENT ON THE WRONG TABLE.** 064 exists for a retired published
+  RATE and the control was put on the SPREADS table on a wrong reading of
+  "retired FX". Retired rates then accumulated in a table with nothing able to
+  remove them and no sign anything was missing. BOTH tables carry it now —
+  064 for a rate, 066 for a policy.
+- **AND THE BUTTON WAS DISABLED WITH ITS CAUSE IN ANOTHER PANEL.** It read the
+  PAGE-LEVEL `pin`, which since the shared PIN panel was removed is filled
+  only by a box inside the Exchange rates panel further down. So an
+  administrator hovering Delete found it dead, with nothing anywhere saying
+  why — the EXACT complaint this page's own comment already records about
+  Retire, reintroduced by the control added to fix something else. Every
+  action carries its own PIN, beside the thing it authorises.
+- **TWO PRESSES, NOT A MODAL.** An operator clearing five retired rows should
+  not have a dialog thrown over the table five times, and the second press is
+  in the same place as the first.
+- **A LIVE ROW HAS NO BUTTON AT ALL** rather than a disabled one: deleting one
+  unprices the corridor and 008 then refuses every quote on it, so a control
+  whose only outcome is a refusal is worse than no control.
+
 ### Why a mobile money send did nothing — non-obvious rules
 
 `apps/web/src/app/transfer/page.tsx`, `apps/mobile/app/transfer.tsx`, bound by
@@ -3267,6 +3407,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/063_momo_accounts.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/064_retired_rate_delete.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/065_push.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/066_retired_policy_delete.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/067_wallet_payouts_and_missing_details.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -3331,6 +3472,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/063_momo_accounts.test.
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/064_retired_rate_delete.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/065_push.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/066_retired_policy_delete.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/067_wallet_payouts_and_missing_details.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,
