@@ -189,19 +189,43 @@ export class ProfileService {
       kyc_tier: number;
       kyc_approved: boolean;
     }>(
-      `SELECT u.full_name,
+      /*
+       * THE APPROVED SUBMISSION IS READ AS WELL, AND THAT IS THE FIX FOR AN
+       * EM DASH ON A VERIFIED ACCOUNT.
+       *
+       * 040 keeps `users.full_name` and `kyc_submissions.full_name` apart for
+       * a good reason — one is a greeting, the other is what a reviewer read
+       * off a document — and nothing noticed that an account can hold the
+       * SECOND AND NOT THE FIRST. Every account opened before 040 has a null
+       * name and every account opened before the phone was collected has a
+       * null number; the customer then submits documents carrying both, a
+       * reviewer approves them, and the platform knows this person's name and
+       * number while their own settings screen renders a dash for each. The
+       * admin dashboard reads the submission and shows them. Same person,
+       * same database, two answers — and the customer is the one told nothing
+       * is there.
+       *
+       * COALESCE, NOT REPLACE: what the customer set about themselves wins,
+       * because it is theirs and it is the greeting. The submission is the
+       * fallback for a blank, never an override of a value.
+       *
+       * 067 BACKFILLS `users` FROM THE SAME PLACE, so this is belt and braces
+       * rather than a substitute: the column is what the Send screen resolves
+       * a recipient against, and a customer with a null one cannot be paid by
+       * anybody however well this screen renders.
+       */
+      `SELECT COALESCE(u.full_name, k.full_name) AS full_name,
               u.email,
               u.phone,
               u.country,
               c.name AS country_name,
               u.created_at,
               u.kyc_tier,
-              EXISTS (
-                SELECT 1 FROM kyc_submissions k
-                 WHERE k.user_id = u.id AND k.status = 'approved'
-              ) AS kyc_approved
+              (k.user_id IS NOT NULL) AS kyc_approved
          FROM users u
          LEFT JOIN countries c ON c.code = u.country
+         LEFT JOIN kyc_submissions k
+                ON k.user_id = u.id AND k.status = 'approved'
         WHERE u.uuid = $1`,
       [userUuid],
     );
@@ -221,6 +245,39 @@ export class ProfileService {
      */
     const verified = row.kyc_approved || Number(row.kyc_tier) >= 1;
 
+    const values = {
+      full_name: row.full_name,
+      phone: row.phone,
+      country: row.country,
+    } as const;
+
+    /*
+     * VERIFIED LOCKS WHAT IS THERE. IT NEVER LOCKS A BLANK.
+     *
+     * The first version of this refused a verified customer every field, and
+     * the reasoning was sound as far as it went: what a reviewer read off a
+     * document is the record, and letting its subject retype it afterwards
+     * makes the verification a claim about a moment rather than about the
+     * account.
+     *
+     * THAT ARGUMENT SAYS NOTHING ABOUT A FIELD THAT IS EMPTY. Nothing has
+     * been attested about a blank, so there is nothing for filling it in to
+     * contradict — and the cost of the stricter reading was not theoretical.
+     * A verified customer with no phone number is a customer NOBODY CAN PAY:
+     * the number is the Xetral-to-Xetral identifier, the Send screen resolves
+     * on it, and their Request payment panel has nothing to share. Locking
+     * that field left them with no path anywhere in the product, on the
+     * ground that their identity had been confirmed.
+     *
+     * So the rule is per FIELD and not per ACCOUNT: a verified customer may
+     * fill in what is missing and may change nothing that is present. An
+     * unverified one may still do both — they are tier 0, capped, and nothing
+     * has been attested about them yet.
+     */
+    const editable = (['full_name', 'phone', 'country'] as const).filter((field) =>
+      verified ? values[field] === null : true,
+    );
+
     return {
       full_name: row.full_name,
       email: row.email,
@@ -230,7 +287,7 @@ export class ProfileService {
       created_at: row.created_at.toISOString(),
       kyc_tier: Number(row.kyc_tier),
       kyc_verified: verified,
-      editable: verified ? [] : ['full_name', 'phone', 'country'],
+      editable,
     };
   }
 
@@ -257,17 +314,32 @@ export class ProfileService {
     const current = await this.details(userUuid);
 
     /*
-     * A VERIFIED CUSTOMER CHANGES NOTHING HERE, and the refusal is the
-     * control — the screen hiding the fields is only a courtesy.
+     * THE REFUSAL IS PER FIELD, AND IT IS THE CONTROL — the screen drawing
+     * only the editable ones is a courtesy, and `editable` is what it draws
+     * from so the two cannot describe different rules.
      *
-     * What a reviewer read off a document is the record. Letting its subject
-     * retype their own name or number afterwards would make the verification
-     * a claim about a moment rather than about the account, and the name a
-     * money decision may read would no longer be the name anybody checked.
-     * Changing either is a re-verification, which is a person's job.
+     * A VERIFIED CUSTOMER MAY NOT CHANGE WHAT IS THERE. What a reviewer read
+     * off a document is the record, and letting its subject retype it
+     * afterwards would make the verification a claim about a moment rather
+     * than about the account.
+     *
+     * A VERIFIED CUSTOMER MAY FILL IN WHAT IS BLANK. Nothing was attested
+     * about an empty field, so there is nothing for this to contradict — and
+     * the alternative is a verified customer with no phone number, whom
+     * nobody can pay and who has no path anywhere in the product to fix it.
+     *
+     * A FIELD SET TO WHAT IT ALREADY HOLDS IS NOT A CHANGE, so a screen that
+     * posts every field it rendered does not trip this. The refusal is about
+     * altering an attested value, not about mentioning one.
      */
-    if (current.kyc_verified) {
-      throw new ForbiddenException({ error: 'profile_locked' });
+    const asking = (['full_name', 'phone', 'country'] as const).filter(
+      (field) => input[field] !== undefined,
+    );
+    const locked = asking.filter(
+      (field) => !current.editable.includes(field) && !same(field, input, current),
+    );
+    if (locked.length > 0) {
+      throw new ForbiddenException({ error: 'profile_locked', fields: locked });
     }
 
     /*
@@ -378,4 +450,29 @@ export class ProfileService {
  */
 export function paymentLinkFor(origin: string, slug: string): string {
   return `${origin.replace(/\/+$/, '')}/pay/${slug}`;
+}
+
+/**
+ * Whether what was asked for is what is already recorded.
+ *
+ * A SCREEN THAT POSTS EVERY FIELD IT RENDERED MUST NOT BE REFUSED for the
+ * ones it is not changing — otherwise "save my name" fails on a verified
+ * account because the form also carried the country. The phone is compared on
+ * DIGITS, because what a customer reads back is the national spelling and what
+ * is stored is E.164: `0803…` and `+234803…` are the same number, and
+ * comparing them as text would call an unchanged field a change.
+ */
+function same(
+  field: 'full_name' | 'phone' | 'country',
+  input: { full_name?: string | undefined; phone?: string | undefined; country?: string | undefined },
+  current: AccountDetails,
+): boolean {
+  const asked = input[field];
+  const held = current[field];
+  if (asked === undefined || held === null) return false;
+  if (field === 'phone') {
+    const digits = (value: string): string => value.replace(/[^0-9]/g, '').replace(/^0+/, '');
+    return held.replace(/[^0-9]/g, '').endsWith(digits(asked));
+  }
+  return asked.trim().toUpperCase() === held.trim().toUpperCase();
 }

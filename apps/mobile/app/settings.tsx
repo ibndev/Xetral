@@ -160,6 +160,10 @@ function YourDetails() {
   const countryValue = country ?? held?.country ?? '';
   const dial = (countries.data ?? []).find((c) => c.code === countryValue)?.dial_code;
   const phoneMissing = held !== undefined && held.phone === null;
+  /* Whether anything is still fillable — on a verified account that means a
+   * BLANK field rather than one that may be rewritten. Kept identical to the
+   * web screen, because two readings of one rule is what this batch fixed. */
+  const anythingEditable = (held?.editable.length ?? 0) > 0;
   const nothingToSave =
     name === undefined && phone === undefined && country === undefined;
 
@@ -167,10 +171,12 @@ function YourDetails() {
     <Panel
       title="Your details"
       subtitle={
-        locked
-          ? 'Verified — these can no longer be changed here'
-          : phoneMissing
-            ? 'Add your phone number so people can pay you'
+        phoneMissing
+          ? 'Add your phone number so people can pay you'
+          : locked
+            ? anythingEditable
+              ? 'Verified — what is on file is fixed, but anything missing can be added'
+              : 'Verified — these can no longer be changed here'
             : 'What we hold about your account'
       }
     >
@@ -180,7 +186,7 @@ function YourDetails() {
         which reads as something that has not loaded rather than as the reason
         their money is not arriving.
       */}
-      {phoneMissing && !locked && (
+      {phoneMissing && may('phone') && (
         <Text style={styles.error}>
           Your phone number is missing. It is how other Xetral users pay you, so
           without it money cannot reach your account.
@@ -275,7 +281,7 @@ function YourDetails() {
         </Text>
       </View>
 
-      {!locked && (
+      {anythingEditable && (
         <Button
           label="Save"
           busy={busy}
@@ -303,7 +309,7 @@ function YourDetails() {
 
       <Text style={styles.hint}>
         {locked
-          ? 'Contact support if any of this is wrong — changing verified details is a re-verification.'
+          ? 'Contact support if anything already on file is wrong — changing a verified detail is a re-verification.'
           : 'Your email address identifies your account and cannot be changed here. Once your identity is verified these details are fixed.'}
       </Text>
     </Panel>

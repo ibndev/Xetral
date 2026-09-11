@@ -134,6 +134,10 @@ function YourDetails() {
    */
   const phoneMissing = held !== undefined && held.phone === null;
 
+  /** Whether anything at all is still fillable, which on a verified account
+   *  means a field that is blank rather than a field that may be rewritten. */
+  const anythingEditable = (held?.editable.length ?? 0) > 0;
+
   const nothingToSave =
     name === undefined && phone === undefined && country === undefined;
 
@@ -161,11 +165,25 @@ function YourDetails() {
       }}
     >
       <h2>Your details</h2>
+      {/*
+        THE SENTENCE FOLLOWS WHAT IS ACTUALLY EDITABLE, not whether the account
+        is verified.
+
+        It used to say "verified, so these can no longer be changed" to every
+        verified customer — including one whose phone number was MISSING, who
+        could do nothing about it and was being told that was correct. A
+        verified customer may still fill in a blank: nothing was attested about
+        an empty field. So the copy distinguishes a locked record from a
+        record with a hole in it, because they need opposite things from the
+        person reading them.
+      */}
       <p className="lead">
-        {locked
-          ? 'Your identity has been verified, so these can no longer be changed here.'
-          : phoneMissing
-            ? 'Add your phone number so other Xetral users can pay you.'
+        {phoneMissing
+          ? 'Add your phone number so other Xetral users can pay you.'
+          : locked
+            ? anythingEditable
+              ? 'Your identity has been verified. What is already on file cannot be changed here, but anything still missing can be filled in.'
+              : 'Your identity has been verified, so these can no longer be changed here.'
             : 'What we hold about your account.'}
       </p>
 
@@ -175,7 +193,7 @@ function YourDetails() {
         the Request payment panel only says "Not set", which reads as a feature
         that has not loaded.
       */}
-      {phoneMissing && !locked && (
+      {phoneMissing && may('phone') && (
         <div className="notice warn">
           <p>
             <strong>Your phone number is missing.</strong> It is how other
@@ -280,7 +298,13 @@ function YourDetails() {
         </span>
       </div>
 
-      {!locked && (
+      {/*
+        THE BUTTON FOLLOWS THE FIELDS. Hiding it whenever the account is
+        verified left a verified customer with an editable phone input and no
+        way to submit it — a form that takes typing and cannot be saved, which
+        reads as broken rather than as restricted.
+      */}
+      {anythingEditable && (
         <button type="submit" disabled={busy || nothingToSave}>
           {busy ? 'Saving…' : 'Save'}
         </button>
@@ -291,8 +315,8 @@ function YourDetails() {
 
       <p className="hint">
         {locked
-          ? 'Contact support if any of this is wrong — changing verified details is a re-verification.'
-          : 'Your email address identifies your account and cannot be changed here. Once your identity is verified these details are fixed.'}
+          ? 'Contact support if anything already on file is wrong — changing a verified detail is a re-verification.'
+          : 'Your email address identifies your account and cannot be changed here. Once your identity is verified, what is on file is fixed.'}
       </p>
     </form>
   );

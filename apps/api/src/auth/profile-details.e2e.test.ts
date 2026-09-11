@@ -309,4 +309,81 @@ describe('a VERIFIED customer', () => {
     expect(after.body.phone).toBe(person.phone);
     expect(after.body.country).toBe('NG');
   });
+
+  it('MAY STILL FILL IN A BLANK, and the phone is the one that matters', async () => {
+    /*
+     * THE SCREENSHOT THAT PROMPTED THIS. A verified account showing an em dash
+     * for Name and Phone, under a sentence saying those can no longer be
+     * changed — so the customer was told the blank was correct and had no path
+     * anywhere in the product.
+     *
+     * THE COST IS NOT COSMETIC. The number is the Xetral-to-Xetral identifier:
+     * a customer without one cannot be found on the Send screen, so NOBODY CAN
+     * PAY THEM, and their Request payment panel has nothing to share.
+     *
+     * Verified locks what is THERE. Nothing was attested about a field that is
+     * empty, so there is nothing for filling it in to contradict.
+     */
+    const person = await register();
+    await pool.query(`UPDATE users SET kyc_tier = 1, phone = NULL WHERE uuid = $1`, [person.uuid]);
+
+    const read = await details(person).expect(200);
+    expect(read.body.kyc_verified).toBe(true);
+    expect(read.body.phone).toBeNull();
+    // The blank one, and ONLY the blank one.
+    expect(read.body.editable).toEqual(['phone']);
+
+    // UNIQUE PER RUN. The e2e files share one database and
+    // `users_phone_unique` is global, so a fixed number here passes once and
+    // answers `phone_taken` ever after.
+    const national = `80${String(Date.now()).slice(-8)}`;
+    const saved = await request(app.getHttpServer())
+      .post('/v1/auth/profile')
+      .set('Authorization', `Bearer ${person.token}`)
+      .send({ phone: national })
+      .expect(201);
+    expect(saved.body.phone).toBe(`+234${national}`);
+    // And once it holds a value it is attested-adjacent like the rest: the
+    // field closes behind them.
+    expect(saved.body.editable).toEqual([]);
+
+    const refused = await request(app.getHttpServer())
+      .post('/v1/auth/profile')
+      .set('Authorization', `Bearer ${person.token}`)
+      .send({ phone: `80${String(Date.now() + 1).slice(-8)}` })
+      .expect(403);
+    expect(refused.body.error).toBe('profile_locked');
+  });
+
+  it('READS THE NAME OFF THE APPROVED SUBMISSION when the account has none', async () => {
+    /*
+     * 040 keeps `users.full_name` and `kyc_submissions.full_name` apart for a
+     * good reason, and nothing noticed an account can hold the SECOND AND NOT
+     * THE FIRST. The admin dashboard reads the submission and showed a name;
+     * the customer's own screen read `users` and showed a dash. Same person,
+     * same database, two answers — and the customer is the one told nothing is
+     * there.
+     */
+    const person = await register();
+    // Nobody approves their own identity documents — 009's CHECK — so the
+    // reviewer is a second account.
+    const other = await register();
+    const reviewer = (
+      await pool.query<{ id: string }>(`SELECT id FROM users WHERE uuid = $1`, [other.uuid])
+    ).rows[0]?.id;
+    await pool.query(`UPDATE users SET full_name = NULL WHERE uuid = $1`, [person.uuid]);
+    await pool.query(
+      `INSERT INTO kyc_submissions
+         (user_id, full_name, date_of_birth, phone, bvn_sealed, bvn_last4,
+          bvn_fingerprint, address, status, reviewed_by, reviewed_at)
+       SELECT u.id, 'OLAWALE ADEYEMI', DATE '1990-01-01', '08031234567', 'v1:sealed',
+              '1234', $2, '1 Test Street', 'approved', $3::bigint, now()
+         FROM users u WHERE u.uuid = $1`,
+      [person.uuid, `v1:${Date.now().toString(16).padStart(64, 'b')}`, reviewer],
+    );
+
+    const read = await details(person).expect(200);
+    expect(read.body.full_name).toBe('OLAWALE ADEYEMI');
+    expect(read.body.kyc_verified).toBe(true);
+  });
 });
