@@ -215,6 +215,16 @@ const API_ERROR_CODES = [
    */
   'price_in_use',
   /*
+   * `transaction_not_found` — an entry id that names nothing this customer has
+   * a leg in.
+   *
+   * ONE ANSWER TO TWO QUESTIONS, and deliberately: "no such transaction" and
+   * "not yours" are the same 404, because distinguishing them would make the
+   * detail view a way to enumerate other people's transactions by id — the
+   * rule 018 already applies to disputes.
+   */
+  'transaction_not_found',
+  /*
    * `broadcast_not_found` — an announcement id that names nothing.
    *
    * Reachable only from the operations dashboard, which is why it exists at

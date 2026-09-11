@@ -3200,3 +3200,76 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
   gap: 8px;
   flex-wrap: wrap;
 }
+
+/* ---------------------------------------------------------------------------
+   A TRANSACTION, OPENED.
+
+   A sheet rather than a page, because the customer is answering a question
+   about one row and then going back to the list. A route would lose their
+   scroll position and their filter, which on a screen that paginates is the
+   difference between "tap, read, close" and "tap, read, find your place again".
+
+   The backdrop closes it and so does the button; there is deliberately no
+   swipe, which on the web is a gesture browsers have their own plans for.
+--------------------------------------------------------------------------- */
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgb(0 0 0 / 0.45);
+  padding: 0;
+}
+@media (min-width: 640px) {
+  .sheet-backdrop { align-items: center; padding: 24px; }
+}
+
+.sheet {
+  width: 100%;
+  max-width: 460px;
+  max-height: 88vh;
+  overflow-y: auto;
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 20px 20px 0 0;
+  padding: 20px 18px calc(20px + env(safe-area-inset-bottom));
+  box-shadow: 0 -8px 40px rgb(0 0 0 / 0.25);
+}
+@media (min-width: 640px) {
+  .sheet { border-radius: 20px; padding-bottom: 20px; }
+}
+
+.sheet-amount {
+  font-size: 30px;
+  font-weight: 650;
+  margin: 10px 0 2px;
+  letter-spacing: -0.01em;
+}
+
+/* A row that is a button. It must not inherit the button chrome — the whole
+   point is that it still reads as a list row — so every visual property is
+   restated rather than left to whatever `button` happens to set, which is the
+   cascade collision `.icon-btn` records. */
+.list-row.tappable {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 12px;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  padding: 10px 6px;
+}
+.list-row.tappable:hover:where(:not(:disabled)) { background: var(--field); }
+.list-row.tappable:active { background: var(--field); }
+/* The focus ring is for keyboards. A thumb gets nothing, for the reason the
+   icon buttons get nothing: an outline follows the element's own radius and
+   reads as a shape rather than as a state. */
+.list-row.tappable:focus { outline: none; }
+.list-row.tappable:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+/* Money leaving, in the row's subtitle. */
+.row-sub .danger { color: var(--danger); }

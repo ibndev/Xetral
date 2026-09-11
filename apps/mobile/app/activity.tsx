@@ -1,10 +1,10 @@
 import { useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
-import { activityFiltersFor, formatAmount } from '@xetral/client';
+import { Modal, Pressable, ScrollView, Share, Text, View } from 'react-native';
+import { activityFiltersFor, formatAmount, receiptText, statusWords } from '@xetral/client';
 import type { Transaction } from '@xetral/client';
 import { Icon } from '@/icon';
 import { Shell } from '@/shell';
-import { Empty, FormError, Loading } from '@/ui';
+import { Button, Empty, FormError, Loading } from '@/ui';
 import { useLoad, useXetral } from '@/hooks';
 import { font, radius, space, useStyles, useTheme } from '@/theme';
 
@@ -53,6 +53,9 @@ export default function Activity() {
 
   const [pages, setPages] = useState<readonly Transaction[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
+  // Which row is open, by id rather than by index: the list grows as pages
+  // load, so an index would point at a different transaction after a Load more.
+  const [open, setOpen] = useState<string | undefined>(undefined);
 
   const first = useLoad(async () => {
     const page = await client.transactions(currency, undefined, kinds);
@@ -137,7 +140,22 @@ export default function Activity() {
         {pages.map((t) => {
           const outgoing = t.amount.trim().startsWith('-');
           return (
-            <View key={t.id} style={styles.row}>
+            /*
+              A ROW IS A BUTTON. Everything a handset row cannot hold — the fee,
+              the reference, the destination in full, what has happened since —
+              is one deliberate tap away rather than crammed in or left out.
+
+              `android_ripple={null}` for the reason every icon button refuses
+              it: a disc lighting up behind a line of text reads as a shape
+              rather than as a state.
+            */
+            <Pressable
+              key={t.id}
+              accessibilityRole="button"
+              android_ripple={null}
+              onPress={() => setOpen(t.id)}
+              style={styles.row}
+            >
               <View style={styles.rowIcon}>
                 <Icon
                   name={outgoing ? 'arrowUpRight' : 'download'}
@@ -147,7 +165,7 @@ export default function Activity() {
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={{ color: colors.text, fontFamily: font.sansSemi }} numberOfLines={1}>
-                  {t.description}
+                  {t.destination ?? t.description}
                 </Text>
                 <Text style={styles.muted}>
                   {new Date(t.occurred_at).toLocaleString(undefined, {
@@ -156,12 +174,29 @@ export default function Activity() {
                     hour: '2-digit',
                     minute: '2-digit',
                   })}
+                  {/*
+                    THE PAYOUT'S LIVE STATE, because the description cannot
+                    carry it: a payout posts two entries and the customer has a
+                    wallet leg only in the first, so what they read was written
+                    at RESERVE time and said so for ever.
+                  */}
+                  {t.payout_state !== undefined && t.payout_state !== 'sent'
+                    ? ` · ${t.payout_state === 'returned' ? 'returned' : 'on its way'}`
+                    : ''}
                 </Text>
               </View>
-              <Text style={[styles.amount, outgoing ? undefined : { color: colors.ok }]}>
+              {/*
+                MONEY LEAVING IS RED AND MONEY ARRIVING IS GREEN. It was red for
+                neither: an outgoing figure took the default text colour, so the
+                only thing separating "you were paid" from "you paid" at a
+                glance was a minus sign and a small arrow.
+              */}
+              <Text
+                style={[styles.amount, { color: outgoing ? colors.danger : colors.ok }]}
+              >
                 {formatAmount(t.amount, t.currency)}
               </Text>
-            </View>
+            </Pressable>
           );
         })}
 
@@ -177,6 +212,118 @@ export default function Activity() {
 
         <FormError error={first.error} code={first.code} />
       </View>
+      {open !== undefined && (
+        <TransactionSheet id={open} onClose={() => setOpen(undefined)} />
+      )}
     </Shell>
+  );
+}
+
+/**
+ * ONE TRANSACTION, IN FULL, AND A WAY TO SEND IT ON.
+ *
+ * THE SHARE IS THE POINT rather than a decoration. The question a customer is
+ * answering when they open a transaction is almost always somebody else's —
+ * "did you send it?" — and before this the only answer available was a
+ * screenshot of a list row, which carries no reference and no destination.
+ *
+ * `Share.share` with the text the web builds from the same function, so a
+ * receipt forwarded from a phone and one copied from a laptop say the same
+ * thing.
+ */
+function TransactionSheet({ id, onClose }: { id: string; onClose: () => void }) {
+  const client = useXetral();
+  const styles = useStyles();
+  const colors = useTheme();
+  const detail = useLoad(() => client.transaction(id), [client, id]);
+  const t = detail.data;
+
+  return (
+    <Modal visible animationType="slide" transparent onRequestClose={onClose}>
+      <Pressable
+        style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' }}
+        onPress={onClose}
+        android_ripple={null}
+      >
+        {/* Stops a tap inside the sheet from closing it. */}
+        <Pressable
+          android_ripple={null}
+          onPress={() => undefined}
+          style={{
+            backgroundColor: colors.surface,
+            borderTopLeftRadius: radius.lg,
+            borderTopRightRadius: radius.lg,
+            padding: space.lg,
+            paddingBottom: space.xl,
+            maxHeight: '88%',
+          }}
+        >
+          <ScrollView>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+              <Text style={styles.h2}>Transaction</Text>
+              <Pressable accessibilityLabel="Close" onPress={onClose} android_ripple={null}>
+                <Icon name="close" size={20} color={colors.text2} />
+              </Pressable>
+            </View>
+
+            {detail.loading && <Loading />}
+            <FormError error={detail.error} code={detail.code} />
+
+            {t !== undefined && (
+              <>
+                <Text style={[styles.amount, { fontSize: 28, marginTop: space.sm }]}>
+                  {formatAmount(t.amount, t.currency)}
+                </Text>
+                <Text style={styles.lead}>{statusWords(t)}</Text>
+
+                <Row label="What" value={t.description} />
+                {t.beneficiary !== undefined && <Row label="To" value={t.beneficiary} />}
+                {t.bank_name !== undefined && (
+                  <Row
+                    label="Bank"
+                    value={`${t.bank_name}${
+                      t.account_number === undefined ? '' : ` ••${t.account_number.slice(-4)}`
+                    }`}
+                  />
+                )}
+                {/* The fee as its own line: a transfer that charges one is two
+                    postings against the same wallet, and a customer who can see
+                    only the total cannot reconcile it against their balance. */}
+                {t.fee !== undefined && !/^0([.,]0+)?$/.test(t.fee) && (
+                  <Row label="Fee" value={formatAmount(t.fee, t.currency)} />
+                )}
+                <Row label="Date" value={new Date(t.occurred_at).toLocaleString()} />
+                <Row label="Reference" value={t.reference} />
+                {t.narration !== undefined && t.narration !== null && t.narration !== '' && (
+                  <Row label="Note" value={t.narration} />
+                )}
+
+                <Button
+                  label="Share receipt"
+                  icon="copy"
+                  onPress={() => {
+                    // A dismissed share sheet rejects, and that is not an error
+                    // worth reporting to anybody.
+                    void Share.share({ message: receiptText(t) }).catch(() => undefined);
+                  }}
+                />
+              </>
+            )}
+          </ScrollView>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+function Row({ label, value }: { label: string; value: string }) {
+  const styles = useStyles();
+  return (
+    <View style={styles.row}>
+      <Text style={[styles.muted, { flex: 1 }]}>{label}</Text>
+      <Text style={[styles.muted, { flex: 1, textAlign: 'right' }]} numberOfLines={2}>
+        {value}
+      </Text>
+    </View>
   );
 }

@@ -196,6 +196,57 @@ export interface Transaction {
   readonly amount: string;
   readonly currency: string;
   readonly occurred_at: string;
+  /**
+   * What later happened to the ENTRY — `posted`, `reversed`, `refunded`,
+   * `disputed`. 023's view, never a stored column.
+   */
+  readonly status?: string;
+  /**
+   * WHAT LATER HAPPENED TO A BANK PAYOUT, which is a different question from
+   * `status` above and is why it is a different field.
+   *
+   * A payout posts two entries and the customer has a wallet leg only in the
+   * first, so the description they read was written at RESERVE time and said
+   * so — "bank payout reserved", for ever, on money that reached the bank days
+   * ago. Entries are append-only and rewriting it would be wrong anyway: it
+   * was true when it was written. This is the live state, looked up by the
+   * entry the payout names.
+   *
+   * `on_its_way` is NOT "failed" and NOT "sent": it means nobody has answered
+   * for this payout yet and the sweep will ask. Saying either would be a claim
+   * that cannot be supported.
+   */
+  readonly payout_state?: 'sent' | 'on_its_way' | 'returned';
+  /** Where it went, as a bank statement names one: the bank and four digits. */
+  readonly destination?: string;
+}
+
+/**
+ * ONE TRANSACTION, IN FULL — what a customer gets when they tap a row.
+ *
+ * THE LIST IS DELIBERATELY THIN so this can be complete: a row carries a line
+ * and a figure, and the fee, the reference, the destination and what has
+ * happened since are one tap away rather than crammed into a 320px row.
+ */
+export interface TransactionDetail extends Transaction {
+  /**
+   * EACH LEG THIS CUSTOMER HAS IN THE ENTRY. A transfer that charges a fee is
+   * two postings against the same wallet, and a receipt showing only the
+   * larger one would not add up to what left the account. `amount` above is
+   * their SUM.
+   */
+  readonly legs: readonly { readonly amount: string; readonly currency: string }[];
+  /**
+   * What a customer quotes to support. The entry's own id rather than a
+   * provider's: a provider reference is opaque and only its issuer can resolve
+   * it, while this names the row every internal screen can find.
+   */
+  readonly reference: string;
+  readonly beneficiary?: string;
+  readonly bank_name?: string;
+  readonly account_number?: string;
+  readonly narration?: string | null;
+  readonly fee?: string;
 }
 
 /**
@@ -557,6 +608,17 @@ export class XetralClient {
       `/v1/wallets/transactions?${query.toString()}`,
     );
     return { entries: body.entries, nextCursor: body.next_cursor };
+  }
+
+  /**
+   * One transaction, in full.
+   *
+   * An entry this customer has no leg in answers the same `transaction_not_found`
+   * as one that does not exist — the API does not distinguish them, and a
+   * caller must not try to.
+   */
+  async transaction(id: string): Promise<TransactionDetail> {
+    return this.#get(`/v1/wallets/transactions/${encodeURIComponent(id)}`);
   }
 
   /**

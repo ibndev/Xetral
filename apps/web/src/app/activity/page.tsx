@@ -1,11 +1,12 @@
 'use client';
 
 import { useState } from 'react';
-import { activityFiltersFor, formatAmount } from '@xetral/client';
+import { activityFiltersFor, formatAmount, receiptText, statusWords } from '@xetral/client';
 import type { Transaction } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { Icon } from '@/ui/icon';
 import { useLoad, useXetral } from '@/lib/hooks';
+import { FormError } from '@/ui/form-error';
 
 /**
  * The rail, one line, five filters.
@@ -63,6 +64,9 @@ export default function Activity() {
   const [extra, setExtra] = useState<readonly Transaction[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  // Which row is open, by id rather than by index: the list grows as pages
+  // load, so an index would point at a different transaction after a Load more.
+  const [open, setOpen] = useState<string | undefined>(undefined);
 
   const first = useLoad(async () => {
     const page = await client.transactions(currency, undefined, kinds);
@@ -124,26 +128,62 @@ export default function Activity() {
           {rows.map((t) => {
             const outgoing = t.amount.trim().startsWith('-');
             return (
-              <div className="list-row" key={t.id}>
+              /*
+                A ROW IS A BUTTON. Everything a 320px row cannot hold — the
+                fee, the reference, the destination in full, what has happened
+                since — is one deliberate tap away rather than crammed in or
+                left out.
+              */
+              <button
+                type="button"
+                className="list-row tappable"
+                key={t.id}
+                onClick={() => setOpen(t.id)}
+              >
                 <span className="row-icon">
                   <Icon name={outgoing ? 'arrowUpRight' : 'download'} size={19} />
                 </span>
                 <span className="row-main">
-                  <span className="row-title">{t.description}</span>
+                  <span className="row-title">{t.destination ?? t.description}</span>
                   <span className="row-sub">
                     {new Date(t.occurred_at).toLocaleString(undefined, {
                       day: 'numeric', month: 'short', year: 'numeric',
                       hour: '2-digit', minute: '2-digit',
                     })}
+                    {/*
+                      THE PAYOUT'S LIVE STATE, because the description cannot
+                      carry it. A payout posts two entries and the customer has
+                      a wallet leg only in the first, so what they read was
+                      written at RESERVE time — "bank payout reserved", for
+                      ever, on money that reached the bank days ago. Entries are
+                      append-only and rewriting one would be wrong anyway: it
+                      was true when it was written.
+                    */}
+                    {t.payout_state !== undefined && t.payout_state !== 'sent' && (
+                      <>
+                        {' · '}
+                        <span
+                          className={t.payout_state === 'returned' ? 'danger' : undefined}
+                        >
+                          {t.payout_state === 'returned' ? 'returned' : 'on its way'}
+                        </span>
+                      </>
+                    )}
                   </span>
                 </span>
+                {/*
+                  MONEY LEAVING IS RED AND MONEY ARRIVING IS GREEN. It was red
+                  for neither: an outgoing figure took the default text colour,
+                  so the only thing separating "you were paid" from "you paid"
+                  at a glance was a minus sign and a small arrow.
+                */}
                 <span
                   className="row-value amount"
-                  style={outgoing ? undefined : { color: 'var(--ok)' }}
+                  style={{ color: outgoing ? 'var(--danger)' : 'var(--ok)' }}
                 >
                   {formatAmount(t.amount, t.currency)}
                 </span>
-              </div>
+              </button>
             );
           })}
         </div>
@@ -156,6 +196,133 @@ export default function Activity() {
           </div>
         )}
       </section>
+      {open !== undefined && (
+        <TransactionSheet id={open} onClose={() => setOpen(undefined)} />
+      )}
     </Shell>
+  );
+}
+
+/**
+ * ONE TRANSACTION, IN FULL, AND A WAY TO SEND IT ON.
+ *
+ * THE SHARE IS THE POINT of this screen rather than a decoration. The question
+ * a customer is answering when they open a transaction is almost always
+ * somebody else's — "did you send it?" — and before this the only answer
+ * available was a screenshot of a list row, which carries no reference and no
+ * destination.
+ *
+ * `navigator.share` where the browser has it, the clipboard where it does not.
+ * Not a download: a receipt that arrives as a file is one more step for
+ * everybody, and the artifact sandbox aside, a phone's share sheet is where
+ * this is going anyway.
+ */
+function TransactionSheet({ id, onClose }: { id: string; onClose: () => void }) {
+  const client = useXetral();
+  const detail = useLoad(() => client.transaction(id), [client, id]);
+  const [shared, setShared] = useState<string | undefined>(undefined);
+
+  const t = detail.data;
+
+  async function share(): Promise<void> {
+    if (t === undefined) return;
+    const text = receiptText(t);
+    try {
+      // The share sheet where there is one. `navigator.share` rejects when the
+      // customer dismisses it, which is not an error worth reporting — hence
+      // the catch below rather than a message.
+      /*
+       * THE SHARE SHEET WHERE THERE IS ONE, the clipboard where there is not.
+       * Narrowed through a local rather than tested inline: `'share' in
+       * navigator` does not narrow the type, and a cast would assert something
+       * about a browser API rather than check it.
+       */
+      const nav: Navigator | undefined = typeof navigator === 'undefined' ? undefined : navigator;
+      if (nav === undefined) return;
+      if (typeof nav.share === 'function') {
+        await nav.share({ title: 'Xetral receipt', text });
+        return;
+      }
+      await nav.clipboard.writeText(text);
+      setShared('Receipt copied.');
+    } catch {
+      // A dismissed share sheet and a refused clipboard look the same from
+      // here and neither is worth interrupting somebody for.
+    }
+  }
+
+  return (
+    <div className="sheet-backdrop" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="row-between">
+          <h2>Transaction</h2>
+          <button type="button" className="icon-btn" onClick={onClose} aria-label="Close">
+            <Icon name="close" size={18} />
+          </button>
+        </div>
+
+        {detail.loading && <p className="spinner">Loading…</p>}
+        <FormError error={detail.error} code={detail.code} />
+
+        {t !== undefined && (
+          <>
+            <p className="sheet-amount amount">
+              {formatAmount(t.amount, t.currency)}
+            </p>
+            <p className="lead">{statusWords(t)}</p>
+
+            <div className="row">
+              <span className="muted">What</span>
+              <span>{t.description}</span>
+            </div>
+            {t.beneficiary !== undefined && (
+              <div className="row">
+                <span className="muted">To</span>
+                <span>{t.beneficiary}</span>
+              </div>
+            )}
+            {t.bank_name !== undefined && (
+              <div className="row">
+                <span className="muted">Bank</span>
+                <span>
+                  {t.bank_name}
+                  {t.account_number !== undefined && ` ••${t.account_number.slice(-4)}`}
+                </span>
+              </div>
+            )}
+            {/*
+              THE FEE AS ITS OWN LINE. A transfer that charges one is two
+              postings against the same wallet, and a customer who can see only
+              the total cannot reconcile it against their balance.
+            */}
+            {t.fee !== undefined && !/^0([.,]0+)?$/.test(t.fee) && (
+              <div className="row">
+                <span className="muted">Fee</span>
+                <span>{formatAmount(t.fee, t.currency)}</span>
+              </div>
+            )}
+            <div className="row">
+              <span className="muted">Date</span>
+              <span>{new Date(t.occurred_at).toLocaleString()}</span>
+            </div>
+            <div className="row">
+              <span className="muted">Reference</span>
+              <span className="mono">{t.reference}</span>
+            </div>
+            {t.narration !== undefined && t.narration !== null && t.narration !== '' && (
+              <div className="row">
+                <span className="muted">Note</span>
+                <span>{t.narration}</span>
+              </div>
+            )}
+
+            <button type="button" onClick={() => void share()}>
+              <Icon name="copy" size={16} /> Share receipt
+            </button>
+            {shared !== undefined && <p className="ok">{shared}</p>}
+          </>
+        )}
+      </div>
+    </div>
   );
 }

@@ -588,3 +588,107 @@ describe('the record', () => {
     expect(res.body.payouts).toHaveLength(0);
   });
 });
+
+describe('what a customer reads about a payout afterwards', () => {
+  /*
+   * THE COMPLAINT THIS EXISTS FOR: "the payout activity log is saying bank
+   * payout reserved instead of bank payout sent".
+   *
+   * A payout posts TWO entries. The reserve moves wallet → pending and its
+   * description is written at that moment; the settle moves pending → float,
+   * and the customer has NO leg in `customer_wallet` on it — so a wallet
+   * history, which is wallet legs only and is right to be, can never show it.
+   * The row therefore read "bank payout reserved" for ever, on money that
+   * reached the bank days ago.
+   *
+   * Entries are append-only, so the description is not rewritten — it was true
+   * when it was written. The live state is decorated on instead, which is also
+   * correct for every row written before any of this existed.
+   */
+  it('shows a SETTLED payout as sent, not as reserved', async () => {
+    const customer = await onboard();
+    await fund(customer.userId, 1_000_000n);
+    await pay(customer).expect(200);
+
+    const history = await request(app.getHttpServer())
+      .get('/v1/wallets/transactions?currency=NGN')
+      .set('Authorization', `Bearer ${customer.token}`)
+      .expect(200);
+
+    const row = (history.body.entries as Record<string, unknown>[])[0]!;
+    expect(row['payout_state']).toBe('sent');
+    // And the row names WHERE it went rather than an internal ledger stage.
+    expect(row['destination']).toContain('••6789');
+  });
+
+  it('opens ONE transaction in full, with the fee and a reference', async () => {
+    const customer = await onboard();
+    await fund(customer.userId, 1_000_000n);
+    await pay(customer).expect(200);
+
+    const history = await request(app.getHttpServer())
+      .get('/v1/wallets/transactions?currency=NGN')
+      .set('Authorization', `Bearer ${customer.token}`)
+      .expect(200);
+    const id = (history.body.entries as { id: string }[])[0]!.id;
+
+    const detail = await request(app.getHttpServer())
+      .get(`/v1/wallets/transactions/${id}`)
+      .set('Authorization', `Bearer ${customer.token}`)
+      .expect(200);
+
+    expect(detail.body.beneficiary).toBe(BANK_NAME_ON_ACCOUNT);
+    expect(detail.body.account_number).toBe(ACCOUNT);
+    expect(detail.body.reference).toBe(id);
+    // Each leg, so a receipt shows the amount and the fee as the two things
+    // they are rather than as one number nobody can reconcile.
+    expect(Array.isArray(detail.body.legs)).toBe(true);
+  });
+
+  it('ANSWERS THE SAME 404 for somebody else’s transaction as for none', async () => {
+    /*
+     * Distinguishing them would make this a way to enumerate other people's
+     * transactions by id — the rule 018 already applies to disputes. Asserted
+     * as an EQUALITY of the two responses rather than separately, which is how
+     * the payment link's two answers came to differ.
+     */
+    const mine = await onboard();
+    const theirs = await onboard();
+    await fund(theirs.userId, 1_000_000n);
+    await pay(theirs).expect(200);
+
+    const theirHistory = await request(app.getHttpServer())
+      .get('/v1/wallets/transactions?currency=NGN')
+      .set('Authorization', `Bearer ${theirs.token}`)
+      .expect(200);
+    const theirId = (theirHistory.body.entries as { id: string }[])[0]!.id;
+
+    const notMine = await request(app.getHttpServer())
+      .get(`/v1/wallets/transactions/${theirId}`)
+      .set('Authorization', `Bearer ${mine.token}`);
+
+    const noSuchThing = await request(app.getHttpServer())
+      .get('/v1/wallets/transactions/00000000-0000-4000-8000-000000000000')
+      .set('Authorization', `Bearer ${mine.token}`);
+
+    expect(notMine.status).toBe(noSuchThing.status);
+    expect(notMine.body).toEqual(noSuchThing.body);
+    expect(notMine.status).toBe(404);
+  });
+
+  it('answers a MALFORMED id exactly as an unknown one', async () => {
+    // Same status and same body, so neither says which ids are the right SHAPE
+    // and therefore worth guessing.
+    const customer = await onboard();
+
+    const malformed = await request(app.getHttpServer())
+      .get('/v1/wallets/transactions/not-a-uuid')
+      .set('Authorization', `Bearer ${customer.token}`);
+    const unknown = await request(app.getHttpServer())
+      .get('/v1/wallets/transactions/00000000-0000-4000-8000-000000000000')
+      .set('Authorization', `Bearer ${customer.token}`);
+
+    expect(malformed.status).toBe(unknown.status);
+    expect(malformed.body).toEqual(unknown.body);
+  });
+});

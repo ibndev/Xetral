@@ -377,6 +377,32 @@ export class WalletService {
     const userId = await this.#userIdOf(userUuid);
     const rows = await this.ledger.history(userId, currency, options);
 
+    /*
+     * WHAT LATER HAPPENED TO A BANK PAYOUT, decorated on rather than baked in.
+     *
+     * A payout posts TWO entries. The reserve moves wallet → pending and its
+     * description is written at that moment; the settle moves pending → float,
+     * and the customer has no leg in `customer_wallet` on it — so the history
+     * above, which is wallet legs only and is right to be, can never show it.
+     *
+     * The consequence was a row reading "bank payout reserved" for ever, on
+     * money that reached the bank days ago. A customer looking at their own
+     * activity had no way to learn a transfer had actually gone.
+     *
+     * Entries are APPEND-ONLY, so the description cannot be rewritten when the
+     * payout settles — and should not be: it was true when it was written.
+     * `bank_payouts.reserve_entry_id` names the entry, so the LIVE status is
+     * one indexed lookup away and is correct for rows written before any of
+     * this existed.
+     *
+     * The lookup is scoped to the page, so it is one query per page rather
+     * than one per row.
+     */
+    const payouts = await this.#payoutStateFor(
+      userId,
+      rows.map((row) => row.entryUuid),
+    );
+
     return {
       entries: rows.map((row) => ({
         id: row.entryUuid,
@@ -390,8 +416,212 @@ export class WalletService {
         // nothing saying the two were the same event.
         status: row.status,
         answered_by: row.answeredBy,
+        ...(payouts.get(row.entryUuid) ?? {}),
       })),
       next_cursor: rows.length === options.limit ? (rows[rows.length - 1]?.postingId ?? null) : null,
+    };
+  }
+
+  /**
+   * The live state of any bank payout among these entries.
+   *
+   * KEYED ON `reserve_entry_id`, which is the entry the customer actually has
+   * a wallet leg in — the settle entry moves pending → float and is invisible
+   * to a wallet history, correctly.
+   *
+   * Scoped to the customer as well as to the entries. The entry ids come from
+   * this customer's own postings so a cross-read is not reachable, but a query
+   * about somebody's money that relies on its caller having filtered correctly
+   * is one refactor away from not being scoped at all.
+   */
+  async #payoutStateFor(
+    userId: string,
+    entryUuids: readonly string[],
+  ): Promise<Map<string, { payout_state: string; destination: string }>> {
+    const found = new Map<string, { payout_state: string; destination: string }>();
+    if (entryUuids.length === 0) return found;
+
+    const result = await this.pool.query<{
+      entry_uuid: string;
+      status: string;
+      bank_name: string;
+      account_number: string;
+    }>(
+      `SELECT e.uuid AS entry_uuid, b.status, b.bank_name, b.account_number
+         FROM bank_payouts b
+         JOIN journal_entries e ON e.id = b.reserve_entry_id
+        WHERE b.user_id = $1::bigint
+          AND e.uuid = ANY($2::uuid[])`,
+      [userId, [...entryUuids]],
+    );
+
+    for (const row of result.rows) {
+      found.set(row.entry_uuid, {
+        /*
+         * THE PROVIDER'S WORD, TRANSLATED ONCE.
+         *
+         * `reserved` deliberately does NOT become "failed" or "sent": it means
+         * nobody has answered for this payout yet, the money is held, and the
+         * sweep will ask. Saying either would be a claim we cannot support —
+         * the rule 043 records about a timeout settling nothing and reversing
+         * nothing.
+         */
+        payout_state:
+          row.status === 'reserved'
+            ? 'on_its_way'
+            : row.status === 'failed'
+              ? 'returned'
+              : 'sent',
+        // Four digits, the way a bank statement names a destination. The whole
+        // number is on the detail view, which is one deliberate tap.
+        destination: `${row.bank_name} ••${row.account_number.slice(-4)}`,
+      });
+    }
+    return found;
+  }
+
+  /**
+   * ONE TRANSACTION, IN FULL — what a customer gets when they tap a row.
+   *
+   * THE LIST IS DELIBERATELY THIN and this is why it can be: a row carries a
+   * line and a figure, and everything else — the fee, the reference, where it
+   * went, what has happened to it since — is one tap away rather than crammed
+   * into a 320px row.
+   *
+   * SCOPED TO THE CUSTOMER'S OWN LEG, and the refusal for somebody else's
+   * entry is the SAME 404 as for one that does not exist. Distinguishing them
+   * turns this into a way to enumerate other people's transactions by id —
+   * the rule 018 already applies to disputes.
+   *
+   * IT SHOWS EVERY LEG THIS CUSTOMER HAS IN THE ENTRY, not one. A transfer
+   * that charges a fee is two postings against the same wallet, and a receipt
+   * that showed only the larger one would not add up to what left the account.
+   */
+  async transaction(
+    userUuid: string,
+    entryUuid: string,
+  ): Promise<Record<string, unknown>> {
+    const userId = await this.#userIdOf(userUuid);
+
+    const legs = await this.pool.query<{
+      uuid: string;
+      kind: string;
+      description: string;
+      occurred_at: Date;
+      amount_minor: string;
+      currency: string;
+      account_kind: string;
+      status: string;
+      answered_by: string | null;
+      metadata: Record<string, unknown>;
+    }>(
+      `SELECT e.uuid, e.kind, e.description, e.occurred_at, e.metadata,
+              p.amount_minor, p.currency, a.kind::text AS account_kind,
+              s.status, s.answered_by
+         FROM journal_entries e
+         JOIN postings p        ON p.journal_entry_id = e.id
+         JOIN accounts a        ON a.id = p.account_id
+         JOIN entry_status s    ON s.id = e.id
+        WHERE e.uuid = $1::uuid
+          AND a.owner_id = $2::bigint
+          AND a.kind = 'customer_wallet'
+        ORDER BY p.id`,
+      [entryUuid, userId],
+    );
+
+    const first = legs.rows[0];
+    if (first === undefined) {
+      throw new NotFoundException({ error: 'transaction_not_found' });
+    }
+
+    const currency = first.currency as Currency;
+    /*
+     * THE NET MOVEMENT, summed across this customer's own legs.
+     *
+     * A transfer posts the amount and the fee separately, so the figure a
+     * customer should read as "what this cost me" is the sum rather than the
+     * first leg. Summed as BIGINT, never as a number: these are minor units
+     * and a float here is the rule this codebase exists to keep.
+     */
+    let net = 0n;
+    for (const leg of legs.rows) net += BigInt(leg.amount_minor);
+
+    const payout = await this.#payoutDetailFor(userId, entryUuid);
+
+    return {
+      id: first.uuid,
+      kind: first.kind,
+      description: first.description,
+      occurred_at: first.occurred_at.toISOString(),
+      amount: toMajor({ amount: net, currency }),
+      currency,
+      status: first.status,
+      answered_by: first.answered_by,
+      /*
+       * EACH LEG, so a receipt can show the amount and the fee as the two
+       * things they are rather than as one number the customer cannot
+       * reconcile against their balance.
+       */
+      legs: legs.rows.map((leg) => ({
+        amount: toMajor({ amount: BigInt(leg.amount_minor), currency }),
+        currency: leg.currency,
+      })),
+      /*
+       * THE REFERENCE A CUSTOMER QUOTES TO SUPPORT. It is the entry's own
+       * uuid rather than anything a provider issued: a provider reference is
+       * opaque and only its issuer can resolve it, and this one names the row
+       * every internal screen can find.
+       */
+      reference: first.uuid,
+      ...(payout ?? {}),
+    };
+  }
+
+  /**
+   * The payout behind an entry, for the detail view — the destination in full
+   * and the reason where there is one.
+   *
+   * THE PROVIDER'S SENTENCE IS NOT HERE. `failure_reason` names our
+   * integration — 006's rule — so it stays on the row an operator reads. What
+   * a customer gets is the state.
+   */
+  async #payoutDetailFor(
+    userId: string,
+    entryUuid: string,
+  ): Promise<Record<string, unknown> | undefined> {
+    const result = await this.pool.query<{
+      status: string;
+      bank_name: string;
+      account_number: string;
+      account_name: string;
+      narration: string | null;
+      fee_minor: string;
+      currency: string;
+    }>(
+      `SELECT b.status, b.bank_name, b.account_number, b.account_name,
+              b.narration, b.fee_minor, b.currency
+         FROM bank_payouts b
+         JOIN journal_entries e ON e.id = b.reserve_entry_id
+        WHERE b.user_id = $1::bigint AND e.uuid = $2::uuid`,
+      [userId, entryUuid],
+    );
+    const row = result.rows[0];
+    if (row === undefined) return undefined;
+
+    const currency = row.currency as Currency;
+    return {
+      payout_state:
+        row.status === 'reserved'
+          ? 'on_its_way'
+          : row.status === 'failed'
+            ? 'returned'
+            : 'sent',
+      destination: `${row.bank_name} ••${row.account_number.slice(-4)}`,
+      beneficiary: row.account_name,
+      bank_name: row.bank_name,
+      account_number: row.account_number,
+      narration: row.narration,
+      fee: toMajor({ amount: BigInt(row.fee_minor), currency }),
     };
   }
 

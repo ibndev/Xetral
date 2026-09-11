@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, Inject, Post, Query, Req } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpCode, Inject, NotFoundException, Param, Post, Query, Req } from '@nestjs/common';
 import type { AuthenticatedRequest } from '../auth/auth.guard.js';
 import { WalletService } from './wallet.service.js';
 import type { BalanceView, TransferResult } from './wallet.service.js';
@@ -31,6 +31,31 @@ export class WalletController {
       ...(before === undefined ? {} : { before }),
       ...(kinds === undefined ? {} : { kinds }),
     });
+  }
+
+  /**
+   * ONE TRANSACTION, IN FULL.
+   *
+   * Declared AFTER the list above, and that ordering matters to Nest: a
+   * parameterised segment registered first would swallow `/transactions`
+   * itself and the list would arrive here as an id of "transactions".
+   *
+   * An entry this customer has no leg in answers the SAME 404 as one that
+   * does not exist — distinguishing them would make this a way to enumerate
+   * other people's transactions by id.
+   */
+  @Get('transactions/:id')
+  async transaction(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+  ): Promise<unknown> {
+    // A malformed id answers as an unknown one rather than as a 500 from the
+    // uuid cast — same status, same body, so neither says which ids are the
+    // right SHAPE and therefore worth guessing.
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      throw new NotFoundException({ error: 'transaction_not_found' });
+    }
+    return this.wallets.transaction(claimsOf(request).sub, id);
   }
 
   /**

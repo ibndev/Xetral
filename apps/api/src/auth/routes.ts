@@ -206,6 +206,11 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
 
       .authenticated('GET', '/v1/wallets', { pin: false })
       .authenticated('GET', '/v1/wallets/transactions', { pin: false })
+      // ONE transaction, in full — what a customer gets when they tap a row.
+      // No PIN: it is their own history, and the list above already shows the
+      // figure. An entry they have no leg in answers the same 404 as one that
+      // does not exist.
+      .authenticated('GET', '/v1/wallets/transactions/:id', { pin: false })
       // The first route in the platform to declare pin: true, and the reason
       // the flag exists. Reading a balance does not need a PIN; moving money
       // does.
