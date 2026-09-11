@@ -1299,6 +1299,35 @@ export class AdminController {
     return removed;
   }
 
+  /**
+   * Removes a RETIRED spread policy — the table an operator actually retires
+   * rows in, and the one 064 left out.
+   */
+  @Delete('prices/fx-spread/:id')
+  async deleteFxSpread(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ): Promise<unknown> {
+    const parsed = deleteRateSchema.safeParse(body);
+    if (!parsed.success) throw invalid(parsed.error.issues);
+
+    const actor = claims(request).sub;
+    const removed = await this.pricing.deletePolicy(id);
+
+    const ip = ipOf(request);
+    await this.audit.record({
+      actorId: actor,
+      action: 'price.delete',
+      subjectType: 'price',
+      subjectId: id,
+      detail: { kind: 'fx_spread' },
+      reason: parsed.data.reason,
+      ...(ip === undefined ? {} : { ip }),
+    });
+    return removed;
+  }
+
   /* ---------------------------- provider health ------------------------- */
 
   /**

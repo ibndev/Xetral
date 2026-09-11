@@ -371,6 +371,14 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
         role: 'admin',
         stepUp: 'pin',
       })
+      // The SAME decision about a spread policy, which is the table an
+      // operator actually retires rows in. `admin` for the reason above:
+      // retiring can be undone by publishing again and this cannot.
+      .staff('DELETE', '/v1/admin/prices/fx-spread/:id', {
+        pin: true,
+        role: 'admin',
+        stepUp: 'pin',
+      })
       /*
        * ANNOUNCEMENTS TO CUSTOMER HANDSETS.
        *

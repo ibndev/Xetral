@@ -84,10 +84,6 @@ export default function Wallet() {
     [client, currency],
   );
 
-  // Listed separately only where there is money. A rail of zeroes under a
-  // selector that already offers every currency is noise.
-  const others = assets.filter((b) => b.currency !== currency && !isZero(b.total));
-
   return (
     <Shell>
       {/*
@@ -192,30 +188,16 @@ export default function Wallet() {
         </div>
       </section>
 
-      {others.length > 0 && (
-        <section className="card animate-in d2">
-          <div className="card-head">
-            <h2>Other balances</h2>
-          </div>
-          <div className="list">
-            {others.map((b: Balance) => (
-              <div className="list-row" key={b.currency}>
-                <span className="row-icon"><Icon name="wallet" size={19} /></span>
-                <span className="row-main">
-                  <span className="row-title">{b.currency}</span>
-                  {!isZero(b.pending) && (
-                    <span className="row-sub">{formatAmount(b.pending, b.currency)} pending</span>
-                  )}
-                </span>
-                <span className="row-value amount">
-                  {hidden ? MASK : formatAmount(b.spendable, b.currency)}
-                </span>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
+      {/*
+        THERE IS NO "OTHER BALANCES" BOX, and its absence is deliberate.
 
+        The currency SELECTOR on the balance card is the control for this: it
+        names every currency this customer can hold and switches the figure
+        above it. A second list repeating the same balances underneath is two
+        controls for one decision — the exact reason the currency rail and the
+        badge were collapsed into that selector in the first place — and it
+        grew the page by however many currencies the platform happens to offer.
+      */}
       <section className="animate-in d2">
         <div className="row-between section-head">
           <h2>Products</h2>

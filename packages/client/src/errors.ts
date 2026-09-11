@@ -206,6 +206,15 @@ const API_ERROR_CODES = [
    */
   'price_is_live',
   /*
+   * `price_in_use` — a retired spread policy that priced a real trade.
+   *
+   * PERMANENT, unlike `price_is_live`, and that is the difference worth
+   * saying out loud: retiring clears the first and nothing clears this one. A
+   * trade names the policy it was priced under, so the row is part of that
+   * trade's record rather than a price nobody took.
+   */
+  'price_in_use',
+  /*
    * `broadcast_not_found` — an announcement id that names nothing.
    *
    * Reachable only from the operations dashboard, which is why it exists at

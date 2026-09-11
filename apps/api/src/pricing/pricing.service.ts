@@ -435,6 +435,54 @@ export class PricingService {
     return row;
   }
 
+  /**
+   * Removes a RETIRED spread policy.
+   *
+   * THE TABLE AN OPERATOR ACTUALLY RETIRES ROWS IN. 064 gave this to published
+   * RATES, which mostly retire themselves because the reference feed
+   * republishes them; a SPREAD is the row with a Retire button on it and the
+   * one that accumulates every mistyped margin.
+   *
+   * TWO REFUSALS, AND THEY MEAN DIFFERENT THINGS.
+   *
+   * A LIVE policy is refused by 066's trigger: deleting one silently unprices
+   * the corridor, because 008 refuses an unpublished pair rather than quoting
+   * from a default.
+   *
+   * A policy that PRICED A TRADE is refused by the FOREIGN KEY, and that one
+   * is permanent — it is part of that trade's record. Unlike a published rate,
+   * which nothing references by key, a trade names the policy it was priced
+   * under. The key is left to do the refusing rather than re-checked here: a
+   * count before the constraint is a second, weaker copy of the rule plus a
+   * race.
+   */
+  async deletePolicy(uuid: string): Promise<{ uuid: string }> {
+    const removed = await this.pool
+      .query<{ uuid: string }>(
+        `DELETE FROM fx_spread_policies WHERE uuid = $1 RETURNING uuid`,
+        [uuid],
+      )
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : '';
+        if (message.includes('LIVE spread policy cannot be deleted')) {
+          throw new UnprocessableEntityException({ error: 'price_is_live' });
+        }
+        // The key's own refusal, turned into words an operator can act on —
+        // and the action is "leave it", which is why it says so rather than
+        // inviting a retry.
+        if (message.includes('fx_trades_spread_policy_id_fkey')) {
+          throw new UnprocessableEntityException({ error: 'price_in_use' });
+        }
+        throw error;
+      });
+
+    const row = removed.rows[0];
+    if (row === undefined) throw new NotFoundException({ error: 'price_not_found' });
+
+    this.#logger.log(`spread policy deleted: ${uuid}`);
+    return row;
+  }
+
   async retire(
     table: 'fx' | 'giftcard',
     uuid: string,

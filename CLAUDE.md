@@ -3132,6 +3132,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/062_spread_pressure.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/063_momo_accounts.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/064_retired_rate_delete.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/065_push.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/066_retired_policy_delete.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -3195,6 +3196,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/062_spread_pressure.tes
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/063_momo_accounts.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/064_retired_rate_delete.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/065_push.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/066_retired_policy_delete.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

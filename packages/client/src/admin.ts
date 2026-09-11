@@ -1127,6 +1127,21 @@ export class AdminClient {
     );
   }
 
+  /**
+   * Delete a RETIRED spread policy. `admin` only, and the route is what
+   * enforces that — this method existing does not make it callable.
+   *
+   * A policy that priced a real trade is refused permanently: a trade names
+   * the policy it was priced under, so that row is part of its record.
+   */
+  async deleteFxSpread(uuid: string, reason: string, pin: string): Promise<Record<string, unknown>> {
+    return this.#request(
+      'DELETE',
+      `/v1/admin/prices/fx-spread/${encodeURIComponent(uuid)}`,
+      { reason, transaction_pin: pin },
+    );
+  }
+
   /* ------------------------------ broadcasts ---------------------------- */
 
   /**

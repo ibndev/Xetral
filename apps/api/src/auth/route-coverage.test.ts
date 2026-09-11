@@ -176,6 +176,9 @@ describe('the privileged surface is declared as privileged', () => {
       // this cannot, so it sits with the role that holds the rest of the
       // irreversible surface.
       'DELETE /v1/admin/prices/fx-rate/:id (admin)',
+      // The same decision about a spread policy — the table an operator
+      // actually retires rows in, and the one 064 left out.
+      'DELETE /v1/admin/prices/fx-spread/:id (admin)',
       'GET /v1/admin/audit (admin)',
       // Announcements to customer handsets. The two reads are `support`, the
       // widest staff role: "did it go out?" is a question the person taking

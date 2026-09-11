@@ -345,6 +345,8 @@ function sentenceFor(error: ApiError): string {
       return 'Choose your country first — a phone number needs its dialling code.';
     case 'broadcast_not_found':
       return 'That announcement is no longer here.';
+    case 'price_in_use':
+      return 'This spread priced a real trade, so it is part of that transaction\u2019s record and cannot be removed.';
     case 'price_is_live':
       return 'That rate is still in force. Retire it first — deleting a live rate would leave the corridor unpriced.';
     case 'payout_provider_unavailable':

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { formatAmount, nationalPhone, paymentLinkFor } from '@xetral/client';
-import type { Deposit, MomoAccount, XetralClient, XetralCountry } from '@xetral/client';
+import type { MomoAccount, XetralClient, XetralCountry } from '@xetral/client';
 import { MOMO_NETWORKS } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { FormError } from '@/ui/form-error';
@@ -50,7 +50,6 @@ export default function AddMoney() {
    * while they are reading.
    */
   const account = useLoad(() => client.existingFundingAccount(), [client]);
-  const deposits = useLoad<readonly Deposit[]>(() => client.deposits(), [client]);
 
   /*
    * WHAT SOMEBODY HERE CAN ACTUALLY FUND WITH — data, not a `switch`.
@@ -316,7 +315,7 @@ export default function AddMoney() {
         </div>
 
         <div className="copy-row">
-          <span className="copy-label">My Xetral-to-Xetral number</span>
+          <span className="copy-label">Share to a Xetral user &amp; get paid</span>
           {/*
             THE LOCAL NUMBER, WITHOUT THE COUNTRY CODE — `553 921 133`, not
             `+233 553 921 133`.
@@ -360,35 +359,16 @@ export default function AddMoney() {
       </div>
 
       {/*
-        MONEY RECEIVED, ONLY WHEN THERE IS SOME.
-        
-        It was a second card with an empty state, on a screen whose job is to
-        get money in — so the commonest view of this page was two boxes, one of
-        them saying nothing. The history itself is not clutter: a customer
-        whose transfer has not arrived needs it more than anybody. So it is
-        removed exactly when it has nothing to say.
+        THE DEPOSIT HISTORY IS NOT HERE, and that is what this screen is for
+        rather than an omission.
+
+        Add Money answers "how do I put money in" — an account number to
+        transfer to, a wallet to link, a link to share. What has ALREADY
+        arrived is a question about the past, and the Activity screen is where
+        every movement is listed with a filter per currency. A second, shorter
+        copy of it here is a list that disagrees with that one the moment
+        either grows a rule the other does not have.
       */}
-      {(deposits.data?.length ?? 0) > 0 && (
-        <div className="card">
-          <div className="section-head">
-            <h2>Money received</h2>
-          </div>
-
-          <div className="list">
-            {(deposits.data ?? []).map((d) => (
-              <div className="row" key={d.id}>
-                <div>
-                  <div className="row-title">{d.sender_name ?? 'Bank transfer'}</div>
-                  <div className="row-sub">{new Date(d.created_at).toLocaleString()}</div>
-                </div>
-                <div className="amount mono">{formatAmount(d.amount, d.currency)}</div>
-              </div>
-            ))}
-          </div>
-
-          <FormError error={deposits.error} code={deposits.code} />
-        </div>
-      )}
     </Shell>
   );
 }

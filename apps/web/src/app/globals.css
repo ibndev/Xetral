@@ -3189,3 +3189,14 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
  */
 :root[data-keyboard='open'] .tabbar { display: none; }
 :root[data-keyboard='open'] .shell { padding-bottom: 24px; }
+
+/* A badge and the one action that applies to it, on one line. Used where a
+   row's state and the control that acts on that state belong together — a
+   retired price and its Delete — so the cell reads as one thing rather than
+   as two columns squeezed into one. */
+.row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}

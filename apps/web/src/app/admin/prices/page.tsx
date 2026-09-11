@@ -264,11 +264,48 @@ export default function Prices() {
                 </td>
                 <td>{formatMinor(row.min_base_minor, row.base_currency)}</td>
                 <td>{row.published_by ?? <em>at a prompt</em>}</td>
+                {/*
+                  RETIRE WHILE LIVE, DELETE ONCE RETIRED — and this is the
+                  table that needed it. A published rate mostly retires itself,
+                  because the reference feed republishes it; a SPREAD is the row
+                  an operator retires by hand, so it is the one that accumulates
+                  every mistyped margin with no way to clear it.
+
+                  A live policy has no Delete at all rather than a disabled one:
+                  066 refuses it in the DATABASE, because deleting one unprices
+                  the corridor and 008 then refuses every quote on it. Offering
+                  a control whose only outcome is a refusal is worse than not
+                  offering it.
+
+                  The refusal that CANNOT be cleared is a policy that priced a
+                  real trade — the foreign key holds it, and the message says so
+                  rather than inviting a retry.
+                */}
                 <td>
                   {row.retired_at === null ? (
                     <Retire uuid={row.uuid} kind="fx" busy={busy} onRetire={act} />
                   ) : (
-                    <span className="badge">retired</span>
+                    <span className="row-actions">
+                      <span className="badge">retired</span>
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          className="btn small danger"
+                          disabled={busy || pin === ''}
+                          onClick={() =>
+                            void act(async () => {
+                              await admin.deleteFxSpread(
+                                row.uuid,
+                                'removed a retired spread from the prices screen',
+                                pin,
+                              );
+                            })
+                          }
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </span>
                   )}
                 </td>
               </tr>
@@ -403,10 +440,6 @@ export default function Prices() {
                   <th>Our margin</th>
                   <th>Published by</th>
                   <th>Age</th>
-                  {/* Empty header: the column holds one action and only for
-                      some rows, so a label would name a thing most rows do
-                      not have. */}
-                  <th />
                 </tr>
               </thead>
               <tbody>
@@ -447,40 +480,6 @@ export default function Prices() {
                       renders, and customers are quoted whatever it last said.
                     */}
                     <td className="mono">{ageOf(row.age_seconds)}</td>
-                    {/*
-                      DELETE, and only for a RETIRED rate, and only for an
-                      `admin`.
-
-                      A live rate has no button at all rather than a disabled
-                      one: 064 refuses it in the DATABASE because deleting one
-                      unprices the corridor, and offering a control whose only
-                      outcome is a refusal is worse than not offering it.
-
-                      What is lost is an offer nobody took — `fx_trades`
-                      carries its own applied ratio, so no transaction reads
-                      its price back through this table. That is the whole
-                      reason this can exist.
-                    */}
-                    <td>
-                      {isAdmin && row.retired_at != null && (
-                        <button
-                          type="button"
-                          className="btn small danger"
-                          disabled={busy || pin === ''}
-                          onClick={() =>
-                            void act(async () => {
-                              await admin.deleteFxRate(
-                                row.uuid,
-                                'removed a retired rate from the prices screen',
-                                pin,
-                              );
-                            })
-                          }
-                        >
-                          Delete
-                        </button>
-                      )}
-                    </td>
                   </tr>
                 ))}
               </tbody>

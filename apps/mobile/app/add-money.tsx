@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Linking, Share, Text, TextInput, View } from 'react-native';
 import { formatAmount, nationalPhone, paymentLinkFor } from '@xetral/client';
-import type { Deposit, MomoAccount, XetralClient, XetralCountry } from '@xetral/client';
+import type { MomoAccount, XetralClient, XetralCountry } from '@xetral/client';
 import { MOMO_NETWORKS } from '@xetral/client';
 import { Select } from '@/select';
 import { Shell } from '@/shell';
@@ -56,7 +56,6 @@ export default function AddMoney() {
   /* The linked wallet. Its own load: 063 is a later migration and a deployment
    * without it must show the link form rather than fail the screen. */
   const momo = useLoad(() => client.linkedMomo(), [client]);
-  const deposits = useLoad<readonly Deposit[]>(() => client.deposits(), [client]);
 
   /*
    * WHAT SOMEBODY HERE CAN ACTUALLY FUND WITH — data, not a `switch`.
@@ -223,38 +222,12 @@ export default function AddMoney() {
       <RequestPayment />
 
       {/*
-        MONEY RECEIVED, ONLY WHEN THERE IS SOME. It was a second panel with an
-        empty state on a screen whose job is to get money IN, so the commonest
-        view was two boxes with one of them saying nothing. The history is not
-        clutter — a customer whose transfer has not arrived needs it more than
-        anybody — so it is removed exactly when it has nothing to say.
+        THE DEPOSIT HISTORY IS NOT HERE. Add Money answers "how do I put money
+        in"; what has already arrived is a question about the past, and the
+        Activity screen lists every movement with a filter per currency. A
+        second, shorter copy here is a list that disagrees with that one the
+        moment either grows a rule the other does not have.
       */}
-      {(deposits.data?.length ?? 0) > 0 && (
-        <Panel title="Money received">
-          {(deposits.data ?? []).map((d) => (
-            <View
-              key={d.id}
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: space.sm,
-                paddingVertical: space.sm,
-              }}
-            >
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: colors.text, fontFamily: font.sansSemi }}>
-                  {d.sender_name ?? 'Bank transfer'}
-                </Text>
-                <Text style={styles.muted}>{new Date(d.created_at).toLocaleString()}</Text>
-              </View>
-              <Text style={styles.amount}>{formatAmount(d.amount, d.currency)}</Text>
-            </View>
-          ))}
-
-          <FormError error={deposits.error} code={deposits.code} />
-        </Panel>
-      )}
     </Shell>
   );
 }
@@ -316,7 +289,7 @@ function RequestPayment() {
 
       {profile.data !== undefined && (
         <>
-          <Text style={styles.muted}>My Xetral-to-Xetral number</Text>
+          <Text style={styles.muted}>Share to a Xetral user &amp; get paid</Text>
           {/* THE LOCAL NUMBER, WITHOUT THE COUNTRY CODE. This one is for
               another XETRAL customer, and the Send screen puts a dialling-code
               picker in front of its phone field — the sender picks the country
