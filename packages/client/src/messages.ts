@@ -345,6 +345,17 @@ function sentenceFor(error: ApiError): string {
       return 'Choose your country first — a phone number needs its dialling code.';
     case 'broadcast_not_found':
       return 'That announcement is no longer here.';
+    case 'cannot_send_to_self':
+      return 'That is your own number. Choose somebody else to pay.';
+    case 'unsupported_network':
+      return 'That network cannot receive money in this country yet. Choose another.';
+    case 'recipient_name_required':
+      // A REQUEST, NOT A REFUSAL. This rail cannot tell us who holds the
+      // number, so the customer names them for their own list — which is why
+      // the sentence asks rather than apologising.
+      return 'This network cannot confirm the account name. Give this recipient a name so you can recognise them later.';
+    case 'recipient_exists':
+      return 'That recipient is already in your list.';
     case 'checkout_refused':
       // What a payer can actually do: nothing, except tell the person who
       // asked them for money. Saying "try again shortly" about a merchant

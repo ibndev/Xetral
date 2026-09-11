@@ -402,6 +402,50 @@ export interface PayoutBank {
   readonly name: string;
 }
 
+/**
+ * WHICH RAIL REACHES A RECIPIENT — derived, never chosen by a customer.
+ *
+ * `xetral` moves between two accounts here and never leaves; `bank` and `momo`
+ * both leave through a payout and differ in what the destination means and
+ * whether the rail can name who holds it.
+ */
+export type RecipientKind = 'xetral' | 'bank' | 'momo';
+
+/** One row of the customer's own address book. Carries no email and no other
+ *  contact detail, the rule `payable_links` records. */
+export interface Recipient {
+  readonly id: string;
+  readonly kind: RecipientKind;
+  readonly country: string;
+  readonly currency: string;
+  readonly rail_code: string | null;
+  readonly rail_name: string | null;
+  readonly destination: string;
+  /** What the list shows. */
+  readonly display_name: string;
+  /**
+   * What the RAIL said, or null where it has no name enquiry. ONLY THIS ONE
+   * may be rendered as a confirmation: `display_name` can be the customer's
+   * own words, and a screen presenting those as confirmed would be a
+   * confirmation screen that confirms nothing.
+   */
+  readonly resolved_name: string | null;
+  readonly last_used_at: string | null;
+  readonly created_at: string;
+}
+
+/** What a lookup can say about a destination before anything is saved. */
+export interface RecipientResolution {
+  readonly kind: RecipientKind;
+  readonly country: string;
+  readonly currency: string;
+  readonly rail_code: string | null;
+  readonly rail_name: string | null;
+  /** Digits only, normalised server-side into the form the rail accepts. */
+  readonly destination: string;
+  readonly resolved_name: string | null;
+}
+
 export interface BankPayout {
   readonly id: string;
   readonly status: string;
@@ -1066,6 +1110,65 @@ export class XetralClient {
     return this.#get(`/v1/payouts/lookup?${query.toString()}`);
   }
 
+  /* ------------------------ the customer's address book ------------------
+   *
+   * ONE SEND FLOW, and these are what it is made of. The screen no longer
+   * asks "Xetral, bank or mobile money?" — a question about OUR PLUMBING put
+   * to somebody who wants to pay a person — so the kind travels here as a
+   * consequence of what was typed rather than as something anybody chose.
+   */
+
+  async recipients(): Promise<readonly Recipient[]> {
+    const body = await this.#get<{ recipients: Recipient[] }>('/v1/recipients');
+    return body.recipients;
+  }
+
+  /**
+   * Who holds this, before anything is saved.
+   *
+   * A POST because the destination is a phone number or an account number,
+   * and a query string is the one place a value reaches a browser history, a
+   * proxy log and a referrer at once.
+   *
+   * `resolved_name` COMES BACK NULL WHERE THE RAIL HAS NO NAME ENQUIRY, and
+   * that is not a failure: Kenya's M-PESA has none, so the screen asks the
+   * customer for a label instead of showing them a refusal about a number
+   * that is perfectly correct.
+   */
+  async resolveRecipient(input: {
+    kind: RecipientKind;
+    country?: string;
+    railCode?: string;
+    destination: string;
+  }): Promise<RecipientResolution> {
+    return this.#post('/v1/recipients/resolve', {
+      kind: input.kind,
+      ...(input.country === undefined ? {} : { country: input.country }),
+      ...(input.railCode === undefined ? {} : { rail_code: input.railCode }),
+      destination: input.destination,
+    });
+  }
+
+  async saveRecipient(input: {
+    kind: RecipientKind;
+    country?: string;
+    railCode?: string;
+    destination: string;
+    label?: string;
+  }): Promise<Recipient> {
+    return this.#post('/v1/recipients', {
+      kind: input.kind,
+      ...(input.country === undefined ? {} : { country: input.country }),
+      ...(input.railCode === undefined ? {} : { rail_code: input.railCode }),
+      destination: input.destination,
+      ...(input.label === undefined ? {} : { label: input.label }),
+    });
+  }
+
+  async removeRecipient(id: string): Promise<void> {
+    await this.#delete(`/v1/recipients/${encodeURIComponent(id)}`);
+  }
+
   async bankPayouts(): Promise<readonly BankPayout[]> {
     const body = await this.#get<{ payouts: BankPayout[] }>('/v1/payouts');
     return body.payouts;
@@ -1346,6 +1449,10 @@ export class XetralClient {
 
   async #post<T>(path: string, body: unknown): Promise<T> {
     return this.#request<T>('POST', path, body);
+  }
+
+  async #delete<T>(path: string): Promise<T> {
+    return this.#request<T>('DELETE', path);
   }
 
   /**

@@ -258,6 +258,26 @@ const API_ERROR_CODES = [
    */
   'checkout_refused',
   /*
+   * The four the ONE Send flow can answer with, and each says what to do next
+   * rather than that something went wrong.
+   *
+   * `cannot_send_to_self` — the number typed is the customer's own. Worth its
+   *   own code because the alternative is a transfer that balances to nothing
+   *   and a customer who thinks they paid somebody.
+   * `unsupported_network` — a network this corridor does not carry, refused
+   *   here rather than at the provider, where 046 records that it reaches the
+   *   customer as their own number being wrong.
+   * `recipient_name_required` — the rail has no name enquiry, so the customer
+   *   has to label this destination themselves. Kenya's M-PESA, and it is a
+   *   request rather than a refusal.
+   * `recipient_exists` — already in their list. Almost never reached, because
+   *   the service returns the existing row instead.
+   */
+  'cannot_send_to_self',
+  'unsupported_network',
+  'recipient_name_required',
+  'recipient_exists',
+  /*
    * `broadcast_not_found` — an announcement id that names nothing.
    *
    * Reachable only from the operations dashboard, which is why it exists at
