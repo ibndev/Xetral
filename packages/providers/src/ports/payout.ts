@@ -73,6 +73,42 @@ export interface PayoutRequest<C extends Currency = Currency> {
    * clawed back.
    */
   readonly reference: string;
+  /**
+   * WHO IS SENDING, for the corridors that require it by regulation.
+   *
+   * Kenya's M-PESA payout is refused without `meta.sender`,
+   * `meta.sender_country` and `meta.mobile_number` — it is treated as a
+   * cross-border remittance and the originator has to be named. We sent no
+   * `meta` at all, so every shilling transfer was refused for a missing
+   * required field before anything else about it was considered.
+   *
+   * It is the SENDING CUSTOMER, never the platform: a remittance names the
+   * person the money came from. Optional on the port because the rails that
+   * do not ask for it must not be made to carry it.
+   */
+  readonly sender?:
+    | {
+        readonly name: string;
+        /** ISO-3166 alpha-2 of the sender's own country. */
+        readonly country: string;
+        /** The sender's own number, digits only, international form. */
+        readonly phone: string;
+      }
+    | undefined;
+  /**
+   * WHICH OF OUR BALANCES FUNDS THIS, when the rail holds several.
+   *
+   * Flutterwave is a PREFUNDED WALLET, not a rail that moves money on demand:
+   * it debits the balance matching the payout currency unless told otherwise,
+   * so a cedi payout needs cedis. A platform with no GHS float can either hold
+   * one or name a different balance here and accept the provider's conversion
+   * rate — and that is a treasury decision somebody has to make, which is why
+   * it arrives as a value rather than being assumed by this file.
+   *
+   * Undefined means "the payout currency", which is the provider's own
+   * default.
+   */
+  readonly debitCurrency?: string | undefined;
 }
 
 /**

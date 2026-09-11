@@ -37,6 +37,32 @@ export const FLUTTERWAVE_MOBILE_MONEY_NETWORKS: Readonly<Record<string, readonly
   KE: [{ code: 'MPS', name: 'M-PESA' }],
 };
 
+/**
+ * WHERE A WALLET NUMBER CAN BE RESOLVED TO A NAME, AND WHERE IT CANNOT.
+ *
+ * THIS FILE SPENT THREE ROUNDS ASSERTING THAT NO MOBILE MONEY WALLET HAS A
+ * NAME ENQUIRY. That is false, and it is false in the one country this
+ * platform's customers were complaining about. Flutterwave's own
+ * documentation for `/v3/accounts/resolve` lists what it accepts: Nigerian
+ * bank accounts, Ghanaian bank accounts, GHANAIAN MOBILE MONEY NUMBERS, and a
+ * Flutterwave merchant id.
+ *
+ * So "we cannot find the momo details" was never the provider's answer. The
+ * adapter refused to ask: it matched the network code, threw
+ * `name_unavailable` and never made the call. Every layer above then did
+ * exactly what it was told, correctly, all the way to a screen saying the name
+ * could not be found — about a number whose name Flutterwave will return on
+ * request. A REFUSAL THIS CODE INVENTED, relayed faithfully by everything
+ * downstream, is the hardest kind of fault to see: every component is
+ * behaving.
+ *
+ * KENYA IS NOT ON THAT LIST, and that is the reason this is a table rather
+ * than a flag. M-PESA is absent from what resolve accepts, so there
+ * `name_unavailable` is the true answer and stays — 043's rule holds where it
+ * applies. What was wrong was applying it everywhere.
+ */
+const RESOLVES_MOBILE_MONEY: ReadonlySet<string> = new Set(['GH']);
+
 const banksResponse = z.object({
   status: z.string().optional(),
   data: z.array(z.object({ code: z.string().min(1), name: z.string().min(1) })).optional(),
@@ -69,14 +95,15 @@ const transferResponse = z.object({
  * is worth the repetition: this is the direction that sends a customer's
  * money away and cannot be recalled.
  *
- * A MOBILE MONEY WALLET HAS NO INDEPENDENT NAME TO FETCH, and this adapter
- * says so rather than inventing one. `lookup` asks their resolver, which
- * answers for bank accounts; where it cannot, the refusal is `name_unavailable`
- * rather than "no such account", because the two mean opposite things to the
- * customer standing in front of it — one is "check the number", the other is
- * "we cannot confirm who this is". The rule 043 states — the name is the
- * BANK'S, never the sender's — is unchanged: what this adapter will not do is
- * echo back a name the sender typed.
+ * WHETHER A WALLET HAS A NAME TO FETCH IS A TABLE, NOT A RULE — see
+ * `RESOLVES_MOBILE_MONEY`. `lookup` ASKS wherever the resolver answers, which
+ * includes Ghanaian mobile money numbers, and refuses with `name_unavailable`
+ * only where no such call exists. That refusal is told apart from "no such
+ * account" because the two mean opposite things to the customer standing in
+ * front of it — one is "check the number", the other is "we cannot confirm who
+ * this is". The rule 043 states — the name is the RAIL'S, never the sender's —
+ * is unchanged: what this adapter will not do is echo back a name the sender
+ * typed.
  */
 export class FlutterwavePayoutAdapter implements PayoutPort {
   readonly provider = PROVIDER;
@@ -115,21 +142,31 @@ export class FlutterwavePayoutAdapter implements PayoutPort {
   ): Promise<BeneficiaryLookup> {
     const iso = country.trim().toUpperCase();
     const networks = FLUTTERWAVE_MOBILE_MONEY_NETWORKS[iso];
+    const isWallet = networks?.some((n) => n.code === bankCode) === true;
 
-    if (networks?.some((n) => n.code === bankCode) === true) {
+    if (isWallet && !RESOLVES_MOBILE_MONEY.has(iso)) {
       /*
-       * NO NAME ENQUIRY EXISTS FOR A WALLET, and pretending otherwise is the
-       * one thing this must not do. A resolver that answered the sender's own
-       * text would turn the confirmation screen into a mirror, which is worse
-       * than no confirmation because it looks like one.
+       * WHERE THERE GENUINELY IS NO CALL TO MAKE. M-PESA is not among what
+       * `/v3/accounts/resolve` accepts, so this is the provider's real
+       * position rather than this adapter's assumption — and the one thing
+       * that must not happen here is answering with the sender's own text,
+       * which is a confirmation screen that confirms nothing while looking
+       * exactly like one.
        */
       throw new ProviderRejectedError(
         PROVIDER,
-        'a mobile money wallet has no name enquiry; confirm the network and the number',
+        `a ${iso} mobile money wallet has no name enquiry; confirm the network and the number`,
         'name_unavailable',
       );
     }
 
+    /*
+     * THE SAME TWO FIELDS FOR BOTH, which is why one call serves both rails.
+     * For a bank, `account_bank` is the bank code and `account_number` is the
+     * account. For a Ghanaian wallet, `account_bank` is the NETWORK code and
+     * `account_number` is the number IN INTERNATIONAL FORM — `233…`, which is
+     * what `phone.ts` produces and what the row already records.
+     */
     const body = await this.#client.request('POST', FLUTTERWAVE_ENDPOINTS.resolveAccount, {
       account_number: accountNumber,
       account_bank: bankCode,
@@ -158,30 +195,59 @@ export class FlutterwavePayoutAdapter implements PayoutPort {
       amount: majorText(request.amount.amount, request.amount.currency),
       currency: request.amount.currency,
       /*
-       * WHAT WE ARE DEBITED IN, stated rather than inferred.
+       * WHICH BALANCE FUNDS THIS, and the comment that used to sit here was
+       * backwards in a way that mattered.
        *
-       * Left out, Flutterwave picks a balance — and on a multi-currency
-       * account that can mean funding a cedi payout from the naira balance at
-       * a rate nobody chose. That is the same silent conversion this whole
-       * migration exists because of, in the outbound direction.
+       * It said "left out, Flutterwave picks a balance". They do not pick:
+       * they DEBIT THE BALANCE MATCHING THE PAYOUT CURRENCY. So echoing the
+       * payout currency here is not a safety measure, it is the default
+       * written out — and it PINS the transfer to a GHS float this platform
+       * may not hold, on a provider that is a prefunded wallet rather than a
+       * rail that moves money on demand.
+       *
+       * Naming a DIFFERENT currency is what the field is actually for: debit
+       * naira, pay out cedis, at Flutterwave's own conversion rate. That
+       * trades a float for a rate somebody else sets, which is a treasury
+       * decision — so it comes from a setting and this file states whatever
+       * it is told.
        */
-      debit_currency: request.amount.currency,
+      debit_currency: request.debitCurrency ?? request.amount.currency,
       ...(request.narration === undefined ? {} : { narration: request.narration }),
       /* OURS, derived from the customer's key. Their side de-duplicates on
        * it, so a retry after a timeout is one payout at their end too — and
        * on this operation a duplicate cannot be clawed back. */
       reference: request.reference,
       /*
-       * OMITTED ENTIRELY WHERE THERE IS NO NAME, rather than sent empty.
+       * REQUIRED ON EVERY TRANSFER, INCLUDING A WALLET — and omitting it was a
+       * rule about our SCREENS applied to their WIRE FORMAT.
        *
-       * A mobile money wallet has no name enquiry on any network, so there is
-       * nothing to send — and the one thing this adapter must never do is put
-       * the sender's own text in this field, which would appear on the
-       * recipient's side as a confirmed name that nobody confirmed.
+       * Flutterwave's mobile money transfer documentation says it plainly: "a
+       * beneficiary_name is also required so we can identify this account in
+       * your list of beneficiaries", and their own SDK docs quote
+       * `beneficiary_name is required` as a FAILED TRANSFER RESPONSE. It is a
+       * LABEL on their beneficiary book, not a claim about who holds the
+       * wallet.
+       *
+       * 043's rule is about what a SENDER is shown: never present the sender's
+       * own typed name back to them as though a rail confirmed it. Labelling a
+       * transfer does not do that. Conflating the two removed a required field
+       * and would have had every momo payout refused for validation — which is
+       * the opposite of the fault it was meant to fix.
        */
-      ...(request.accountName === undefined || request.accountName.trim() === ''
+      beneficiary_name: beneficiaryLabel(request),
+      /*
+       * WHO SENT IT, where the corridor asks. Kenya's M-PESA payout is a
+       * cross-border remittance and is refused without the originator named.
+       */
+      ...(request.sender === undefined
         ? {}
-        : { beneficiary_name: request.accountName }),
+        : {
+            meta: {
+              sender: request.sender.name,
+              sender_country: request.sender.country,
+              mobile_number: request.sender.phone,
+            },
+          }),
     });
 
     const parsed = transferResponse.safeParse(body);
@@ -229,6 +295,27 @@ function receiptOf(data: {
     };
   }
   return { providerPayoutId: String(data.id), state: 'sent' };
+}
+
+/**
+ * What goes in `beneficiary_name`, which is a required field on every transfer.
+ *
+ * THE RAIL'S OWN ANSWER WHERE THERE IS ONE. Ghana resolves a wallet number to
+ * a name and Nigeria resolves an account number, so on both the value here is
+ * a claim the sender did not author — which is the whole point of the lookup.
+ *
+ * WHERE THE RAIL CANNOT ANSWER — Kenya — the field is still required, and the
+ * honest thing to put in it is a LABEL rather than a name: the network and the
+ * last four digits identify the destination in Flutterwave's beneficiary book
+ * without asserting anything about a person. What must never go here is the
+ * sender's own typed text, because that is the value somebody would later be
+ * tempted to render back on a confirmation screen.
+ */
+function beneficiaryLabel<C extends Currency>(request: PayoutRequest<C>): string {
+  const given = request.accountName?.trim();
+  if (given !== undefined && given !== '') return given;
+  const last4 = request.accountNumber.slice(-4);
+  return `${request.bankCode} ${last4}`.trim();
 }
 
 function majorText(amountMinor: bigint, currency: string): string {

@@ -59,17 +59,50 @@ describe('what a customer is offered to send to', () => {
 });
 
 describe('who holds the destination', () => {
-  it('says a wallet has no name enquiry rather than inventing one', async () => {
+  it('ASKS for a Ghanaian wallet, instead of refusing to ask', async () => {
     /*
-     * THE ONE REFUSAL TOLD APART FROM THE OTHERS. There is no name enquiry for
-     * a mobile money wallet on any of these rails — that is a fact about the
-     * product, so saying it leaks nothing about which numbers exist. What this
-     * must never do is echo back a name the sender typed, which would be a
-     * confirmation screen that confirms nothing while looking exactly like one.
+     * THE TEST THAT ENCODED THE BUG, rewritten to encode the fact.
+     *
+     * It used to assert that a `GH`/`MTN` lookup threw `name_unavailable`
+     * WITHOUT CALLING ANYTHING — and it passed, for three rounds, while
+     * customers in Accra were reporting that their momo details could not be
+     * found. Flutterwave's own documentation for `/v3/accounts/resolve` lists
+     * GHANAIAN MOBILE MONEY NUMBERS among what it accepts, so the refusal was
+     * this adapter's invention and the test was agreeing with it.
+     *
+     * A test written from the same assumption as the code passes everything
+     * and fails on the first live call. It is the lesson Phase 3 records about
+     * the Bitnob endpoint table, in a second place.
+     */
+    const { client, sent } = stub([
+      { status: 'success', data: { account_name: 'RABI SIEDU' } },
+    ]);
+    const found = await new FlutterwavePayoutAdapter(client).lookup('GH', 'MTN', '233553921133');
+    expect(sent[0]?.url).toBe('https://api.flutterwave.com/v3/accounts/resolve');
+    // The NETWORK code goes in `account_bank` and the number goes in
+    // INTERNATIONAL form — what `phone.ts` produces and what the row records.
+    expect(sent[0]?.body).toMatchObject({
+      account_bank: 'MTN',
+      account_number: '233553921133',
+    });
+    expect(found.accountName).toBe('RABI SIEDU');
+  });
+
+  it('still says M-PESA has no name enquiry, because it has none', async () => {
+    /*
+     * 043'S RULE HOLDS WHERE IT APPLIES, and Kenya is where it applies. M-PESA
+     * is absent from what `/v3/accounts/resolve` accepts, so this is the
+     * provider's real position rather than an assumption — and it is told
+     * apart from `unknown_account`, which reads to a customer as "check the
+     * number".
+     *
+     * What this must never do either way is echo back a name the sender typed,
+     * which would be a confirmation screen that confirms nothing while looking
+     * exactly like one.
      */
     const { client, sent } = stub([]);
     await expect(
-      new FlutterwavePayoutAdapter(client).lookup('GH', 'MTN', '0244123456'),
+      new FlutterwavePayoutAdapter(client).lookup('KE', 'MPS', '254712345678'),
     ).rejects.toMatchObject({ providerCode: 'name_unavailable' });
     expect(sent).toHaveLength(0);
   });
