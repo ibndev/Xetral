@@ -345,6 +345,12 @@ function sentenceFor(error: ApiError): string {
       return 'Choose your country first — a phone number needs its dialling code.';
     case 'broadcast_not_found':
       return 'That announcement is no longer here.';
+    case 'checkout_refused':
+      // What a payer can actually do: nothing, except tell the person who
+      // asked them for money. Saying "try again shortly" about a merchant
+      // account that is not enabled for this currency is a false sentence
+      // that costs the payee a second failed attempt.
+      return 'This payment could not be started. Please tell the person who sent you this link.';
     case 'checkout_not_configured':
       return 'This currency cannot be paid yet. Ask the person who sent you this link to get in touch with us.';
     case 'transaction_not_found':

@@ -344,10 +344,46 @@ export class PaymentLinkService {
        * what crosses the boundary is a code the page turns into words, and
        * `/admin/funding/diagnostics` is where the reason is answerable.
        */
-      if (error instanceof ProviderUnavailableError && /no .* key is configured/i.test(
-        error.message,
-      )) {
+      /*
+       * AND IT IS WRITTEN DOWN, on the row the payer's attempt already
+       * created.
+       *
+       * A log line is written at the moment a stranger presses a button, and
+       * an operator cannot page back through application logs looking for the
+       * afternoon somebody tried to pay a customer they have never heard of.
+       * `checkout_refusals` is where "why did my payment link say Payment
+       * error" becomes answerable — with the RAIL'S OWN SENTENCE, which is
+       * the difference between a credential nobody pasted and an outage.
+       *
+       * BEST EFFORT, because the refusal is what matters. A failure to record
+       * why a checkout failed must not become a second failure on top of it.
+       */
+      await this.pool
+        .query(`UPDATE link_payments SET refusal_reason = $2 WHERE reference = $1`, [
+          reference,
+          describe(error).slice(0, 500),
+        ])
+        .catch(() => undefined);
+
+      if (
+        error instanceof ProviderUnavailableError &&
+        /no .* key is configured/i.test(error.message)
+      ) {
         throw new ServiceUnavailableException({ error: 'checkout_not_configured' });
+      }
+      /*
+       * A REFUSAL IS NOT AN OUTAGE, and collapsing them is what produced
+       * "Payment error" for three different problems.
+       *
+       * `ProviderRejectedError` means the rail UNDERSTOOD and said no — this
+       * merchant is not enabled for cedis, this currency is not on the
+       * integration, this amount is below their floor. None of those improve
+       * by waiting, so telling the payer to try again later is false. 037
+       * already draws this line for provider health and it is the same line:
+       * a rejection is an answer, not ill health.
+       */
+      if (error instanceof ProviderRejectedError) {
+        throw new ServiceUnavailableException({ error: 'checkout_refused' });
       }
       throw new ServiceUnavailableException({ error: 'checkout_unavailable' });
     }

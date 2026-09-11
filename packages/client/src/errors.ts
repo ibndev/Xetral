@@ -239,6 +239,25 @@ const API_ERROR_CODES = [
    */
   'checkout_not_configured',
   /*
+   * `checkout_refused` — the rail understood and said no.
+   *
+   * THE THIRD MEANING THAT USED TO SHARE ONE CODE. A merchant account not
+   * enabled for this currency, an amount below the rail's floor, a product
+   * the integration does not carry: each is an ANSWER rather than an outage,
+   * and none of them improves by waiting. Telling a payer to try again
+   * shortly is false in every one.
+   *
+   * 037 draws the same line for provider health — a rejection is not ill
+   * health — and it is drawn here for the same reason: collapsing a refusal
+   * into an outage produces an alert nobody can act on and a sentence nobody
+   * should believe.
+   *
+   * It carries no provider name and no sentence. Those name our integration
+   * and are recorded on the payment row, where `checkout_refusals` answers
+   * for them.
+   */
+  'checkout_refused',
+  /*
    * `broadcast_not_found` — an announcement id that names nothing.
    *
    * Reachable only from the operations dashboard, which is why it exists at
