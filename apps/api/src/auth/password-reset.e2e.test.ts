@@ -440,6 +440,34 @@ describe('using the code', () => {
   });
 });
 
+/**
+ * Sweep until THIS customer's message stops being pending.
+ *
+ * ONE SWEEP IS NOT ENOUGH, and assuming it was is what made these tests
+ * depend on the order the e2e files happen to run in. The worker drains
+ * `LIMIT 100` per pass and the sweep is GLOBAL by design, so once the shared
+ * database holds more queued messages than that — which any suite that
+ * registers customers can cause — a single pass never reaches the row this
+ * test just wrote. It then reads `pending` and reports a broken worker.
+ *
+ * The file already states the rule for the MAILER ("asserted on THIS message,
+ * not on a global count"); this is the same rule applied to the SWEEP, which
+ * is the half it was missing. Bounded, so a genuinely stuck message fails the
+ * test rather than hanging it.
+ */
+async function drain(userId: string, kind = 'password_reset'): Promise<void> {
+  for (let pass = 0; pass < 20; pass += 1) {
+    const row = await pool.query<{ status: string }>(
+      `SELECT status::text AS status FROM notification_outbox
+        WHERE user_id = $1::bigint AND kind = $2
+        ORDER BY id DESC LIMIT 1`,
+      [userId, kind],
+    );
+    if (row.rows[0] !== undefined && row.rows[0].status !== 'pending') return;
+    await worker.sweep();
+  }
+}
+
 describe('the outbox worker', () => {
   it('sends a queued message and forgets its body', async () => {
     const { userId, email } = await seedCustomer();
@@ -448,7 +476,7 @@ describe('the outbox worker', () => {
       .send({ identifier: email })
       .expect(204);
 
-    await worker.sweep();
+    await drain(userId);
 
     const row = await pool.query<{
       status: string;
@@ -488,8 +516,12 @@ describe('the outbox worker', () => {
     const key = `xetral:notification:${await idFor(userId)}`;
     const mine = (): number => mailer.sent.filter((m) => m.idempotencyKey === key).length;
 
-    await worker.sweep();
+    await drain(userId);
     expect(mine()).toBe(1);
+    // A SECOND full drain must not send it again. `drain` returns immediately
+    // once the row is no longer pending, so this is the sweep being asked to
+    // reconsider a message it has already delivered.
+    await drain(userId);
     await worker.sweep();
     expect(mine()).toBe(1);
   });
@@ -502,7 +534,22 @@ describe('the outbox worker', () => {
       .expect(204);
 
     mailer.failWith = new ProviderUnavailableError('stub', 'upstream down');
-    await worker.sweep();
+    /*
+     * SWEPT UNTIL THIS MESSAGE HAS BEEN ATTEMPTED, not once. The row is
+     * expected to stay `pending` — that is the whole assertion — so the loop
+     * watches `attempts` rather than the status, and the worker's `LIMIT 100`
+     * means a shared database deeper than that needs several passes before it
+     * reaches this row at all.
+     */
+    for (let pass = 0; pass < 20; pass += 1) {
+      const seen = await pool.query<{ attempts: number }>(
+        `SELECT attempts FROM notification_outbox
+          WHERE user_id = $1::bigint ORDER BY id DESC LIMIT 1`,
+        [userId],
+      );
+      if ((seen.rows[0]?.attempts ?? 0) > 0) break;
+      await worker.sweep();
+    }
 
     const row = await pool.query<{ status: string; attempts: number }>(
       `SELECT status::text AS status, attempts FROM notification_outbox

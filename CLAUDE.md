@@ -1141,6 +1141,140 @@ and the Send screen of both apps.
   file rather than by what they mean, which is how a view becomes unreadable
   one migration at a time. `DROP VIEW` then `CREATE VIEW`.
 
+### Why a mobile money send did nothing — non-obvious rules
+
+`apps/web/src/app/transfer/page.tsx`, `apps/mobile/app/transfer.tsx`, bound by
+`momo-send.test.ts`.
+
+- **THE API WAS NEVER WRONG, AND IT LOOKED LIKE A PROVIDER FAULT TWICE.** The
+  payout port answers `name_unavailable` for a wallet — correctly and
+  permanently, because there is no name enquiry on that rail. The screen
+  displayed that answer and ENABLED its button for it. The SUBMIT HANDLER,
+  written earlier and never revisited, still required a beneficiary name:
+  `if (destination === 'bank' && beneficiary === undefined) return;`. So the
+  control enabled, the customer pressed it, and nothing happened.
+- **A BUTTON THAT LOOKS LIVE AND DOES NOTHING READS AS "IT CANNOT FIND THE
+  NUMBER".** That is what was reported, three times, about numbers that were
+  correct — and it is why the complaint pointed at the lookup rather than at
+  the form.
+- **TWO DEFINITIONS OF ONE QUESTION**, the shape already recorded about the two
+  recipient resolvers and the two beneficiary lookups. `payoutReviewable` is
+  the one definition now, read by the button AND the handler, and the test
+  fails the build on either re-deriving it inline.
+- **`number.length < 10` IS A NUBAN AND NOT A PHONE NUMBER.** A Ghanaian MTN
+  number and a Kenyan Safaricom number are NINE national digits, so a customer
+  who typed theirs without the trunk zero made no request at all — no
+  `name_unavailable` came back, so the button stayed disabled with nothing on
+  screen saying why. The floor is per rail.
+
+### Editing your own account — non-obvious rules
+
+`apps/api/src/auth/profile.service.ts`, on the settings screen of both apps.
+
+- **VERIFIED MEANS READ-ONLY, and the direction looks backwards.** What a
+  reviewer read off a document is the record; letting its subject retype their
+  own name or number afterwards would make the verification a claim about a
+  moment rather than about the account, and the name a money decision may read
+  would no longer be the name anybody checked. Correcting it is a
+  re-verification, which is a person's job.
+- **UNVERIFIED MEANS FILL IN WHAT IS MISSING**, and the field that matters is
+  THE PHONE NUMBER. An account opened before it was required has none, the
+  number IS the Xetral-to-Xetral identifier, and there was no path anywhere in
+  the product to add one — so those customers show "Not set" on Request
+  payment and every sender is told there is no such customer. The screen says
+  that in words rather than leaving a blank that reads as something which
+  failed to load.
+- **THE NUMBER IS NATIONAL DIGITS AND THE DIALLING CODE COMES FROM THE
+  COUNTRY**, joined server-side exactly as registration does it.
+  `users_phone_unique` is a plain index on text and cannot see that three
+  spellings are one person. A national number with NO country is REFUSED
+  rather than guessed: assuming the platform default would write a Nigerian
+  number for a Ghanaian, and the index would then hold a string nobody can be
+  reached on.
+- **THE EMAIL HAS NO ENDPOINT, VERIFIED OR NOT**, and `.strict()` refuses one
+  rather than ignoring it. It is what `users_email_unique` refuses a duplicate
+  account on, so a form that could move an address between accounts is an
+  account-takeover primitive with a text box in front of it.
+- **`editable` IS NAMED BY THE SERVER** and the screens draw themselves from
+  it rather than each re-deriving the rule. The copy on the client is the one
+  an attacker can edit; the refusal is the control either way.
+
+### What a customer reads about a payout — non-obvious rules
+
+`apps/api/src/wallet/wallet.service.ts`, `packages/client/src/receipt.ts`.
+
+- **"BANK PAYOUT RESERVED" WAS PERMANENT, AND IT IS STRUCTURAL.** A payout
+  posts TWO entries: the reserve moves wallet → pending and its description is
+  written at that moment, and the settle moves pending → float, where the
+  customer has no `customer_wallet` leg at all. A wallet history is wallet legs
+  only and is right to be — so the settle can never appear and the row a
+  customer reads was written before anything was sent.
+- **THE DESCRIPTION IS NOT REWRITTEN.** Entries are append-only and it was
+  TRUE when it was written. `bank_payouts.reserve_entry_id` names the entry, so
+  the live state is one indexed lookup away — and decorating is correct for
+  every row written before any of this existed, which rewriting could never
+  have been.
+- **`on_its_way` IS NOT "failed" AND NOT "sent".** It means nobody has answered
+  for this payout yet: the money is held and the sweep will ask. Saying either
+  would be a claim about money that may already be in somebody's account —
+  043's rule about a timeout settling nothing and reversing nothing.
+- **MONEY LEAVING IS RED AND MONEY ARRIVING IS GREEN.** It was red for
+  neither: an outgoing figure took the default text colour, so the only thing
+  separating "you were paid" from "you paid" at a glance was a minus sign.
+- **A ROW IS A BUTTON, AND THE DETAIL IS SCOPED TO THE CUSTOMER'S OWN LEGS.**
+  An entry they have no leg in answers the SAME 404 as one that does not
+  exist, asserted as an EQUALITY of the two responses rather than separately —
+  which is exactly how the payment link's two answers came to differ. A
+  malformed id answers identically, so neither says which ids are the right
+  shape.
+- **IT RETURNS EVERY LEG, NOT ONE.** A transfer that charges a fee is two
+  postings against the same wallet, and a receipt showing only the larger one
+  would not add up to what left the account.
+- **THE RECEIPT IS ONE FORMATTER FOR BOTH APPS.** Two copies of "what a receipt
+  says" drift, and the copy that drifts is the one a customer forwards to the
+  person asking whether they were paid. Plain text, so it survives WhatsApp, a
+  feature phone and a quote back to support.
+- **IT CARRIES NO BALANCE, NO PROVIDER SENTENCE AND NEVER A FULL ACCOUNT
+  NUMBER.** A receipt goes to the person who asked to be paid; what is left in
+  the account is nobody's business but the customer's, the provider's sentence
+  names our integration, and the last four is what identifies a destination on
+  every bank statement.
+
+### Why a checkout refused — non-obvious rules
+
+`apps/api/src/pay/payment-link.service.ts`,
+`apps/api/src/funding/funding-diagnostics.service.ts`, covered by
+`apps/api/src/pay/checkout.e2e.test.ts`.
+
+- **ONE CODE COVERED A MISSING KEY, A REFUSAL AND AN OUTAGE.** A deployment
+  holding a Paystack key and no Flutterwave one collected naira perfectly and
+  answered every cedi, shilling and dollar checkout with
+  `checkout_unavailable` — which reads as "try again later" about something
+  that will never work until somebody pastes a key.
+- **THE REASON EXISTED ONLY IN A LOG LINE** written at the moment a payer
+  pressed a button. `provider_route_coverage` says whether a currency HAS a
+  rail; nothing said whether that rail can be CALLED, and the two apart are
+  why nobody could connect "cedi links fail" to "the Flutterwave key is
+  absent".
+- **THE LOG NAMES THE RAIL**, because two providers serve this endpoint and "no
+  secret key is configured" is true of both — 061's fault, where a log naming
+  the global default sent an operator to check a credential that had nothing to
+  do with it.
+- **THE PAYER'S ANSWER STILL CARRIES NO PROVIDER NAME AND NO SENTENCE.** That
+  part names our integration and stays in the log, which is 006's rule; what
+  crosses the boundary is a code the page turns into words.
+- **THE DIAGNOSTICS CHECK RESOLVES THE CREDENTIAL THE WAY THE ADAPTER DOES**,
+  026's order, so it cannot report a key the rail would not find — and it
+  returns a BOOLEAN, because a helper here that returned the key would put one
+  behind a staff route.
+- **NOTHING COVERED THIS PATH AT ALL, AND THAT IS WHY IT SHIPPED.** The
+  checkout adapters are constructed INSIDE `#checkout()` rather than injected,
+  so there was no port to fake and no test was written; the only proof the
+  Flutterwave half worked was that it read correctly. It did read correctly.
+  The e2e drives the REAL adapter over HTTP to a stub speaking their published
+  v3 protocol, which is the only thing that exercises the unit conversion, the
+  payment options, the envelope and the auth scheme together.
+
 ### Telling customers something — non-obvious rules
 
 Schema: `packages/ledger/sql/065_push.sql`. Port in
