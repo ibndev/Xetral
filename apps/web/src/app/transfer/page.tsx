@@ -1,27 +1,47 @@
 'use client';
 
-import { Suspense, useState } from 'react';
+import { Suspense, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { e164, exponentFor, formatAmount, isValidAmount, sendableFor } from '@xetral/client';
+import { exponentFor, formatAmount, isValidAmount, sendableFor } from '@xetral/client';
+import { CURRENCIES } from '@xetral/shared';
+import type {
+  Recipient,
+  RecipientKind,
+  RecipientResolution,
+  XetralCountry,
+} from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { FormError } from '@/ui/form-error';
 import { Icon } from '@/ui/icon';
 import { Select } from '@/ui/select';
-import { CountryMark } from '@/ui/currency-mark';
+import { CurrencyMark } from '@/ui/currency-mark';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/lib/hooks';
-import { codeOf } from '@/lib/errors';
-import { Toast } from '@/ui/toast';
-
-/** Zero, written the way this currency writes it — "0.00" for naira,
- *  "0.000000" for USDT. The API sends major units, so the string differs. */
-const isZero = (amount: string): boolean => /^-?0(\.0+)?$/.test(amount);
-
 
 /**
- * `useSearchParams` suspends, so the screen it is read on must sit inside a
- * boundary or the whole route opts out of static rendering with a build error
- * naming neither this file nor the hook.
+ * SENDING MONEY, AS ONE FLOW.
+ *
+ * IT WAS THREE PRODUCTS UNDER ONE HEADING. The screen opened by asking
+ * "Xetral, bank or mobile money?" — a question about OUR PLUMBING, put to
+ * somebody who only wants to pay a person — and each answer led to a different
+ * form, a different set of fields and a different endpoint. A customer who
+ * picked wrong got a dead end rather than a redirect, and the tabs meant the
+ * commonest send took two decisions before a number could be typed.
+ *
+ * Four steps now, and each asks one thing:
+ *
+ *   who       the people already paid, so the second payment costs a tap
+ *   currency  what the recipient RECEIVES, which is the only question that
+ *             decides everything after it
+ *   details   the country is read off the currency, and the rail is a list of
+ *             networks with the Xetral account among them
+ *   amount    what leaves, what lands, and what it costs
+ *
+ * THE RAIL IS A ROW IN A LIST RATHER THAN A TAB ACROSS THE TOP. That is the
+ * whole of the unification: "how does this reach them" is one question with
+ * several answers, and an internal Xetral transfer is one of the answers
+ * rather than a separate product — so a customer who does not know whether
+ * their friend has an account picks from one list and finds out.
  */
 export default function TransferPage() {
   return (
@@ -31,1077 +51,840 @@ export default function TransferPage() {
   );
 }
 
+type Step = 'who' | 'currency' | 'details' | 'amount';
+
+/**
+ * What a currency is CALLED, from the money registry rather than a second list.
+ *
+ * A picker showing bare codes asks a customer to know that GHS is the cedi.
+ * The registry is where every currency this system can represent is already
+ * described — a hand-written map here would be the fourth copy of the asset
+ * list `crypto-networks.test.ts` exists to bind, and the one nobody updates.
+ */
+function nameOf(code: string): string {
+  const known = (CURRENCIES as Record<string, { name?: string } | undefined>)[code];
+  return known?.name ?? code;
+}
+
 function Transfer() {
   const client = useXetral();
   const params = useSearchParams();
 
+  const session = useLoad(() => client.currentSession(), [client]);
+  const wallets = useLoad(() => client.balances(), [client]);
+  const saved = useLoad(() => client.recipients(), [client]);
+  const countries = useLoad(() => client.session.countries(), [client]);
+
   /*
-   * ARRIVED FROM A PAYMENT LINK.
+   * ARRIVED FROM A PAYMENT LINK, which skips straight past the address book.
    *
-   * `/pay/<handle>` redirects here with the handle in `to`, so somebody who
-   * followed a link does not retype what the link already said. It is the
-   * INITIAL value of ordinary state rather than a controlled one, because the
-   * customer must be able to correct it — a recipient the page keeps putting
-   * back is a recipient they cannot change.
+   * `/pay/<x>` sends somebody here with the identifier in `to`. They have
+   * already been told who they are paying, so asking them to pick from a list
+   * they have never seen would be a step backwards — the flow opens on the
+   * details screen with the number filled in.
    */
   const arrivedWith = params.get('to') ?? '';
-  const [recipient, setRecipient] = useState(arrivedWith);
+  const [step, setStep] = useState<Step>(arrivedWith === '' ? 'who' : 'details');
+
+  /** The recipient being paid — chosen from the list, or built by the flow. */
+  const [chosen, setChosen] = useState<Recipient | undefined>(undefined);
+  const [draft, setDraft] = useState<RecipientResolution | undefined>(undefined);
+
+  /** What the RECIPIENT receives. Chosen on step two and read by every step
+   *  after it, because it decides the country, the rail and the conversion. */
+  const [receive, setReceive] = useState('');
+
+  const home = session.data?.home_currency ?? 'NGN';
+
+  const back = () => {
+    if (step === 'amount') setStep('details');
+    else if (step === 'details') setStep(arrivedWith === '' ? 'currency' : 'who');
+    else if (step === 'currency') setStep('who');
+  };
+
+  return (
+    <Shell title="Send">
+      {step !== 'who' && (
+        <button type="button" className="icon-btn back" onClick={back} aria-label="Back">
+          <Icon name="chevronLeft" size={20} />
+        </button>
+      )}
+
+      {step === 'who' && (
+        <ChooseRecipient
+          recipients={saved.data ?? []}
+          onPick={(recipient) => {
+            setChosen(recipient);
+            setDraft(undefined);
+            setReceive(recipient.currency);
+            setStep('amount');
+          }}
+          onRemove={async (id) => {
+            await client.removeRecipient(id);
+            saved.reload();
+          }}
+          onNew={() => {
+            setChosen(undefined);
+            setDraft(undefined);
+            setStep('currency');
+          }}
+        />
+      )}
+
+      {step === 'currency' && (
+        <ChooseCurrency
+          home={home}
+          onPick={(currency) => {
+            setReceive(currency);
+            setStep('details');
+          }}
+        />
+      )}
+
+      {step === 'details' && (
+        <RecipientDetails
+          receive={receive === '' ? home : receive}
+          countries={countries.data ?? []}
+          initialDestination={arrivedWith}
+          onReady={(resolution, recipient) => {
+            setDraft(resolution);
+            setChosen(recipient);
+            setReceive(resolution.currency);
+            saved.reload();
+            setStep('amount');
+          }}
+        />
+      )}
+
+      {step === 'amount' && (draft !== undefined || chosen !== undefined) && (
+        <SendAmount
+          /* One of the two is always present at this point: a saved recipient
+             carries everything a draft does, and a draft is what a new one
+             becomes before it is saved. */
+          to={chosen ?? toRecipient(draft as RecipientResolution)}
+          balances={wallets.data ?? []}
+          home={home}
+          onSent={() => {
+            saved.reload();
+            wallets.reload();
+            setStep('who');
+          }}
+        />
+      )}
+    </Shell>
+  );
+}
+
+/* ------------------------------------------------------------------ step 1 */
+
+/**
+ * The people already paid.
+ *
+ * A SEND FLOW WHOSE FIRST STEP IS AN EMPTY FIELD makes every payment cost the
+ * same typing as the first. The list is the difference between a product
+ * somebody uses twice and one they use weekly — which is why it is the
+ * opening screen rather than a convenience tucked behind the form.
+ */
+function ChooseRecipient({
+  recipients,
+  onPick,
+  onRemove,
+  onNew,
+}: {
+  recipients: readonly Recipient[];
+  onPick: (recipient: Recipient) => void;
+  onRemove: (id: string) => Promise<void>;
+  onNew: () => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState('');
+  const [menu, setMenu] = useState<string | undefined>(undefined);
 
   /*
-   * WHERE THE MONEY IS GOING, and this is the half the screen was missing.
-   *
-   * Sending has only ever meant sending to another Xetral customer, which is
-   * the smaller half of what this product is for: money arrives through a
-   * dedicated account number and the only ways out were a card, a bill or
-   * crypto. A customer could not pay their landlord.
-   *
-   * Two destinations on ONE screen rather than two screens, because the
-   * question a customer is answering is the same one — who am I paying — and
-   * the shape of the answer is the only thing that differs. It also keeps the
-   * amount, the currency and the PIN step in one place rather than in two
-   * copies that drift.
-   *
-   * Arriving from a payment link pins it to `xetral`: a link names a Xetral
-   * customer and nothing else, so offering a bank tab to somebody who
-   * followed one is offering a wrong turn.
+   * THE CHIPS ARE THE CURRENCIES THIS CUSTOMER ACTUALLY PAYS, not every
+   * currency the platform offers. A filter for a currency nobody in the list
+   * holds filters to nothing, which reads as a broken control rather than as
+   * an empty result.
    */
-  const [destination, setDestination] = useState<'xetral' | 'bank'>('xetral');
-  /*
-   * THE RECIPIENT'S DIALLING CODE IS THE RECIPIENT'S COUNTRY.
-   *
-   * A Xetral-to-Xetral payment is now addressed by phone number, and the
-   * picker in front of the field does two jobs at once: it builds the E.164
-   * string the server stores, so a sender can type the number the way they
-   * have it saved; and it says WHERE THE MONEY IS GOING without any lookup at
-   * all. That second part matters — asking the server "which country is this
-   * number in?" would be an endpoint that says which numbers belong to
-   * customers, one request at a time.
-   */
-  /*
-   * THE COUNTRY CODE, NOT THE DIALLING CODE, is what this holds.
-   *
-   * They are not interchangeable: the United States and Canada share +1, so
-   * a picker keyed on the dialling code has two entries with one value and
-   * `find()` returns whichever came first — the customer selects Canada and
-   * the screen says United States. The country code is unique by definition
-   * and the dialling code is read off it.
-   */
-  const [recipientCountry, setRecipientCountryCode] = useState('');
-  const [recipientPhone, setRecipientPhone] = useState('');
-  const [bankCode, setBankCode] = useState('');
-  const [accountNumber, setAccountNumber] = useState('');
-  const [amount, setAmount] = useState('');
-  /*
-   * EMPTY UNTIL THE SESSION LOADS, then resolved rather than stored.
-   *
-   * It was `useState('NGN')`, so every customer's Send screen opened on naira
-   * — including one in Accra, who was then shown "You have no NGN" and "We
-   * cannot convert NGN to GHS yet" on the screen they opened in order to pay
-   * somebody. Seeding it from the session instead would capture whatever was
-   * there on the FIRST render, which is `undefined`; `sendCurrency` below
-   * falls back to the home currency, so the picker follows the customer the
-   * moment their session arrives and the commonest send needs no choice at
-   * all. Same fix, same reason, as the recipient's country picker below.
-   */
-  const [currency, setCurrency] = useState('');
-  const [pin, setPin] = useState('');
+  const currencies = useMemo(
+    () => [...new Set(recipients.map((r) => r.currency))].sort(),
+    [recipients],
+  );
+
+  const shown = recipients.filter((r) => {
+    if (filter !== '' && r.currency !== filter) return false;
+    if (query.trim() === '') return true;
+    const needle = query.trim().toLowerCase();
+    return (
+      r.display_name.toLowerCase().includes(needle) ||
+      r.destination.includes(needle.replace(/[^0-9]/g, '')) ||
+      (r.rail_name ?? '').toLowerCase().includes(needle)
+    );
+  });
+
+  return (
+    <section className="card send-step">
+      <h1>Who do you want to send money to?</h1>
+
+      <label className="field search">
+        <Icon name="search" size={18} />
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search by name or account details"
+          aria-label="Search recipients"
+        />
+      </label>
+
+      {currencies.length > 0 && (
+        <div className="chip-rail" role="group" aria-label="Filter by currency">
+          <button
+            type="button"
+            className={filter === '' ? 'chip on' : 'chip'}
+            onClick={() => setFilter('')}
+          >
+            All
+          </button>
+          {currencies.map((currency) => (
+            <button
+              key={currency}
+              type="button"
+              className={filter === currency ? 'chip on' : 'chip'}
+              onClick={() => setFilter(currency)}
+            >
+              <CurrencyMark currency={currency} size={16} />
+              {currency}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {recipients.length === 0 ? (
+        <p className="lead">
+          Nobody here yet. Add the first person you want to pay and they stay on
+          this list.
+        </p>
+      ) : (
+        <ul className="list recipient-list">
+          {shown.map((r) => (
+            <li key={r.id} className="list-row">
+              <button type="button" className="row-open tappable" onClick={() => onPick(r)}>
+                <span className="row-icon">{initialsOf(r.display_name)}</span>
+                <span className="row-main">
+                  <span className="row-title">{r.display_name}</span>
+                  <span className="row-sub">
+                    {r.rail_name ?? 'Xetral account'} &middot;&middot;&middot;
+                    {r.destination.slice(-4)}
+                  </span>
+                </span>
+                <CurrencyMark currency={r.currency} size={18} />
+              </button>
+              {/*
+                REMOVING IS BEHIND A SECOND PRESS, not a swipe and not a
+                one-tap icon. This list is tapped to SEND, so a destructive
+                control beside the tap target is one thumb-width from deleting
+                somebody's landlord.
+              */}
+              <span className="row-actions">
+                <button
+                  type="button"
+                  className="icon-btn"
+                  aria-label={`More for ${r.display_name}`}
+                  onClick={() => setMenu(menu === r.id ? undefined : r.id)}
+                >
+                  <Icon name="menu" size={18} />
+                </button>
+                {menu === r.id && (
+                  <button
+                    type="button"
+                    className="btn small danger"
+                    onClick={() => {
+                      setMenu(undefined);
+                      void onRemove(r.id);
+                    }}
+                  >
+                    Remove
+                  </button>
+                )}
+              </span>
+            </li>
+          ))}
+          {shown.length === 0 && (
+            <li className="hint">Nobody on this list matches that.</li>
+          )}
+        </ul>
+      )}
+
+      <button type="button" className="fab" onClick={onNew}>
+        <Icon name="plus" size={18} />
+        New recipient
+      </button>
+    </section>
+  );
+}
+
+/* ------------------------------------------------------------------ step 2 */
+
+/**
+ * What the RECIPIENT receives.
+ *
+ * ASKED BEFORE THE NUMBER, and that order is the reason this flow can be one
+ * flow. The currency decides the country, the country decides the rail, and
+ * the rail decides whether a name can be looked up — so everything the details
+ * screen needs to draw itself comes from this one answer. Asking for a number
+ * first would mean guessing which of those it belonged to.
+ */
+function ChooseCurrency({
+  home,
+  onPick,
+}: {
+  home: string;
+  onPick: (currency: string) => void;
+}) {
+  const [query, setQuery] = useState('');
 
   /*
-   * ON THE SHARED HOOKS, which is what gives this screen the error CODE.
-   *
-   * It kept its own busy/error/done state and only ever saw the sentence, so
-   * a customer with no transaction PIN was told to set one with no way to get
-   * there — on the screen where that refusal is most likely to happen. The
-   * hooks carry the code alongside the message, which is what `FormError`
-   * needs to offer the next step.
+   * WHAT THIS PLATFORM CAN ACTUALLY DELIVER, from `sendableFor` — the same
+   * list the old screen used. A picker offering a currency nothing can pay out
+   * is a choice that fails three screens later, which 046 records as the
+   * failure that reads to a customer as their own details being wrong.
    */
-  const { busy, error, code, done, run, clear } = useSubmit();
+  const all = sendableFor(home);
+  const needle = query.trim().toLowerCase();
+  const matches = (code: string): boolean =>
+    needle === '' ||
+    code.toLowerCase().includes(needle) ||
+    nameOf(code).toLowerCase().includes(needle);
 
-  /**
-   * One key per attempt at THIS transfer, generated when the form is first
-   * rendered and reused across retries.
-   *
-   * That is the whole point: a customer who taps Send twice, or whose
-   * connection drops mid-request, must not send twice. Generating it inside
-   * the submit handler would defeat it entirely.
-   */
-  const attempt = useIdempotencyKey();
+  const favourites = all.filter((c) => (c === home || c === 'USD') && matches(c));
+  const stablecoins = all.filter((c) => (c === 'USDT' || c === 'USDC') && matches(c));
+  const rest = all
+    .filter((c) => !favourites.includes(c) && !stablecoins.includes(c) && matches(c))
+    .sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
 
-  /*
-   * WHAT MAY BE SENT, NOT WHAT IS HELD.
-   *
-   * This list came from `/v1/wallets` — the customer's own balances — which
-   * reads as sensible and is the wrong question twice over. A customer holding
-   * only naira was offered exactly one option, so the picker looked broken;
-   * and anything that happened to appear as a balance became a transfer option
-   * nothing had decided to offer.
-   *
-   * `TRANSFER_CURRENCIES` is the decision, shared with the phone app and
-   * checked against the API's own enum by `wallet-currencies.test.ts`. Gift
-   * cards are deliberately not in it: selling one is an offer we review, not
-   * money sent to somebody.
-   *
-   * Balances are still loaded, to show what is behind each choice.
-   */
-  const balances = useLoad(() => client.balances(), [client]);
-  const held = new Map((balances.data ?? []).map((b) => [b.currency, b.spendable]));
+  return (
+    <section className="card send-step">
+      <h1>What currency should your recipient receive?</h1>
 
-  /*
-   * THE PIN IS ASKED ABOUT BEFORE THE FORM, NOT AFTER IT.
-   *
-   * Every money-moving route verifies a transaction PIN, and a customer who
-   * has never set one could only find that out by filling in a recipient, an
-   * amount and a PIN box — and being told the PIN box was never going to
-   * work. `has_pin` is on the session for exactly this, so the refusal
-   * arrives as a step to take rather than as an error at the end.
-   */
-  const session = useLoad(() => client.currentSession(), [client]);
+      <label className="field search">
+        <Icon name="search" size={18} />
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search currency or country"
+          aria-label="Search currencies"
+        />
+      </label>
 
+      <CurrencyGroup heading="Favourites" codes={favourites} onPick={onPick} />
+      <CurrencyGroup heading="Stablecoins" codes={stablecoins} onPick={onPick} />
+      <CurrencyGroup heading="All currencies" codes={rest} onPick={onPick} />
 
-  /*
-   * ANOTHER COUNTRY'S LOCAL CURRENCY IS NOISE IN THIS PICKER.
-   *
-   * `TRANSFER_CURRENCIES` is what the API ACCEPTS and now includes cedis and
-   * shillings, because a Ghanaian must be able to send them. Showing all of
-   * them to everybody would give a Nigerian two options that answer
-   * `insufficient_funds` and nothing on the screen saying which. So the local
-   * ones are filtered to their own, plus any they are actually holding —
-   * money can arrive in a currency somebody cannot normally send from, and
-   * once it is theirs they must be able to move it.
-   */
-  const offered = sendableFor(session.data?.home_currency, [...held.keys()]);
+      {favourites.length + stablecoins.length + rest.length === 0 && (
+        <p className="hint">No currency matches that.</p>
+      )}
+    </section>
+  );
+}
 
-  /*
-   * Bank payouts are a per-country rail, so the country comes from the
-   * customer rather than from a picker. `FALLBACK_HOME_CURRENCY`'s lesson,
-   * applied to a country: an account opened before 040 has none, and Nigeria
-   * is the only corridor this platform has opened.
-   */
-  const homeCountry = session.data?.country ?? 'NG';
+function CurrencyGroup({
+  heading,
+  codes,
+  onPick,
+}: {
+  heading: string;
+  codes: readonly string[];
+  onPick: (currency: string) => void;
+}) {
+  if (codes.length === 0) return null;
+  return (
+    <>
+      <h2 className="group-head">{heading}</h2>
+      <ul className="list">
+        {codes.map((code) => (
+          <li key={code} className="list-row">
+            <button type="button" className="row-open tappable" onClick={() => onPick(code)}>
+              <span className="row-icon">
+                <CurrencyMark currency={code} size={22} />
+              </span>
+              <span className="row-main">
+                <span className="row-title">{nameOf(code)}</span>
+                <span className="row-sub">{code}</span>
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+}
 
-  /*
-   * HOW MONEY LEAVES WHERE THIS CUSTOMER IS — data, not a `switch`.
-   *
-   * The bank tab offered a Nigerian bank list to everybody. In Ghana and
-   * Kenya money moves to a mobile money wallet on a phone number, not to a
-   * ten-digit NUBAN, so a customer in Accra was being offered a product their
-   * money cannot reach. 046 puts the answer on the country row, which is
-   * where 040 says a fact about a country belongs.
-   *
-   * Falls back to 'bank' while the list loads and on an API that predates
-   * 046 — the conservative answer, and the one Nigeria needs.
-   */
-  const countries = useLoad(() => client.session.countries(), [client]);
-  /*
-   * FROM THE SESSION FIRST, and the country list only as a fallback.
-   *
-   * The session already carries `payout_method` — the API reads it off the
-   * customer's OWN country row and it is what Add Money personalises on. This
-   * screen was deriving it a second time by finding the customer's country in
-   * the public list, which is one more thing that has to have loaded and one
-   * more place the answer can be missing: a deployment whose country list is
-   * behind, or a list that had not arrived yet, silently read 'bank' — and a
-   * customer in Accra was offered a Nigerian bank account form for money that
-   * moves on a phone number.
-   *
-   * One question, one answer, from the read that already has it.
-   */
-  const payoutMethod =
-    session.data?.payout_method ??
-    countries.data?.find((c) => c.code === homeCountry)?.payout_method ??
-    'bank';
-  const mobileMoney = payoutMethod === 'mobile_money';
-  /*
-   * The bank list, loaded only when it is needed.
-   *
-   * It is a provider call behind our API, so a customer who never opens the
-   * bank tab never pays for it — and on a deployment with no Bitnob address
-   * the list simply fails to load and the tab says so, rather than the whole
-   * Send screen failing to render.
-   */
+/* ------------------------------------------------------------------ step 3 */
+
+/**
+ * Where it lands, and who holds it.
+ *
+ * THE COUNTRY IS READ OFF THE CURRENCY AND CANNOT BE TYPED. Cedis land in
+ * Ghana; offering a country picker here would let somebody select Kenya and
+ * GHS and produce a destination no rail can reach. It is shown because a
+ * customer should be able to SEE what was inferred, and it is not editable
+ * because changing it means changing the currency, which is one step back.
+ *
+ * THE ACCOUNT NAME IS FETCHED, NEVER TYPED — where the rail can answer. That
+ * is the whole of what "the momo details cannot be found" was: the adapter
+ * matched a network code and refused before making the call, so a Ghanaian
+ * number whose owner Flutterwave will name was reported as unfindable. Where
+ * the rail genuinely has none — Kenya's M-PESA — the screen ASKS FOR A LABEL
+ * rather than refusing, because a bare number in an address book is how
+ * somebody pays the wrong person.
+ */
+function RecipientDetails({
+  receive,
+  countries,
+  initialDestination,
+  onReady,
+}: {
+  receive: string;
+  countries: readonly XetralCountry[];
+  initialDestination: string;
+  onReady: (resolution: RecipientResolution, saved: Recipient | undefined) => void;
+}) {
+  const client = useXetral();
+  const { busy, error, code, run } = useSubmit();
+
+  const country = countries.find((c) => c.currency === receive);
+  const [rail, setRail] = useState('');
+  const [destination, setDestination] = useState(initialDestination.replace(/[^0-9]/g, ''));
+  const [label, setLabel] = useState('');
+  const [save, setSave] = useState(true);
+  const [found, setFound] = useState<RecipientResolution | undefined>(undefined);
+
   const banks = useLoad(
-    async () => (destination === 'bank' ? client.payoutBanks(homeCountry) : []),
-    [client, destination, homeCountry],
+    async () => (country === undefined ? [] : client.payoutBanks(country.code)),
+    [country?.code],
   );
 
   /*
-   * WHERE THE MONEY IS GOING, from the dialling code and nothing else.
+   * THE XETRAL ACCOUNT IS A ROW IN THE SAME LIST AS THE NETWORKS.
    *
-   * No lookup, deliberately. An endpoint answering "which country is this
-   * number in?" would answer differently for a number that belongs to a
-   * customer and one that does not, which is a way to enumerate the customer
-   * base one request at a time — the rule 039 already applies to handles. The
-   * dial code IS the country, it is a fact about the number rather than about
-   * the person, and it is true before the recipient has even signed up.
+   * That is the unification. "How does this reach them" is ONE question with
+   * several answers, and an internal transfer is one of the answers rather
+   * than a separate product behind a tab — so a customer who does not know
+   * whether their friend has an account picks from one list and finds out. It
+   * is first because it is instant and free, which is the answer most people
+   * want when it applies.
    */
-  /*
-   * THEIR OWN COUNTRY UNTIL THEY SAY OTHERWISE.
-   *
-   * The picker opened on a placeholder — "+—", no flag — so the commonest
-   * payment on the platform, somebody paying a neighbour, began by asking the
-   * customer to find their own country in a list. Most payments are domestic;
-   * the default should be the one most people need and the picker is right
-   * there for everybody else.
-   *
-   * Resolved rather than stored so it follows the session the moment it
-   * loads: seeding the state with `session.data?.country` would capture
-   * whatever was there on the first render, which is `undefined`.
-   */
-  const recipientPlace =
-    countries.data?.find(
-      (c) => c.code === (recipientCountry === '' ? session.data?.country : recipientCountry),
-    );
-  const recipientCurrency = recipientPlace?.currency;
-  const homeCurrency = session.data?.home_currency ?? 'NGN';
+  const rails = [
+    { value: 'xetral', label: 'Xetral account — instant, no fee' },
+    ...(banks.data ?? []).map((bank) => ({ value: bank.code, label: bank.name })),
+  ];
+
+  const kind: RecipientKind =
+    rail === 'xetral' ? 'xetral' : country?.payout_method === 'mobile_money' ? 'momo' : 'bank';
+
+  const numberLabel =
+    kind === 'bank' ? 'Account number' : kind === 'momo' ? 'Mobile Money number' : 'Phone number';
 
   /*
-   * A LOCAL PAYOUT IS IN THE LOCAL CURRENCY, AND THERE IS NO PICKER.
+   * ENOUGH TYPED TO BE WORTH ASKING ABOUT, and the floor is PER RAIL.
    *
-   * Money leaving to a Nigerian bank is naira, to a Ghanaian wallet is cedis,
-   * to a Kenyan one is shillings — that is what the rail is. Offering a
-   * currency box there was offering a choice the provider cannot honour: the
-   * only outcomes were the customer picking their own currency anyway, or
-   * picking another one and being refused after typing a PIN.
+   * A Ghanaian MTN number and a Kenyan Safaricom number are NINE national
+   * digits; a NUBAN is ten. A flat floor of ten meant the lookup never fired
+   * for a customer who typed theirs without the trunk zero — so no request was
+   * made, nothing came back, and the button stayed disabled with nothing on
+   * screen saying why.
    *
-   * International is the Xetral-to-Xetral side, which keeps its picker.
+   * ONE DEFINITION, read by the lookup AND by the button. Two copies of this
+   * condition is exactly what made the old screen's button enable and do
+   * nothing, and `momo-send.test.ts` fails the build on either re-deriving it.
    */
-  const sendCurrency =
-    destination === 'bank' ? homeCurrency : currency === '' ? homeCurrency : currency;
-
-  /*
-   * WHAT THE RECIPIENT ACTUALLY RECEIVES, quoted by the server.
-   *
-   * Only when the two currencies differ — a same-currency transfer converts
-   * nothing and a rate line under it would be noise. The rate comes from
-   * `fx_spread_policies` through `/v1/fx/quote`, so what the customer reads
-   * here is the rate they will get rather than a number this screen worked
-   * out: an unpublished pair is REFUSED rather than quoted from a default,
-   * and the refusal must show up before the PIN rather than after it.
-   */
-  /*
-   * WHO IS BEING PAID, as one string for the API.
-   *
-   * A customer who followed a payment LINK arrives with the recipient already
-   * named — a handle, resolved server-side — and must not be asked to type a
-   * phone number they do not have. Everybody else is paying by number, and
-   * `e164()` builds the one canonical form from the picker and the digits.
-   *
-   * The link case keeps working for the reason 039 gives: a link is how
-   * somebody OUTSIDE Xetral pays a customer, and it resolves to the same
-   * person their number does.
-   */
-  const payee =
-    arrivedWith !== ''
-      ? recipient
-      : e164(recipientPlace?.dial_code ?? '', recipientPhone);
-
-  const converting =
-    destination === 'xetral' &&
-    recipientCurrency !== undefined &&
-    recipientCurrency !== sendCurrency;
-
-  /*
-   * THE REASON IS KEPT, AND SWALLOWING IT WAS HALF THE BUG.
-   *
-   * This was `.catch(() => undefined)`, so every failure — an unpublished
-   * pair, an amount below the minimum, a provider outage, a validation
-   * refusal — rendered the same sentence: "We cannot convert NGN to GHS yet."
-   *
-   * That sentence was FALSE for the case that actually happened. The API's own
-   * currency list had been left behind by three migrations and did not contain
-   * GHS, so the quote was refused as `invalid_request` before a single price
-   * was read — and an operator who had published both the spread and the rate,
-   * and could see them on the prices screen, had no way to learn that. The
-   * list is derived from the money registry now; keeping the code here is what
-   * stops the next such refusal hiding behind a claim about pricing.
-   */
-  // A rate is quoted against an amount, so an empty box asks for one unit —
-  // enough to render the rate line before the customer has typed anything.
-  //
-  // COMPUTED OUT HERE so it can be both the dependency and the thing the
-  // answer is checked against. Inside the loader it was neither: every
-  // keystroke that left it unchanged — a trailing space, a second decimal
-  // point — still fired a quote.
-  const forAmount =
-    amount === '' || !isValidAmount(amount, exponentFor(sendCurrency)) ? '1' : amount;
-
-  const quote = useLoad(async () => {
-    if (!converting || recipientCurrency === undefined) return undefined;
-    // STAMPED WITH WHAT IT IS A QUOTE FOR. See `priced` below.
-    return { forAmount, ...(await client.fxQuote(sendCurrency, recipientCurrency, forAmount)) };
-  }, [client, converting, recipientCurrency, sendCurrency, forAmount]);
-
-  /*
-   * THE FIGURE ONLY COUNTS WHEN IT IS A FIGURE FOR THIS AMOUNT.
-   *
-   * `useLoad` keeps the last successful result while the next request is in
-   * flight AND after one fails — which is right for a balance and wrong for a
-   * rate. Type 25, clear it, type 20, and the "they receive" line went on
-   * showing what 25 converts to: correct arithmetic about an amount the
-   * customer had already replaced. A refusal in between — a rate limit hit by
-   * quoting on every keystroke, a moment of no signal — pinned it there.
-   *
-   * So the answer carries the question. A quote whose `forAmount` is not what
-   * is on screen is not this customer's quote, and showing nothing is the only
-   * honest alternative to showing the wrong number about their money.
-   */
-  const priced = quote.data?.forAmount === forAmount ? quote.data : undefined;
-  /*
-   * ONLY `pair_not_supported` MEANS "we do not trade this". It is the code
-   * `fx_spread_policies` produces for a pair nobody has published, which is
-   * the one case that sentence is true of. `below_minimum` is a real quote
-   * against too small an amount and must not read as an unpriced corridor.
-   */
-  const pairUnpriced = quote.code === 'pair_not_supported';
-  /*
-   * ONLY WHEN WE KNOW. `has_pin` is `boolean | null` and null means the server
-   * could not tell — which must NOT route somebody into creating a PIN they
-   * already have. That is exactly what happened when a failed query answered
-   * `false`: a customer who had set one was sent back to set it again.
-   *
-   * Unknown falls through to the ordinary form, where the server's own
-   * `pin_not_set` refusal decides — and that refusal already carries a link to
-   * the right screen, so the worst case is one extra step rather than a loop.
-   */
-  const needsPin = session.data?.has_pin === false;
-
-  /*
-   * ONE FIELD, NOT A CHOICE BETWEEN TWO SCREENS.
-   *
-   * This asked "a payment link, or a Xetral wallet?" first, and both answers
-   * led to THE SAME INPUT — because `#recipientByIdentifier` resolves a
-   * handle, an email, a phone number and a whole payment link from one
-   * string. The question was a step that changed nothing but the label, and
-   * getting it wrong meant pasting an address into a box that said link.
-   *
-   * It was also what broke the layout. `.choice` was a <button> holding a
-   * sentence, and the global button rule sets `white-space: nowrap` — so the
-   * sub-line could not wrap and forced the page 41px wider than a 360px
-   * handset, which is the sideways scroll on this screen. Measured before and
-   * after; one field cannot do that.
-   */
-  const [stage, setStage] = useState<'details' | 'confirm'>('details');
-
-  /*
-   * THE NAME THE BANK HOLDS, fetched before the customer confirms.
-   *
-   * This is the one control a bank payout has that a Xetral transfer does
-   * not need: an account number that passes every format check can still
-   * belong to a stranger, and the only claim about the beneficiary that does
-   * not come from the sender is the bank's own.
-   *
-   * It is shown, and it is NOT sent. The server looks it up again for itself
-   * — anything this page can send is something a stolen session can send, so
-   * a name from here would make the confirmation a formality. What is shown
-   * here is for the customer to read.
-   */
-  const [beneficiary, setBeneficiary] = useState<string | undefined>(undefined);
-  const [lookingUp, setLookingUp] = useState(false);
-  const [lookupFailed, setLookupFailed] = useState(false);
-  /*
-   * A MOBILE MONEY WALLET HAS NO NAME ENQUIRY, and that is a fact about the
-   * rail rather than a failure of this request.
-   *
-   * A bank can be asked who holds an account number and its answer is the one
-   * claim about the beneficiary that does not come from the sender — which is
-   * why 043 makes the lookup mandatory there. No such call exists for a
-   * wallet. Collapsing the two would either block every mobile money send
-   * behind a name that can never arrive, or — far worse — invite somebody to
-   * "fix" it by echoing back the name the sender typed, which is a
-   * confirmation screen that confirms nothing while looking exactly like one.
-   *
-   * So it is its own state: the send is allowed, and the screen says plainly
-   * that the number is the only thing being checked.
-   */
-  const [nameUnavailable, setNameUnavailable] = useState(false);
-
-  /*
-   * HOW MANY DIGITS BEFORE IT IS WORTH ASKING, and it is NOT ten everywhere.
-   *
-   * Ten is a NUBAN. A Ghanaian MTN number and a Kenyan Safaricom number are
-   * NINE national digits — `244123456`, `712345678` — so a floor of ten meant
-   * the lookup never fired at all for a customer who typed their number
-   * without the trunk zero. No request, so no `name_unavailable`, so the
-   * Continue button stayed disabled with nothing on screen saying why: the
-   * whole Send screen simply stopped responding in Accra and Nairobi.
-   */
+  const mobileMoney = kind !== 'bank';
   const minimumDigits = mobileMoney ? 9 : 10;
+  const enough = destination.replace(/[^0-9]/g, '').length >= minimumDigits;
 
-  /*
-   * WHETHER THE PAYOUT SIDE HAS ENOUGH TO PUT IN FRONT OF SOMEBODY.
-   *
-   * ONE definition, read by the Review button AND by `review()`. They were
-   * two, they disagreed, and the disagreement is what broke Send in Accra:
-   * the button allowed `nameUnavailable` through and the handler did not, so
-   * the control enabled and did nothing at all.
-   */
-  const payoutReviewable = beneficiary !== undefined || nameUnavailable;
-
-  async function lookUp(code: string, number: string): Promise<void> {
-    if (code === '' || number.length < minimumDigits) {
-      setBeneficiary(undefined);
-      setLookupFailed(false);
-      setNameUnavailable(false);
-      return;
-    }
-    /*
-     * A WALLET IS NOT ASKED ABOUT AT ALL.
-     *
-     * There is no name enquiry on any mobile money network, so this request
-     * can only ever come back `name_unavailable` — a round trip whose answer
-     * is already known, on the screen money leaves from, and one more thing
-     * that has to succeed before a Ghanaian can press Continue. The state it
-     * would set is set directly instead.
-     */
-    if (mobileMoney) {
-      setBeneficiary(undefined);
-      setLookupFailed(false);
-      setNameUnavailable(true);
-      return;
-    }
-    setLookingUp(true);
-    setLookupFailed(false);
-    setNameUnavailable(false);
-    try {
-      const found = await client.lookupBankAccount({
-        country: homeCountry,
-        bankCode: code,
-        accountNumber: number,
+  async function look(): Promise<void> {
+    if (!enough || rail === '') return;
+    await run(async () => {
+      const resolution = await client.resolveRecipient({
+        kind,
+        /*
+         * THE COUNTRY GOES EVEN ON THE XETRAL BRANCH, and leaving it off is
+         * what made `08031234567` resolve to nobody. A national number has no
+         * country in it; this flow already fixed one at the currency step, so
+         * the server normalises through THAT country's dialling code rather
+         * than guessing the sender's.
+         */
+        ...(country === undefined ? {} : { country: country.code }),
+        ...(kind === 'xetral' ? {} : { railCode: rail }),
+        destination,
       });
-      setBeneficiary(found.account_name);
-    } catch (error: unknown) {
-      setBeneficiary(undefined);
-      /*
-       * ONE REFUSAL IS TOLD APART FROM THE OTHERS, and only this one.
-       *
-       * `name_unavailable` says the rail has no name enquiry at all — it is
-       * about mobile money as a product, not about this number, so it leaks
-       * nothing about which numbers exist. Everything else stays deliberately
-       * indistinguishable: a lookup that separated "no such account" from
-       * "the bank did not answer" would let somebody map which numbers are
-       * live at which bank, one request at a time.
-       */
-      if (codeOf(error) === 'name_unavailable') setNameUnavailable(true);
-      else setLookupFailed(true);
-    } finally {
-      setLookingUp(false);
-    }
-  }
-
-  // Against the currency actually being SENT. On the payout side there is no
-  // picker and the rail decides, so checking the picked one would count
-  // decimals for a currency this transfer is not in.
-  const amountValid = amount === '' || isValidAmount(amount, exponentFor(sendCurrency));
-
-  /*
-   * THE PIN IS NOT PART OF THE FORM.
-   *
-   * It used to sit under the amount, so a customer typed the secret that
-   * authorises the payment BEFORE they had seen what they were authorising —
-   * and a mistyped recipient was discovered after the PIN, or not at all. A
-   * PIN answers "yes, this one", which is a question that cannot be asked
-   * before the thing exists.
-   *
-   * So: details, then a review of what is about to happen, then the PIN. The
-   * PIN never enters this component's state until that last step and is
-   * cleared the moment the request returns.
-   */
-  function review(event: React.FormEvent) {
-    event.preventDefault();
-    /*
-     * A BANK payout cannot be reviewed without a name to review. Advancing
-     * with an unresolved account would put a confirmation screen in front of
-     * a customer that confirms nothing — which is worse than no screen,
-     * because they will read it as having been checked.
-     *
-     * A MOBILE MONEY WALLET IS THE EXCEPTION, AND LEAVING IT OUT IS WHAT
-     * BROKE SEND IN ACCRA AND NAIROBI. There is no name enquiry on that rail
-     * — `name_unavailable` is the correct, permanent answer — so a name can
-     * never arrive and this guard could never pass. The button beneath
-     * already allowed it through, so it ENABLED, the customer pressed it, and
-     * this line returned silently: a control that looks live and does
-     * nothing, which reads as "it cannot find the number".
-     *
-     * The two conditions are the same question and are now written once.
-     */
-    if (destination === 'bank' && !payoutReviewable) return;
-    setStage('confirm');
-  }
-
-  function confirm(event: React.FormEvent) {
-    event.preventDefault();
-    void run(async () => {
-      const result =
-        destination === 'bank'
-          ? await client
-              .payToBank({
-                country: homeCountry,
-                bankCode,
-                accountNumber,
-                amount,
-                // THE LOCAL CURRENCY, not a picked one. There is no picker on
-                // this side and the rail decides — see the row that replaced
-                // it.
-                currency: homeCurrency,
-                pin,
-                idempotencyKey: attempt.key,
-              })
-              /*
-               * One shape for the success line below. A payout answers with
-               * its own view, and mapping it here keeps the two branches from
-               * each growing their own copy of the wording.
-               *
-               * `pending` IS THE HALF THAT WAS MISSING. A payout the provider
-               * never answered for stays `reserved` — the money is held, the
-               * sweep will ask, and nothing has reached the bank yet — and
-               * this line said "Sent" for it. (A payout that FAILED now
-               * arrives as a refusal rather than as a view, so it cannot
-               * reach this branch at all.)
-               */
-              .then((p) => ({
-                amount: p.amount,
-                fee: p.fee,
-                currency: p.currency,
-                pending: p.status === 'reserved',
-              }))
-          : converting && recipientCurrency !== undefined
-            ? /*
-               * ACROSS CURRENCIES IS A REMITTANCE, NOT A TRANSFER.
-               *
-               * `remit` is ONE journal entry that converts and delivers — the
-               * shape Phase 10 chose deliberately, because convert-then-send
-               * leaves a window where a crash strands the money in a wallet
-               * the sender never meant to hold. Calling `transfer` here
-               * instead would have moved naira into a Ghanaian's naira
-               * wallet, which is money they cannot spend where they live.
-               */
-              await client
-                .remit({
-                  from: sendCurrency,
-                  to: recipientCurrency,
-                  amount,
-                  recipient: payee,
-                  pin,
-                  idempotencyKey: attempt.key,
-                })
-                .then((t) => ({
-                  amount: t.amount,
-                  fee: '0.00',
-                  currency: t.from,
-                  pending: false,
-                }))
-            : await client
-                .transfer({
-                  recipient: payee,
-                  amount,
-                  currency: sendCurrency,
-                  pin,
-                  idempotencyKey: attempt.key,
-                })
-                .then((t) => ({ ...t, pending: false }));
-      // The attempt is over, so the next Send is a new transfer and needs a
-      // new key — reusing this one would have the server replay this transfer
-      // and report success for money that never moved.
-      attempt.next();
-      // The PIN is cleared immediately and never kept in state between
-      // actions. It is not a password: it authorises one instruction.
-      setPin('');
-      // Back to an empty form: a success is the end of this transfer, and
-      // leaving the review on screen invites a second tap on money that has
-      // already moved.
-      setStage('details');
-      setAmount('');
-      setRecipient('');
-      setRecipientPhone('');
-      setAccountNumber('');
-      setBeneficiary(undefined);
-      const moved = `${formatAmount(result.amount, result.currency)}${
-        result.fee === '0.00' ? '' : ` (fee ${formatAmount(result.fee, result.currency)})`
-      }`;
-      // NOT "Sent" for a payout still in the air. Saying it left when the
-      // bank has not answered is the sentence that made a stuck transfer
-      // read as a delivered one.
-      return result.pending
-        ? `${moved} is on its way. We are waiting for the bank to confirm it.`
-        : `Sent ${moved}.`;
+      setFound(resolution);
+      return undefined;
     });
   }
 
-  if (session.loading) {
-    return (
-      <Shell>
-        <div className="card"><p className="spinner">Loading…</p></div>
-      </Shell>
-    );
-  }
-
-  if (needsPin) {
-    return (
-      <Shell>
-        <div className="card">
-          <h1>First, a transaction PIN</h1>
-          <h2>It authorises every payment you make</h2>
-          <p className="lead">
-            A separate PIN approves money leaving your account. You set it once.
-          </p>
-          <Link className="btn" href="/settings#transaction-pin">
-            Set my transaction PIN
-          </Link>
-        </div>
-      </Shell>
-    );
-  }
-
-  if (stage === 'confirm') {
-    return (
-      <Shell>
-        <form className="card" onSubmit={confirm}>
-          <div className="section-head">
-            <h1>Confirm</h1>
-            <button
-              type="button"
-              className="btn link"
-              onClick={() => {
-                setPin('');
-                setStage('details');
-              }}
-            >
-              Edit
-            </button>
-          </div>
-          <h2>Check this before you approve it</h2>
-
-          {/* What is about to happen.
-              For a XETRAL transfer the recipient is echoed exactly as typed
-              rather than resolved to a name: resolving would be a lookup that
-              says which handles and addresses exist, and this screen is
-              reachable by anybody.
-              For a BANK payout it is the opposite, and deliberately — the
-              name comes from the bank, the sender did not author it, and
-              showing it is the only thing standing between a transposed digit
-              and money that cannot be recalled. */}
-          {destination === 'bank' ? (
-            <>
-              <div className="row">
-                <span className="muted">To</span>
-                <span>{beneficiary}</span>
-              </div>
-              <div className="row">
-                <span className="muted">Account</span>
-                <span className="mono">
-                  {accountNumber} · {banks.data?.find((b) => b.code === bankCode)?.name ?? ''}
-                </span>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="row">
-                <span className="muted">To</span>
-                <span className="mono">{payee}</span>
-              </div>
-              {recipientPlace !== undefined && (
-                <div className="row">
-                  <span className="muted">In</span>
-                  <span>{recipientPlace.name}</span>
-                </div>
-              )}
-            </>
-          )}
-          <div className="row">
-            <span className="muted">Amount</span>
-            <span className="mono">{formatAmount(amount || '0', sendCurrency)}</span>
-          </div>
-          {/*
-            THE LAST PLACE THE CONVERSION CAN BE CHECKED.
-
-            The rate and the figure are both on the form, and a customer who
-            scrolled past them on a handset should not approve a PIN without
-            seeing what the person at the other end gets. Nothing here is a
-            new claim — it is the same quote, repeated where the decision is
-            actually made.
-          */}
-          {converting && priced !== undefined && (
-            <div className="row">
-              <span className="muted">They receive</span>
-              <span className="mono">
-                {formatAmount(priced.receives, recipientCurrency ?? sendCurrency)}
-              </span>
-            </div>
-          )}
-
-          <label>
-            Transaction PIN
-            <input
-              type="password"
-              inputMode="numeric"
-              autoComplete="off"
-              value={pin}
-              maxLength={6}
-              onChange={(e) => setPin(e.target.value)}
-              // Focused here rather than on the details form, because this is
-              // the first moment the PIN is the thing being asked for.
-              autoFocus
-              required
-            />
-          </label>
-
-          <button type="submit" disabled={busy || pin === ''}>
-            {busy ? 'Sending…' : `Send ${formatAmount(amount || '0', sendCurrency)}`}
-          </button>
-
-          <FormError error={error} code={code} />
-          {done !== undefined && <p className="ok">{done}</p>}
-
-          {/*
-            OVER the form as well as in it. The form resets itself on a
-            success and the keyboard is closing at the same moment, so the
-            line above is easy to miss on a handset — and "did my ₦50,000 go?"
-            is the one question this product must never leave open. The inline
-            copy stays, so a refusal can still be re-read after this has gone.
-          */}
-          <Toast message={done} tone="ok" onDone={clear} />
-          <Toast message={error} tone="bad" onDone={clear} />
-        </form>
-      </Shell>
-    );
-  }
+  const nameUnavailable = found !== undefined && found.resolved_name === null;
+  const ready =
+    found !== undefined && (found.resolved_name !== null || label.trim().length >= 2);
 
   return (
-    <Shell>
-      <form className="card" onSubmit={review}>
-        <h1>Send money</h1>
-        <h2>
-          {mobileMoney
-            ? 'Send to a Xetral account or Mobile Money number.'
-            : 'Send to a Xetral account or bank account.'}
-        </h2>
+    <form
+      className="card send-step"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (found === undefined) {
+          void look();
+          return;
+        }
+        void run(async () => {
+          const recipient = save
+            ? await client.saveRecipient({
+                kind: found.kind,
+                /* `found.destination` is already the international form, so
+                   re-resolving needs no country — but an empty one would fail
+                   the two-character schema, which is why this checks the
+                   VALUE rather than the kind. */
+                ...(found.country === '' ? {} : { country: found.country }),
+                ...(found.rail_code === null ? {} : { railCode: found.rail_code }),
+                destination: found.destination,
+                ...(label.trim() === '' ? {} : { label: label.trim() }),
+              })
+            : undefined;
+          onReady(found, recipient);
+          return undefined;
+        });
+      }}
+    >
+      <h1>Who are you sending to?</h1>
+      <p className="lead">Fill in the necessary details of your recipient</p>
 
-        {/* Two destinations, one screen. Deliberately NOT the `.choice`
-            pattern that broke this page's layout once: the global button rule
-            sets `white-space: nowrap`, so a button holding a sentence forced
-            the page 41px wider than a 360px handset. These hold one word. */}
-        {arrivedWith === '' && (
-          <div className="segmented wide" role="group" aria-label="Where the money is going">
-            <button
-              type="button"
-              className={destination === 'xetral' ? 'active' : ''}
-              onClick={() => setDestination('xetral')}
-            >
-              Xetral
-            </button>
-            <button
-              type="button"
-              className={destination === 'bank' ? 'active' : ''}
-              onClick={() => setDestination('bank')}
-            >
-              {mobileMoney ? 'Mobile Money' : 'Bank'}
-            </button>
-          </div>
-        )}
-
-        {destination === 'bank' ? (
-          <>
-            <label id="transfer-bank-label">
-              {mobileMoney ? 'Mobile Money provider' : 'Bank'}
-              <Select
-                labelledBy="transfer-bank-label"
-                /* PASTE-OR-TYPE, because the list is long. Paystack returns
-                   upwards of a hundred Nigerian banks; scrolling one
-                   alphabetically to reach Kuda is the customer doing the
-                   computer's work. */
-                searchable
-                searchPlaceholder={
-                  mobileMoney ? 'Search providers…' : 'Search banks…'
-                }
-                value={bankCode}
-                onChange={(code) => {
-                  setBankCode(code);
-                  void lookUp(code, accountNumber);
-                }}
-                options={(banks.data ?? []).map((bank) => ({
-                  value: bank.code,
-                  label: bank.name,
-                }))}
-              />
-            </label>
-
-            <label>
-              {mobileMoney ? 'Mobile Money number' : 'Account number'}
-              <input
-                type="text"
-                inputMode="numeric"
-                autoComplete="off"
-                placeholder={mobileMoney ? '0244123456' : '0123456789'}
-                value={accountNumber}
-                maxLength={20}
-                onChange={(e) => {
-                  // Digits only, so a pasted number carrying spaces or
-                  // dashes does not fail a lookup that would have worked.
-                  const digits = e.target.value.replace(/[^0-9]/g, '');
-                  setAccountNumber(digits);
-                  void lookUp(bankCode, digits);
-                }}
-                required
-              />
-              {/* THE ONLY THING ON THIS SCREEN THE SENDER DID NOT WRITE. */}
-              {lookingUp && <span className="hint">Checking the name…</span>}
-              {beneficiary !== undefined && (
-                <span className="beneficiary">{beneficiary}</span>
-              )}
-              {lookupFailed && (
-                <span className="hint">
-                  {mobileMoney
-                    ? 'We could not check that number. Check the provider and the number.'
-                    : 'We could not find that account. Check the number and the bank.'}
-                </span>
-              )}
-              {nameUnavailable && (
-                <span className="hint">
-                  Mobile Money does not confirm names. Check the number and the provider
-                  carefully — a transfer cannot be recalled.
-                </span>
-              )}
-            </label>
-          </>
-        ) : (
-        arrivedWith !== '' ? (
-          /*
-            ARRIVED FROM A PAYMENT LINK, so the recipient is already named and
-            must not be asked for again. A link names one Xetral customer —
-            that is what 039 built it for, and it is how somebody OUTSIDE
-            Xetral is given a way to pay one — so showing a phone picker here
-            would ask a sender for a number they were never given.
-          */
-          <div className="row">
-            <span className="muted">Paying</span>
-            <span className="mono">{recipient}</span>
-          </div>
-        ) : (
-        <>
-          {/*
-            THE PHONE NUMBER IS THE IDENTIFIER, and the picker in front of it
-            is doing two jobs.
-
-            It builds the E.164 string the server stores, so a customer can
-            type the number the way they have it saved — with the leading zero
-            every Nigerian writes — instead of being told there is no such
-            customer because a plus was missing. And it says which COUNTRY the
-            money is going to, which is what the rate line below reads. The
-            second job is why it is a picker rather than a free-text field: a
-            number pasted whole would have to be parsed, and the parse would
-            be a guess about somebody else's country.
-
-            The list says "Ghana" and the trigger says "+233", the same
-            arrangement the signup form uses and for the same reason: a
-            country's name in front of a phone number pushes the digits off a
-            handset.
-          */}
-          <div className="field">
-            <label htmlFor="recipient-phone" id="recipient-country-label">
-              Recipient&apos;s phone number
-            </label>
-            <div className="input-affix dial">
-              <div className="dial-select">
-                <Select
-                  compact
-                  labelledBy="recipient-country-label"
-                  value={recipientPlace?.code ?? ''}
-                  onChange={setRecipientCountryCode}
-                  placeholder="+—"
-                  renderMark={(code) => <CountryMark country={code} size={18} />}
-                  renderTrigger={(code) => (
-                    <span className="dial-digits">
-                      +{countries.data?.find((c) => c.code === code)?.dial_code ?? ''}
-                    </span>
-                  )}
-                  options={(countries.data ?? []).map((c) => ({
-                    value: c.code,
-                    label: c.name,
-                    hint: c.currency,
-                  }))}
-                />
-              </div>
-              <input
-                id="recipient-phone"
-                type="tel"
-                inputMode="numeric"
-                placeholder="8031234567"
-                value={recipientPhone}
-                autoComplete="off"
-                onChange={(e) => setRecipientPhone(e.target.value.replace(/[^0-9]/g, ''))}
-                required
-              />
-            </div>
-            <p className="hint">
-              {recipientPlace === undefined
-                ? 'Choose the country their number is in.'
-                : `Going to ${recipientPlace.name} — they receive ${recipientPlace.currency}.`}
-            </p>
-          </div>
-        </>
-        )
-        )}
-
+      <div className="field">
+        <span className="field-label">Recipient country</span>
         {/*
-          A CURRENCY PICKER ON THE XETRAL SIDE AND NONE ON THE PAYOUT SIDE.
-
-          A local payout IS its currency: money to a Nigerian bank is naira,
-          to a Ghanaian wallet is cedis, to a Kenyan one is shillings. A box
-          offering anything else offered a choice the rail cannot honour, and
-          the only outcomes were picking your own currency anyway or being
-          refused after typing a PIN. Xetral-to-Xetral is the international
-          half of this product and keeps the choice.
+          READ-ONLY AS TEXT, not as a disabled input. A disabled box reads as a
+          bug — somebody taps it, nothing happens, and the screen has given
+          them no way forward. A line of text is the same restriction stated as
+          a fact.
         */}
-        {destination === 'bank' ? (
-          <div className="row">
-            <span className="muted">Currency</span>
-            <span>
-              <span className="mono">{homeCurrency}</span>{' '}
-              <span className="muted">
-                · {mobileMoney ? 'mobile money' : 'bank'} transfers are local
-              </span>
-            </span>
-          </div>
-        ) : (
-        <label id="transfer-currency-label">
-          Currency
-          <Select
-            labelledBy="transfer-currency-label"
-            value={currency}
-            onChange={setCurrency}
-            options={offered.map((code) => ({
-              value: code,
-              label: code,
-              // ALWAYS a figure, including a zero. Omitting the hint for a
-              // currency with no balance made "you have none of this" look
-              // identical to "we did not say" — and now that every currency
-              // is offered rather than filtered, that difference is the whole
-              // information the picker carries.
-              hint: formatAmount(held.get(code) ?? '0', code),
-            }))}
-          />
+        <p className="readonly">{country?.name ?? receive}</p>
+      </div>
+
+      <label className="field">
+        <span className="field-label">Network</span>
+        <Select
+          value={rail}
+          onChange={(next) => {
+            setRail(next);
+            setFound(undefined);
+          }}
+          options={[{ value: '', label: 'Network' }, ...rails]}
+          searchable={rails.length > 6}
+          searchPlaceholder="Search networks…"
+        />
+      </label>
+
+      <label className="field">
+        <span className="field-label">{numberLabel}</span>
+        <input
+          value={destination}
+          onChange={(e) => {
+            setDestination(e.target.value);
+            setFound(undefined);
+          }}
+          onBlur={() => void look()}
+          inputMode="numeric"
+          placeholder={kind === 'bank' ? '0123456789' : '0553921133'}
+          autoComplete="off"
+        />
+      </label>
+
+      {found?.resolved_name != null && (
+        <div className="field">
+          <span className="field-label">Account name</span>
           {/*
-            THE RATE, UNDER THE BOX THAT DECIDES IT, BEFORE ANY AMOUNT.
-
-            A customer sending naira to Ghana is making two decisions at once
-            — what to send and what it becomes — and the second was invisible
-            until after the money had moved. `/v1/fx/quote` is the same
-            published policy the conversion itself will use, so this is the
-            rate they will get rather than one this screen worked out. An
-            unpublished pair is REFUSED rather than quoted from a default, and
-            saying so here is far better than saying so after the PIN.
+            THE RAIL'S OWN ANSWER, and the only thing on this screen presented
+            as confirmation. A name the SENDER typed shown here would be a
+            confirmation screen that confirms nothing while looking exactly
+            like one — 043's rule, and the reason the label below is a
+            separate, differently worded field.
           */}
-          {converting && (
-            <span className="hint">
-              {quote.loading || (priced === undefined && quote.error === undefined)
-                ? 'Getting today\u2019s rate…'
-                : priced !== undefined
-                  ? `1 ${sendCurrency} = ${priced.rate} ${recipientCurrency ?? ''} today.`
-                  : pairUnpriced
-                    ? `We cannot convert ${sendCurrency} to ${recipientCurrency ?? ''} yet.`
-                    : /* NOT a claim about pricing. Whatever went wrong, saying
-                         the corridor does not exist is the one answer that
-                         sends an operator to check something already correct. */
-                      (quote.error ?? 'We could not get a rate just now.')}
-            </span>
-          )}
-        </label>
-        )}
+          <p className="readonly">{found.resolved_name}</p>
+        </div>
+      )}
 
-        {/*
-          THE WAY OUT, on the screen where the dead end is.
-          
-          Sending cedis from a naira balance is the ordinary cross-border
-          case, and it needs a conversion first. Without this line the
-          customer picks GHS, types an amount, proves a PIN and is told
-          `insufficient_funds` — a refusal that is true and says nothing
-          about what to do.
-        */}
-        {isZero(held.get(sendCurrency) ?? '0') && (
-          <p className="hint">
-            You have no {sendCurrency}.{' '}
-            <Link href="/fx">Convert some first</Link>, then come back.
-          </p>
-        )}
-
-        <label>
-          Amount
+      {nameUnavailable && (
+        <label className="field">
+          <span className="field-label">Name this recipient</span>
           <input
-            type="text"
-            inputMode="decimal"
-            value={amount}
-            placeholder="0.00"
-            onChange={(e) => setAmount(e.target.value)}
-            required
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="What you want to call them"
+            maxLength={140}
           />
-          {/*
-            WHAT THEY WILL ACTUALLY GET, under the box that decides it.
-
-            The rate line above answers "what is a naira worth today"; this
-            answers the question the sender is really asking, which is whether
-            the person at the other end receives enough. Both are needed: a
-            rate with no figure makes the customer do arithmetic on a phone,
-            and a figure with no rate cannot be checked against anything.
-
-            Quoted for the amount typed, so it moves as they type.
-          */}
-          {converting && amount !== '' && amountValid && (
-            <span className="hint">
-              {quote.loading || (priced === undefined && quote.error === undefined)
-                ? 'Working out what they receive…'
-                : priced === undefined
-                  ? pairUnpriced
-                    ? 'We cannot say what they would receive yet.'
-                    : 'We could not work that out just now.'
-                  : `They receive about ${formatAmount(
-                      priced.receives,
-                      recipientCurrency ?? sendCurrency,
-                    )}.`}
-            </span>
-          )}
+          <span className="hint">
+            This network cannot confirm the account name, so nobody has checked
+            it. Give them a name you will recognise — and check the number.
+          </span>
         </label>
-        {!amountValid && (
-          // Caught by the form rather than by a 400 from a money-moving
-          // endpoint — and the check counts decimals per currency, so USDT
-          // gets six and naira gets two.
-          <p className="error">
-            Enter an amount with at most {exponentFor(sendCurrency)} decimal places.
-          </p>
-        )}
+      )}
 
-        {/* NO TRANSACTION PIN HERE. It is asked on the confirm step, once the
-            customer can see what they are approving. */}
-        <button
-          type="submit"
-          disabled={
-            !amountValid ||
-            amount === '' ||
-            (destination === 'bank'
-              ? /*
-                 * A BANK PAYOUT CANNOT BE REVIEWED WITHOUT A NAME TO REVIEW,
-                 * and a mobile money one cannot have one — see
-                 * `nameUnavailable`. Requiring a name on a rail that has no
-                 * name enquiry would leave every customer in Accra and
-                 * Nairobi with a Review button that never enables, on the
-                 * screen they use to pay somebody.
-                 */
-                !payoutReviewable
-              : // A phone number that `e164()` could not build from — no
-                // country picked, or no digits — is not somebody to pay, and
-                // advancing would put a review screen in front of a customer
-                // naming nobody.
-                payee === '')
-          }
-        >
-          Review
-        </button>
+      <label className="row toggle">
+        <span>Save as beneficiary</span>
+        <input type="checkbox" checked={save} onChange={(e) => setSave(e.target.checked)} />
+      </label>
 
-        <FormError error={error} code={code} />
-        {done !== undefined && <p className="ok">{done}</p>}
+      <FormError error={error} code={code} />
 
-        <Toast message={done} tone="ok" onDone={clear} />
-        <Toast message={error} tone="bad" onDone={clear} />
-      </form>
-    </Shell>
+      <button type="submit" disabled={busy || rail === '' || !enough || (found !== undefined && !ready)}>
+        {busy ? 'Checking…' : found === undefined ? 'Check details' : 'Continue'}
+      </button>
+    </form>
   );
+}
+
+/* ------------------------------------------------------------------ step 4 */
+
+/**
+ * What leaves, what lands, and what it costs.
+ *
+ * TWO CARDS RATHER THAN ONE FIELD, because a cross-border payment has two
+ * amounts and a customer cares about the second. The old screen showed one
+ * box and a line of text; here "they receive" is a figure in its own right,
+ * and the currency on each side is a control rather than a label.
+ */
+function SendAmount({
+  to,
+  balances,
+  home,
+  onSent,
+}: {
+  to: Recipient;
+  balances: readonly { currency: string; spendable: string }[];
+  home: string;
+  onSent: () => void;
+}) {
+  const client = useXetral();
+  const { busy, error, code, done, run } = useSubmit();
+  const { key, next } = useIdempotencyKey();
+
+  const [sendCurrency, setSendCurrency] = useState(home);
+  const [amount, setAmount] = useState('');
+  const [pin, setPin] = useState('');
+
+  const balance = balances.find((b) => b.currency === sendCurrency)?.spendable ?? '0';
+  const sameCurrency = sendCurrency === to.currency;
+
+  /*
+   * A QUOTE CARRIES THE AMOUNT IT IS A QUOTE FOR.
+   *
+   * `useLoad` keeps the last successful result while the next request is in
+   * flight and after one fails, which is right for a balance and wrong for a
+   * rate: type 25, clear it, type 20, and "they receive" goes on showing what
+   * 25 converts to — correct arithmetic about an amount the customer has
+   * already replaced. Stamping the answer with the amount and rendering only
+   * on a match is structural; a debounce is not, because the stale figure
+   * comes back on the next refusal either way.
+   */
+  const quote = useLoad(
+    async () => {
+      if (sameCurrency || !isValidAmount(amount, exponentFor(sendCurrency))) return undefined;
+      const got = await client.fxQuote(sendCurrency, to.currency, amount);
+      return { forAmount: amount, ...got };
+    },
+    [sendCurrency, to.currency, amount, sameCurrency],
+  );
+  const lands = quote.data?.forAmount === amount ? quote.data : undefined;
+
+  /*
+   * NO `Number(amount)` HERE, and the absence is the rule rather than an
+   * omission. `isValidAmount` already refuses a negative (its pattern starts
+   * `^[0-9]+`) and already refuses zero (it demands a digit 1-9), so the
+   * `> 0` this line used to carry was redundant AND was a float holding
+   * money — caught by `.semgrep/xetral.yml`, which is what that rule is for.
+   */
+  const enough = isValidAmount(amount, exponentFor(sendCurrency));
+
+  return (
+    <form
+      className="send-step"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void run(async () => {
+          /*
+           * THREE PATHS, AND THE CUSTOMER CHOSE NONE OF THEM.
+           *
+           * A Xetral account in the same currency is a wallet transfer; in a
+           * different one it is a REMITTANCE, which converts and pays in one
+           * entry rather than leaving money in a wallet the sender never
+           * meant to hold. Anything else leaves through a payout. The old
+           * screen made this a tab; here it follows from the recipient and
+           * the currency, which is the whole of the unification.
+           */
+          if (to.kind === 'xetral' && sameCurrency) {
+            await client.transfer({
+              recipient: to.destination,
+              amount,
+              currency: sendCurrency,
+              pin,
+              idempotencyKey: key,
+            });
+          } else if (to.kind === 'xetral') {
+            await client.remit({
+              from: sendCurrency,
+              to: to.currency,
+              amount,
+              recipient: to.destination,
+              pin,
+              idempotencyKey: key,
+            });
+          } else {
+            await client.payToBank({
+              country: to.country,
+              bankCode: to.rail_code ?? '',
+              accountNumber: to.destination,
+              amount,
+              currency: to.currency,
+              pin,
+              idempotencyKey: key,
+            });
+          }
+          next();
+          setAmount('');
+          setPin('');
+          onSent();
+          return `Sent to ${to.display_name}.`;
+        });
+      }}
+    >
+      <header className="send-to">
+        <span className="row-icon">{initialsOf(to.display_name)}</span>
+        <span className="row-main">
+          <span className="row-title">{to.display_name}</span>
+          <span className="row-sub">
+            {to.rail_name ?? 'Xetral account'} &middot; {to.destination}
+          </span>
+        </span>
+      </header>
+
+      <h1>
+        Send {to.currency} to {firstNameOf(to.display_name)}
+      </h1>
+
+      <div className={enough || amount === '' ? 'amount-card' : 'amount-card invalid'}>
+        <span className="field-label">You send</span>
+        <div className="amount-row">
+          <Select
+            value={sendCurrency}
+            onChange={setSendCurrency}
+            options={balances.map((b) => ({ value: b.currency, label: b.currency }))}
+            renderMark={(value) => <CurrencyMark currency={value} size={18} />}
+            compact
+          />
+          <input
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            inputMode="decimal"
+            placeholder="0"
+            aria-label="Amount to send"
+          />
+        </div>
+        <span className="hint">
+          Balance: {formatAmount(balance, sendCurrency)}
+        </span>
+        {amount !== '' && !enough && (
+          <span className="error">Enter an amount in {sendCurrency}.</span>
+        )}
+      </div>
+
+      <div className="amount-card">
+        <span className="field-label">{firstNameOf(to.display_name)} receives</span>
+        <div className="amount-row">
+          <span className="currency-pill">
+            <CurrencyMark currency={to.currency} size={18} />
+            {to.currency}
+          </span>
+          <strong className="lands">
+            {sameCurrency
+              ? formatAmount(amount === '' ? '0' : amount, to.currency)
+              : lands === undefined
+                ? '—'
+                : formatAmount(lands.receives, to.currency)}
+          </strong>
+        </div>
+        {!sameCurrency && lands !== undefined && (
+          <span className="hint">
+            1 {sendCurrency} = {lands.rate} {to.currency}
+          </span>
+        )}
+      </div>
+
+      <label className="field">
+        <span className="field-label">Transaction PIN</span>
+        <input
+          type="password"
+          inputMode="numeric"
+          autoComplete="off"
+          value={pin}
+          onChange={(e) => setPin(e.target.value)}
+          maxLength={12}
+        />
+      </label>
+
+      <p className="arrival">
+        <Icon name="zap" size={15} />
+        {to.kind === 'xetral' ? 'Arrives instantly' : 'Usually arrives within minutes'}
+      </p>
+
+      <FormError error={error} code={code} />
+      {done !== undefined && <p className="ok">{done}</p>}
+
+      <button type="submit" disabled={busy || !enough || pin === ''}>
+        {busy ? 'Sending…' : 'Continue'}
+      </button>
+
+      <p className="hint">
+        Wrong person? <Link href="/transfer">Choose somebody else</Link>.
+      </p>
+    </form>
+  );
+}
+
+/* --------------------------------------------------------------- the small */
+
+/** A draft, rendered by the same component a saved recipient is. */
+function toRecipient(found: RecipientResolution): Recipient {
+  return {
+    id: '',
+    kind: found.kind,
+    country: found.country,
+    currency: found.currency,
+    rail_code: found.rail_code,
+    rail_name: found.rail_name,
+    destination: found.destination,
+    display_name: found.resolved_name ?? found.destination,
+    resolved_name: found.resolved_name,
+    last_used_at: null,
+    created_at: new Date().toISOString(),
+  };
+}
+
+/**
+ * Initials, for the disc beside a name.
+ *
+ * TWO LETTERS AT MOST. A name with five words produces five letters in a
+ * 42-pixel circle, which renders as an illegible smudge rather than as an
+ * avatar — and the point of the disc is to be recognisable at a glance.
+ */
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  const first = parts[0]?.[0] ?? '';
+  const last = parts.length > 1 ? (parts[parts.length - 1]?.[0] ?? '') : '';
+  return `${first}${last}`.toUpperCase();
+}
+
+/** "Send GHS to Rabi" reads better than the whole legal name, and the whole
+ *  name is on the header directly above it. */
+function firstNameOf(name: string): string {
+  return name.trim().split(/\s+/)[0] ?? name;
 }
