@@ -113,6 +113,21 @@ export class FundingDiagnosticsService {
         `provider that issued them; this only decides the next one.`,
     });
 
+    /*
+     * CAN EACH ROUTED CURRENCY ACTUALLY BE COLLECTED, which is a different
+     * question from every check above and was answerable nowhere.
+     *
+     * 059 routes a currency to a rail; this asks whether that rail HOLDS A
+     * CREDENTIAL. The two together are what decide whether a payment link
+     * works, and with them apart a deployment holding a Paystack key and no
+     * Flutterwave one collected naira perfectly and answered every cedi,
+     * shilling and dollar checkout with `checkout_unavailable` — one opaque
+     * code for a missing key, a refusal and an outage alike. The reason was in
+     * a log line written at the moment a payer pressed the button, and nowhere
+     * else.
+     */
+    checks.push(...(await this.#checkoutChecks()));
+
     if (rail !== 'paystack') {
       checks.push({
         name: 'Paystack checks',
@@ -124,6 +139,96 @@ export class FundingDiagnosticsService {
 
     checks.push(...(await this.#paystackChecks()));
     return { rail, checks, failures: await this.#recentFailures() };
+  }
+
+  /**
+   * Which currencies a payment link can actually take, one line each.
+   *
+   * ROUTED IS NOT THE SAME AS READY. `provider_route_coverage` answers
+   * whether a currency has a rail; this answers whether that rail can be
+   * called at all, which is the half that was missing — and the half a payer
+   * meets.
+   *
+   * NO CREDENTIAL IS EVER READ OUT, only whether one resolves. 026 has no
+   * endpoint that returns a secret and this is not going to become the first.
+   */
+  async #checkoutChecks(): Promise<readonly DiagnosticCheck[]> {
+    let routes: readonly { currency: string; provider: string }[];
+    try {
+      const rows = await this.pool.query<{ currency: string; provider: string }>(
+        `SELECT currency, provider FROM provider_routes
+          WHERE operation = 'collect' ORDER BY currency`,
+      );
+      routes = rows.rows;
+    } catch {
+      // A deployment behind 059. Said plainly rather than thrown: this page is
+      // the first thing somebody opens when a schema is behind.
+      return [
+        {
+          name: 'Which currencies a payment link can take',
+          state: 'warn',
+          detail:
+            'No provider_routes table. Apply packages/ledger/sql/059_provider_routing.sql — ' +
+            'without it every currency falls back to the one global funding_provider.',
+        },
+      ];
+    }
+
+    if (routes.length === 0) {
+      return [
+        {
+          name: 'Which currencies a payment link can take',
+          state: 'fail',
+          detail:
+            'No collect routes at all, so every payment link refuses. Apply ' +
+            '059_provider_routing.sql, or read provider_route_coverage.',
+        },
+      ];
+    }
+
+    const checks: DiagnosticCheck[] = [];
+    for (const route of routes) {
+      // Resolved the way the adapter resolves it — the credential store first
+      // and the environment as the fallback, 026's order — so this cannot
+      // report a key the rail would not find.
+      const key = await this.#secretFor(route.provider);
+      checks.push({
+        name: `Collecting ${route.currency}`,
+        state: key ? 'pass' : 'fail',
+        detail: key
+          ? `Routed to ${route.provider}, which has a key. A payment link in ` +
+            `${route.currency} can be paid.`
+          : `Routed to ${route.provider}, WHICH HAS NO KEY — so every ` +
+            `${route.currency} payment link answers "checkout unavailable". ` +
+            `Paste ${route.provider}.secret_key on the Provider keys screen, or ` +
+            `set ${route.provider.toUpperCase()}_SECRET_KEY.`,
+      });
+    }
+    return checks;
+  }
+
+  /**
+   * Whether a rail has a usable secret, without ever producing one.
+   *
+   * Returns a BOOLEAN and nothing else. A helper here that returned the key
+   * would put one behind a staff route, and 026's whole argument is that a
+   * credential goes in and never comes back out over HTTP.
+   */
+  async #secretFor(provider: string): Promise<boolean> {
+    const fallback =
+      provider === 'paystack'
+        ? this.config.paystackSecretKey
+        : provider === 'flutterwave'
+          ? this.config.flutterwaveSecretKey
+          : undefined;
+    try {
+      const value = await this.credentials.secretFor(provider, 'secret_key', fallback);
+      return value !== undefined && value !== '';
+    } catch {
+      // An unknown slot, or a store that cannot be read. Reported as absent,
+      // which is the answer that sends somebody to look.
+      return false;
+    }
   }
 
   /**

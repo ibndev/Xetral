@@ -15,7 +15,7 @@ import {
   PaystackClient,
 } from '@xetral/providers';
 import type { CheckoutPort } from '@xetral/providers';
-import { ProviderRejectedError } from '@xetral/providers';
+import { ProviderRejectedError, ProviderUnavailableError } from '@xetral/providers';
 import { assertBalanced, posting } from '@xetral/ledger';
 import type { LedgerIntent } from '@xetral/ledger';
 import { LedgerService } from '@xetral/ledger';
@@ -319,7 +319,36 @@ export class PaymentLinkService {
        * `purchases` is: a row that can be removed is evidence that can be
        * removed.
        */
-      this.#logger.error(`could not start a payment on ${slug}: ${describe(error)}`);
+      /*
+       * THE LOG NAMES THE RAIL, because two providers serve this endpoint and
+       * the sentence alone does not always say which. "no secret key is
+       * configured" is true of both and sends an operator to check the wrong
+       * one — the fault 061 records about the naira account log naming the
+       * global default.
+       */
+      this.#logger.error(
+        `could not start a ${currency} payment on ${slug} via ${provider}: ${describe(error)}`,
+      );
+
+      /*
+       * A MISSING CREDENTIAL IS TOLD APART FROM AN OUTAGE, and only those two.
+       *
+       * They need different actions and had one code between them: a
+       * deployment holding a Paystack key and no Flutterwave one collected
+       * naira perfectly and answered every cedi, shilling and dollar checkout
+       * with `checkout_unavailable` — which reads as "try again later" about
+       * something that will never work until somebody pastes a key.
+       *
+       * WHAT THE PAYER IS TOLD CARRIES NO PROVIDER NAME AND NO SENTENCE. That
+       * part names our integration and stays in the log, which is 006's rule;
+       * what crosses the boundary is a code the page turns into words, and
+       * `/admin/funding/diagnostics` is where the reason is answerable.
+       */
+      if (error instanceof ProviderUnavailableError && /no .* key is configured/i.test(
+        error.message,
+      )) {
+        throw new ServiceUnavailableException({ error: 'checkout_not_configured' });
+      }
       throw new ServiceUnavailableException({ error: 'checkout_unavailable' });
     }
 

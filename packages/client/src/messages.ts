@@ -345,6 +345,8 @@ function sentenceFor(error: ApiError): string {
       return 'Choose your country first — a phone number needs its dialling code.';
     case 'broadcast_not_found':
       return 'That announcement is no longer here.';
+    case 'checkout_not_configured':
+      return 'This currency cannot be paid yet. Ask the person who sent you this link to get in touch with us.';
     case 'transaction_not_found':
       return 'That transaction is not on this account.';
     case 'price_in_use':

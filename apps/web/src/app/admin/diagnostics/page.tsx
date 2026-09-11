@@ -36,8 +36,9 @@ export default function Diagnostics() {
         <h1>Diagnostics</h1>
         <h2>{report.data === undefined ? '—' : `${failing.length} blocking`}</h2>
         <p className="lead">
-          What the naira rail says when it is asked, rather than what it is
-          configured to be.
+          What each rail says when it is asked, rather than what it is
+          configured to be — including which currencies a payment link can
+          actually take.
         </p>
         <AdminError error={report.error} code={report.code} role="admin" />
         {report.loading && <p className="spinner">Checking…</p>}

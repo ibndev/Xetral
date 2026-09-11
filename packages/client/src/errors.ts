@@ -225,6 +225,20 @@ const API_ERROR_CODES = [
    */
   'transaction_not_found',
   /*
+   * `checkout_not_configured` — the rail this currency routes to has no key.
+   *
+   * TOLD APART FROM `checkout_unavailable`, and only these two, because they
+   * need different actions and had one code between them. A deployment
+   * holding a Paystack key and no Flutterwave one collected naira perfectly
+   * and answered every cedi, shilling and dollar checkout with "try again
+   * later" — about something that will never work until somebody pastes a
+   * key.
+   *
+   * It carries no provider name: that part names our integration and stays in
+   * the log, which is 006's rule.
+   */
+  'checkout_not_configured',
+  /*
    * `broadcast_not_found` — an announcement id that names nothing.
    *
    * Reachable only from the operations dashboard, which is why it exists at
