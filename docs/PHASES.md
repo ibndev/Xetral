@@ -27,6 +27,7 @@ shipped, that is called out explicitly.
 | 16 — One identifier, a code to get back in, a price that keeps itself | ✅ | ExchangeRate-API key to go live |
 | 17 — A link a stranger can pay | ✅ | Paystack credentials to go live |
 | 18 — A provider per currency | ✅ | Flutterwave credentials to go live |
+| 19 — One Send flow, and the refusal we invented | ✅ | |
 
 All eleven phases are built, a **pre-deployment audit** (Phase 12) closed what
 building them phase by phase had left between the phases, and **Phase 13** is
@@ -2026,3 +2027,106 @@ constants that failed on the first live call — then paste
 give Flutterwave the `/v1/webhooks/flutterwave/deposits` URL, and confirm the
 mobile money network codes in `FLUTTERWAVE_MOBILE_MONEY_NETWORKS` with their
 support before the first payout.
+
+
+---
+
+## Phase 19 — One Send flow, and the refusal we invented ✅
+
+Not a feature list. One screen that asked a customer a question about our
+plumbing, and one belief about a provider that this repo had written down as a
+rule, repeated three times, and never checked.
+
+| File | What it is |
+|---|---|
+| `packages/ledger/sql/068_recipients.sql` | the address book, and which balance funds a payout |
+| `apps/api/src/recipients/recipient-book.service.ts` | resolve, save, remove — one resolver per rail |
+| `apps/web/src/app/transfer/page.tsx`, `apps/mobile/app/transfer.tsx` | four steps, no tabs |
+| `packages/providers/src/flutterwave/payout-adapter.ts` | `RESOLVES_MOBILE_MONEY`, and the call that was never made |
+
+### The refusal was ours
+
+For three rounds customers in Accra reported that their mobile money details
+could not be found, and three separate faults produced that one sentence.
+
+1. **The SCREEN.** The port answered `name_unavailable`, the screen displayed
+   it and ENABLED its button for it, and the submit handler still required a
+   beneficiary name. The control enabled, the customer pressed it, nothing
+   happened — which reads as "it cannot find the number".
+2. **The SERVER.** `send()` called the lookup unconditionally and treated its
+   refusal as a reason not to send, so every cedi and shilling payout was
+   refused before the rail was ever asked. Fixing the screen is why the button
+   then worked and the send still did not.
+3. **The BELIEF, which was written into `CLAUDE.md` as a rule.** "A mobile
+   money wallet has no name enquiry" — stated in 043, repeated in 059,
+   repeated again in 067. Flutterwave's own documentation for
+   `/v3/accounts/resolve` lists **Ghanaian Mobile Money Numbers** among what
+   it accepts. The adapter matched the network code, threw, and never made the
+   call.
+
+**A REFUSAL THIS CODEBASE INVENTED IS THE HARDEST KIND TO SEE, because every
+component is behaving.** It was relayed correctly by the adapter, correctly by
+the service, correctly by the screen, down to a sentence about a number the
+provider will name on request.
+
+4. **AND THE TEST AGREED WITH IT.** `payout-adapter.test.ts` asserted the
+   refusal AND that no HTTP call was made, and was green throughout. That is
+   Phase 3's lesson about the Bitnob endpoint table in a second place: the
+   tests agreed with the code because the same person wrote both, and only the
+   vendor's own documentation settles it.
+5. **SO IT IS A TABLE, NOT A FLAG.** `RESOLVES_MOBILE_MONEY` names where a
+   wallet resolves. Kenya is genuinely absent from what resolve accepts, so
+   `name_unavailable` is the true answer there and stays — 043's rule holds
+   where it applies. What was wrong was applying it everywhere. Where no name
+   exists the screen ASKS FOR A LABEL, so Kenya is a different screen rather
+   than a dead end.
+
+### Then: one flow
+
+The Send screen opened by asking "Xetral, bank or mobile money?" Each answer
+led to a different form and a different endpoint, and a customer who picked
+wrong got a dead end rather than a redirect.
+
+6. **THE RAIL IS A ROW IN A LIST, NOT A TAB.** The Xetral account sits in the
+   same picker as MTN, Telecel and AirtelTigo — first, because it is instant
+   and free. Which of `/v1/wallets/transfers`, `/v1/fx/remit` and
+   `/v1/payouts` carries the money follows from the recipient and the
+   currency, which is a derivation rather than a question.
+7. **THE CURRENCY IS ASKED BEFORE THE NUMBER.** It decides the country, the
+   country decides the rail, and the rail decides whether a name can be looked
+   up — so everything the details screen needs comes from one answer.
+8. **THE FIRST SCREEN IS A LIST OF PEOPLE.** A send flow that opens on a blank
+   field makes every payment cost the same typing as the first.
+9. **A SAVED DESTINATION IS IMMUTABLE AND REMOVAL IS FINAL**, by trigger. 043
+   makes a payout's destination immutable because the reserve is already
+   posted; a saved recipient is what a customer taps WITHOUT re-reading, so a
+   row whose number could be edited redirects every future payment.
+10. **NO TRANSACTION PIN ON THE ADDRESS BOOK, deliberately.** Adding a
+    beneficiary is the classic first half of a takeover, so the instinct is to
+    gate it — but a saved recipient moves nothing, the send takes a PIN and
+    re-fetches the rail's name on that request, and the destination is
+    immutable. Asking here would be a second, weaker copy of a control that
+    already holds.
+11. **AND THE NEW FLOW REINTRODUCED A FAULT ITS OWN COMMENT WARNED ABOUT.**
+    Dropping the dialling-code picker meant `08031234567` — how a number is
+    written in Lagos — resolved to nobody, because the stored value is E.164.
+    The country the currency step already fixed is what makes a national
+    number safe: normalised through THAT country's dial code, never the
+    sender's. Found by the e2e on its first run.
+12. **`Number(amount) > 0` WAS A FLOAT HOLDING MONEY, and it was redundant.**
+    `isValidAmount` already refuses a negative and already refuses zero. The
+    local Semgrep rule caught it in both apps — which is the third time those
+    five rules have found something real.
+
+### And which balance funds a payout
+
+13. **FLUTTERWAVE IS A PREFUNDED WALLET AND NOTHING HERE EVER SAID SO.** It
+    debits the balance matching the payout currency, so a cedi payout needs a
+    cedi float. `payout_debit_currencies` is how an operator says otherwise —
+    and EMPTY IS THE DEFAULT, because naming another balance overrides the
+    published spread with a rate somebody else sets, which is 032's argument
+    about the transfer levy applied to a treasury decision.
+
+**Before this goes live, an operator must:** apply migration **068**, and
+decide `payout_debit_currencies` deliberately — leaving it empty means each
+currency is paid from its own float, which needs one to exist.

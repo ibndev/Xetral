@@ -784,11 +784,18 @@ Schema: `packages/ledger/sql/059_provider_routing.sql`. Router in
   secret key authorises every outbound call correctly and rejects every
   webhook — which from inside is indistinguishable from a broken integration
   rather than a missing box.
-- **A MOBILE MONEY WALLET HAS NO NAME ENQUIRY**, so `name_unavailable` is its
-  own refusal, told apart from `account_not_found` — which stays
-  indistinguishable from an unreachable bank, per 043. What the adapter will
-  not do is echo back the name the sender typed: that is a confirmation screen
-  that confirms nothing while looking exactly like one.
+- **WHICH WALLETS HAVE A NAME ENQUIRY IS A TABLE, AND THIS FILE HAD IT
+  WRONG.** It said, flatly, that a mobile money wallet has none. Flutterwave's
+  own documentation for `/v3/accounts/resolve` lists what it accepts —
+  Nigerian bank accounts, Ghanaian bank accounts, GHANAIAN MOBILE MONEY
+  NUMBERS, and a merchant id — so the claim was false in the one country the
+  complaints were coming from. `RESOLVES_MOBILE_MONEY` is that list.
+  `name_unavailable` remains its own refusal, told apart from
+  `account_not_found` — which stays indistinguishable from an unreachable
+  bank, per 043 — and it is now raised only where no such call exists. What
+  the adapter will not do either way is echo back the name the sender typed:
+  that is a confirmation screen that confirms nothing while looking exactly
+  like one.
 - **THE NETWORKS ARE A TABLE, NOT A CALL.** `GET /v3/banks/GH` answers BANKS,
   and a Ghanaian offered that list is choosing a bank in order to pay an MTN
   wallet — 046's lesson about offering a product the customer's money cannot
@@ -1102,7 +1109,8 @@ and the Send screen of both apps.
   about the answer, so a Ghanaian typing a momo number was told the NAME could
   not be found — `account_not_found`, which reads as "you typed it wrong" —
   where the send path would have said `name_unavailable`, which is 043's own
-  refusal meaning a wallet HAS no name enquiry and never will. Two customers
+  refusal meaning a wallet has no name enquiry — TRUE OF KENYA AND FALSE OF
+  GHANA, which the round after this one found out. Two customers
   reporting "it says it cannot find the user name, meanwhile nothing is wrong
   with the name" were reading a sentence about a product that does not exist.
   `lookup()` delegates now: one translation, the same shape as the two
@@ -1148,9 +1156,10 @@ Normalisation in `apps/api/src/phone.ts`, applied in
 `apps/api/src/payouts/payout.service.ts`.
 
 - **`send()` CALLED THE LOOKUP UNCONDITIONALLY AND TREATED ITS REFUSAL AS A
-  REASON NOT TO SEND.** A mobile money wallet has no name enquiry on any
-  network — 043 records `name_unavailable` and 059 repeats it — so the one
-  answer that rail can ever give was the one answer that stopped the payout.
+  REASON NOT TO SEND.** The adapter answered `name_unavailable` for every
+  wallet — 043 records it and 059 repeated it, and BOTH WERE OVERSTATING IT;
+  see the section below — so the one answer that rail would give was the one
+  answer that stopped the payout.
   Every cedi and shilling send was refused BEFORE THE RAIL WAS ASKED, on
   exactly the corridor the Ghana and Kenya integration exists for. The
   previous round fixed the SCREEN, which is why the button then worked and
@@ -1281,31 +1290,122 @@ Normalisation in `apps/api/src/phone.ts`, applied in
   unprices the corridor and 008 then refuses every quote on it, so a control
   whose only outcome is a refusal is worse than no control.
 
-### Why a mobile money send did nothing — non-obvious rules
+### Sending money, as ONE flow — non-obvious rules
 
-`apps/web/src/app/transfer/page.tsx`, `apps/mobile/app/transfer.tsx`, bound by
-`momo-send.test.ts`.
+Schema: `packages/ledger/sql/068_recipients.sql`. Service in
+`apps/api/src/recipients/recipient-book.service.ts`, screens in
+`apps/web/src/app/transfer/page.tsx` and `apps/mobile/app/transfer.tsx`, bound
+by `momo-send.test.ts`.
 
-- **THE API WAS NEVER WRONG, AND IT LOOKED LIKE A PROVIDER FAULT TWICE.** The
-  payout port answers `name_unavailable` for a wallet — correctly and
-  permanently, because there is no name enquiry on that rail. The screen
-  displayed that answer and ENABLED its button for it. The SUBMIT HANDLER,
-  written earlier and never revisited, still required a beneficiary name:
-  `if (destination === 'bank' && beneficiary === undefined) return;`. So the
-  control enabled, the customer pressed it, and nothing happened.
-- **A BUTTON THAT LOOKS LIVE AND DOES NOTHING READS AS "IT CANNOT FIND THE
-  NUMBER".** That is what was reported, three times, about numbers that were
-  correct — and it is why the complaint pointed at the lookup rather than at
-  the form.
-- **TWO DEFINITIONS OF ONE QUESTION**, the shape already recorded about the two
-  recipient resolvers and the two beneficiary lookups. `payoutReviewable` is
-  the one definition now, read by the button AND the handler, and the test
-  fails the build on either re-deriving it inline.
+- **SENDING WAS THREE PRODUCTS WEARING ONE HEADING.** The screen opened by
+  asking "Xetral, bank or mobile money?" — a question about OUR PLUMBING, put
+  to somebody who only wants to pay a person — and each answer led to a
+  different form, a different set of fields and a different endpoint. A
+  customer who picked wrong got a dead end rather than a redirect, and the
+  commonest send cost two decisions before a number could be typed. Nothing
+  about that was necessary: which of `/v1/wallets/transfers`, `/v1/fx/remit`
+  and `/v1/payouts` carries the money is DERIVABLE from the destination.
+- **THE RAIL IS A ROW IN A LIST, NOT A TAB ACROSS THE TOP.** That is the whole
+  of the unification. The Xetral account sits in the same picker as MTN,
+  Telecel and AirtelTigo, first, because it is instant and free — so a
+  customer who does not know whether their friend has an account picks from
+  one list and finds out, rather than guessing in advance.
+- **THE CURRENCY IS ASKED BEFORE THE NUMBER, and that order is what lets this
+  be one flow.** The currency decides the country, the country decides the
+  rail, and the rail decides whether a name can be looked up. Asking for a
+  number first would mean guessing which of those it belonged to.
+- **THE FIRST SCREEN IS A LIST OF PEOPLE, NOT AN EMPTY FIELD.** A send flow
+  that opens on a blank box makes every payment cost the same typing as the
+  first. `recipients` is the difference between a product somebody uses twice
+  and one they use weekly.
+- **A SAVED RECIPIENT'S DESTINATION IS IMMUTABLE, by trigger.** 043 makes a
+  payout's destination immutable because the reserve is already posted and an
+  UPDATE moving the number sends authorised money to somebody never named. The
+  argument reaches one step further back: a saved recipient is what a customer
+  taps WITHOUT re-reading, so a row whose number could be edited redirects
+  every future payment. The LABEL is the customer's own note and may change.
+- **REMOVAL IS A COLUMN AND IS FINAL.** A row a customer can erase is evidence
+  a customer can erase, and one that could be restored would let a destination
+  be parked and brought back after a complaint was closed. The unique index is
+  partial on `removed_at IS NULL`, so removing somebody by accident does not
+  make them un-addable — 006's argument about virtual accounts.
+- **`display_name` AND `resolved_name` ARE KEPT APART**, the way 040 keeps
+  `users.full_name` and `kyc_submissions.full_name` apart: one is somebody's
+  own words and one is an answer from a system with no reason to flatter. Only
+  `resolved_name` is ever shown as confirmation.
+
+### Why a mobile money send did nothing, and then still did nothing — non-obvious rules
+
+Three rounds of the same report — "it says it cannot find the momo details" —
+and three different faults, each of which made the next one invisible.
+
+- **ROUND ONE WAS THE SCREEN.** The payout port answered `name_unavailable`,
+  the screen displayed it and ENABLED its button for it, and the submit
+  handler — written earlier and never revisited — still required a beneficiary
+  name: `if (destination === 'bank' && beneficiary === undefined) return;`. So
+  the control enabled, the customer pressed it, and nothing happened. A button
+  that looks live and does nothing reads as "it cannot find the number", which
+  is why the complaint pointed at the lookup rather than at the form.
+- **ROUND TWO WAS THE SERVER.** `send()` called the lookup unconditionally and
+  treated its refusal as a reason not to send, so every cedi and shilling
+  payout was refused BEFORE THE RAIL WAS ASKED. Fixing the screen is why the
+  button then worked and the send still did not.
+- **ROUND THREE WAS THE BELIEF ITSELF, and it had been written into this file
+  as a rule.** "A mobile money wallet has no name enquiry" — stated in 043,
+  repeated in 059, repeated again in 067, and FALSE for Ghana.
+  `/v3/accounts/resolve` accepts Ghanaian Mobile Money Numbers; the adapter
+  matched the network code, threw `name_unavailable`, and never made the call.
+  A REFUSAL THIS CODEBASE INVENTED, relayed faithfully by every layer down to
+  a screen saying the name could not be found — about a number whose name the
+  provider will return on request.
+- **A TEST WRITTEN FROM THE SAME ASSUMPTION AS THE CODE PASSES EVERYTHING.**
+  `payout-adapter.test.ts` asserted the refusal AND that no call was made, and
+  was green throughout. That is Phase 3's lesson about the Bitnob endpoint
+  table in a second place: the tests agreed with the code because the same
+  person wrote both, and only the vendor's own documentation settles it.
+- **SO IT IS A TABLE, NOT A FLAG.** `RESOLVES_MOBILE_MONEY` names where a
+  wallet can be resolved. Kenya is genuinely absent from what resolve accepts,
+  so `name_unavailable` is the true answer there and stays — 043's rule holds
+  where it applies. What was wrong was applying it everywhere.
+- **AND AN UNNAMEABLE RAIL ASKS FOR A LABEL RATHER THAN REFUSING.** Where the
+  rail cannot answer, the screen asks what the customer wants to call them —
+  so Kenya is a different screen rather than a dead end. The label is worded
+  differently from "Account name" and is never presented as confirmation,
+  because a name the sender typed shown as the account's is a confirmation
+  screen that confirms nothing while looking exactly like one.
 - **`number.length < 10` IS A NUBAN AND NOT A PHONE NUMBER.** A Ghanaian MTN
   number and a Kenyan Safaricom number are NINE national digits, so a customer
-  who typed theirs without the trunk zero made no request at all — no
-  `name_unavailable` came back, so the button stayed disabled with nothing on
-  screen saying why. The floor is per rail.
+  who typed theirs without the trunk zero made no request at all — nothing came
+  back, so the button stayed disabled with nothing on screen saying why. The
+  floor is per rail, and it is ONE definition read by the lookup and the
+  button alike: two copies of that condition is what round one was.
+
+### Which balance funds a payout — non-obvious rules
+
+- **FLUTTERWAVE IS A PREFUNDED WALLET AND NOTHING HERE EVER SAID SO.** It
+  debits the balance matching the payout currency, so a cedi payout needs a
+  cedi float — and a deployment that has never collected a cedi has none.
+  Every Ghanaian transfer then fails with a message about funds, which reads
+  as a bug in the integration and is not one.
+- **`debit_currency` IS THE DEFAULT WRITTEN OUT, NOT A SAFETY MEASURE.** The
+  comment that used to sit on it was backwards: it said that left out, they
+  pick a balance. They do not pick. Naming a DIFFERENT currency is what the
+  field is for — debit naira, pay out cedis, at THEIR conversion rate.
+- **WHICH IS A TREASURY DECISION AND SO IT IS A SETTING.**
+  `payout_debit_currencies` (`GHS=NGN,KES=NGN`), and EMPTY IS THE DEFAULT:
+  naming another balance overrides the spread an operator published on
+  `/admin/prices` with a rate somebody else sets, and 032's rule is that a
+  mechanism which changes what a customer is charged ships complete with the
+  decision not shipped at all.
+- **`beneficiary_name` IS REQUIRED ON EVERY FLUTTERWAVE TRANSFER**, and
+  removing it was a regression this repo shipped. It is a LABEL on their
+  beneficiary book rather than a claim about the holder, which is why it can
+  be filled from the rail's answer where there is one and from the network and
+  last four where there is not — never from what the sender typed.
+- **KENYA'S M-PESA REQUIRES `meta`** — `sender`, `sender_country` and
+  `mobile_number`. It is a cross-border remittance and the originator has to
+  be named; a transfer without it is refused for a reason that reads as an
+  invalid account.
 
 ### Editing your own account — non-obvious rules
 
@@ -3408,6 +3508,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/064_retired_rate_delete
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/065_push.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/066_retired_policy_delete.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/067_wallet_payouts_and_missing_details.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/068_recipients.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -3473,6 +3574,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/064_retired_rate_delete
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/065_push.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/066_retired_policy_delete.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/067_wallet_payouts_and_missing_details.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/068_recipients.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,
