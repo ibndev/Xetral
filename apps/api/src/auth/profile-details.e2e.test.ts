@@ -41,6 +41,7 @@ interface Person {
   email: string;
   token: string;
   phone: string;
+  uuid: string;
 }
 
 async function register(): Promise<Person> {
@@ -58,7 +59,11 @@ async function register(): Promise<Person> {
     })
     .expect(201);
 
-  return { email, token: created.body.access_token as string, phone: `+234${national}` };
+  const token = created.body.access_token as string;
+  const row = await pool.query<{ uuid: string }>(`SELECT uuid FROM users WHERE email = $1`, [
+    email,
+  ]);
+  return { email, token, phone: `+234${national}`, uuid: row.rows[0]!.uuid };
 }
 
 const details = (person: Person) =>
@@ -120,12 +125,12 @@ describe('a customer reading their own account', () => {
   });
 });
 
-describe('a customer filling in their name', () => {
-  it('writes it, and the next read returns what was written', async () => {
+describe('an UNVERIFIED customer filling in what is missing', () => {
+  it('writes a name, and the next read returns what was written', async () => {
     const person = await register();
 
     const saved = await request(app.getHttpServer())
-      .post('/v1/auth/profile/name')
+      .post('/v1/auth/profile')
       .set('Authorization', `Bearer ${person.token}`)
       // Padded deliberately: the database trims, so the response is what says
       // whether the trim happened rather than what the form believed it sent.
@@ -133,68 +138,110 @@ describe('a customer filling in their name', () => {
       .expect(201);
 
     expect(saved.body.full_name).toBe('Chinelo Okafor');
+    expect(saved.body.kyc_verified).toBe(false);
+    expect(saved.body.editable).toContain('phone');
 
     const read = await details(person).expect(200);
     expect(read.body.full_name).toBe('Chinelo Okafor');
   });
 
+  it('ADDS A MISSING PHONE NUMBER, which is what nobody could do', async () => {
+    /*
+     * An account opened before the number was required has none — and the
+     * number IS the Xetral-to-Xetral identifier, so Request payment reads
+     * "Not set" and every sender is told there is no such customer. There was
+     * no path anywhere in the product to fix that.
+     */
+    const person = await register();
+    await pool.query(`UPDATE users SET phone = NULL WHERE uuid = $1`, [person.uuid]);
+
+    const before = await details(person).expect(200);
+    expect(before.body.phone).toBeNull();
+
+    const national = String(8000000000 + Math.floor(Math.random() * 999999999));
+    const saved = await request(app.getHttpServer())
+      .post('/v1/auth/profile')
+      .set('Authorization', `Bearer ${person.token}`)
+      // NATIONAL digits. The dialling code comes from the country, joined
+      // server-side, because a unique index on text cannot see that three
+      // spellings are one person.
+      .send({ phone: national })
+      .expect(201);
+
+    expect(saved.body.phone).toBe(`+234${national}`);
+  });
+
+  it('strips the trunk zero exactly as registration does', async () => {
+    const person = await register();
+    await pool.query(`UPDATE users SET phone = NULL WHERE uuid = $1`, [person.uuid]);
+
+    const national = String(8000000000 + Math.floor(Math.random() * 999999999));
+    const saved = await request(app.getHttpServer())
+      .post('/v1/auth/profile')
+      .set('Authorization', `Bearer ${person.token}`)
+      .send({ phone: `0${national}` })
+      .expect(201);
+
+    // A domestic dialling convention rather than part of the number. Left on,
+    // the account holds a string nobody can be reached at.
+    expect(saved.body.phone).toBe(`+234${national}`);
+  });
+
+  it('REFUSES A NUMBER ANOTHER ACCOUNT HOLDS, without saying whose', async () => {
+    const theirs = await register();
+    const mine = await register();
+    await pool.query(`UPDATE users SET phone = NULL WHERE uuid = $1`, [mine.uuid]);
+
+    const taken = await pool.query<{ phone: string }>(
+      `SELECT phone FROM users WHERE uuid = $1`,
+      [theirs.uuid],
+    );
+    const national = taken.rows[0]!.phone.replace('+234', '');
+
+    const refused = await request(app.getHttpServer())
+      .post('/v1/auth/profile')
+      .set('Authorization', `Bearer ${mine.token}`)
+      .send({ phone: national })
+      .expect(409);
+
+    // One number, one account: every per-customer control assumes it.
+    expect(refused.body.error).toBe('phone_taken');
+    expect(JSON.stringify(refused.body)).not.toContain(theirs.uuid);
+  });
+
   it('refuses a name the database CHECK would refuse', async () => {
     const person = await register();
 
-    // `users_full_name_check` demands 2..120 characters after trimming. The
-    // schema states the same bounds so the refusal is readable, but the CHECK
-    // is what holds — this asserts the readable half.
-    await request(app.getHttpServer())
-      .post('/v1/auth/profile/name')
-      .set('Authorization', `Bearer ${person.token}`)
-      .send({ full_name: 'a' })
-      .expect(400);
+    for (const full_name of ['a', 'x'.repeat(121)]) {
+      await request(app.getHttpServer())
+        .post('/v1/auth/profile')
+        .set('Authorization', `Bearer ${person.token}`)
+        .send({ full_name })
+        .expect(400);
+    }
 
-    await request(app.getHttpServer())
-      .post('/v1/auth/profile/name')
-      .set('Authorization', `Bearer ${person.token}`)
-      .send({ full_name: 'x'.repeat(121) })
-      .expect(400);
-
-    // The name is untouched by either refusal.
     const read = await details(person).expect(200);
     expect(read.body.full_name).toBe('Original Name');
   });
 
-  it('REFUSES A SMUGGLED EMAIL, PHONE OR COUNTRY rather than ignoring one', async () => {
+  it('REFUSES A SMUGGLED EMAIL rather than ignoring one', async () => {
+    /*
+     * `.strict()`, and this is what it is for. The email is what
+     * `users_email_unique` refuses a duplicate account on, so an endpoint that
+     * could move an address between accounts is an account-takeover primitive
+     * with a text box in front of it. A field silently ignored is a field
+     * somebody will one day wire up.
+     */
     const person = await register();
 
-    /*
-     * `.strict()`, and this is what it is for. Those three are read-only for
-     * reasons that are not about validation — the email is what
-     * `users_email_unique` refuses a duplicate account on, the phone is the
-     * identifier every per-customer control assumes one person holds one of,
-     * and the country decides which rails serve them. A field silently ignored
-     * is a field somebody will one day wire up; a field refused is a decision
-     * anybody reading the code can see.
-     */
     await request(app.getHttpServer())
-      .post('/v1/auth/profile/name')
+      .post('/v1/auth/profile')
       .set('Authorization', `Bearer ${person.token}`)
       .send({ full_name: 'Someone Else', email: 'attacker@example.com' })
       .expect(400);
 
-    await request(app.getHttpServer())
-      .post('/v1/auth/profile/name')
-      .set('Authorization', `Bearer ${person.token}`)
-      .send({ full_name: 'Someone Else', phone: '+2348030000000' })
-      .expect(400);
-
-    await request(app.getHttpServer())
-      .post('/v1/auth/profile/name')
-      .set('Authorization', `Bearer ${person.token}`)
-      .send({ full_name: 'Someone Else', country: 'GH' })
-      .expect(400);
-
     const read = await details(person).expect(200);
     expect(read.body.email).toBe(person.email);
-    expect(read.body.phone).toBe(person.phone);
-    expect(read.body.country).toBe('NG');
     expect(read.body.full_name).toBe('Original Name');
   });
 
@@ -203,7 +250,7 @@ describe('a customer filling in their name', () => {
     const theirs = await register();
 
     await request(app.getHttpServer())
-      .post('/v1/auth/profile/name')
+      .post('/v1/auth/profile')
       .set('Authorization', `Bearer ${mine.token}`)
       .send({ full_name: 'Only Mine' })
       .expect(201);
@@ -216,13 +263,50 @@ describe('a customer filling in their name', () => {
     const person = await register();
 
     // No PIN has been set on this account at all, and the write still lands.
-    // A PIN authorises money leaving; a greeting on a checkout page is not
-    // that, and 040 keeps this name and the verified one apart precisely so
-    // nothing that moves money reads this one.
     await request(app.getHttpServer())
-      .post('/v1/auth/profile/name')
+      .post('/v1/auth/profile')
       .set('Authorization', `Bearer ${person.token}`)
       .send({ full_name: 'No Pin Needed' })
       .expect(201);
+  });
+});
+
+describe('a VERIFIED customer', () => {
+  it('IS REFUSED EVERY CHANGE, and the refusal is the control', async () => {
+    /*
+     * The direction looks backwards and is the point. What a reviewer read off
+     * a document is the record; letting its subject retype their own name or
+     * number afterwards would make the verification a claim about a moment
+     * rather than about the account, and the name a money decision may read
+     * would no longer be the name anybody checked.
+     *
+     * The screen hiding the fields is a courtesy. This is the rule.
+     */
+    const person = await register();
+    await pool.query(`UPDATE users SET kyc_tier = 1 WHERE uuid = $1`, [person.uuid]);
+
+    const read = await details(person).expect(200);
+    expect(read.body.kyc_verified).toBe(true);
+    // Named rather than implied, so the screen cannot present a field the
+    // server would refuse.
+    expect(read.body.editable).toEqual([]);
+
+    for (const body of [
+      { full_name: 'A New Name' },
+      { phone: '8039999999' },
+      { country: 'GH' },
+    ]) {
+      const refused = await request(app.getHttpServer())
+        .post('/v1/auth/profile')
+        .set('Authorization', `Bearer ${person.token}`)
+        .send(body)
+        .expect(403);
+      expect(refused.body.error).toBe('profile_locked');
+    }
+
+    const after = await details(person).expect(200);
+    expect(after.body.full_name).toBe('Original Name');
+    expect(after.body.phone).toBe(person.phone);
+    expect(after.body.country).toBe('NG');
   });
 });

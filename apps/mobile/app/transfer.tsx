@@ -252,10 +252,19 @@ export default function Transfer() {
   // decimals for a currency this transfer is not in.
   const amountValid = amount === '' || isValidAmount(amount, exponentFor(sendCurrency));
 
+  /*
+   * HOW MANY DIGITS BEFORE IT IS WORTH ASKING, and it is NOT ten everywhere.
+   *
+   * Ten is a NUBAN. A Ghanaian MTN number and a Kenyan Safaricom number are
+   * NINE national digits — `244123456`, `712345678` — so a floor of ten meant
+   * the lookup never fired at all for a customer who typed their number
+   * without the trunk zero. No request, so no `name_unavailable`, so the
+   * Continue button stayed disabled with nothing on screen saying why.
+   */
+  const minimumDigits = mobileMoney ? 9 : 10;
+
   async function lookUp(code: string, number: string): Promise<void> {
-    // Ten digits is a NUBAN, which is where asking becomes useful rather than
-    // noise on every keystroke.
-    if (code === '' || number.length < 10) {
+    if (code === '' || number.length < minimumDigits) {
       setBeneficiary(undefined);
       setLookupFailed(false);
       setNameUnavailable(false);

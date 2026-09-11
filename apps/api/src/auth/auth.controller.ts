@@ -24,7 +24,7 @@ import {
   loginSchema,
   registerSchema,
   refreshSchema,
-  renameSchema,
+  updateProfileSchema,
   resetPasswordSchema,
   totpCodeSchema,
 } from './dto.js';
@@ -407,28 +407,32 @@ export class AuthController {
   }
 
   /**
-   * Changes the name the customer is greeted by.
+   * Fills in or corrects what the account holds — while it is unverified.
+   *
+   * `POST /profile` rather than `POST /profile/name`, because the screen is
+   * about the account rather than about one field: a customer whose phone
+   * number is missing is exactly who this exists for, and the old path could
+   * not have carried one.
    *
    * Returns the whole account rather than 204, so the screen renders what the
    * database now holds instead of what the form believed it sent — the round
-   * trip that caught the card finish being written by a statement naming `$9`
-   * against an array of eight.
+   * trip that caught a statement naming `$9` against an array of eight.
    */
-  @Post('profile/name')
-  async renameMine(
+  @Post('profile')
+  async updateMine(
     @Req() request: AuthenticatedRequest,
     @Body() body: unknown,
   ): Promise<AccountDetails> {
     const auth = request.auth;
     if (auth === undefined) throw new UnauthorizedException({ error: 'invalid_token' });
-    const parsed = renameSchema.safeParse(body);
+    const parsed = updateProfileSchema.safeParse(body);
     if (!parsed.success) {
       throw new BadRequestException({
         error: 'invalid_request',
         fields: parsed.error.issues.map((issue) => issue.path.join('.')),
       });
     }
-    return this.profile.rename(auth.sub, parsed.data.full_name);
+    return this.profile.update(auth.sub, parsed.data);
   }
 
   @Post('totp/elevate')

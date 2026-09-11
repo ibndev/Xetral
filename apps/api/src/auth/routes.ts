@@ -178,7 +178,7 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // assumes one person holds one of; the third decides which rails serve
       // them. None of the three is a text box.
       .authenticated('GET', '/v1/auth/profile/details', { pin: false })
-      .authenticated('POST', '/v1/auth/profile/name', { pin: false })
+      .authenticated('POST', '/v1/auth/profile', { pin: false })
       /*
        * THE HANDSET A CUSTOMER IS SIGNED IN ON.
        *

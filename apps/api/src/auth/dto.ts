@@ -144,22 +144,42 @@ export type TotpCodeRequest = z.infer<typeof totpCodeSchema>;
 
 
 /**
- * The one field on the account a customer may change themselves.
+ * What a customer may change about their own account.
+ *
+ * ONLY WHILE UNVERIFIED, and the service refuses otherwise — this schema says
+ * what the shape of a change is, never who may make one.
  *
  * THE BOUNDS ARE THE DATABASE'S, restated. `users_full_name_check` demands
- * 2..120 characters after trimming, so a longer or emptier name is refused by
- * the CHECK whether it arrives through this schema, through a script or
- * through psql — this is the early, readable refusal, not the rule.
+ * 2..120 characters after trimming, and the phone is NATIONAL DIGITS exactly
+ * as registration takes them: the dialling code comes from the country, so a
+ * second place to type one is a second place to get it wrong.
  *
- * `.strict()`, so a caller cannot smuggle an `email`, a `phone` or a `country`
- * into the update by naming one. Those are read-only on this screen for
- * reasons that are not about validation, and a field silently ignored is a
+ * `.strict()`, so a caller cannot smuggle an `email` into the update by naming
+ * it. That one is read-only for a reason that is not about validation —
+ * `users_email_unique` is what refuses a duplicate account, and an endpoint
+ * that could move an address between accounts is an account-takeover
+ * primitive with a text box in front of it. A field silently ignored is a
  * field somebody will one day wire up.
+ *
+ * Every field is OPTIONAL and at least one must be present: this is the screen
+ * for filling in what is missing, so a customer with only a phone number to
+ * add must not have to resend a name they never had.
  */
-export const renameSchema = z
+export const updateProfileSchema = z
   .object({
-    full_name: z.string().trim().min(2).max(120),
+    full_name: z.string().trim().min(2).max(120).optional(),
+    phone: z.string().trim().regex(/^[0-9]{4,15}$/).optional(),
+    country: z
+      .string()
+      .trim()
+      .toUpperCase()
+      .regex(/^[A-Z]{2}$/)
+      .optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (v) => v.full_name !== undefined || v.phone !== undefined || v.country !== undefined,
+    { message: 'nothing to change' },
+  );
 
-export type RenameRequest = z.infer<typeof renameSchema>;
+export type UpdateProfileRequest = z.infer<typeof updateProfileSchema>;

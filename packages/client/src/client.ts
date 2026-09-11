@@ -407,6 +407,23 @@ export interface AccountDetails {
   readonly created_at: string;
   /** 0 registered, 1 KYC approved, 2 enhanced. */
   readonly kyc_tier: number;
+  /**
+   * Whether a person has read this customer's documents.
+   *
+   * VERIFIED MEANS READ-ONLY, which looks backwards and is the point: what a
+   * reviewer read off a document is the record, and letting its subject retype
+   * it afterwards would make the verification a claim about a moment rather
+   * than about the account.
+   */
+  readonly kyc_verified: boolean;
+  /**
+   * Which fields this customer may change, named by the server.
+   *
+   * The screen draws itself from this rather than re-deriving the rule, so a
+   * field the server would refuse is never presented as editable. The refusal
+   * is still the control.
+   */
+  readonly editable: readonly ('full_name' | 'phone' | 'country')[];
 }
 
 export interface KycStatus {
@@ -691,17 +708,24 @@ export class XetralClient {
   }
 
   /**
-   * Changes the name the customer is greeted by.
+   * Fills in or corrects what the account holds — while it is unverified.
    *
-   * No PIN: this moves no money. The name is a greeting on the home screen and
-   * on a checkout page, never the verified name — that one is read off a
-   * document by a reviewer and lives with the KYC submission.
+   * THE PHONE IS NATIONAL DIGITS, not E.164. The dialling code comes from the
+   * country and the two are joined server-side, because `users_phone_unique`
+   * is a plain unique index on text and cannot see that three spellings are
+   * one person. A second place to type a dialling code is a second place to
+   * get it wrong.
    *
-   * Returns the account as the server now holds it, so a screen renders what
-   * was written rather than what the form believed it sent.
+   * No PIN: this moves no money. Returns the account as the server now holds
+   * it, so a screen renders what was written rather than what the form
+   * believed it sent.
    */
-  async updateName(fullName: string): Promise<AccountDetails> {
-    return this.#post('/v1/auth/profile/name', { full_name: fullName });
+  async updateProfile(input: {
+    full_name?: string;
+    phone?: string;
+    country?: string;
+  }): Promise<AccountDetails> {
+    return this.#post('/v1/auth/profile', input);
   }
 
   /**

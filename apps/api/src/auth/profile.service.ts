@@ -1,8 +1,9 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Inject, Injectable, Logger } from '@nestjs/common';
 import type { Pool } from 'pg';
 import type { ApiConfig } from '../config.js';
 import { API_CONFIG, DATABASE } from '../tokens.js';
 import { PaymentLinkService } from '../pay/payment-link.service.js';
+import { CountriesService } from '../countries/countries.service.js';
 
 export interface ProfileView {
   /**
@@ -85,6 +86,29 @@ export interface AccountDetails {
    * with no way to learn what would change is a support ticket.
    */
   readonly kyc_tier: number;
+  /**
+   * Whether a person has read this customer's documents.
+   *
+   * IT IS WHAT DECIDES EDITABILITY, and in the direction that may look
+   * backwards: a VERIFIED customer may change nothing here. What a reviewer
+   * read off a document is the record, and letting the subject of that record
+   * retype their own name or number afterwards would make the verification a
+   * claim about a moment rather than about the account — the same reason
+   * `kyc_submissions.full_name` and `users.full_name` are separate columns.
+   *
+   * An UNVERIFIED customer may fill in what is missing and correct what is
+   * wrong. They are tier 0, capped, and nothing has been attested about them
+   * yet, so there is nothing for an edit to contradict.
+   */
+  readonly kyc_verified: boolean;
+  /**
+   * What this customer may change, named rather than implied.
+   *
+   * The screen draws itself from this instead of re-deriving the rule, so a
+   * field the server will refuse is never presented as editable — and the
+   * refusal stays the control either way.
+   */
+  readonly editable: readonly ('full_name' | 'phone' | 'country')[];
 }
 
 /**
@@ -116,6 +140,7 @@ export class ProfileService {
     @Inject(DATABASE) private readonly pool: Pool,
     @Inject(API_CONFIG) private readonly config: ApiConfig,
     @Inject(PaymentLinkService) private readonly links: PaymentLinkService,
+    @Inject(CountriesService) private readonly countries: CountriesService,
   ) {}
 
   async mine(userUuid: string): Promise<ProfileView> {
@@ -162,6 +187,7 @@ export class ProfileService {
       country_name: string | null;
       created_at: Date;
       kyc_tier: number;
+      kyc_approved: boolean;
     }>(
       `SELECT u.full_name,
               u.email,
@@ -169,7 +195,11 @@ export class ProfileService {
               u.country,
               c.name AS country_name,
               u.created_at,
-              u.kyc_tier
+              u.kyc_tier,
+              EXISTS (
+                SELECT 1 FROM kyc_submissions k
+                 WHERE k.user_id = u.id AND k.status = 'approved'
+              ) AS kyc_approved
          FROM users u
          LEFT JOIN countries c ON c.code = u.country
         WHERE u.uuid = $1`,
@@ -177,6 +207,19 @@ export class ProfileService {
     );
     const row = result.rows[0];
     if (row === undefined) throw new Error('profile requested for a user that does not exist');
+
+    /*
+     * EITHER SIGNAL COUNTS AS VERIFIED, and reading both is deliberate.
+     *
+     * 029 raises `kyc_tier` to 1 in the SAME transaction that approves a
+     * submission, so the two normally agree. They can disagree in one
+     * direction that matters: an administrator may raise a tier for a customer
+     * whose source of funds was established off-platform. Treating the higher
+     * tier as verified is the SAFE reading here, because the consequence of
+     * being wrong is a locked field rather than an editable record somebody
+     * has attested to.
+     */
+    const verified = row.kyc_approved || Number(row.kyc_tier) >= 1;
 
     return {
       full_name: row.full_name,
@@ -186,6 +229,8 @@ export class ProfileService {
       country_name: row.country_name,
       created_at: row.created_at.toISOString(),
       kyc_tier: Number(row.kyc_tier),
+      kyc_verified: verified,
+      editable: verified ? [] : ['full_name', 'phone', 'country'],
     };
   }
 
@@ -205,14 +250,98 @@ export class ProfileService {
    * the CHECK is what actually holds — a rule enforced only in application code
    * is a rule that holds until the first 3am manual fix.
    */
-  async rename(userUuid: string, fullName: string): Promise<AccountDetails> {
-    const result = await this.pool.query<{ id: string }>(
-      `UPDATE users SET full_name = $2 WHERE uuid = $1 RETURNING id`,
-      [userUuid, fullName.trim()],
-    );
-    if (result.rowCount === 0) {
-      throw new Error('rename requested for a user that does not exist');
+  async update(
+    userUuid: string,
+    input: { full_name?: string | undefined; phone?: string | undefined; country?: string | undefined },
+  ): Promise<AccountDetails> {
+    const current = await this.details(userUuid);
+
+    /*
+     * A VERIFIED CUSTOMER CHANGES NOTHING HERE, and the refusal is the
+     * control — the screen hiding the fields is only a courtesy.
+     *
+     * What a reviewer read off a document is the record. Letting its subject
+     * retype their own name or number afterwards would make the verification
+     * a claim about a moment rather than about the account, and the name a
+     * money decision may read would no longer be the name anybody checked.
+     * Changing either is a re-verification, which is a person's job.
+     */
+    if (current.kyc_verified) {
+      throw new ForbiddenException({ error: 'profile_locked' });
     }
+
+    /*
+     * THE COUNTRY IS RESOLVED FIRST, because it is what gives a national
+     * number its dialling code. A customer correcting both in one save must
+     * get the NEW country's code on the new number rather than the old one's
+     * — doing the phone first would write a number belonging to a country
+     * they are in the act of leaving.
+     */
+    const countryCode = input.country ?? current.country;
+    if (input.country !== undefined && input.country !== current.country) {
+      // `requireOpen`, so a country this platform does not serve is refused
+      // with the same answer signup gives — a profile form must not become a
+      // way to read the roadmap either.
+      await this.countries.requireOpen(input.country);
+    }
+
+    let phone: string | undefined;
+    if (input.phone !== undefined) {
+      if (countryCode === null) {
+        /*
+         * A NATIONAL NUMBER WITH NO COUNTRY CANNOT BE NORMALISED, and
+         * guessing is the one thing that must not happen: assuming the
+         * platform default would write a Nigerian number for a Ghanaian and
+         * `users_phone_unique` would then hold a string nobody can be reached
+         * on.
+         */
+        throw new ConflictException({ error: 'country_required' });
+      }
+      const country = await this.countries.requireOpen(countryCode);
+      /*
+       * THE SAME NORMALISATION REGISTRATION DOES, deliberately identical: the
+       * trunk zero is a domestic dialling convention rather than part of the
+       * number, and `users_phone_unique` is a plain unique index on text that
+       * cannot see that three spellings are one person.
+       */
+      phone = `+${country.dial_code}${input.phone.replace(/^0+/, '')}`;
+    }
+
+    try {
+      const result = await this.pool.query<{ id: string }>(
+        `UPDATE users
+            SET full_name = COALESCE($2, full_name),
+                phone     = COALESCE($3, phone),
+                country   = COALESCE($4::char(2), country)
+          WHERE uuid = $1
+          RETURNING id`,
+        [
+          userUuid,
+          input.full_name?.trim() ?? null,
+          phone ?? null,
+          input.country ?? null,
+        ],
+      );
+      if (result.rowCount === 0) {
+        throw new Error('profile update for a user that does not exist');
+      }
+    } catch (error: unknown) {
+      /*
+       * ONE NUMBER, ONE ACCOUNT. Every per-customer control — the daily
+       * ceiling, the new-recipient count, the hourly velocity, 025's BVN
+       * uniqueness — assumes a person cannot become several customers, and
+       * this index is part of what holds that.
+       *
+       * The refusal says the number is taken and deliberately not by whom.
+       */
+      const detail = error instanceof Error ? error.message : String(error);
+      if (detail.includes('users_phone_unique')) {
+        throw new ConflictException({ error: 'phone_taken' });
+      }
+      throw error;
+    }
+
+    this.#logger.log(`profile updated for an unverified customer`);
     return this.details(userUuid);
   }
 

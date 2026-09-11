@@ -1,14 +1,16 @@
 import { useState } from 'react';
-import { Pressable, Switch, Text, View } from 'react-native';
+import { Pressable, Switch, Text, TextInput, View } from 'react-native';
 import { router } from 'expo-router';
 import type { DataRequest } from '@xetral/client';
 import { Shell } from '@/shell';
 import { Button, Done, Field, FormError, Loading, Panel } from '@/ui';
+import { Select } from '@/select';
 import { useLoad, useSubmit, useXetral } from '@/hooks';
 import { resetXetral, xetral } from '@/session';
 import { forget } from '@/biometrics';
 import { unregisterFromPush } from '@/push';
 import { font, space, useStyles, useTheme, useThemeChoice } from '@/theme';
+import { xetral as xetralSession } from '@/session';
 
 /**
  * The account screen — the phone's copy of the web's `/settings`.
@@ -132,77 +134,177 @@ function Choice({
 function YourDetails() {
   const client = useXetral();
   const styles = useStyles();
+  const colors = useTheme();
   const details = useLoad(() => client.accountDetails(), [client]);
+  // The open list, the same call the signup form makes — and it needs no
+  // token, so it cannot trip a refresh against an empty store.
+  const countries = useLoad(() => xetralSession().session.countries(), []);
   const { busy, error, code, done, run } = useSubmit();
-  const [name, setName] = useState<string | undefined>(undefined);
 
-  // `undefined` until the customer types, so the field is controlled by what
-  // the server holds rather than by an empty string that would blank a name
-  // they already have while the request is in flight.
-  const value = name ?? details.data?.full_name ?? '';
+  const [name, setName] = useState<string | undefined>(undefined);
+  const [phone, setPhone] = useState<string | undefined>(undefined);
+  const [country, setCountry] = useState<string | undefined>(undefined);
+
+  const held = details.data;
+  /*
+   * VERIFIED MEANS READ-ONLY, read from the SERVER rather than worked out
+   * here. What a reviewer read off a document is the record, and a screen that
+   * derived the rule for itself would be a second copy of it — on the side an
+   * attacker can edit.
+   */
+  const locked = held?.kyc_verified === true;
+  const may = (field: 'full_name' | 'phone' | 'country') =>
+    held !== undefined && held.editable.includes(field);
+
+  const nameValue = name ?? held?.full_name ?? '';
+  const countryValue = country ?? held?.country ?? '';
+  const dial = (countries.data ?? []).find((c) => c.code === countryValue)?.dial_code;
+  const phoneMissing = held !== undefined && held.phone === null;
+  const nothingToSave =
+    name === undefined && phone === undefined && country === undefined;
 
   return (
     <Panel
       title="Your details"
       subtitle={
-        details.data !== undefined && details.data.full_name === null
-          ? 'We do not have your name yet'
-          : 'What we hold about your account'
+        locked
+          ? 'Verified — these can no longer be changed here'
+          : phoneMissing
+            ? 'Add your phone number so people can pay you'
+            : 'What we hold about your account'
       }
     >
-      <Field
-        label="Name"
-        value={value}
-        onChangeText={setName}
-        placeholder="Your full name"
-        autoComplete="name"
-        hint="How we greet you, and what somebody paying your link sees. Not your verified name — that comes from your identity documents."
-      />
-      <Button
-        label="Save"
-        busy={busy}
-        disabled={value.trim().length < 2}
-        onPress={() =>
-          void run(async () => {
-            const saved = await client.updateName(value.trim());
-            // Taken back off the response rather than off the form: the
-            // database trims, and its CHECK is what actually holds.
-            setName(saved.full_name ?? '');
-            details.reload();
-            return 'Saved.';
-          })
-        }
-      />
-      <FormError error={error} code={code} />
-      <Done message={done} />
+      {/*
+        THE MISSING NUMBER IS SAID IN ITS OWN WORDS. Without one nobody can pay
+        this customer at all — the Request payment panel says only "Not set",
+        which reads as something that has not loaded rather than as the reason
+        their money is not arriving.
+      */}
+      {phoneMissing && !locked && (
+        <Text style={styles.error}>
+          Your phone number is missing. It is how other Xetral users pay you, so
+          without it money cannot reach your account.
+        </Text>
+      )}
 
+      {may('full_name') ? (
+        <Field
+          label="Name"
+          value={nameValue}
+          onChangeText={setName}
+          placeholder="Your full name"
+          autoComplete="name"
+          hint="How we greet you, and what somebody paying your link sees. Not your verified name."
+        />
+      ) : (
+        <View style={styles.row}>
+          <Text style={[styles.muted, { flex: 1 }]}>Name</Text>
+          <Text style={styles.muted}>{held?.full_name ?? '—'}</Text>
+        </View>
+      )}
+
+      {/*
+        ONE COUNTRY CONTROL, AND IT IS THE ONE IN FRONT OF THE PHONE NUMBER —
+        the construction the signup form already uses. A second full-width
+        picker beside it lets somebody select Ghana and +234, and the number is
+        then unreachable while looking perfectly ordinary.
+      */}
+      {may('phone') || may('country') ? (
+        <>
+          <Text style={styles.label}>Phone number</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Select
+              label="Country"
+              variant="dial"
+              value={countryValue}
+              onChange={setCountry}
+              placeholder="+—"
+              renderTrigger={(code) => (
+                <Text style={[styles.amount, { color: colors.text }]}>
+                  +{(countries.data ?? []).find((c) => c.code === code)?.dial_code ?? ''}
+                </Text>
+              )}
+              options={(countries.data ?? []).map((c) => ({
+                value: c.code,
+                label: c.name,
+                hint: c.currency,
+              }))}
+            />
+            <TextInput
+              style={[styles.input, { flex: 1 }]}
+              value={phone ?? ''}
+              // National digits only. A number pasted from a contact card
+              // carries spaces and a plus; stripping is kinder than refusing.
+              onChangeText={(text) => setPhone(text.replace(/[^0-9]/g, ''))}
+              keyboardType="phone-pad"
+              textContentType="telephoneNumber"
+              placeholder={held?.phone ?? '8031234567'}
+              placeholderTextColor={colors.text3}
+              editable={countryValue !== ''}
+            />
+          </View>
+          <Text style={styles.hint}>
+            {held?.phone === null
+              ? 'Without this, other Xetral users cannot pay you.'
+              : `Currently ${held?.phone ?? '—'}. Leave blank to keep it.`}
+          </Text>
+        </>
+      ) : (
+        <>
+          <View style={styles.row}>
+            <Text style={[styles.muted, { flex: 1 }]}>Country</Text>
+            <Text style={styles.muted}>{held?.country_name ?? held?.country ?? '—'}</Text>
+          </View>
+          <View style={styles.row}>
+            <Text style={[styles.muted, { flex: 1 }]}>Phone</Text>
+            <Text style={styles.muted}>{held?.phone ?? '—'}</Text>
+          </View>
+        </>
+      )}
+
+      {/* The email has no endpoint at all, verified or not: it is what refuses
+          a duplicate account, so moving one between accounts is a takeover. */}
       <View style={styles.row}>
         <Text style={[styles.muted, { flex: 1 }]}>Email</Text>
-        <Text style={styles.muted}>{details.data?.email ?? '—'}</Text>
-      </View>
-      <View style={styles.row}>
-        <Text style={[styles.muted, { flex: 1 }]}>Phone</Text>
-        <Text style={styles.muted}>{details.data?.phone ?? '—'}</Text>
-      </View>
-      <View style={styles.row}>
-        <Text style={[styles.muted, { flex: 1 }]}>Country</Text>
-        <Text style={styles.muted}>
-          {details.data?.country_name ?? details.data?.country ?? '—'}
-        </Text>
+        <Text style={styles.muted}>{held?.email ?? '—'}</Text>
       </View>
       <View style={styles.row}>
         <Text style={[styles.muted, { flex: 1 }]}>Member since</Text>
         <Text style={styles.muted}>
-          {details.data === undefined
-            ? '—'
-            : new Date(details.data.created_at).toLocaleDateString()}
+          {held === undefined ? '—' : new Date(held.created_at).toLocaleDateString()}
         </Text>
       </View>
 
+      {!locked && (
+        <Button
+          label="Save"
+          busy={busy}
+          disabled={nothingToSave}
+          onPress={() =>
+            void run(async () => {
+              const saved = await client.updateProfile({
+                ...(name === undefined ? {} : { full_name: name.trim() }),
+                ...(phone === undefined ? {} : { phone: phone.replace(/[^0-9]/g, '') }),
+                ...(country === undefined ? {} : { country }),
+              });
+              // Off the RESPONSE, not the form: the server trims the name and
+              // builds E.164 from the country's own dialling code.
+              setName(saved.full_name ?? '');
+              setPhone(undefined);
+              setCountry(undefined);
+              details.reload();
+              return 'Saved.';
+            })
+          }
+        />
+      )}
+      <FormError error={error} code={code} />
+      <Done message={done} />
+
       <Text style={styles.hint}>
-        Your email and phone number identify your account, and your country
-        decides which payment rails serve you — so none of the three can be
-        changed here. Contact support to change your email or phone number.
+        {locked
+          ? 'Contact support if any of this is wrong — changing verified details is a re-verification.'
+          : 'Your email address identifies your account and cannot be changed here. Once your identity is verified these details are fixed.'}
       </Text>
     </Panel>
   );

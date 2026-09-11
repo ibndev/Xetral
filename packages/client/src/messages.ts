@@ -339,6 +339,10 @@ function sentenceFor(error: ApiError): string {
     /* purchases */
     case 'purchase_failed':
       return 'That purchase did not go through. You have not been charged.';
+    case 'profile_locked':
+      return 'Your details are verified and can no longer be edited here. Contact support if something is wrong.';
+    case 'country_required':
+      return 'Choose your country first — a phone number needs its dialling code.';
     case 'broadcast_not_found':
       return 'That announcement is no longer here.';
     case 'price_is_live':

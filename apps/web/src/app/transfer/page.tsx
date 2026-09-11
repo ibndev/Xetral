@@ -415,10 +415,30 @@ function Transfer() {
    */
   const [nameUnavailable, setNameUnavailable] = useState(false);
 
+  /*
+   * HOW MANY DIGITS BEFORE IT IS WORTH ASKING, and it is NOT ten everywhere.
+   *
+   * Ten is a NUBAN. A Ghanaian MTN number and a Kenyan Safaricom number are
+   * NINE national digits — `244123456`, `712345678` — so a floor of ten meant
+   * the lookup never fired at all for a customer who typed their number
+   * without the trunk zero. No request, so no `name_unavailable`, so the
+   * Continue button stayed disabled with nothing on screen saying why: the
+   * whole Send screen simply stopped responding in Accra and Nairobi.
+   */
+  const minimumDigits = mobileMoney ? 9 : 10;
+
+  /*
+   * WHETHER THE PAYOUT SIDE HAS ENOUGH TO PUT IN FRONT OF SOMEBODY.
+   *
+   * ONE definition, read by the Review button AND by `review()`. They were
+   * two, they disagreed, and the disagreement is what broke Send in Accra:
+   * the button allowed `nameUnavailable` through and the handler did not, so
+   * the control enabled and did nothing at all.
+   */
+  const payoutReviewable = beneficiary !== undefined || nameUnavailable;
+
   async function lookUp(code: string, number: string): Promise<void> {
-    // Ten digits is a NUBAN, which is the point at which asking is useful
-    // rather than noise on every keystroke.
-    if (code === '' || number.length < 10) {
+    if (code === '' || number.length < minimumDigits) {
       setBeneficiary(undefined);
       setLookupFailed(false);
       setNameUnavailable(false);
@@ -473,11 +493,23 @@ function Transfer() {
    */
   function review(event: React.FormEvent) {
     event.preventDefault();
-    // A bank payout cannot be reviewed without a name to review. Advancing
-    // with an unresolved account would put a confirmation screen in front of
-    // a customer that confirms nothing — which is worse than no screen,
-    // because they will read it as having been checked.
-    if (destination === 'bank' && beneficiary === undefined) return;
+    /*
+     * A BANK payout cannot be reviewed without a name to review. Advancing
+     * with an unresolved account would put a confirmation screen in front of
+     * a customer that confirms nothing — which is worse than no screen,
+     * because they will read it as having been checked.
+     *
+     * A MOBILE MONEY WALLET IS THE EXCEPTION, AND LEAVING IT OUT IS WHAT
+     * BROKE SEND IN ACCRA AND NAIROBI. There is no name enquiry on that rail
+     * — `name_unavailable` is the correct, permanent answer — so a name can
+     * never arrive and this guard could never pass. The button beneath
+     * already allowed it through, so it ENABLED, the customer pressed it, and
+     * this line returned silently: a control that looks live and does
+     * nothing, which reads as "it cannot find the number".
+     *
+     * The two conditions are the same question and are now written once.
+     */
+    if (destination === 'bank' && !payoutReviewable) return;
     setStage('confirm');
   }
 
@@ -1038,7 +1070,7 @@ function Transfer() {
                  * Nairobi with a Review button that never enables, on the
                  * screen they use to pay somebody.
                  */
-                beneficiary === undefined && !nameUnavailable
+                !payoutReviewable
               : // A phone number that `e164()` could not build from — no
                 // country picked, or no digits — is not somebody to pay, and
                 // advancing would put a review screen in front of a customer

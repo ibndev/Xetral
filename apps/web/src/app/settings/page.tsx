@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { Shell } from '@/ui/shell';
 import { FormError } from '@/ui/form-error';
 import { useLoad, useSubmit, useXetral } from '@/lib/hooks';
+import { Select } from '@/ui/select';
+import { xetral } from '@/lib/session';
 import { messageFor } from '@/lib/errors';
 
 /**
@@ -89,15 +91,51 @@ export default function Settings() {
 function YourDetails() {
   const client = useXetral();
   const details = useLoad(() => client.accountDetails(), [client]);
+  /*
+   * `session.countries()` rather than a client method — the same call the
+   * signup form makes, and for the same reason: it is the open list, it needs
+   * no token, and a hardcoded copy here would make "open a country without a
+   * deploy" true of the database and false of the screen that reads it.
+   */
+  const countries = useLoad(() => xetral().session.countries(), []);
   const { busy, error, code, done, run } = useSubmit();
-  const [name, setName] = useState<string | undefined>(undefined);
 
-  // `undefined` until the first render after the load, so the input is
-  // controlled by what the server holds rather than by an empty string that
-  // would blank a name the customer already has while the request is in
-  // flight.
-  const value = name ?? details.data?.full_name ?? '';
-  const missing = details.data !== undefined && details.data.full_name === null;
+  const [name, setName] = useState<string | undefined>(undefined);
+  const [phone, setPhone] = useState<string | undefined>(undefined);
+  const [country, setCountry] = useState<string | undefined>(undefined);
+
+  const held = details.data;
+  /*
+   * VERIFIED MEANS READ-ONLY, and the direction is the point rather than an
+   * oversight. What a reviewer read off a document is the record; letting its
+   * subject retype it afterwards would make the verification a claim about a
+   * moment rather than about the account.
+   *
+   * READ FROM THE SERVER, never re-derived here. A screen that worked out for
+   * itself who may edit is a second copy of the rule, and the copy on the
+   * client is the one an attacker can edit.
+   */
+  const locked = held?.kyc_verified === true;
+  const may = (field: 'full_name' | 'phone' | 'country') =>
+    held !== undefined && held.editable.includes(field);
+
+  // `undefined` until the customer types, so each field is controlled by what
+  // the server holds rather than by an empty string that would blank a value
+  // they already have while the request is in flight.
+  const nameValue = name ?? held?.full_name ?? '';
+  const countryValue = country ?? held?.country ?? '';
+  const dial = (countries.data ?? []).find((c) => c.code === countryValue)?.dial_code;
+
+  /*
+   * THE ONE THAT BROUGHT THIS SCREEN ABOUT. An account opened before the
+   * phone number was required has none, and without one nobody can pay them:
+   * the number IS the Xetral-to-Xetral identifier, so Request payment reads
+   * "Not set" and every sender is told there is no such customer.
+   */
+  const phoneMissing = held !== undefined && held.phone === null;
+
+  const nothingToSave =
+    name === undefined && phone === undefined && country === undefined;
 
   return (
     <form
@@ -106,10 +144,17 @@ function YourDetails() {
       onSubmit={(event) => {
         event.preventDefault();
         void run(async () => {
-          const saved = await client.updateName(value.trim());
-          // Take the name back off the response rather than trusting the form:
-          // the database trims and its CHECK is what actually holds.
+          const saved = await client.updateProfile({
+            ...(name === undefined ? {} : { full_name: name.trim() }),
+            ...(phone === undefined ? {} : { phone: phone.replace(/[^0-9]/g, '') }),
+            ...(country === undefined ? {} : { country }),
+          });
+          // Taken back off the RESPONSE rather than off the form: the server
+          // trims the name and builds E.164 from the country's own dialling
+          // code, so what it returns is what is actually held.
           setName(saved.full_name ?? '');
+          setPhone(undefined);
+          setCountry(undefined);
           details.reload();
           return 'Saved.';
         });
@@ -117,60 +162,137 @@ function YourDetails() {
     >
       <h2>Your details</h2>
       <p className="lead">
-        {missing
-          ? 'We do not have your name yet. It is how we greet you, and what somebody paying your link sees.'
-          : 'What we hold about your account.'}
+        {locked
+          ? 'Your identity has been verified, so these can no longer be changed here.'
+          : phoneMissing
+            ? 'Add your phone number so other Xetral users can pay you.'
+            : 'What we hold about your account.'}
       </p>
 
-      <label>
-        Name
-        <input
-          value={value}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Your full name"
-          autoComplete="name"
-          minLength={2}
-          maxLength={120}
-          required
-        />
-        <span className="hint">
-          How we greet you, and what somebody paying your link sees. Not your
-          verified name — that comes from your identity documents.
-        </span>
-      </label>
+      {/*
+        THE MISSING NUMBER IS SAID FIRST AND IN ITS OWN WORDS. A customer whose
+        number is absent has no way to learn that is why nobody can pay them —
+        the Request payment panel only says "Not set", which reads as a feature
+        that has not loaded.
+      */}
+      {phoneMissing && !locked && (
+        <div className="notice warn">
+          <p>
+            <strong>Your phone number is missing.</strong> It is how other
+            Xetral users pay you, so without it money cannot reach your account.
+          </p>
+        </div>
+      )}
 
-      <button type="submit" disabled={busy || value.trim().length < 2}>
-        {busy ? 'Saving…' : 'Save'}
-      </button>
+      {may('full_name') ? (
+        <label>
+          Name
+          <input
+            value={nameValue}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Your full name"
+            autoComplete="name"
+            minLength={2}
+            maxLength={120}
+          />
+          <span className="hint">
+            How we greet you, and what somebody paying your link sees. Not your
+            verified name — that comes from your identity documents.
+          </span>
+        </label>
+      ) : (
+        <div className="row">
+          <span className="muted">Name</span>
+          <span>{held?.full_name ?? '—'}</span>
+        </div>
+      )}
 
-      <FormError error={error} code={code} />
-      {done !== undefined && <p className="ok">{done}</p>}
+      {may('country') ? (
+        <label>
+          Country
+          <Select
+            value={countryValue}
+            onChange={(next) => setCountry(next)}
+            options={[
+              { value: '', label: 'Choose your country' },
+              ...(countries.data ?? []).map((c) => ({ value: c.code, label: c.name })),
+            ]}
+          />
+          <span className="hint">
+            It decides which payment rails serve you and which wallet your money
+            arrives in.
+          </span>
+        </label>
+      ) : (
+        <div className="row">
+          <span className="muted">Country</span>
+          <span>{held?.country_name ?? held?.country ?? '—'}</span>
+        </div>
+      )}
 
+      {may('phone') ? (
+        <label>
+          Phone number
+          {/*
+            THE DIALLING CODE IS DRAWN, NEVER TYPED. It is read from the country
+            already chosen, so there is one place a country is stated — a second
+            input lets somebody select Ghana and +234, and the number would then
+            be unreachable while looking perfectly ordinary.
+          */}
+          <span className="input-affix dial">
+            <span className="mono">{dial === undefined ? '+—' : `+${dial}`}</span>
+            <input
+              value={phone ?? (held?.phone !== null && held?.phone !== undefined ? '' : '')}
+              onChange={(e) => setPhone(e.target.value)}
+              inputMode="numeric"
+              autoComplete="tel-national"
+              placeholder={held?.phone ?? '8031234567'}
+              disabled={countryValue === ''}
+            />
+          </span>
+          <span className="hint">
+            {held?.phone === null
+              ? 'Without this, other Xetral users cannot pay you.'
+              : `Currently ${held?.phone}. Leave blank to keep it.`}
+          </span>
+        </label>
+      ) : (
+        <div className="row">
+          <span className="muted">Phone</span>
+          <span>{held?.phone ?? '—'}</span>
+        </div>
+      )}
+
+      {/*
+        THE EMAIL HAS NO ENDPOINT AT ALL, verified or not. It is what
+        `users_email_unique` refuses a duplicate account on, so a form that
+        could move an address between accounts is an account-takeover
+        primitive with a text box in front of it.
+      */}
       <div className="row">
         <span className="muted">Email</span>
-        <span>{details.data?.email ?? '—'}</span>
-      </div>
-      <div className="row">
-        <span className="muted">Phone</span>
-        <span>{details.data?.phone ?? '—'}</span>
-      </div>
-      <div className="row">
-        <span className="muted">Country</span>
-        <span>{details.data?.country_name ?? details.data?.country ?? '—'}</span>
+        <span>{held?.email ?? '—'}</span>
       </div>
       <div className="row">
         <span className="muted">Member since</span>
         <span>
-          {details.data === undefined
-            ? '—'
-            : new Date(details.data.created_at).toLocaleDateString()}
+          {held === undefined ? '—' : new Date(held.created_at).toLocaleDateString()}
         </span>
       </div>
 
+      {!locked && (
+        <button type="submit" disabled={busy || nothingToSave}>
+          {busy ? 'Saving…' : 'Save'}
+        </button>
+      )}
+
+      <FormError error={error} code={code} />
+      {done !== undefined && <p className="ok">{done}</p>}
+
       <p className="hint">
-        Your email and phone number identify your account, and your country
-        decides which payment rails serve you — so none of the three can be
-        changed here. Contact support to change your email or phone number.
+        {locked
+          ? 'Contact support if any of this is wrong — changing verified details is a re-verification.'
+          : 'Your email address identifies your account and cannot be changed here. Once your identity is verified these details are fixed.'}
       </p>
     </form>
   );

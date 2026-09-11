@@ -213,6 +213,24 @@ const API_ERROR_CODES = [
    * removed teaches an operator to distrust the whole surface.
    */
   'broadcast_not_found',
+  /*
+   * `profile_locked` — a verified customer changing their own details.
+   *
+   * The direction looks backwards and is the point: what a reviewer read off a
+   * document is the record, and letting its subject retype it afterwards would
+   * make the verification a claim about a moment rather than about the
+   * account. Correcting it is a re-verification, which is a person's job.
+   */
+  'profile_locked',
+  /*
+   * `country_required` — a national phone number with no country to give it a
+   * dialling code.
+   *
+   * Guessing is the one thing that must not happen here: assuming the platform
+   * default would write a Nigerian number for a Ghanaian, and the unique index
+   * would then hold a string nobody can be reached on.
+   */
+  'country_required',
   'purchase_not_found',
   'verification_not_supported',
 
