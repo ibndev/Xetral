@@ -8,6 +8,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import type { Pool } from 'pg';
+import { e164 } from '../phone.js';
 import { DATABASE } from '../tokens.js';
 import { isMissingSchema, reportMissingSchema } from '../database-schema.js';
 
@@ -221,12 +222,14 @@ export class MomoService {
    * The country's dialling code and the national digits, with the trunk zero
    * stripped — the same construction registration uses, so one wallet has one
    * spelling wherever it is written down.
+   *
+   * DELEGATES rather than repeats. This was the only implementation, and a
+   * MOBILE MONEY PAYOUT needed the same answer with no `+` on it — so the
+   * choice was a second copy here or one definition both callers share, and
+   * this codebase has a standing record of which of those goes wrong.
    */
   static e164(dialCode: string, national: string): string | undefined {
-    const digits = national.replace(/[^0-9]/g, '').replace(/^0+/, '');
-    const code = dialCode.replace(/[^0-9]/g, '');
-    if (digits.length < 6 || digits.length > 14 || code === '') return undefined;
-    return `+${code}${digits}`;
+    return e164(dialCode, national);
   }
 }
 

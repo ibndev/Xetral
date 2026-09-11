@@ -53,8 +53,17 @@ export interface PayoutRequest<C extends Currency = Currency> {
    * The name the LOOKUP returned, carried through so the adapter sends what
    * the customer was shown. Passing the sender's own text here would defeat
    * the lookup — see the port's header.
+   *
+   * OPTIONAL, BECAUSE ONE RAIL HAS NO NAME TO RETURN. A mobile money wallet
+   * has no name enquiry on any network, so there is nothing to look up and
+   * nothing to carry — and a required field here made that state
+   * inexpressible, which is why the service refused every Ghanaian and Kenyan
+   * payout rather than sending one. Undefined means NOBODY CONFIRMED WHO
+   * HOLDS THIS, and is the only honest value; the alternative a required field
+   * invites is the sender's own text, which confirms nothing while looking
+   * exactly like a confirmation.
    */
-  readonly accountName: string;
+  readonly accountName?: string | undefined;
   readonly amount: Money<C>;
   readonly narration?: string | undefined;
   /**

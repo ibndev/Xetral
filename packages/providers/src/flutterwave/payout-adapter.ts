@@ -171,7 +171,17 @@ export class FlutterwavePayoutAdapter implements PayoutPort {
        * it, so a retry after a timeout is one payout at their end too — and
        * on this operation a duplicate cannot be clawed back. */
       reference: request.reference,
-      beneficiary_name: request.accountName,
+      /*
+       * OMITTED ENTIRELY WHERE THERE IS NO NAME, rather than sent empty.
+       *
+       * A mobile money wallet has no name enquiry on any network, so there is
+       * nothing to send — and the one thing this adapter must never do is put
+       * the sender's own text in this field, which would appear on the
+       * recipient's side as a confirmed name that nobody confirmed.
+       */
+      ...(request.accountName === undefined || request.accountName.trim() === ''
+        ? {}
+        : { beneficiary_name: request.accountName }),
     });
 
     const parsed = transferResponse.safeParse(body);

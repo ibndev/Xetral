@@ -68,7 +68,7 @@ class FakePayoutPort implements PayoutPort {
   readonly sends: {
     bankCode: string;
     accountNumber: string;
-    accountName: string;
+    accountName: string | undefined;
     amountMinor: bigint;
     currency: string;
     reference: string;
@@ -184,6 +184,21 @@ async function fund(userId: string, kobo: bigint): Promise<void> {
     postings: [
       posting({ kind: 'customer_wallet', ownerId: userId, currency: 'NGN' }, money(kobo, 'NGN')),
       posting({ kind: 'provider_float', currency: 'NGN' }, money(-kobo, 'NGN')),
+    ],
+  });
+}
+
+/** The same, in any currency — Accra and Nairobi hold cedis and shillings. */
+async function fundIn(userId: string, currency: Currency, minor: bigint): Promise<void> {
+  await ledger.post({
+    idempotencyKey: `test-po-fund:${randomUUID()}`,
+    kind: 'wallet_funding',
+    occurredAt: new Date(),
+    description: 'test payout funding',
+    metadata: {},
+    postings: [
+      posting({ kind: 'customer_wallet', ownerId: userId, currency }, money(minor, currency)),
+      posting({ kind: 'provider_float', currency }, money(-minor, currency)),
     ],
   });
 }
@@ -349,6 +364,144 @@ describe('sending', () => {
     // connection must not pay their landlord twice.
     expect(port.sends).toHaveLength(1);
     expect((await nairaBalance(customer)).spendable).toBe('15000.00');
+  });
+});
+
+/**
+ * THE CORRIDOR THAT COULD NOT SEND AT ALL.
+ *
+ * A mobile money wallet has no name enquiry on any network — 043 records it as
+ * `name_unavailable` and 059 repeats it — and `send()` called the lookup
+ * unconditionally and treated that refusal as a reason not to send. So every
+ * cedi and shilling payout was refused BY US, before the rail was ever asked,
+ * on exactly the corridor the Ghana and Kenya integration exists for.
+ *
+ * NOTHING HERE COULD HAVE CAUGHT IT, which is why it shipped three times: the
+ * fake port answered a bank lookup happily and no test ever asked it for a
+ * wallet. These do.
+ */
+describe('paying a mobile money wallet', () => {
+  let ghanaian: Customer;
+
+  beforeAll(async () => {
+    ghanaian = await onboard();
+    await pool.query(`UPDATE users SET country = 'GH' WHERE id = $1::bigint`, [ghanaian.userId]);
+    await fundIn(ghanaian.userId, 'GHS', 1_000_00n);
+  });
+
+  beforeEach(() => {
+    /*
+     * WHAT THE REAL ADAPTER DOES. A wallet is refused a name, permanently,
+     * because there is nothing to ask. The fake agreed with the bug before —
+     * it answered every lookup with a name — which is the same shape as the
+     * funding fake echoing `currency: 'NGN'` whatever it was asked for.
+     */
+    port.lookupAnswer = new ProviderRejectedError(
+      'flutterwave',
+      'a mobile money wallet has no name enquiry',
+      'name_unavailable',
+    );
+  });
+
+  it('sends, with no beneficiary name anywhere', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/v1/payouts')
+      .set('Authorization', `Bearer ${ghanaian.token}`)
+      .send({
+        country: 'GH',
+        bank_code: 'MTN',
+        account_number: '0501234567',
+        amount: '25.00',
+        currency: 'GHS',
+        transaction_pin: PIN,
+        idempotency_key: randomUUID(),
+      })
+      .expect(200);
+
+    expect(res.body.status).toBe('sent');
+    // NOT the sender's own text, and not an empty string pretending to be a
+    // name: nothing at all, which is the only honest value.
+    expect(res.body.account_name).toBeNull();
+    expect(port.sends.at(-1)?.accountName).toBeUndefined();
+  });
+
+  it('sends the number in the form the rail accepts, not the form it was typed in', async () => {
+    /*
+     * `0501234567` is how a number is written in Accra and is not a number
+     * Flutterwave's transfers API can route. This is the assertion that would
+     * have caught the payout being refused at the rail with a sentence about
+     * an invalid account — which reads to the customer as their own number
+     * being wrong.
+     */
+    await request(app.getHttpServer())
+      .post('/v1/payouts')
+      .set('Authorization', `Bearer ${ghanaian.token}`)
+      .send({
+        country: 'GH',
+        bank_code: 'MTN',
+        account_number: '0501234567',
+        amount: '25.00',
+        currency: 'GHS',
+        transaction_pin: PIN,
+        idempotency_key: randomUUID(),
+      })
+      .expect(200);
+
+    expect(port.sends.at(-1)?.accountNumber).toBe('233501234567');
+  });
+
+  it('records the number it sent, because the row is immutable', async () => {
+    const key = randomUUID();
+    const res = await request(app.getHttpServer())
+      .post('/v1/payouts')
+      .set('Authorization', `Bearer ${ghanaian.token}`)
+      .send({
+        country: 'GH',
+        bank_code: 'MTN',
+        account_number: '0244123456',
+        amount: '10.00',
+        currency: 'GHS',
+        transaction_pin: PIN,
+        idempotency_key: key,
+      })
+      .expect(200);
+
+    // 043 makes the destination immutable once the row exists, so a row
+    // recording what the customer typed rather than what was sent is a payout
+    // nothing could reconcile against the provider afterwards.
+    expect(res.body.account_number).toBe('233244123456');
+  });
+
+  it('refuses a number it cannot put into international form, rather than sending it as typed', async () => {
+    await request(app.getHttpServer())
+      .post('/v1/payouts')
+      .set('Authorization', `Bearer ${ghanaian.token}`)
+      .send({
+        country: 'GH',
+        bank_code: 'MTN',
+        account_number: '01234567890123456789',
+        amount: '10.00',
+        currency: 'GHS',
+        transaction_pin: PIN,
+        idempotency_key: randomUUID(),
+      })
+      .expect(400);
+  });
+
+  it('still refuses a BANK payout whose account nobody could find', async () => {
+    /*
+     * THE OTHER HALF, and the reason this is not a blanket relaxation. Where a
+     * rail CAN answer, 043's rule is unchanged: an account number that passes
+     * every format check can still belong to a stranger, and the bank's answer
+     * is the only claim about the beneficiary that does not come from the
+     * sender.
+     */
+    port.lookupAnswer = new ProviderRejectedError('paystack', 'no such account', 'unknown_account');
+    const nigerian = await onboard();
+    await fund(nigerian.userId, 1_000_000n);
+    const res = await pay(nigerian);
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe('account_not_found');
   });
 });
 

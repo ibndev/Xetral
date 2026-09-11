@@ -186,6 +186,25 @@ export class PaystackPayoutAdapter implements PayoutPort {
    * dies between them must be able to say which one it got through.
    */
   async send<C extends Currency>(request: PayoutRequest<C>): Promise<PayoutReceipt> {
+    /*
+     * A `nuban` RECIPIENT CANNOT BE CREATED WITHOUT A NAME, so an absent one
+     * is refused HERE with a sentence rather than sent as `undefined` and
+     * refused by Paystack as a validation error about a field.
+     *
+     * `accountName` became optional so a MOBILE MONEY wallet — which has no
+     * name enquiry on any network — could be paid at all. This rail is the
+     * other case: it serves bank accounts, where the lookup always answers,
+     * and a payout reaching here without a name means the lookup was skipped
+     * for a destination that has one. That is worth saying out loud.
+     */
+    if (request.accountName === undefined || request.accountName.trim() === '') {
+      throw new ProviderContractError(
+        PROVIDER,
+        'a Paystack transfer recipient needs the name the bank returned, and ' +
+          'none was looked up for this destination',
+      );
+    }
+
     const recipient = await this.#client.request(
       'POST',
       PAYSTACK_ENDPOINTS.createTransferRecipient,

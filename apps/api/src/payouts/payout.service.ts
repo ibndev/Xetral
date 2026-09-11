@@ -15,6 +15,8 @@ import type { PayoutBank, PayoutPort, PayoutReceipt } from '@xetral/providers';
 import { applyBasisPoints, fromMajor, money, toMajor } from '@xetral/shared';
 import type { Currency, Money } from '@xetral/shared';
 import { DATABASE, LEDGER, PAYOUT_PORT } from '../tokens.js';
+import { internationalDigits } from '../phone.js';
+import { CountriesService } from '../countries/countries.service.js';
 import type { LookupQuery, PayoutBody } from './dto.js';
 import { AffordabilityService } from '../wallet/affordability.service.js';
 import { SettingsService } from '../settings/settings.service.js';
@@ -43,6 +45,26 @@ import { NotificationService } from '../notifications/notification.service.js';
  * the sender typed themselves confirms nothing.
  */
 
+/**
+ * WHERE A PAYOUT IS GOING, resolved once and used everywhere after.
+ *
+ * The point of this being a value rather than three arguments is that the
+ * NORMALISED number and the rail it was normalised for travel together. A
+ * function that took a country and a number separately could be handed the
+ * national spelling and the mobile money flag by two different callers, which
+ * is precisely how the row and the rail come to disagree about where money
+ * went.
+ */
+interface PayoutDestination {
+  readonly country: string;
+  readonly bank_code: string;
+  /** Digits only. For a wallet this is the international form — `233…` — and
+   *  never the trunk-zero spelling the customer typed. */
+  readonly account_number: string;
+  /** Whether this rail has a name enquiry at all. It does not. */
+  readonly mobile_money: boolean;
+}
+
 export interface PayoutView {
   readonly id: string;
   readonly status: string;
@@ -51,7 +73,13 @@ export interface PayoutView {
   readonly fee: string;
   readonly bank_name: string;
   readonly account_number: string;
-  readonly account_name: string;
+  /**
+   * Who the RAIL said holds this destination, or null where the rail has no
+   * name enquiry at all — a mobile money wallet. Null is not "we failed to
+   * look it up": it is "there is nothing to look up", and each app renders it
+   * as the network rather than as a blank that reads like a bug.
+   */
+  readonly account_name: string | null;
   readonly narration: string | null;
   readonly failure_reason: string | null;
   readonly created_at: string;
@@ -67,7 +95,7 @@ export interface PayoutRow {
   bank_code: string;
   bank_name: string;
   account_number: string;
-  account_name: string;
+  account_name: string | null;
   narration: string | null;
   currency: string;
   amount_minor: string;
@@ -110,6 +138,7 @@ export class PayoutService {
     @Inject(SpendingLimitService) private readonly limits: SpendingLimitService,
     @Inject(TaxService) private readonly tax: TaxService,
     @Inject(NotificationService) private readonly notifications: NotificationService,
+    @Inject(CountriesService) private readonly countries: CountriesService,
   ) {}
 
   /** Banks — or Mobile Money networks — a customer may send to. */
@@ -186,7 +215,22 @@ export class PayoutService {
     const amount = this.#parseAmount(body.amount, currency);
 
     /*
-     * THE NAME IS RE-FETCHED HERE, not taken from the request.
+     * THE NUMBER IS NORMALISED BEFORE ANYTHING ELSE READS IT, and every later
+     * step uses the normalised one — the reservation, the row, and the rail.
+     *
+     * A Ghanaian types `0501234567` because that is how a number is written in
+     * Accra. Flutterwave's transfers API takes `233501234567` and has no idea
+     * what a trunk zero is, so the payout was refused at the rail with a
+     * sentence about an invalid account. Doing this here rather than in the
+     * adapter means the ROW records the number the money was actually sent
+     * to — and `bank_payouts.account_number` is immutable, so a row saying
+     * something the rail never saw could never be corrected.
+     */
+    const destination = await this.#destinationFor(body);
+
+    /*
+     * THE NAME IS RE-FETCHED WHERE THERE IS ONE TO FETCH, and is not taken
+     * from the request.
      *
      * The client has already looked it up to show a confirmation screen, and
      * it would be easy to let it pass the answer back. That would make the
@@ -194,8 +238,15 @@ export class PayoutService {
      * attacker with a stolen session sends too, and the point of the lookup is
      * to produce a claim the sender did not author. One extra round trip
      * against a payment that cannot be recalled is not a cost worth saving.
+     *
+     * WHERE THERE IS NO SUCH CALL AT ALL, THIS IS UNDEFINED AND THE PAYOUT
+     * PROCEEDS. That is the whole of the Ghana and Kenya fix: a mobile money
+     * wallet has no name enquiry, `lookupOrRefuse` said so correctly, and
+     * `send` treated its refusal as a reason not to send — so every cedi and
+     * shilling payout was refused by us, before the rail was ever asked.
+     * Requiring a claim that cannot exist is not a control; it is an outage.
      */
-    const beneficiary = await this.lookupOrRefuse(body);
+    const beneficiary = await this.#beneficiaryFor(destination);
 
     // The same basis-point fee a wallet transfer charges, applied to the same
     // shape. Rounded UP, stated at the call site, because every rounding
@@ -221,6 +272,7 @@ export class PayoutService {
     const reserved = await this.#reserve(
       userId,
       body,
+      destination,
       beneficiary,
       reference,
       amount,
@@ -231,10 +283,16 @@ export class PayoutService {
     let receipt: PayoutReceipt;
     try {
       receipt = await this.port.send({
-        country: body.country,
-        bankCode: body.bank_code,
-        accountNumber: body.account_number,
-        accountName: beneficiary.accountName,
+        country: destination.country,
+        bankCode: destination.bank_code,
+        accountNumber: destination.account_number,
+        /*
+         * WHAT THE RAIL TOLD US, or nothing. Never the sender's own text: a
+         * confirmation against a name the sender typed confirms nothing while
+         * looking exactly like one, which is 043's rule and the reason this
+         * field is not on `payoutSchema` at all.
+         */
+        accountName: beneficiary?.accountName,
         amount,
         narration: body.narration,
         reference,
@@ -261,6 +319,94 @@ export class PayoutService {
 
     await this.applyReceipt(await this.#reload(reserved.id), receipt);
     return refuseIfFailed(toView(await this.#reload(reserved.id)));
+  }
+
+  /**
+   * WHERE THE MONEY IS GOING, in the spelling the rail accepts.
+   *
+   * A MOBILE MONEY DESTINATION IS A PHONE NUMBER, and a phone number is
+   * written differently by the person holding it and by the API that reaches
+   * it. `0501234567` in Accra is `233501234567` on Flutterwave's wire;
+   * `0712345678` in Nairobi is `254712345678`. Sending the national spelling
+   * is not a near miss — it is a number their transfers API cannot route, and
+   * it comes back as a refusal about the account rather than about the format.
+   *
+   * WHICH RAIL THIS IS COMES FROM THE COUNTRY, not from the bank code and not
+   * from a list in this file. 046 put `payout_method` on `countries` precisely
+   * so the SCREEN would stop offering a product the customer's money cannot
+   * reach, and this is the server reading the same row — one source of truth
+   * for one question, which is the rule this codebase keeps relearning.
+   *
+   * A BANK DESTINATION IS LEFT EXACTLY AS TYPED. A NUBAN has no dialling code
+   * and no trunk zero to strip, and an account number beginning with a zero is
+   * an ordinary account number.
+   */
+  async #destinationFor(body: PayoutBody): Promise<PayoutDestination> {
+    const country = await this.countries.byCode(body.country);
+
+    if (country?.payout_method !== 'mobile_money') {
+      return {
+        country: body.country,
+        bank_code: body.bank_code,
+        account_number: body.account_number,
+        mobile_money: false,
+      };
+    }
+
+    const msisdn = internationalDigits(country.dial_code, body.account_number);
+    if (msisdn === undefined) {
+      /*
+       * REFUSED, NEVER SENT AS TYPED. This is the direction that cannot be
+       * recalled, so a number we cannot put into the rail's own form is one
+       * nobody should be able to send to — "we sent it to whatever you wrote"
+       * is not a recovery story.
+       */
+      throw new BadRequestException({
+        error: 'invalid_request',
+        fields: ['account_number'],
+      });
+    }
+
+    return {
+      country: body.country,
+      bank_code: body.bank_code,
+      account_number: msisdn,
+      mobile_money: true,
+    };
+  }
+
+  /**
+   * Who the rail says holds this destination, or nothing at all.
+   *
+   * A WALLET IS NOT ASKED ABOUT. There is no name enquiry on any mobile money
+   * network — not a gap in one provider's coverage, a fact about the product —
+   * so calling and translating a refusal we already know is coming is a round
+   * trip that can only fail, on the screen money leaves from. The country's
+   * `payout_method` already said which rail this is.
+   *
+   * A BANK IS ASKED, AND A REFUSAL THAT MEANS "NO SUCH NAME EXISTS" DOES NOT
+   * STOP THE PAYOUT. Everything else does: an unknown account and an
+   * unreachable bank still refuse, indistinguishably, which is 043's rule.
+   */
+  async #beneficiaryFor(
+    destination: PayoutDestination,
+  ): Promise<{ accountName: string } | undefined> {
+    if (destination.mobile_money) return undefined;
+    try {
+      return await this.lookupOrRefuse({
+        country: destination.country,
+        bank_code: destination.bank_code,
+        account_number: destination.account_number,
+      });
+    } catch (error) {
+      if (
+        error instanceof NotFoundException &&
+        (error.getResponse() as { error?: string }).error === 'name_unavailable'
+      ) {
+        return undefined;
+      }
+      throw error;
+    }
   }
 
   /**
@@ -521,7 +667,8 @@ export class PayoutService {
   async #reserve(
     userId: string,
     body: PayoutBody,
-    beneficiary: { accountName: string },
+    destination: PayoutDestination,
+    beneficiary: { accountName: string } | undefined,
     reference: string,
     amount: Money<Currency>,
     split: { gross: Money<Currency>; tax: Money<Currency> },
@@ -572,9 +719,10 @@ export class PayoutService {
       throw error;
     }
 
-    const banks = await this.port.banks(body.country);
+    const banks = await this.port.banks(destination.country);
     const bankName =
-      banks.find((bank: PayoutBank) => bank.code === body.bank_code)?.name ?? body.bank_code;
+      banks.find((bank: PayoutBank) => bank.code === destination.bank_code)?.name ??
+      destination.bank_code;
 
     const inserted = await this.pool.query<{ id: string }>(
       `INSERT INTO bank_payouts
@@ -589,11 +737,23 @@ export class PayoutService {
         userId,
         reference,
         body.idempotency_key,
-        body.country,
-        body.bank_code,
+        destination.country,
+        destination.bank_code,
         bankName,
-        body.account_number,
-        beneficiary.accountName,
+        /*
+         * THE NORMALISED NUMBER, which is the one the rail was given. The row
+         * is immutable once written (043), so recording what the customer
+         * typed rather than what was sent would leave a payout nobody could
+         * reconcile against the provider.
+         */
+        destination.account_number,
+        /*
+         * NULL WHERE THE RAIL HAS NO NAME ENQUIRY, which 067 makes possible.
+         * The absence is the honest record — nobody confirmed who holds this —
+         * and it is what the receipt renders as "Mobile money wallet" rather
+         * than as a name somebody might act on.
+         */
+        beneficiary?.accountName ?? null,
         body.narration ?? null,
         body.currency,
         amount.amount.toString(),

@@ -270,6 +270,19 @@ export default function Transfer() {
       setNameUnavailable(false);
       return;
     }
+    /*
+     * A WALLET IS NOT ASKED ABOUT AT ALL. No mobile money network has a name
+     * enquiry, so this request can only come back `name_unavailable` — the
+     * same answer, one round trip later, on the screen money leaves from.
+     * Kept identical to the web screen, because two definitions of one
+     * question is what broke this flow in the first place.
+     */
+    if (mobileMoney) {
+      setBeneficiary(undefined);
+      setLookupFailed(false);
+      setNameUnavailable(true);
+      return;
+    }
     setLookingUp(true);
     setLookupFailed(false);
     setNameUnavailable(false);

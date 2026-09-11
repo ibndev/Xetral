@@ -444,6 +444,21 @@ function Transfer() {
       setNameUnavailable(false);
       return;
     }
+    /*
+     * A WALLET IS NOT ASKED ABOUT AT ALL.
+     *
+     * There is no name enquiry on any mobile money network, so this request
+     * can only ever come back `name_unavailable` — a round trip whose answer
+     * is already known, on the screen money leaves from, and one more thing
+     * that has to succeed before a Ghanaian can press Continue. The state it
+     * would set is set directly instead.
+     */
+    if (mobileMoney) {
+      setBeneficiary(undefined);
+      setLookupFailed(false);
+      setNameUnavailable(true);
+      return;
+    }
     setLookingUp(true);
     setLookupFailed(false);
     setNameUnavailable(false);
