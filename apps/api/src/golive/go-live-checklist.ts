@@ -892,6 +892,25 @@ export const SETTINGS: readonly Item[] = [
       'from a customer because of a default. Capped at 500 by CHECK.',
   },
   {
+    /*
+     * FLUTTERWAVE IS A PREFUNDED WALLET AND NOTHING IN THIS PLATFORM SAID SO.
+     * It debits the balance matching the payout currency, so a cedi payout
+     * needs a cedi float — and a deployment that has never collected a cedi
+     * has none. Every Ghanaian transfer then fails with a message about funds,
+     * which reads as a broken integration and is not one.
+     */
+    name: 'payout_debit_currencies',
+    kind: 'setting',
+    failure: 'default-is-deliberate',
+    ifMissed:
+      'EMPTY MEANS EACH CURRENCY IS PAID FROM ITS OWN FLOAT, which is the ' +
+      'provider default and keeps OUR published spread as the price — so a ' +
+      'GHS or KES payout needs a funded GHS or KES balance at the provider. ' +
+      'Setting GHS=NGN pays out of naira instead and lets the PROVIDER set ' +
+      'the conversion rate, overriding the spread on /admin/prices. A ' +
+      'treasury decision either way, which is why neither is assumed.',
+  },
+  {
     name: 'card_issuance_fee_cents',
     kind: 'setting',
     failure: 'wrong-by-default',

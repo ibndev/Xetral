@@ -153,6 +153,7 @@ jobs:
             -f packages/ledger/sql/065_push.sql \
             -f packages/ledger/sql/066_retired_policy_delete.sql \
             -f packages/ledger/sql/067_wallet_payouts_and_missing_details.sql \
+            -f packages/ledger/sql/068_recipients.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       - name: Ledger and identity invariants
@@ -227,6 +228,7 @@ jobs:
                    packages/ledger/sql/065_push.test.sql \
                    packages/ledger/sql/066_retired_policy_delete.test.sql \
                    packages/ledger/sql/067_wallet_payouts_and_missing_details.test.sql \
+                   packages/ledger/sql/068_recipients.test.sql \
                    packages/ledger/sql/099_least_privilege.test.sql; do
             echo "== $f"
             psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
@@ -333,6 +335,7 @@ jobs:
             -f packages/ledger/sql/065_push.sql \
             -f packages/ledger/sql/066_retired_policy_delete.sql \
             -f packages/ledger/sql/067_wallet_payouts_and_missing_details.sql \
+            -f packages/ledger/sql/068_recipients.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       # ------------------------------------------------------------------

@@ -268,6 +268,20 @@ export class PayoutService {
      */
     await this.affordability.assertWalletCanCover(userId, total);
 
+    /*
+     * READ ONCE, BEFORE THE MONEY IS HELD. A failure to read who is sending
+     * must not happen between the reserve and the provider call, where the
+     * money is committed and the recovery is a sweep.
+     */
+    const sender = await this.#senderFor(userId);
+
+    /*
+     * READ ONCE, not once per use. Two reads of one setting can disagree — the
+     * cache expires between them — and the disagreement here would be a
+     * payout whose `debit_currency` was decided by a race.
+     */
+    const debitCurrency = await this.settings.payoutDebitCurrency(currency);
+
     const reference = payoutReferenceFor(userUuid, body.idempotency_key);
     const reserved = await this.#reserve(
       userId,
@@ -286,6 +300,27 @@ export class PayoutService {
         country: destination.country,
         bankCode: destination.bank_code,
         accountNumber: destination.account_number,
+        /*
+         * WHO SENT IT, because one corridor is refused without it.
+         *
+         * Kenya's M-PESA payout is treated as a cross-border remittance and
+         * Flutterwave refuses it unless the originator is named — we sent no
+         * `meta` at all, so every shilling transfer was rejected for a missing
+         * required field before anything else about it was considered.
+         *
+         * It is the SENDING CUSTOMER and never the platform: a remittance
+         * names the person the money came from, and naming ourselves would be
+         * a false statement on a regulatory field.
+         */
+        ...(sender === undefined ? {} : { sender }),
+        /*
+         * WHICH OF OUR BALANCES FUNDS IT. Empty means the payout currency's
+         * own float, which is the provider's default and keeps OUR published
+         * spread as the price; a value here trades that float for somebody
+         * else's conversion rate, which is why it is a setting an operator
+         * types rather than an assumption this file makes.
+         */
+        ...(debitCurrency === undefined ? {} : { debitCurrency }),
         /*
          * WHAT THE RAIL TOLD US, or nothing. Never the sender's own text: a
          * confirmation against a name the sender typed confirms nothing while
@@ -319,6 +354,44 @@ export class PayoutService {
 
     await this.applyReceipt(await this.#reload(reserved.id), receipt);
     return refuseIfFailed(toView(await this.#reload(reserved.id)));
+  }
+
+  /**
+   * The sending customer, as a remittance corridor requires them named.
+   *
+   * NOT THE PLATFORM. Flutterwave's Kenya payout asks for `sender`,
+   * `sender_country` and `mobile_number` because the transfer is a
+   * cross-border remittance and the originator has to be identifiable; naming
+   * ourselves there would be a false statement on a regulatory field.
+   *
+   * UNDEFINED RATHER THAN A GUESS where the account holds no name or no
+   * number. The adapter then omits the block, and the rails that do not ask
+   * for it are unaffected — which is better than sending a placeholder to a
+   * field somebody may one day report on.
+   */
+  async #senderFor(userId: string): Promise<
+    { name: string; country: string; phone: string } | undefined
+  > {
+    const rows = await this.pool.query<{
+      full_name: string | null;
+      phone: string | null;
+      country: string | null;
+    }>(`SELECT full_name, phone, country FROM users WHERE id = $1::bigint`, [userId]);
+    const row = rows.rows[0];
+    if (row?.full_name == null || row.phone == null || row.country == null) {
+      this.#logger.warn(
+        'a payout is being sent with no originator details; a corridor that ' +
+          'requires them will refuse it. The customer has no name, number or ' +
+          'country on their account.',
+      );
+      return undefined;
+    }
+    return {
+      name: row.full_name,
+      country: row.country,
+      // Digits only, the form every rail here takes on the wire.
+      phone: row.phone.replace(/[^0-9]/g, ''),
+    };
   }
 
   /**

@@ -87,11 +87,13 @@ import {
 } from './crypto/crypto.controller.js';
 import { CryptoService } from './crypto/crypto.service.js';
 import { PayoutService } from './payouts/payout.service.js';
+import { RecipientBookService } from './recipients/recipient-book.service.js';
 import { PaystackWebhookService } from './funding/paystack-webhook.service.js';
 import { FlutterwaveWebhookService } from './funding/flutterwave-webhook.service.js';
 import { SwitchingFundingPort } from './funding/funding-provider.js';
 import { SwitchingPayoutPort } from './payouts/payout-provider.js';
 import { PayoutController } from './payouts/payout.controller.js';
+import { RecipientBookController } from './recipients/recipient-book.controller.js';
 import { CryptoWebhookService } from './crypto/crypto-webhook.service.js';
 import { CryptoReconciliationService } from './crypto/crypto-reconciliation.service.js';
 import { CryptoDepositReconciliationService } from './crypto/crypto-deposit-reconciliation.service.js';
@@ -1190,6 +1192,7 @@ export class AppModule {
         DepositWebhookController,
         CryptoController,
         PayoutController,
+        RecipientBookController,
         CryptoWebhookController,
         FxController,
         HealthController,
@@ -1415,6 +1418,7 @@ export class AppModule {
         FlutterwaveWebhookService,
         CryptoService,
         PayoutService,
+        RecipientBookService,
         CryptoWebhookService,
         FxService,
         CryptoReconciliationService,

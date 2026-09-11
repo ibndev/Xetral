@@ -709,6 +709,27 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       .authenticated('GET', '/v1/payouts', { pin: false })
       .authenticated('POST', '/v1/payouts', { pin: true })
 
+      /*
+       * THE ADDRESS BOOK BEHIND ONE SEND FLOW, and none of it takes a PIN.
+       *
+       * The instinct is to gate adding a beneficiary, because that is the
+       * first half of a takeover everywhere else in banking. Here it buys
+       * nothing: a saved recipient moves no money, the SEND takes a PIN and
+       * re-fetches the rail's own name on that very request, and 068 makes the
+       * destination immutable by trigger. A stolen session that adds a
+       * recipient has gained a row it still cannot spend through — and a
+       * second, weaker copy of a control that already holds is what 004
+       * records about pre-checking a balance.
+       *
+       * `resolve` is a POST because it carries a phone number or an account
+       * number, and a query string is the one place a value reaches a browser
+       * history, a proxy log and a referrer at once.
+       */
+      .authenticated('GET', '/v1/recipients', { pin: false })
+      .authenticated('POST', '/v1/recipients/resolve', { pin: false })
+      .authenticated('POST', '/v1/recipients', { pin: false })
+      .authenticated('DELETE', '/v1/recipients/:id', { pin: false })
+
       .public(
         'POST',
         '/v1/webhooks/bitnob/crypto',

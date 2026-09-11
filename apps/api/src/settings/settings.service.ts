@@ -216,6 +216,39 @@ export class SettingsService implements OnApplicationBootstrap {
   }
 
   /**
+   * WHICH OF OUR PROVIDER BALANCES FUNDS A PAYOUT IN THIS CURRENCY.
+   *
+   * FLUTTERWAVE IS A PREFUNDED WALLET AND NOTHING IN THIS PLATFORM SAID SO.
+   * It debits the balance matching the payout currency, so a cedi payout needs
+   * a cedi float — and a deployment that has never collected a cedi has none,
+   * which refuses every Ghanaian transfer with a message about funds rather
+   * than about anything a developer could fix.
+   *
+   * There are exactly two ways out and both are decisions:
+   *
+   *   hold a float      leave this empty; cedis pay cedis, and somebody tops
+   *                     the balance up ahead of demand.
+   *   name another      set `GHS=NGN`; Flutterwave debits naira and converts
+   *                     at THEIR rate, which is a price we do not set.
+   *
+   * EMPTY IS THE DEFAULT because the second answer silently overrides a
+   * published spread with somebody else's rate, and that must be typed by a
+   * person rather than assumed by a file.
+   *
+   * The format is `GHS=NGN,KES=NGN` — payout currency on the left, the balance
+   * that funds it on the right.
+   */
+  async payoutDebitCurrency(payout: string): Promise<string | undefined> {
+    const map = (await this.text('payout_debit_currencies', '')).trim();
+    if (map === '') return undefined;
+    for (const pair of map.split(',')) {
+      const [from, to] = pair.split('=').map((part) => part.trim().toUpperCase());
+      if (from === payout.toUpperCase() && to !== undefined && to !== '') return to;
+    }
+    return undefined;
+  }
+
+  /**
    * What a virtual USD card costs to issue, in CENTS.
    *
    * CENTS, and the name says so, because the card is a dollar card and the fee
