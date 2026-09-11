@@ -149,7 +149,6 @@ export class AdminService {
      * way or written out once per combination.
      */
     const rows = await this.pool.query<UserSummary & { row_id: string }>(
-      // nosemgrep: semgrep.no-interpolated-sql
       /*
        * TWO NAMES, AND THE LIST NEEDS BOTH.
        *
@@ -164,6 +163,21 @@ export class AdminService {
        * them into one column, which is what would make the distinction
        * quietly disappear.
        */
+      /*
+       * DIRECTLY ABOVE THE STATEMENT, and it has to be.
+       *
+       * `nosemgrep` covers the line it sits on and the one after it, so this
+       * marker was disarmed the moment the comment above was written between
+       * it and the query — the finding moved to the template literal's own
+       * line and the suppression stayed where it was. Nothing said so: the
+       * marker still reads as present in review, and the only thing that
+       * noticed was a red scan.
+       *
+       * The reasoning is the one above: every VALUE goes through `params`;
+       * what is interpolated is `$N` placeholder numbers and fixed clause
+       * fragments, none of which comes from a request.
+       */
+      // nosemgrep: semgrep.no-interpolated-sql
       `SELECT u.id::text AS row_id, u.uuid AS id, u.email, u.status, u.created_at,
               u.full_name, u.phone, u.handle,
               (SELECT k.full_name FROM kyc_submissions k
