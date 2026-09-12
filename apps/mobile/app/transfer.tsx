@@ -7,6 +7,7 @@ import {
   formatAmount,
   isValidAmount,
   sendableFor,
+  symbolFor,
 } from '@xetral/client';
 import type {
   Recipient,
@@ -261,7 +262,7 @@ function ChooseRecipient({
            */
           contentContainerStyle={{ gap: 8, paddingVertical: space.sm }}
         >
-          <Chip label="All" on={filter === ''} onPress={() => setFilter('')} />
+          <Chip label="All" grid on={filter === ''} onPress={() => setFilter('')} />
           {currencies.map((currency) => (
             <Chip
               key={currency}
@@ -277,47 +278,86 @@ function ChooseRecipient({
       {loading && recipients.length === 0 ? (
         <Loading />
       ) : recipients.length === 0 ? (
-        <Text style={styles.lead}>
+        <Text style={{ color: '#9AA5B4', fontSize: 14, paddingVertical: 20 }}>
           Nobody here yet. Add the first person you want to pay and they stay on
           this list.
         </Text>
       ) : (
         <View>
+          {/* "All recipients" — blue, per the mockup, over a hairline. */}
+          <Text style={{ color: '#3B6FE8', fontSize: 13, fontFamily: font.sansSemi, marginBottom: 8 }}>
+            All recipients
+          </Text>
+          <View style={{ height: 1, backgroundColor: '#E8EAED' }} />
           {shown.map((r) => (
-            <View key={r.id} style={styles.row}>
+            <View
+              key={r.id}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 14,
+                paddingVertical: 16,
+                borderBottomWidth: 1,
+                borderBottomColor: '#F0F2F5',
+              }}
+            >
               <Pressable
                 onPress={() => onPick(r)}
                 android_ripple={null}
                 accessibilityRole="button"
                 accessibilityLabel={`Send to ${r.display_name}`}
-                style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 13 }}
+                style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 14 }}
               >
-                <View
-                  style={[
-                    styles.rowIcon,
-                    { width: 46, height: 46, borderRadius: 999, backgroundColor: colors.brand },
-                  ]}
-                >
-                  <Text style={{ color: colors.onBrand, fontFamily: font.sansSemi, fontSize: 15 }}>
-                    {initialsOf(r.display_name)}
-                  </Text>
+                {/* 54px avatar with a 20px flag badge, bottom-left. */}
+                <View style={{ width: 54, height: 54 }}>
+                  <View
+                    style={{
+                      width: 54,
+                      height: 54,
+                      borderRadius: 27,
+                      backgroundColor: '#ECEEF3',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <Text style={{ color: '#8E939F', fontFamily: font.sansSemi, fontSize: 18 }}>
+                      {initialsOf(r.display_name)}
+                    </Text>
+                  </View>
+                  <View
+                    style={{
+                      position: 'absolute',
+                      bottom: -2,
+                      left: -2,
+                      width: 20,
+                      height: 20,
+                      borderRadius: 10,
+                      overflow: 'hidden',
+                      borderWidth: 2,
+                      borderColor: '#FFFFFF',
+                      backgroundColor: '#fff',
+                    }}
+                  >
+                    <CurrencyMark currency={r.currency} size={16} />
+                  </View>
                 </View>
                 <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={{ color: colors.text, fontFamily: font.sansSemi, fontSize: 15 }}>
+                  <Text
+                    style={{ color: '#111111', fontFamily: font.sansSemi, fontSize: 15.5 }}
+                    numberOfLines={1}
+                  >
                     {r.display_name}
                   </Text>
-                  <Text style={styles.muted} numberOfLines={1}>
-                    {r.rail_name ?? 'Xetral account'} &middot;&middot;&middot;
+                  <Text style={{ color: '#9AA5B4', fontSize: 13 }} numberOfLines={1}>
+                    {r.rail_name ?? 'Xetral account'} {'  |  '}&middot;&middot;&middot;
                     {r.destination.slice(-4)}
                   </Text>
                 </View>
-                <CurrencyMark currency={r.currency} size={18} />
               </Pressable>
               {/*
-                REMOVING IS BEHIND A SECOND PRESS, not a swipe and not a
-                one-tap icon. This list is tapped to SEND, so a destructive
-                control beside the tap target is one thumb-width from deleting
-                somebody's landlord.
+                REMOVING IS BEHIND A SECOND PRESS. The three-dot menu is the
+                mockup's; a destructive control beside the tap target is one
+                thumb-width from deleting somebody's landlord.
               */}
               <Pressable
                 onPress={() => setMenu(menu === r.id ? undefined : r.id)}
@@ -325,14 +365,21 @@ function ChooseRecipient({
                 accessibilityRole="button"
                 accessibilityLabel={`More for ${r.display_name}`}
                 hitSlop={8}
-                style={{ width: 36, alignItems: 'flex-end' }}
+                style={{ width: 28, alignItems: 'center', gap: 3.5 }}
               >
-                <Icon name="menu" size={18} color={colors.text3} />
+                {[0, 1, 2].map((d) => (
+                  <View
+                    key={d}
+                    style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: '#B0B8C4' }}
+                  />
+                ))}
               </Pressable>
             </View>
           ))}
           {shown.length === 0 && (
-            <Text style={styles.hint}>Nobody on this list matches that.</Text>
+            <Text style={{ color: '#9AA5B4', fontSize: 14, paddingVertical: 20 }}>
+              Nobody on this list matches that.
+            </Text>
           )}
           {menu !== undefined && (
             <Button
@@ -348,7 +395,29 @@ function ChooseRecipient({
         </View>
       )}
 
-      <Button label="New recipient" icon="plus" quiet onPress={onNew} />
+      {/* The blue New-recipient pill, per the mockup. */}
+      <Pressable
+        onPress={onNew}
+        android_ripple={null}
+        accessibilityRole="button"
+        accessibilityLabel="New recipient"
+        style={{
+          alignSelf: 'flex-end',
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+          backgroundColor: '#3B6FE8',
+          borderRadius: 50,
+          paddingVertical: 14,
+          paddingHorizontal: 22,
+          marginTop: 20,
+        }}
+      >
+        <Icon name="plus" size={18} color="#FFFFFF" />
+        <Text style={{ color: '#FFFFFF', fontFamily: font.sansSemi, fontSize: 15 }}>
+          New recipient
+        </Text>
+      </Pressable>
     </Panel>
   );
 }
@@ -358,15 +427,16 @@ function ChooseRecipient({
 function Chip({
   label,
   currency,
+  grid = false,
   on,
   onPress,
 }: {
   readonly label: string;
   readonly currency?: string;
+  readonly grid?: boolean;
   readonly on: boolean;
   readonly onPress: () => void;
 }) {
-  const colors = useTheme();
   return (
     <Pressable
       onPress={onPress}
@@ -377,21 +447,40 @@ function Chip({
         flexDirection: 'row',
         alignItems: 'center',
         gap: 6,
-        paddingHorizontal: 13,
-        paddingVertical: 7,
-        borderRadius: radius.pill,
-        // Ink when selected, not paper — the correction `Segmented` already
-        // records: two near-white pills distinguished by a slightly darker
-        // label is a question a customer has to squint at.
-        backgroundColor: on ? colors.brand : colors.field,
-        borderColor: on ? colors.brand : colors.edgeStrong,
-        borderWidth: 1,
+        height: 38,
+        paddingHorizontal: 14,
+        borderRadius: 10,
+        // The mockup's chip: white either way, a BLUE OUTLINE when selected —
+        // not a filled pill. Literal colours, because these three Send steps
+        // are the uploaded mockup exactly.
+        backgroundColor: '#FFFFFF',
+        borderColor: on ? '#3B6FE8' : '#D8DCE4',
+        borderWidth: on ? 2 : 1.5,
       }}
     >
-      {currency !== undefined && <CurrencyMark currency={currency} size={16} />}
+      {grid && (
+        <View style={{ width: 14, height: 14, flexDirection: 'row', flexWrap: 'wrap', gap: 3 }}>
+          {[0, 1, 2, 3].map((d) => (
+            <View
+              key={d}
+              style={{
+                width: 5.5,
+                height: 5.5,
+                borderRadius: 1.2,
+                backgroundColor: on ? '#3B6FE8' : '#2A2E3E',
+              }}
+            />
+          ))}
+        </View>
+      )}
+      {currency !== undefined && (
+        <View style={{ width: 18, height: 18, borderRadius: 9, overflow: 'hidden' }}>
+          <CurrencyMark currency={currency} size={18} />
+        </View>
+      )}
       <Text
         style={{
-          color: on ? colors.onBrand : colors.text2,
+          color: on ? '#3B6FE8' : '#2A2E3E',
           fontFamily: font.sansSemi,
           fontSize: 13.5,
         }}
@@ -486,16 +575,27 @@ function ChooseCurrency({
     .filter((c) => !favourites.includes(c) && !stablecoins.includes(c) && matches(c))
     .sort((a, b) => currencyName(a).localeCompare(currencyName(b)));
 
+  /* The alphabetical tail is grouped by letter, per the mockup (…B, C…). */
+  const letters = new Map<string, string[]>();
+  for (const code of rest) {
+    const letter = currencyName(code).charAt(0).toUpperCase();
+    (letters.get(letter) ?? letters.set(letter, []).get(letter)!).push(code);
+  }
+
   return (
     <Panel bare title="What currency should your recipient receive?">
       <SearchField value={query} onChange={setQuery} placeholder="Search currency or country" />
 
-      <CurrencyGroup heading="Favourites" codes={favourites} onPick={onPick} />
+      <CurrencyGroup heading="Favorites" codes={favourites} onPick={onPick} />
       <CurrencyGroup heading="Stablecoins" codes={stablecoins} onPick={onPick} />
-      <CurrencyGroup heading="All currencies" codes={rest} onPick={onPick} />
+      {[...letters.entries()].map(([letter, codes]) => (
+        <CurrencyGroup key={letter} heading={letter} codes={codes} onPick={onPick} />
+      ))}
 
       {favourites.length + stablecoins.length + rest.length === 0 && (
-        <Text style={styles.hint}>No currency matches that.</Text>
+        <Text style={{ color: '#9AA5B4', fontSize: 14, paddingVertical: 20 }}>
+          No currency matches that.
+        </Text>
       )}
     </Panel>
   );
@@ -510,39 +610,33 @@ function CurrencyGroup({
   readonly codes: readonly string[];
   readonly onPick: (currency: string) => void;
 }) {
-  const styles = useStyles();
-  const colors = useTheme();
   if (codes.length === 0) return null;
   return (
-    <View>
-      <Text
-        style={{
-          color: colors.text2,
-          fontFamily: font.sansSemi,
-          fontSize: 12,
-          letterSpacing: 0.6,
-          textTransform: 'uppercase',
-          marginTop: space.md,
-        }}
-      >
+    <View style={{ marginTop: 24 }}>
+      {/* Section label #7B8FA1 over a hairline, per the mockup. */}
+      <Text style={{ color: '#7B8FA1', fontFamily: font.sansSemi, fontSize: 13, marginBottom: 8 }}>
         {heading}
       </Text>
+      <View style={{ height: 1, backgroundColor: '#E8EAED', marginBottom: 6 }} />
       {codes.map((code) => (
         <Pressable
           key={code}
           onPress={() => onPick(code)}
           android_ripple={null}
           accessibilityRole="button"
-          style={styles.row}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 7 }}
         >
-          <View style={styles.rowIcon}>
-            <CurrencyMark currency={code} size={22} />
+          {/* 44px circular mark. */}
+          <View style={{ width: 44, height: 44, borderRadius: 22, overflow: 'hidden' }}>
+            <CurrencyMark currency={code} size={44} />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={{ color: colors.text, fontFamily: font.sansSemi, fontSize: 15 }}>
+            <Text style={{ color: '#111111', fontFamily: font.sansSemi, fontSize: 16 }}>
               {currencyName(code)}
             </Text>
-            <Text style={styles.muted}>{code}</Text>
+            <Text style={{ color: '#9AA5B4', fontSize: 13, marginTop: 2 }}>
+              {code} ({symbolFor(code)})
+            </Text>
           </View>
         </Pressable>
       ))}
