@@ -75,34 +75,40 @@ describe('a mobile money send can actually be submitted', () => {
     }
   });
 
-  it('treats an unnameable rail as a LABEL to collect, never as a refusal', () => {
+  it('never gates a momo send on a name it cannot get', () => {
     /*
-     * THE HALF THAT IS EASY TO GET WRONG IN THE OTHER DIRECTION. Now that the
-     * adapter asks Flutterwave rather than refusing, Ghana answers with a
-     * name. Kenya still cannot, and a screen that treated THAT as a failure
-     * would have moved the dead end one country to the right.
+     * THE FOURTH ROUND, AND THE REASON THIS ASSERTION INVERTED.
      *
-     * `ready` is what the button reads, and it is satisfied by a resolved name
-     * OR by a label the customer typed — never by the resolution alone.
+     * Earlier the screen collected a LABEL when the rail could not name the
+     * holder, which unblocked Kenya but still made the momo send a two-step,
+     * name-gated flow — and the resolve path it leaned on was STRICTER than the
+     * send path, so a Ghanaian wallet whose /v3/accounts/resolve answered
+     * `account_not_found` was refused a send the very next layer would have
+     * completed. The mockup's momo screen has no name and no label: country,
+     * network, number, go.
+     *
+     * So the invariant is now the OPPOSITE of a label gate — momo must NOT be
+     * gated on `resolved_name` at all. The old `ready` expression and the
+     * label field are gone in both apps, and their return is the regression.
      */
     for (const [name, source] of APPS) {
-      expect(source, name).toContain(
-        "found !== undefined && (found.resolved_name !== null || label.trim().length >= 2)",
-      );
-      // And the label is asked for, rather than the step simply refusing.
-      expect(source, name).toContain('Name this recipient');
+      expect(source, name).not.toContain('label.trim().length >= 2');
+      expect(source, name).not.toContain('Name this recipient');
+      // Momo proceeds in one tap: the submit resolves and goes straight on.
+      expect(source, name).toMatch(/kind === 'momo'[\s\S]{0,80}proceed\(/);
     }
   });
 
   it('never shows the SENDER\'s own words as the account name', () => {
     /*
      * 043's rule: a confirmation screen showing a name the sender typed
-     * confirms nothing while looking exactly like one. The label is a separate
-     * field with different words, and the "Account name" panel renders
-     * `resolved_name` — the rail's own answer — or is not drawn at all.
+     * confirms nothing while looking exactly like one. The "Account name" panel
+     * renders `resolved_name` — the rail's own answer — or is not drawn at all,
+     * and a wallet with no name enquiry shows no such panel rather than echoing
+     * the number back as if it were a name.
      */
     for (const [name, source] of APPS) {
-      expect(source, name).toContain('found?.resolved_name != null');
+      expect(source, name).toContain('resolved_name');
       expect(source, name).not.toMatch(/Account name[\s\S]{0,400}\{label\}/);
     }
   });

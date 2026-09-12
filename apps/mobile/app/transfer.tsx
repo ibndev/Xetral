@@ -588,8 +588,6 @@ function RecipientDetails({
   const country = countries.find((c) => c.currency === receive);
   const [rail, setRail] = useState('');
   const [destination, setDestination] = useState(initialDestination.replace(/[^0-9]/g, ''));
-  const [label, setLabel] = useState('');
-  const [save, setSave] = useState(true);
   const [found, setFound] = useState<RecipientResolution | undefined>(undefined);
 
   const banks = useLoad(
@@ -635,29 +633,47 @@ function RecipientDetails({
   const minimumDigits = mobileMoney ? 9 : 10;
   const enough = destination.replace(/[^0-9]/g, '').length >= minimumDigits;
 
-  async function look(): Promise<void> {
-    if (!enough || rail === '') return;
-    await run(async () => {
-      const resolution = await client.resolveRecipient({
-        kind,
-        /*
-         * THE COUNTRY GOES EVEN ON THE XETRAL BRANCH, and leaving it off is
-         * what made `08031234567` resolve to nobody. A national number has no
-         * country in it; this flow already fixed one at the currency step, so
-         * the server normalises through THAT country's dialling code rather
-         * than guessing the sender's.
-         */
-        ...(country === undefined ? {} : { country: country.code }),
-        ...(kind === 'xetral' ? {} : { railCode: rail }),
-        destination,
-      });
-      setFound(resolution);
-      return undefined;
+  /**
+   * Ask the server who holds this destination.
+   *
+   * FOR MOMO THIS NEVER BLOCKS — the server's resolve path is best-effort for a
+   * wallet, returning the name where the rail can answer and null where it
+   * cannot, and never throwing. A bank or a Xetral account still resolves a
+   * name to confirm; a Xetral number belonging to nobody still fails, which is
+   * the one real refusal on this screen.
+   */
+  async function doResolve(): Promise<RecipientResolution> {
+    return client.resolveRecipient({
+      kind,
+      /* THE COUNTRY GOES EVEN ON THE XETRAL BRANCH — a national number has no
+         country in it, and leaving it off is what made `08031234567` resolve
+         to nobody. The currency step fixed one, so the server normalises
+         through THAT country's dial code, not the sender's. */
+      ...(country === undefined ? {} : { country: country.code }),
+      ...(kind === 'xetral' ? {} : { railCode: rail }),
+      destination,
     });
   }
 
-  const nameUnavailable = found !== undefined && found.resolved_name === null;
-  const ready = found !== undefined && (found.resolved_name !== null || label.trim().length >= 2);
+  async function proceed(resolution: RecipientResolution): Promise<void> {
+    /* SAVING IS BEST-EFFORT AND NEVER GATES THE SEND. The recipient book fills
+       from paying people; a save that fails must not strand a one-off send. */
+    let saved: Recipient | undefined;
+    try {
+      saved = await client.saveRecipient({
+        kind: resolution.kind,
+        ...(resolution.country === '' ? {} : { country: resolution.country }),
+        ...(resolution.rail_code === null ? {} : { railCode: resolution.rail_code }),
+        destination: resolution.destination,
+        ...(resolution.resolved_name === null
+          ? { label: destination.replace(/[^0-9]/g, '') }
+          : {}),
+      });
+    } catch {
+      saved = undefined;
+    }
+    onReady(resolution, saved);
+  }
 
   return (
     <Panel
@@ -686,16 +702,16 @@ function RecipientDetails({
       </View>
 
       <Select
-        label="Network"
+        label={country?.payout_method === 'mobile_money' ? 'Network' : 'Bank'}
         value={rail}
         onChange={(next) => {
           setRail(next);
           setFound(undefined);
         }}
         options={rails}
-        placeholder="Network"
+        placeholder={country?.payout_method === 'mobile_money' ? 'Network' : 'Bank'}
         searchable={rails.length > 6}
-        searchPlaceholder="Search networks…"
+        searchPlaceholder="Search…"
       />
 
       <Field
@@ -705,9 +721,17 @@ function RecipientDetails({
           setDestination(next);
           setFound(undefined);
         }}
-        onBlur={() => void look()}
+        onBlur={() => {
+          // A named rail confirms on blur so the name is on screen before the
+          // button; momo has nothing to confirm and waits for Continue.
+          if (kind === 'momo' || rail === '' || !enough) return;
+          void run(async () => {
+            setFound(await doResolve());
+            return undefined;
+          });
+        }}
         keyboardType="number-pad"
-        placeholder={kind === 'bank' ? '0123456789' : '0553921133'}
+        placeholder={kind === 'bank' ? '0123456789' : 'Enter phone number'}
         autoComplete="off"
       />
 
@@ -718,8 +742,7 @@ function RecipientDetails({
             THE RAIL'S OWN ANSWER, and the only thing on this screen presented
             as confirmation. A name the SENDER typed shown here would be a
             confirmation screen that confirms nothing while looking exactly
-            like one — 043's rule, and the reason the label below is a
-            separate, differently worded field.
+            like one — 043's rule.
           */}
           <View
             style={{
@@ -736,69 +759,24 @@ function RecipientDetails({
         </View>
       )}
 
-      {nameUnavailable && (
-        <Field
-          label="Name this recipient"
-          value={label}
-          onChangeText={setLabel}
-          placeholder="What you want to call them"
-          maxLength={140}
-          hint="This network cannot confirm the account name, so nobody has checked it. Give them a name you will recognise — and check the number."
-        />
-      )}
-
-      <Pressable
-        onPress={() => setSave(!save)}
-        android_ripple={null}
-        accessibilityRole="switch"
-        accessibilityState={{ checked: save }}
-        style={[styles.rowBetween, { marginTop: space.md }]}
-      >
-        <Text style={{ color: colors.text, fontFamily: font.sans, fontSize: 15 }}>
-          Save as beneficiary
-        </Text>
-        <View
-          style={{
-            width: 24,
-            height: 24,
-            borderRadius: 7,
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: save ? colors.brand : colors.field,
-            borderColor: save ? colors.brand : colors.edgeStrong,
-            borderWidth: 1,
-          }}
-        >
-          {save && <Icon name="check" size={15} color={colors.onBrand} />}
-        </View>
-      </Pressable>
-
       <FormError error={error} code={code} />
 
       <Button
-        label={busy ? 'Checking…' : found === undefined ? 'Check details' : 'Continue'}
+        label={busy ? 'Checking…' : kind === 'momo' || found !== undefined ? 'Continue' : 'Check details'}
         busy={busy}
-        disabled={rail === '' || !enough || (found !== undefined && !ready)}
+        disabled={rail === '' || !enough}
         onPress={() => {
-          if (found === undefined) {
-            void look();
-            return;
-          }
+          if (rail === '' || !enough) return;
           void run(async () => {
-            const recipient = save
-              ? await client.saveRecipient({
-                  kind: found.kind,
-                  /* `found.destination` is already the international form,
-                     so re-resolving needs no country — but an empty one would
-                     fail the two-character schema, which is why this checks
-                     the value rather than the kind. */
-                  ...(found.country === '' ? {} : { country: found.country }),
-                  ...(found.rail_code === null ? {} : { railCode: found.rail_code }),
-                  destination: found.destination,
-                  ...(label.trim() === '' ? {} : { label: label.trim() }),
-                })
-              : undefined;
-            onReady(found, recipient);
+            /* ONE TAP FOR MOMO, TWO FOR A NAMED RAIL. A wallet has no name to
+               confirm; a bank or Xetral account shows the resolved name first. */
+            if (found !== undefined) {
+              await proceed(found);
+            } else {
+              const resolution = await doResolve();
+              if (kind === 'momo') await proceed(resolution);
+              else setFound(resolution);
+            }
             return undefined;
           });
         }}

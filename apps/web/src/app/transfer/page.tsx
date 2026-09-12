@@ -9,6 +9,7 @@ import {
   formatAmount,
   isValidAmount,
   sendableFor,
+  symbolFor,
 } from '@xetral/client';
 import type {
   Recipient,
@@ -215,10 +216,10 @@ function ChooseRecipient({
   });
 
   return (
-    <section className="send-step">
-      <h1>Who do you want to send money to?</h1>
+    <section className="sf">
+      <h1 className="sf-title">Who do you want to send money to?</h1>
 
-      <label className="field search">
+      <div className="sf-search">
         <Icon name="search" size={18} />
         <input
           value={query}
@@ -226,25 +227,34 @@ function ChooseRecipient({
           placeholder="Search by name or account details"
           aria-label="Search recipients"
         />
-      </label>
+      </div>
 
       {currencies.length > 0 && (
-        <div className="chip-rail" role="group" aria-label="Filter by currency">
+        <div className="sf-chips" role="group" aria-label="Filter by currency">
           <button
             type="button"
-            className={filter === '' ? 'chip on' : 'chip'}
+            className={filter === '' ? 'sf-chip on' : 'sf-chip'}
             onClick={() => setFilter('')}
           >
+            {/* The 2×2 grid mark the mockup gives the All chip. */}
+            <svg width="14" height="14" viewBox="0 0 14 14" fill={filter === '' ? '#3B6FE8' : '#2A2E3E'} aria-hidden="true">
+              <rect x="0" y="0" width="5.5" height="5.5" rx="1.2" />
+              <rect x="8.5" y="0" width="5.5" height="5.5" rx="1.2" />
+              <rect x="0" y="8.5" width="5.5" height="5.5" rx="1.2" />
+              <rect x="8.5" y="8.5" width="5.5" height="5.5" rx="1.2" />
+            </svg>
             All
           </button>
           {currencies.map((currency) => (
             <button
               key={currency}
               type="button"
-              className={filter === currency ? 'chip on' : 'chip'}
+              className={filter === currency ? 'sf-chip on' : 'sf-chip'}
               onClick={() => setFilter(currency)}
             >
-              <CurrencyMark currency={currency} size={16} />
+              <span className="sf-chip-flag">
+                <CurrencyMark currency={currency} size={18} />
+              </span>
               {currency}
             </button>
           ))}
@@ -252,24 +262,30 @@ function ChooseRecipient({
       )}
 
       {recipients.length === 0 ? (
-        <p className="lead">
+        <p className="sf-empty">
           Nobody here yet. Add the first person you want to pay and they stay on
           this list.
         </p>
       ) : (
-        <ul className="list recipient-list">
+        <>
+          <div className="sf-list-label">All recipients</div>
+          <div className="sf-divider" />
           {shown.map((r) => (
-            <li key={r.id} className="list-row">
-              <button type="button" className="row-open tappable" onClick={() => onPick(r)}>
-                <span className="row-icon">{initialsOf(r.display_name)}</span>
-                <span className="row-main">
-                  <span className="row-title">{r.display_name}</span>
-                  <span className="row-sub">
-                    {r.rail_name ?? 'Xetral account'} &middot;&middot;&middot;
+            <div key={r.id} className="sf-recip">
+              <button type="button" className="sf-recip-open" onClick={() => onPick(r)}>
+                <span className="sf-avatar-wrap">
+                  <span className="sf-avatar">{initialsOf(r.display_name)}</span>
+                  <span className="sf-avatar-flag">
+                    <CurrencyMark currency={r.currency} size={20} />
+                  </span>
+                </span>
+                <span className="sf-recip-info">
+                  <span className="sf-recip-name">{r.display_name}</span>
+                  <span className="sf-recip-bank">
+                    {r.rail_name ?? 'Xetral account'} &nbsp;|&nbsp; &middot;&middot;&middot;
                     {r.destination.slice(-4)}
                   </span>
                 </span>
-                <CurrencyMark currency={r.currency} size={18} />
               </button>
               {/*
                 REMOVING IS BEHIND A SECOND PRESS, not a swipe and not a
@@ -277,40 +293,44 @@ function ChooseRecipient({
                 control beside the tap target is one thumb-width from deleting
                 somebody's landlord.
               */}
-              <span className="row-actions">
+              {menu === r.id ? (
                 <button
                   type="button"
-                  className="icon-btn"
-                  aria-label={`More for ${r.display_name}`}
-                  onClick={() => setMenu(menu === r.id ? undefined : r.id)}
+                  className="btn small danger"
+                  onClick={() => {
+                    setMenu(undefined);
+                    void onRemove(r.id);
+                  }}
                 >
-                  <Icon name="menu" size={18} />
+                  Remove
                 </button>
-                {menu === r.id && (
-                  <button
-                    type="button"
-                    className="btn small danger"
-                    onClick={() => {
-                      setMenu(undefined);
-                      void onRemove(r.id);
-                    }}
-                  >
-                    Remove
-                  </button>
-                )}
-              </span>
-            </li>
+              ) : (
+                <button
+                  type="button"
+                  className="sf-dots"
+                  aria-label={`More for ${r.display_name}`}
+                  onClick={() => setMenu(r.id)}
+                >
+                  <span />
+                  <span />
+                  <span />
+                </button>
+              )}
+            </div>
           ))}
-          {shown.length === 0 && (
-            <li className="hint">Nobody on this list matches that.</li>
-          )}
-        </ul>
+          {shown.length === 0 && <p className="sf-empty">Nobody on this list matches that.</p>}
+        </>
       )}
 
-      <button type="button" className="fab" onClick={onNew}>
-        <Icon name="plus" size={18} />
-        New recipient
-      </button>
+      <div className="sf-newbtn-row">
+        <button type="button" className="sf-newbtn" onClick={onNew}>
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+            <line x1="9" y1="2" x2="9" y2="16" />
+            <line x1="2" y1="9" x2="16" y2="9" />
+          </svg>
+          New recipient
+        </button>
+      </div>
     </section>
   );
 }
@@ -354,11 +374,24 @@ function ChooseCurrency({
     .filter((c) => !favourites.includes(c) && !stablecoins.includes(c) && matches(c))
     .sort((a, b) => currencyName(a).localeCompare(currencyName(b)));
 
-  return (
-    <section className="send-step">
-      <h1>What currency should your recipient receive?</h1>
+  /*
+   * THE ALPHABETICAL TAIL IS GROUPED BY LETTER, exactly as the mockup shows
+   * (…B, C…). Each letter is its own labelled section with a divider, built
+   * from the currency NAME so "Baht" files under B and "Cedi" under C.
+   */
+  const letters = new Map<string, string[]>();
+  for (const code of rest) {
+    const letter = currencyName(code).charAt(0).toUpperCase();
+    (letters.get(letter) ?? letters.set(letter, []).get(letter)!).push(code);
+  }
 
-      <label className="field search">
+  const empty = favourites.length + stablecoins.length + rest.length === 0;
+
+  return (
+    <section className="sf">
+      <h1 className="sf-title">What currency should your recipient receive?</h1>
+
+      <div className="sf-search">
         <Icon name="search" size={18} />
         <input
           value={query}
@@ -366,15 +399,15 @@ function ChooseCurrency({
           placeholder="Search currency or country"
           aria-label="Search currencies"
         />
-      </label>
+      </div>
 
-      <CurrencyGroup heading="Favourites" codes={favourites} onPick={onPick} />
+      <CurrencyGroup heading="Favorites" codes={favourites} onPick={onPick} />
       <CurrencyGroup heading="Stablecoins" codes={stablecoins} onPick={onPick} />
-      <CurrencyGroup heading="All currencies" codes={rest} onPick={onPick} />
+      {[...letters.entries()].map(([letter, codes]) => (
+        <CurrencyGroup key={letter} heading={letter} codes={codes} onPick={onPick} />
+      ))}
 
-      {favourites.length + stablecoins.length + rest.length === 0 && (
-        <p className="hint">No currency matches that.</p>
-      )}
+      {empty && <p className="sf-empty">No currency matches that.</p>}
     </section>
   );
 }
@@ -390,24 +423,23 @@ function CurrencyGroup({
 }) {
   if (codes.length === 0) return null;
   return (
-    <>
-      <h2 className="group-head">{heading}</h2>
-      <ul className="list">
-        {codes.map((code) => (
-          <li key={code} className="list-row">
-            <button type="button" className="row-open tappable" onClick={() => onPick(code)}>
-              <span className="row-icon">
-                <CurrencyMark currency={code} size={22} />
-              </span>
-              <span className="row-main">
-                <span className="row-title">{currencyName(code)}</span>
-                <span className="row-sub">{code}</span>
-              </span>
-            </button>
-          </li>
-        ))}
-      </ul>
-    </>
+    <div className="sf-section">
+      <div className="sf-section-label">{heading}</div>
+      <div className="sf-divider" />
+      {codes.map((code) => (
+        <button key={code} type="button" className="sf-row" onClick={() => onPick(code)}>
+          <span className="sf-icon">
+            <CurrencyMark currency={code} size={44} />
+          </span>
+          <span>
+            <div className="sf-cur-name">{currencyName(code)}</div>
+            <div className="sf-cur-code">
+              {code} ({symbolFor(code)})
+            </div>
+          </span>
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -447,9 +479,8 @@ function RecipientDetails({
   const country = countries.find((c) => c.currency === receive);
   const [rail, setRail] = useState('');
   const [destination, setDestination] = useState(initialDestination.replace(/[^0-9]/g, ''));
-  const [label, setLabel] = useState('');
-  const [save, setSave] = useState(true);
   const [found, setFound] = useState<RecipientResolution | undefined>(undefined);
+  const [sheet, setSheet] = useState(false);
 
   const banks = useLoad(
     async () => (country === undefined ? [] : client.payoutBanks(country.code)),
@@ -474,9 +505,6 @@ function RecipientDetails({
   const kind: RecipientKind =
     rail === 'xetral' ? 'xetral' : country?.payout_method === 'mobile_money' ? 'momo' : 'bank';
 
-  const numberLabel =
-    kind === 'bank' ? 'Account number' : kind === 'momo' ? 'Mobile Money number' : 'Phone number';
-
   /*
    * ENOUGH TYPED TO BE WORTH ASKING ABOUT, and the floor is PER RAIL.
    *
@@ -494,143 +522,189 @@ function RecipientDetails({
   const minimumDigits = mobileMoney ? 9 : 10;
   const enough = destination.replace(/[^0-9]/g, '').length >= minimumDigits;
 
-  async function look(): Promise<void> {
-    if (!enough || rail === '') return;
-    await run(async () => {
-      const resolution = await client.resolveRecipient({
-        kind,
-        /*
-         * THE COUNTRY GOES EVEN ON THE XETRAL BRANCH, and leaving it off is
-         * what made `08031234567` resolve to nobody. A national number has no
-         * country in it; this flow already fixed one at the currency step, so
-         * the server normalises through THAT country's dialling code rather
-         * than guessing the sender's.
-         */
-        ...(country === undefined ? {} : { country: country.code }),
-        ...(kind === 'xetral' ? {} : { railCode: rail }),
-        destination,
-      });
-      setFound(resolution);
-      return undefined;
+  const isMomoCountry = country?.payout_method === 'mobile_money';
+  const pickerLabel = isMomoCountry ? 'Network' : 'Bank';
+  const numberLabel = kind === 'bank' ? 'Account number' : 'Phone number';
+  const railLabel = rails.find((r) => r.value === rail)?.label;
+
+  /**
+   * Ask the server who holds this destination.
+   *
+   * FOR MOMO THIS NEVER BLOCKS. The server's resolve path is now best-effort
+   * for a wallet — it returns the name where the rail can answer and null
+   * where it cannot, and never throws — so a momo send proceeds straight to
+   * the amount. A bank or a Xetral account still resolves a name to confirm,
+   * and a Xetral number that belongs to nobody still fails here, which is the
+   * one refusal on this screen that is real.
+   */
+  async function doResolve(): Promise<RecipientResolution> {
+    return client.resolveRecipient({
+      kind,
+      /* THE COUNTRY GOES EVEN ON THE XETRAL BRANCH — a national number has no
+         country in it, and leaving it off is what made `08031234567` resolve
+         to nobody. This flow fixed one at the currency step, so the server
+         normalises through THAT country's dial code, not the sender's. */
+      ...(country === undefined ? {} : { country: country.code }),
+      ...(kind === 'xetral' ? {} : { railCode: rail }),
+      destination,
     });
   }
 
-  const nameUnavailable = found !== undefined && found.resolved_name === null;
-  const ready =
-    found !== undefined && (found.resolved_name !== null || label.trim().length >= 2);
+  async function proceed(resolution: RecipientResolution): Promise<void> {
+    /*
+     * SAVING IS BEST-EFFORT AND NEVER GATES THE SEND. The recipient book fills
+     * from paying people (mockup 2 is that list), so every send saves — but a
+     * save that fails must not strand a customer who only wanted to pay once.
+     * The amount step reads `draft` when there is no saved row, and toRecipient
+     * gives it a display name, so the send works either way.
+     */
+    let saved: Recipient | undefined;
+    try {
+      saved = await client.saveRecipient({
+        kind: resolution.kind,
+        ...(resolution.country === '' ? {} : { country: resolution.country }),
+        ...(resolution.rail_code === null ? {} : { railCode: resolution.rail_code }),
+        destination: resolution.destination,
+        ...(resolution.resolved_name === null
+          ? { label: destination.replace(/[^0-9]/g, '') }
+          : {}),
+      });
+    } catch {
+      saved = undefined;
+    }
+    onReady(resolution, saved);
+  }
 
   return (
-    <form
-      className="send-step"
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (found === undefined) {
-          void look();
-          return;
-        }
-        void run(async () => {
-          const recipient = save
-            ? await client.saveRecipient({
-                kind: found.kind,
-                /* `found.destination` is already the international form, so
-                   re-resolving needs no country — but an empty one would fail
-                   the two-character schema, which is why this checks the
-                   VALUE rather than the kind. */
-                ...(found.country === '' ? {} : { country: found.country }),
-                ...(found.rail_code === null ? {} : { railCode: found.rail_code }),
-                destination: found.destination,
-                ...(label.trim() === '' ? {} : { label: label.trim() }),
-              })
-            : undefined;
-          onReady(found, recipient);
-          return undefined;
-        });
-      }}
-    >
-      <h1>Who are you sending to?</h1>
-      <p className="lead">Fill in the necessary details of your recipient</p>
+    <>
+      <form
+        className="sf"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (rail === '' || !enough) return;
+          void run(async () => {
+            /*
+             * ONE TAP FOR MOMO, TWO FOR A NAMED RAIL. A wallet has no name to
+             * confirm, so Continue resolves and proceeds in a single press —
+             * the mockup's flow. A bank or Xetral account shows the resolved
+             * name first, so the customer confirms who they are paying.
+             */
+            if (found !== undefined) {
+              await proceed(found);
+            } else {
+              const resolution = await doResolve();
+              if (kind === 'momo') await proceed(resolution);
+              else setFound(resolution);
+            }
+            return undefined;
+          });
+        }}
+      >
+        <h1 className="sf-title">Who are you sending to?</h1>
+        <p className="sf-sub">Fill in the necessary details of your recipient</p>
 
-      <div className="field">
-        <span className="field-label">Recipient country</span>
-        {/*
-          READ-ONLY AS TEXT, not as a disabled input. A disabled box reads as a
-          bug — somebody taps it, nothing happens, and the screen has given
-          them no way forward. A line of text is the same restriction stated as
-          a fact.
-        */}
-        <p className="readonly">{country?.name ?? receive}</p>
-      </div>
+        <div className="sf-group">
+          <span className="sf-label">Recipient country</span>
+          <input className="sf-field" value={country?.name ?? receive} readOnly />
+        </div>
 
-      <label className="field">
-        <span className="field-label">Network</span>
-        <Select
-          value={rail}
-          onChange={(next) => {
-            setRail(next);
-            setFound(undefined);
-          }}
-          options={[{ value: '', label: 'Network' }, ...rails]}
-          searchable={rails.length > 6}
-          searchPlaceholder="Search networks…"
-        />
-      </label>
+        <div className="sf-group">
+          <span className="sf-label">{pickerLabel}</span>
+          <div className="sf-select-wrap">
+            <button
+              type="button"
+              className={sheet ? 'sf-select open' : railLabel ? 'sf-select' : 'sf-select placeholder'}
+              onClick={() => setSheet(true)}
+            >
+              {railLabel ?? pickerLabel}
+            </button>
+            <span className="sf-select-arrow">{sheet ? '▲' : '▼'}</span>
+          </div>
+        </div>
 
-      <label className="field">
-        <span className="field-label">{numberLabel}</span>
-        <input
-          value={destination}
-          onChange={(e) => {
-            setDestination(e.target.value);
-            setFound(undefined);
-          }}
-          onBlur={() => void look()}
-          inputMode="numeric"
-          placeholder={kind === 'bank' ? '0123456789' : '0553921133'}
-          autoComplete="off"
-        />
-      </label>
+        <div className="sf-group">
+          <span className="sf-label">{numberLabel}</span>
+          <input
+            className="sf-field"
+            value={destination}
+            onChange={(e) => {
+              setDestination(e.target.value);
+              setFound(undefined);
+            }}
+            onBlur={() => {
+              // A named rail confirms on blur so the name is on screen before
+              // the button; momo has nothing to confirm and waits for Continue.
+              if (kind === 'momo' || rail === '' || !enough) return;
+              void run(async () => {
+                setFound(await doResolve());
+                return undefined;
+              });
+            }}
+            inputMode="numeric"
+            placeholder={kind === 'bank' ? '0123456789' : 'Enter phone number'}
+            autoComplete="off"
+          />
+        </div>
 
-      {found?.resolved_name != null && (
-        <div className="field">
-          <span className="field-label">Account name</span>
-          {/*
-            THE RAIL'S OWN ANSWER, and the only thing on this screen presented
-            as confirmation. A name the SENDER typed shown here would be a
-            confirmation screen that confirms nothing while looking exactly
-            like one — 043's rule, and the reason the label below is a
-            separate, differently worded field.
-          */}
-          <p className="readonly">{found.resolved_name}</p>
+        {found?.resolved_name != null && (
+          <div className="sf-group">
+            <span className="sf-label">Account name</span>
+            <input className="sf-field" value={found.resolved_name} readOnly />
+          </div>
+        )}
+
+        <FormError error={error} code={code} />
+
+        <button type="submit" className="sf-primary" disabled={busy || rail === '' || !enough}>
+          {busy ? 'Checking…' : kind === 'momo' || found !== undefined ? 'Continue' : 'Check details'}
+        </button>
+      </form>
+
+      {sheet && (
+        <div
+          className="sf-sheet-overlay"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setSheet(false)}
+        >
+          <div className="sf-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="sf-sheet-handle-row">
+              <div className="sf-sheet-handle" />
+            </div>
+            <div className="sf-sheet-head">
+              <span className="sf-sheet-title">
+                Select a {isMomoCountry ? 'network provider' : 'bank'}
+              </span>
+              <button
+                type="button"
+                className="sf-sheet-close"
+                aria-label="Close"
+                onClick={() => setSheet(false)}
+              >
+                ✕
+              </button>
+            </div>
+            <div>
+              {rails.map((r) => (
+                <button
+                  key={r.value}
+                  type="button"
+                  className="sf-net"
+                  onClick={() => {
+                    setRail(r.value);
+                    setFound(undefined);
+                    setSheet(false);
+                  }}
+                >
+                  <span className="sf-net-name">{r.label}</span>
+                  <span className={rail === r.value ? 'sf-radio on' : 'sf-radio'} />
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       )}
-
-      {nameUnavailable && (
-        <label className="field">
-          <span className="field-label">Name this recipient</span>
-          <input
-            value={label}
-            onChange={(e) => setLabel(e.target.value)}
-            placeholder="What you want to call them"
-            maxLength={140}
-          />
-          <span className="hint">
-            This network cannot confirm the account name, so nobody has checked
-            it. Give them a name you will recognise — and check the number.
-          </span>
-        </label>
-      )}
-
-      <label className="row toggle">
-        <span>Save as beneficiary</span>
-        <input type="checkbox" checked={save} onChange={(e) => setSave(e.target.checked)} />
-      </label>
-
-      <FormError error={error} code={code} />
-
-      <button type="submit" disabled={busy || rail === '' || !enough || (found !== undefined && !ready)}>
-        {busy ? 'Checking…' : found === undefined ? 'Check details' : 'Continue'}
-      </button>
-    </form>
+    </>
   );
 }
 

@@ -3555,3 +3555,345 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
   color: var(--text-2);
   font-size: 13px;
 }
+
+/* ===========================================================================
+   SEND FLOW — EXACT MOCKUP SPEC
+
+   Three screens rebuilt one-for-one from the uploaded mockups (currency
+   select, recipient select, momo network). These are LIGHT and literal-
+   coloured on purpose: the mockups are the spec, down to the hex, and the
+   product owner does not accept a design that differs from them. The app's
+   own tokens are not used here, which is why the light-edges guard (which
+   forbids var(--line) box borders, not literal ones) does not fire.
+
+   Font is the app's self-hosted Inter — which is exactly what the currency
+   and recipient mockups call for; the network mockup's Roboto is served by
+   the same Inter, because the CSP admits no external font and one all-Inter
+   product reads better than a lone Roboto screen.
+   =========================================================================== */
+
+.sf {
+  font-family: var(--font-sans);
+  color: #111111;
+  display: block;
+}
+/* The step sits on white, edge to edge — the Shell already carries the side
+   gutter, so this only adds the mockup's foot room. */
+.sf {
+  background: #FFFFFF;
+  padding: 0 0 24px;
+}
+
+.sf-title {
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1.3;
+  letter-spacing: -0.4px;
+  color: #111111;
+  margin: 6px 0 22px;
+}
+.sf-sub {
+  font-size: 13px;
+  font-weight: 400;
+  color: #999999;
+  margin: -14px 0 26px;
+}
+
+/* Search — 52px bar, 1.2px #DADDE3, 14px radius */
+.sf-search {
+  height: 52px;
+  border: 1.2px solid #DADDE3;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  margin-bottom: 28px;
+  background: #FFFFFF;
+}
+.sf-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 400;
+  color: #111111;
+  padding: 0;
+}
+.sf-search input::placeholder { color: #B2BCC8; }
+.sf-search svg { color: #B2BCC8; flex-shrink: 0; }
+
+/* --- currency-select sections --- */
+.sf-section { margin-bottom: 24px; }
+.sf-section-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #7B8FA1;
+  margin-bottom: 8px;
+}
+.sf-divider { height: 1px; background: #E8EAED; margin-bottom: 6px; }
+
+.sf-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 7px 0;
+  width: 100%;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--font-sans);
+}
+.sf-row:hover:where(:not(:disabled)) { background: transparent; }
+.sf-row:active { background: transparent; }
+.sf-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.sf-cur-name { font-size: 16px; font-weight: 700; color: #111111; line-height: 1.25; }
+.sf-cur-code { font-size: 13px; font-weight: 400; color: #9AA5B4; margin-top: 2px; }
+
+/* --- recipient-select --- */
+.sf-chips {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 18px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.sf-chips::-webkit-scrollbar { display: none; }
+.sf-chip {
+  height: 38px;
+  padding: 0 14px;
+  border: 1.5px solid #D8DCE4;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: #2A2E3E;
+  white-space: nowrap;
+  background: #FFFFFF;
+  flex-shrink: 0;
+  cursor: pointer;
+  font-family: var(--font-sans);
+}
+.sf-chip:hover:where(:not(:disabled)) { background: #FFFFFF; }
+.sf-chip.on { border: 2px solid #3B6FE8; color: #3B6FE8; background: #FFFFFF; }
+.sf-chip.on:hover:where(:not(:disabled)) { background: #FFFFFF; color: #3B6FE8; }
+.sf-chip-flag {
+  width: 18px; height: 18px; border-radius: 50%;
+  overflow: hidden; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+
+.sf-list-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #3B6FE8;
+  margin-bottom: 8px;
+}
+
+.sf-recip {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 0;
+  border-bottom: 1px solid #F0F2F5;
+}
+.sf-recip-open {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--font-sans);
+}
+.sf-recip-open:hover:where(:not(:disabled)) { background: transparent; }
+.sf-avatar-wrap { position: relative; width: 54px; height: 54px; flex-shrink: 0; }
+.sf-avatar {
+  width: 54px; height: 54px; border-radius: 50%;
+  background: #ECEEF3;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; font-weight: 600; color: #8E939F; letter-spacing: 0.5px;
+}
+.sf-avatar-flag {
+  position: absolute; bottom: -2px; left: -2px;
+  width: 20px; height: 20px; border-radius: 50%;
+  overflow: hidden; border: 2px solid #FFFFFF;
+  display: flex; align-items: center; justify-content: center; background: #fff;
+}
+.sf-recip-info { flex: 1; min-width: 0; }
+.sf-recip-name {
+  display: block;
+  font-size: 15.5px; font-weight: 700; color: #111111; margin-bottom: 3px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sf-recip-bank {
+  display: block;
+  font-size: 13px; font-weight: 400; color: #9AA5B4;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sf-dots {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 3.5px; padding: 4px; flex-shrink: 0; cursor: pointer;
+  background: transparent; border: 0;
+}
+.sf-dots span { width: 4px; height: 4px; border-radius: 50%; background: #B0B8C4; display: block; }
+
+.sf-empty { color: #9AA5B4; font-size: 14px; padding: 24px 0; }
+
+/* The floating New-recipient pill. In-flow on the web step (not fixed) so it
+   cannot cover the last row on a short list — placed after the list, right
+   aligned, with the mockup's exact fill, radius and shadow. */
+.sf-newbtn-row { display: flex; justify-content: flex-end; margin-top: 20px; }
+.sf-newbtn {
+  background: #3B6FE8;
+  color: #FFFFFF;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 600;
+  padding: 14px 22px;
+  border-radius: 50px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(59,111,232,0.4);
+}
+.sf-newbtn:hover:where(:not(:disabled)) { background: #3361d8; color: #fff; }
+
+/* --- momo network screen --- */
+.sf-group { margin-bottom: 16px; }
+.sf-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 400;
+  color: #888888;
+  margin-bottom: 6px;
+}
+.sf-field {
+  width: 100%;
+  height: 52px;
+  border-radius: 8px;
+  border: none;
+  background: #E8E8E8;
+  padding: 0 16px;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 400;
+  color: #333333;
+  outline: none;
+}
+.sf-field::placeholder { color: #AAAAAA; }
+.sf-field[readonly] { color: #333333; }
+/* The network trigger — a select-shaped field. Blue border while its sheet is
+   open, plain grey field otherwise. */
+.sf-select {
+  width: 100%;
+  height: 52px;
+  border-radius: 8px;
+  border: none;
+  background: #E8E8E8;
+  padding: 0 42px 0 16px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  position: relative;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  color: #333333;
+}
+.sf-select.placeholder { color: #AAAAAA; }
+.sf-select.open { background: #FFFFFF; border: 2px solid #4285F4; }
+.sf-select-wrap { position: relative; }
+.sf-select-arrow {
+  position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
+  color: #555; font-size: 11px; pointer-events: none; line-height: 1;
+}
+
+/* The primary continue button on the momo screen — a blue full-width action
+   matching the flow's accent. */
+.sf-primary {
+  width: 100%;
+  height: 54px;
+  border: 0;
+  border-radius: 12px;
+  background: #3B6FE8;
+  color: #FFFFFF;
+  font-family: var(--font-sans);
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 8px;
+}
+.sf-primary:hover:where(:not(:disabled)) { background: #3361d8; color: #fff; }
+.sf-primary:disabled { opacity: 0.5; cursor: default; }
+
+/* Bottom sheet for the network picker */
+.sf-sheet-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.28);
+  z-index: 60;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.sf-sheet {
+  width: 100%;
+  max-width: 460px;
+  background: #FFFFFF;
+  border-radius: 20px 20px 0 0;
+  padding-bottom: 8px;
+  animation: sf-sheet-up 0.2s ease;
+}
+@keyframes sf-sheet-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
+.sf-sheet-handle-row { display: flex; justify-content: center; padding: 14px 0 0; }
+.sf-sheet-handle { width: 40px; height: 4px; background: #DDDDDD; border-radius: 2px; }
+.sf-sheet-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px 14px;
+}
+.sf-sheet-title { font-size: 18px; font-weight: 700; color: #111111; }
+.sf-sheet-close {
+  background: none; border: 0; cursor: pointer;
+  font-size: 18px; color: #555555; line-height: 1; padding: 4px;
+}
+.sf-net {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 20px;
+  border-top: 1px solid #F0F0F0;
+  cursor: pointer;
+  background: #fff; border-left: 0; border-right: 0; border-bottom: 0;
+  width: 100%;
+  font-family: var(--font-sans);
+}
+.sf-net-name { font-size: 15px; font-weight: 500; color: #222222; letter-spacing: 0.4px; }
+.sf-radio {
+  width: 22px; height: 22px; border-radius: 50%;
+  border: 2px solid #CCCCCC; background: #FFFFFF; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.sf-radio.on { border-color: #3B6FE8; }
+.sf-radio.on::after {
+  content: ''; width: 11px; height: 11px; border-radius: 50%; background: #3B6FE8;
+}
