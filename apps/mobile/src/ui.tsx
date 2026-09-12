@@ -353,19 +353,30 @@ export function Panel({
   title,
   subtitle,
   children,
+  bare = false,
 }: {
   readonly title?: string;
   readonly subtitle?: string;
   readonly children: ReactNode;
+  /**
+   * EDGE TO EDGE, no card chrome. The Send flow is not a panel sitting on the
+   * page — it IS the page, the way Grey and Lemfi draw it — so its steps drop
+   * the recessed card fill and border and let the fields be the only wells.
+   * The screen's own padding still frames it. Every other screen keeps the
+   * card, so nothing else moves.
+   */
+  readonly bare?: boolean;
 }) {
   const styles = useStyles();
-  return (
-    <View style={styles.card}>
+  const body = (
+    <>
       {title !== undefined && <Text style={styles.h1}>{title}</Text>}
       {subtitle !== undefined && <Text style={styles.lead}>{subtitle}</Text>}
       {children}
-    </View>
+    </>
   );
+  if (bare) return <View>{body}</View>;
+  return <View style={styles.card}>{body}</View>;
 }
 
 export function Loading() {

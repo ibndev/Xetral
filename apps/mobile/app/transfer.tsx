@@ -242,7 +242,7 @@ function ChooseRecipient({
   });
 
   return (
-    <Panel title="Who do you want to send money to?">
+    <Panel bare title="Who do you want to send money to?">
       <SearchField
         value={query}
         onChange={setQuery}
@@ -292,14 +292,13 @@ function ChooseRecipient({
                 accessibilityLabel={`Send to ${r.display_name}`}
                 style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 13 }}
               >
-                <View style={styles.rowIcon}>
-                  <Text
-                    style={{
-                      color: colors.text,
-                      fontFamily: font.sansSemi,
-                      fontSize: 13,
-                    }}
-                  >
+                <View
+                  style={[
+                    styles.rowIcon,
+                    { width: 46, height: 46, borderRadius: 999, backgroundColor: colors.brand },
+                  ]}
+                >
+                  <Text style={{ color: colors.onBrand, fontFamily: font.sansSemi, fontSize: 15 }}>
                     {initialsOf(r.display_name)}
                   </Text>
                 </View>
@@ -349,7 +348,7 @@ function ChooseRecipient({
         </View>
       )}
 
-      <Button label="New recipient" icon="plus" onPress={onNew} />
+      <Button label="New recipient" icon="plus" quiet onPress={onNew} />
     </Panel>
   );
 }
@@ -488,7 +487,7 @@ function ChooseCurrency({
     .sort((a, b) => currencyName(a).localeCompare(currencyName(b)));
 
   return (
-    <Panel title="What currency should your recipient receive?">
+    <Panel bare title="What currency should your recipient receive?">
       <SearchField value={query} onChange={setQuery} placeholder="Search currency or country" />
 
       <CurrencyGroup heading="Favourites" codes={favourites} onPick={onPick} />
@@ -662,6 +661,7 @@ function RecipientDetails({
 
   return (
     <Panel
+      bare
       title="Who are you sending to?"
       subtitle="Fill in the necessary details of your recipient"
     >
@@ -872,10 +872,15 @@ function SendAmount({
   const enough = isValidAmount(amount, exponentFor(sendCurrency));
 
   return (
-    <Panel>
+    <Panel bare>
       <View style={[styles.row, { borderBottomWidth: 0, paddingTop: 0 }]}>
-        <View style={styles.rowIcon}>
-          <Text style={{ color: colors.text, fontFamily: font.sansSemi, fontSize: 13 }}>
+        <View
+          style={[
+            styles.rowIcon,
+            { width: 46, height: 46, borderRadius: 999, backgroundColor: colors.brand },
+          ]}
+        >
+          <Text style={{ color: colors.onBrand, fontFamily: font.sansSemi, fontSize: 15 }}>
             {initialsOf(to.display_name)}
           </Text>
         </View>
@@ -920,7 +925,8 @@ function SendAmount({
               textAlign: 'right',
               color: colors.text,
               fontFamily: font.displayBold,
-              fontSize: 26,
+              fontSize: 30,
+              letterSpacing: -0.6,
               fontVariant: ['tabular-nums'],
             }}
           />
@@ -942,7 +948,9 @@ function SendAmount({
               paddingHorizontal: 12,
               paddingVertical: 7,
               borderRadius: radius.pill,
-              backgroundColor: colors.field,
+              backgroundColor: colors.surfaceRaised,
+              borderColor: colors.edge,
+              borderWidth: 1,
             }}
           >
             <CurrencyMark currency={to.currency} size={18} />
@@ -956,7 +964,8 @@ function SendAmount({
               textAlign: 'right',
               color: colors.text,
               fontFamily: font.displayBold,
-              fontSize: 26,
+              fontSize: 30,
+              letterSpacing: -0.6,
               fontVariant: ['tabular-nums'],
             }}
           >

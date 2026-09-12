@@ -3419,6 +3419,32 @@ writing another fetch wrapper.
 - Never widen a type or add `any` to silence the compiler on a money path. The
   compiler is the cheapest auditor available.
 
+### UI work is design work — the standing rule
+
+**Any task that touches a customer-facing screen — web or mobile — is a DESIGN
+task first, and is held to the bar of a top-tier fintech app (Grey, Lemfi,
+Revolut), not "it renders".** This is a permanent instruction from the product
+owner, recorded because it was learned the hard way: a Send flow shipped that
+technically worked and looked like a wireframe — loose vertical spacing, no
+visual hierarchy, controls that did not match the reference screenshots — and
+"it passes the guards" is not the same as "it looks finished".
+
+- **When the prompt includes a mockup or screenshot, match it layout by layout
+  and control by control.** The reference is the spec, not an inspiration. If
+  the screenshots are not in context, ask for them rather than approximating —
+  approximating from memory is what produced the wireframe.
+- **Spacing is intentional, never a default.** Every gap is a decision. A stack
+  of form steps at `--s-4` between every element reads as empty; a real fintech
+  screen is dense and rhythmic. Reach for the smaller steps and group related
+  controls tightly.
+- **The bar is visual, so verify it visually where possible** — build the app
+  and screenshot the screen (Chromium/Playwright is installed) rather than
+  reasoning about pixels. A design guard test going green is necessary and not
+  sufficient.
+- There is no separate design subagent to hand this to; whoever picks up a UI
+  task IS the design lead and owns the craft, the same way the ledger rules are
+  owned on every money path.
+
 ---
 
 ## Commands

@@ -215,7 +215,7 @@ function ChooseRecipient({
   });
 
   return (
-    <section className="card send-step">
+    <section className="send-step">
       <h1>Who do you want to send money to?</h1>
 
       <label className="field search">
@@ -355,7 +355,7 @@ function ChooseCurrency({
     .sort((a, b) => currencyName(a).localeCompare(currencyName(b)));
 
   return (
-    <section className="card send-step">
+    <section className="send-step">
       <h1>What currency should your recipient receive?</h1>
 
       <label className="field search">
@@ -521,7 +521,7 @@ function RecipientDetails({
 
   return (
     <form
-      className="card send-step"
+      className="send-step"
       onSubmit={(event) => {
         event.preventDefault();
         if (found === undefined) {
