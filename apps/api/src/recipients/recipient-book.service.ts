@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
   Inject,
   Injectable,
   Logger,
@@ -194,8 +195,35 @@ export class RecipientBookService {
       });
       resolved = found.accountName;
     } catch (error: unknown) {
-      if (!isNameUnavailable(error)) throw error;
-      this.#logger.log(`${iso} ${body.rail_code} has no name enquiry; asking for a label instead`);
+      /*
+       * FOR A WALLET, A NAME IS A BONUS AND NEVER A GATE — and this resolve
+       * path must not be STRICTER than the send path, which is the bug that
+       * kept "it cannot find the momo details" alive across three earlier
+       * fixes.
+       *
+       * `payout.service.#beneficiaryFor` does not look a momo name up AT ALL
+       * (`if (destination.mobile_money) return undefined`), so the send would
+       * have gone through — but this method, which gates the Continue button,
+       * only tolerated `name_unavailable` and RE-THREW everything else. So a
+       * Ghanaian wallet whose name enquiry answered `account_not_found`, or a
+       * moment when Flutterwave was unreachable, blocked a send that the very
+       * next layer would have completed without a name.
+       *
+       * A momo lookup is therefore best-effort here: on ANY failure the name
+       * is simply null and the flow proceeds, exactly as the send path does.
+       * Only a BANK rail — where the bank's answer is the one claim about the
+       * beneficiary that does not come from the sender (043) — still surfaces
+       * a real failure, and even then a rail with no name enquiry is tolerated.
+       */
+      if (body.kind === 'momo') {
+        this.#logger.log(
+          `${iso} ${body.rail_code} momo name enquiry did not answer (${describe(error)}); proceeding without a name`,
+        );
+      } else if (isNameUnavailable(error)) {
+        this.#logger.log(`${iso} ${body.rail_code} has no name enquiry; asking for a label instead`);
+      } else {
+        throw error;
+      }
     }
 
     return {
@@ -443,4 +471,15 @@ function isNameUnavailable(error: unknown): boolean {
   if (!(error instanceof NotFoundException)) return false;
   const body = error.getResponse() as { error?: string };
   return body.error === 'name_unavailable';
+}
+
+/** A short, log-safe description of a swallowed lookup failure — never the
+ *  provider's own sentence, which names our integration (006). */
+function describe(error: unknown): string {
+  if (error instanceof HttpException) {
+    const body = error.getResponse();
+    const code = typeof body === 'object' && body !== null ? (body as { error?: string }).error : undefined;
+    return code ?? `http ${error.getStatus()}`;
+  }
+  return error instanceof Error ? error.name : 'unknown';
 }
