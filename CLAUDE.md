@@ -3444,6 +3444,21 @@ visual hierarchy, controls that did not match the reference screenshots — and
 - There is no separate design subagent to hand this to; whoever picks up a UI
   task IS the design lead and owns the craft, the same way the ledger rules are
   owned on every money path.
+- **Consistency is the point across the three countries.** Nigeria, Ghana and
+  Kenya share the same screens — only the currency, the rail and the copy
+  differ, all of it data — so the design must be uniform whatever the country,
+  and no screen may lag the others. A revamp is a design-SYSTEM pass (the
+  shared tokens and primitives) plus per-screen verification, not a pile of
+  bespoke one-off screens.
+
+### Merging — the standing rule
+
+**Merge every verified batch to `main` without waiting to be told.** The
+product owner has given standing permission, and Coolify redeploys `main`, so
+finished work that sits on the feature branch is not delivered. The one gate
+is that it is VERIFIED — green guards, tests, typecheck and (for UI) rendered
+and looked at; never merge a red or unrendered change. Develop on the feature
+branch, then fast-forward `main` and push both.
 
 ---
 
