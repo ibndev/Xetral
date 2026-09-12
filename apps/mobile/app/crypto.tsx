@@ -1,10 +1,22 @@
 import { useState } from 'react';
-import { Text, View } from 'react-native';
+import { Text, TextInput, View } from 'react-native';
 import { CRYPTO_PAIRS, formatAmount } from '@xetral/client';
 import type { CryptoAddress, CryptoQuote, Withdrawal } from '@xetral/client';
 import { Shell } from '@/shell';
-import { Button, Done, Empty, Field, FormError, Loading, Panel, VerifyPrompt } from '@/ui';
+import {
+  AmountCard,
+  Button,
+  CurrencyPill,
+  Done,
+  Empty,
+  Field,
+  FormError,
+  Loading,
+  Panel,
+  VerifyPrompt,
+} from '@/ui';
 import { Select } from '@/select';
+import { Icon } from '@/icon';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/hooks';
 import { font, space, useStyles, useTheme } from '@/theme';
 
@@ -138,6 +150,7 @@ function Send({
 }) {
   const client = useXetral();
   const styles = useStyles();
+  const colors = useTheme();
   const { busy, error, code, done, run } = useSubmit();
   const attempt = useIdempotencyKey();
   const [destination, setDestination] = useState('');
@@ -155,19 +168,49 @@ function Send({
         onChangeText={setDestination}
         hint="Check every character. We catch a typo; we cannot recall a payment sent to somebody else's valid address."
       />
-      <Field
-        label="Amount"
-        inputMode="decimal"
-        value={amount}
-        onChangeText={(next) => {
-          setAmount(next);
-          setQuote(undefined);
-        }}
-      />
+      {/* THE AMOUNT IS THE HERO, like Send. The asset sits in the well as a
+          pill and the fee is a line under it, rather than a flat input above a
+          two-row breakdown. */}
+      <AmountCard>
+        <Text style={styles.fieldLabel}>You send</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
+          <CurrencyPill>
+            <Text style={{ color: colors.text, fontFamily: font.sansSemi, fontSize: 14 }}>
+              {pair.asset}
+            </Text>
+          </CurrencyPill>
+          <TextInput
+            value={amount}
+            onChangeText={(next) => {
+              setAmount(next);
+              setQuote(undefined);
+            }}
+            keyboardType="decimal-pad"
+            placeholder="0"
+            placeholderTextColor={colors.text3}
+            accessibilityLabel="Amount to send"
+            style={{
+              flex: 1,
+              textAlign: 'right',
+              color: colors.text,
+              fontFamily: font.displayBold,
+              fontSize: 30,
+              letterSpacing: -0.6,
+              fontVariant: ['tabular-nums'],
+            }}
+          />
+        </View>
+        {quote !== undefined && (
+          <Text style={styles.muted}>
+            Network fee {formatAmount(quote.fee, quote.asset)} · total{' '}
+            {formatAmount(quote.total, quote.asset)}
+          </Text>
+        )}
+      </AmountCard>
 
       <Button
-        label="Check the fee"
-        quiet
+        label={quote === undefined ? 'Check the fee' : 'Refresh fee'}
+        accent
         busy={busy && quote === undefined}
         disabled={amount === ''}
         onPress={() =>
@@ -184,19 +227,6 @@ function Send({
         }
       />
 
-      {quote !== undefined && (
-        <View style={{ marginTop: space.sm, gap: 3 }}>
-          <View style={styles.rowBetween}>
-            <Text style={styles.muted}>Network fee</Text>
-            <Text style={styles.amount}>{formatAmount(quote.fee, quote.asset)}</Text>
-          </View>
-          <View style={styles.rowBetween}>
-            <Text style={styles.muted}>Total debited</Text>
-            <Text style={styles.amount}>{formatAmount(quote.total, quote.asset)}</Text>
-          </View>
-        </View>
-      )}
-
       <Field
         label="Transaction PIN"
         secureTextEntry
@@ -205,6 +235,13 @@ function Send({
         value={pin}
         onChangeText={setPin}
       />
+
+      <View
+        style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 2 }}
+      >
+        <Icon name="alert" size={15} color={colors.text2} />
+        <Text style={styles.hint}>On-chain transfers cannot be recalled.</Text>
+      </View>
 
       <Button
         label="Send"

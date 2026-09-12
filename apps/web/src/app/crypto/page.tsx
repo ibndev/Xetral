@@ -104,8 +104,8 @@ function Receive() {
       <h1>Receive</h1>
       <h2>An address of your own, for one asset on one network</h2>
 
-      <label id="crypto-receive-pair">
-        Asset and network
+      <label className="field" id="crypto-receive-pair">
+        <span className="field-label">Asset and network</span>
         <Select
           labelledBy="crypto-receive-pair"
           value={String(choice)}
@@ -173,8 +173,12 @@ function Send({ onSent }: { onSent: () => void }) {
   const selected = ASSETS[choice];
 
   return (
+    /* EDGE TO EDGE, LIKE SEND. A withdrawal is money leaving to somewhere we
+       cannot reach into — Phase 9's shape — so it reads as the Send bar: the
+       amount is the hero well, the asset sits in it as a pill, and the fee is
+       a line rather than a boxed notice. */
     <form
-      className="card"
+      className="send-step"
       onSubmit={(event) => {
         event.preventDefault();
         void run(async () => {
@@ -199,10 +203,11 @@ function Send({ onSent }: { onSent: () => void }) {
         });
       }}
     >
-      <h2>Send</h2>
+      <h1>Send</h1>
+      <p className="lead">On-chain, to any address you control.</p>
 
-      <label id="crypto-send-pair">
-        Asset and network
+      <label className="field" id="crypto-send-pair">
+        <span className="field-label">Asset and network</span>
         <Select
           labelledBy="crypto-send-pair"
           value={String(choice)}
@@ -214,8 +219,8 @@ function Send({ onSent }: { onSent: () => void }) {
         />
       </label>
 
-      <label>
-        Destination address
+      <label className="field">
+        <span className="field-label">Destination address</span>
         <input
           className="mono"
           value={destination}
@@ -224,58 +229,59 @@ function Send({ onSent }: { onSent: () => void }) {
           spellCheck={false}
           required
         />
-        <span className="hint">          Check every character. We catch a typo; we cannot recall a payment
-          sent to somebody else's valid address.</span>
+        <span className="hint">
+          Check every character. We catch a typo; we cannot recall a payment
+          sent to somebody else’s valid address.
+        </span>
       </label>
 
-      <label>
-        Amount
-        <input
-          inputMode="decimal"
-          value={amount}
-          onChange={(e) => {
-            setAmount(e.target.value);
-            setQuote(undefined);
-          }}
-          required
-        />
-      </label>
-
-      <div className="actions" style={{ marginBottom: 14 }}>
-        <button
-          type="button"
-          className="ghost small"
-          disabled={amount === ''}
-          onClick={() =>
-            void run(async () => {
-              if (selected === undefined) return undefined;
-              setQuote(
-                await client.cryptoQuote({
-                  asset: selected.asset,
-                  network: selected.network,
-                  amount,
-                }),
-              );
-              return undefined;
-            })
-          }
-        >
-          Check the fee
-        </button>
+      <div className="amount-card">
+        <span className="field-label">You send</span>
+        <div className="amount-row">
+          <span className="currency-pill">{selected?.asset ?? ''}</span>
+          <input
+            inputMode="decimal"
+            value={amount}
+            onChange={(e) => {
+              setAmount(e.target.value);
+              setQuote(undefined);
+            }}
+            placeholder="0"
+            aria-label="Amount to send"
+            required
+          />
+        </div>
+        {quote !== undefined && (
+          <span className="hint">
+            Network fee {formatAmount(quote.fee, quote.asset)} · total{' '}
+            {formatAmount(quote.total, quote.asset)}
+          </span>
+        )}
       </div>
 
-      {quote !== undefined && (
-        <div className="notice">
-          <p>
-            Network fee <strong className="amount">{formatAmount(quote.fee, quote.asset)}</strong>{' '}
-            · total{' '}
-            <strong className="amount">{formatAmount(quote.total, quote.asset)}</strong>
-          </p>
-        </div>
-      )}
+      <button
+        type="button"
+        className="quiet block"
+        disabled={busy || amount === ''}
+        onClick={() =>
+          void run(async () => {
+            if (selected === undefined) return undefined;
+            setQuote(
+              await client.cryptoQuote({
+                asset: selected.asset,
+                network: selected.network,
+                amount,
+              }),
+            );
+            return undefined;
+          })
+        }
+      >
+        {quote === undefined ? 'Check the fee' : 'Refresh fee'}
+      </button>
 
-      <label>
-        Transaction PIN
+      <label className="field">
+        <span className="field-label">Transaction PIN</span>
         <input
           type="password"
           inputMode="numeric"
@@ -285,6 +291,10 @@ function Send({ onSent }: { onSent: () => void }) {
           required
         />
       </label>
+
+      <p className="arrival">
+        <Icon name="alert" size={15} /> On-chain transfers cannot be recalled.
+      </p>
 
       <button type="submit" disabled={busy}>
         {busy ? 'Sending…' : 'Send'}
