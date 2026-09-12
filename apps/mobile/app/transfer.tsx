@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   currencyName,
   exponentFor,
@@ -138,6 +139,7 @@ export default function Transfer() {
       {step === 'who' && (
         <ChooseRecipient
           recipients={saved.data ?? []}
+          home={home}
           loading={saved.loading}
           onPick={(recipient) => {
             setChosen(recipient);
@@ -215,12 +217,14 @@ function BackChevron() {
  */
 function ChooseRecipient({
   recipients,
+  home,
   loading,
   onPick,
   onRemove,
   onNew,
 }: {
   readonly recipients: readonly Recipient[];
+  readonly home: string;
   readonly loading: boolean;
   readonly onPick: (recipient: Recipient) => void;
   readonly onRemove: (id: string) => Promise<void>;
@@ -242,10 +246,17 @@ function ChooseRecipient({
    * holds filters to nothing, which reads as a broken control rather than as
    * an empty result.
    */
-  const currencies = useMemo(
-    () => [...new Set(recipients.map((r) => r.currency))].sort(),
-    [recipients],
-  );
+  /* WHAT THIS PLATFORM CAN SEND — NGN, USD, GHS, KES and the stablecoins — not
+     only the currencies already in the address book, which showed one chip to a
+     customer with one payee and none to a customer with none. */
+  const currencies = useMemo(() => {
+    const used = new Set(recipients.map((r) => r.currency));
+    const offered = sendableFor(home);
+    return [...offered].sort((a, b) => {
+      const byUse = Number(used.has(b)) - Number(used.has(a));
+      return byUse !== 0 ? byUse : offered.indexOf(a) - offered.indexOf(b);
+    });
+  }, [recipients, home]);
 
   const shown = recipients.filter((r) => {
     if (filter !== '' && r.currency !== filter) return false;
@@ -673,6 +684,7 @@ function RecipientDetails({
   const client = useXetral();
   const styles = useStyles();
   const colors = useTheme();
+  const sf = useSf();
   const { busy, error, code, run } = useSubmit();
 
   const country = countries.find((c) => c.currency === receive);
@@ -705,6 +717,8 @@ function RecipientDetails({
       label: isMomoCountry ? networkLabel(bank.code, bank.name) : bank.name,
     })),
   ];
+
+  const railLabel = rails.find((r) => r.value === rail)?.label;
 
   const kind: RecipientKind =
     rail === 'xetral' ? 'xetral' : country?.payout_method === 'mobile_money' ? 'momo' : 'bank';
@@ -855,6 +869,13 @@ function RecipientDetails({
             </Text>
           </View>
         </View>
+      )}
+
+      {found !== undefined && found.resolved_name === null && (
+        <Text style={{ color: sf.muted, fontSize: 12.5, marginTop: -4, marginBottom: 10 }}>
+          {railLabel ?? 'This rail'} could not confirm the account name — check the number before
+          you send.
+        </Text>
       )}
 
       <FormError error={error} code={code} />
@@ -1047,11 +1068,10 @@ function SendAmount({
             fontVariant: ['tabular-nums'],
           }}
         >
+          {/* A FIGURE, NEVER A DASH — a dash in a money field reads as broken. */}
           {sameCurrency
             ? formatAmount(amount === '' ? '0' : amount, to.currency)
-            : lands === undefined
-              ? '—'
-              : formatAmount(lands.receives, to.currency)}
+            : formatAmount(lands?.receives ?? '0', to.currency)}
         </Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
           <CurrencyMark currency={to.currency} size={18} />
@@ -1061,13 +1081,13 @@ function SendAmount({
         </View>
       </View>
       <Text style={{ color: sf.muted, fontSize: 12.5, marginTop: 6, marginBottom: 18 }}>
-        {sameCurrency
-          ? to.kind === 'xetral'
-            ? 'Arrives instantly'
-            : 'Usually arrives within minutes'
-          : lands === undefined
-            ? 'Enter an amount to see the rate'
-            : `1 ${sendCurrency} = ${lands.rate} ${to.currency}`}
+        {!sameCurrency && lands !== undefined
+          ? `1 ${sendCurrency} = ${lands.rate} ${to.currency}`
+          : !sameCurrency && quote.code === 'pair_not_supported'
+            ? `We cannot convert ${sendCurrency} to ${to.currency} yet`
+            : to.kind === 'xetral'
+              ? 'Arrives instantly'
+              : 'Usually arrives within minutes'}
       </Text>
 
       <Field
@@ -1225,6 +1245,10 @@ function railLabelOf(to: Recipient): string {
 /** The New-recipient pill, fixed to the bottom-right of the screen. */
 function NewRecipientPill({ onPress }: { readonly onPress: () => void }) {
   const sf = useSf();
+  /* JUST ABOVE THE TAB BAR. The overlay is a sibling of the bar inside the
+     Shell's root, so `bottom: 24` sat ON it — the bar is ~58px plus the home
+     indicator. */
+  const insets = useSafeAreaInsets();
   return (
     <Pressable
       onPress={onPress}
@@ -1234,7 +1258,7 @@ function NewRecipientPill({ onPress }: { readonly onPress: () => void }) {
       style={{
         position: 'absolute',
         right: 20,
-        bottom: 24,
+        bottom: 58 + 12 + insets.bottom,
         flexDirection: 'row',
         alignItems: 'center',
         gap: 8,

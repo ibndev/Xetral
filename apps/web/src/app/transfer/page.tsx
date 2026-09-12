@@ -1,6 +1,7 @@
 'use client';
 
-import { Suspense, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import {
@@ -107,6 +108,7 @@ function Transfer() {
       {step === 'who' && (
         <ChooseRecipient
           recipients={saved.data ?? []}
+          home={home}
           onPick={(recipient) => {
             setChosen(recipient);
             setDraft(undefined);
@@ -181,11 +183,13 @@ function Transfer() {
  */
 function ChooseRecipient({
   recipients,
+  home,
   onPick,
   onRemove,
   onNew,
 }: {
   recipients: readonly Recipient[];
+  home: string;
   onPick: (recipient: Recipient) => void;
   onRemove: (id: string) => Promise<void>;
   onNew: () => void;
@@ -200,15 +204,23 @@ function ChooseRecipient({
   const CHIP_LIMIT = 3;
 
   /*
-   * THE CHIPS ARE THE CURRENCIES THIS CUSTOMER ACTUALLY PAYS, not every
-   * currency the platform offers. A filter for a currency nobody in the list
-   * holds filters to nothing, which reads as a broken control rather than as
-   * an empty result.
+   * THE CHIPS ARE WHAT THIS PLATFORM CAN SEND — NGN, USD, GHS, KES and the
+   * stablecoins — not only the currencies already in the address book.
+   *
+   * Deriving them from saved recipients meant a customer with one Ghanaian
+   * payee saw one chip, and a customer with none saw no rail at all: a filter
+   * that appears once you no longer need it. `sendableFor` is the platform's
+   * own answer, and the currencies actually used are ordered first so the
+   * common ones stay in front of "More".
    */
-  const currencies = useMemo(
-    () => [...new Set(recipients.map((r) => r.currency))].sort(),
-    [recipients],
-  );
+  const currencies = useMemo(() => {
+    const used = new Set(recipients.map((r) => r.currency));
+    const offered = sendableFor(home);
+    return [...offered].sort((a, b) => {
+      const byUse = Number(used.has(b)) - Number(used.has(a));
+      return byUse !== 0 ? byUse : offered.indexOf(a) - offered.indexOf(b);
+    });
+  }, [recipients, home]);
 
   const shown = recipients.filter((r) => {
     if (filter !== '' && r.currency !== filter) return false;
@@ -337,15 +349,7 @@ function ChooseRecipient({
         </>
       )}
 
-      <div className="sf-newbtn-row">
-        <button type="button" className="sf-newbtn" onClick={onNew}>
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
-            <line x1="9" y1="2" x2="9" y2="16" />
-            <line x1="2" y1="9" x2="16" y2="9" />
-          </svg>
-          New recipient
-        </button>
-      </div>
+      <NewRecipientPill onClick={onNew} />
     </section>
   );
 }
@@ -686,6 +690,16 @@ function RecipientDetails({
           </div>
         )}
 
+        {/* THE NAME IS ASKED FOR AND MAY NOT COME. Saying so is the difference
+            between a screen that looks like it never tried and one that tells
+            the customer to check the number themselves. */}
+        {found !== undefined && found.resolved_name === null && (
+          <span className="sf-amount-note" style={{ marginTop: -6, marginBottom: 14 }}>
+            {railLabel ?? 'This rail'} could not confirm the account name — check the number
+            before you send.
+          </span>
+        )}
+
         <FormError error={error} code={code} />
 
         <button type="submit" className="sf-primary" disabled={busy || rail === '' || !enough}>
@@ -900,26 +914,27 @@ function SendAmount({
         {firstNameOf(to.display_name)} receives
       </span>
       <div className="sf-amount">
+        {/* A FIGURE, NEVER A DASH. A dash in a money field reads as broken;
+            zero in the recipient's own currency reads as "nothing yet", and
+            the note under it carries the reason when there is one. */}
         <span className="sf-amount-value">
           {sameCurrency
             ? formatAmount(amount === '' ? '0' : amount, to.currency)
-            : lands === undefined
-              ? '—'
-              : formatAmount(lands.receives, to.currency)}
+            : formatAmount(lands?.receives ?? '0', to.currency)}
         </span>
         <span className="sf-ccy">
           <CurrencyMark currency={to.currency} size={18} />
           {to.currency}
         </span>
       </div>
-      <span className="sf-amount-note">
-        {sameCurrency
-          ? to.kind === 'xetral'
-            ? 'Arrives instantly'
-            : 'Usually arrives within minutes'
-          : lands === undefined
-            ? 'Enter an amount to see the rate'
-            : `1 ${sendCurrency} = ${lands.rate} ${to.currency}`}
+      <span className={quote.code === 'pair_not_supported' ? 'sf-amount-note bad' : 'sf-amount-note'}>
+        {!sameCurrency && lands !== undefined
+          ? `1 ${sendCurrency} = ${lands.rate} ${to.currency}`
+          : !sameCurrency && quote.code === 'pair_not_supported'
+            ? `We cannot convert ${sendCurrency} to ${to.currency} yet`
+            : to.kind === 'xetral'
+              ? 'Arrives instantly'
+              : 'Usually arrives within minutes'}
       </span>
 
       <label className="field" style={{ marginTop: 18 }}>
@@ -981,6 +996,31 @@ function toRecipient(found: RecipientResolution): Recipient {
  * "AirtelTigo Money" — provider strings, not names. A picker is read at a
  * glance, so it reads MTN, VODAFONE, AIRTELTIGO, and XETRAL sits among them.
  */
+/**
+ * The New-recipient pill, JUST ABOVE THE TAB BAR — and portalled to the body.
+ *
+ * `position: fixed` is contained by any ancestor with a transform, and the
+ * Shell's `<main>` carries `screen-in`, whose animation does exactly that. So
+ * the pill was laid out against a 900px-tall main and sat 275px BELOW the
+ * screen: fixed, correct, and invisible. A portal puts it outside every
+ * animated ancestor, which is the only version of this that cannot regress.
+ */
+function NewRecipientPill({ onClick }: { onClick: () => void }) {
+  const [ready, setReady] = useState(false);
+  useEffect(() => setReady(true), []);
+  if (!ready) return null;
+  return createPortal(
+    <button type="button" className="sf-newbtn" onClick={onClick}>
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+        <line x1="9" y1="2" x2="9" y2="16" />
+        <line x1="2" y1="9" x2="16" y2="9" />
+      </svg>
+      New recipient
+    </button>,
+    document.body,
+  );
+}
+
 /** The rail as it should READ on a row: "MTN", not "MTN Mobile Money". */
 function railLabelOf(to: Recipient): string {
   if (to.kind === 'xetral') return 'XETRAL';
