@@ -3733,27 +3733,31 @@ body:has(.sf) { background: var(--sf-bg); }
 /* --- recipient select --- */
 .sf-chips {
   display: flex;
-  gap: 8px;
+  flex-wrap: nowrap;
+  gap: 7px;
   margin-bottom: 18px;
   overflow-x: auto;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
 }
 .sf-chips::-webkit-scrollbar { display: none; }
+/* Opened by "More": the rest of the currencies wrap onto a second line rather
+   than scrolling out of reach. */
+.sf-chips.wrap { flex-wrap: wrap; overflow: visible; }
 .sf-chip {
   display: flex;
   align-items: center;
   justify-content: flex-start;
   gap: 6px;
   flex: 0 0 auto;
-  height: 38px;
+  height: 36px;
   min-height: 0;
-  padding: 0 14px;
+  padding: 0 11px;
   border: 1.5px solid var(--sf-chip-border);
   border-radius: 10px;
   background: var(--sf-chip-bg);
   color: var(--sf-chip-text);
-  font-size: 13.5px;
+  font-size: 13px;
   font-weight: 500;
   cursor: pointer;
 }
@@ -3852,7 +3856,7 @@ body:has(.sf) { background: var(--sf-bg); }
 .sf-newbtn {
   position: fixed;
   right: 20px;
-  bottom: calc(var(--tabbar-h) + 20px + env(safe-area-inset-bottom, 0px));
+  bottom: calc(var(--tabbar-h) + 10px + env(safe-area-inset-bottom, 0px));
   z-index: 45;
   display: inline-flex;
   align-items: center;
@@ -4009,4 +4013,103 @@ body:has(.sf) { background: var(--sf-bg); }
 .sf-radio.on { border-color: var(--sf-accent); }
 .sf-radio.on::after {
   content: ''; width: 11px; height: 11px; border-radius: 50%; background: var(--sf-accent);
+}
+
+/* --- the amount step -------------------------------------------------------
+
+   A STRAIGHT FIELD, NOT A CARD. It was a tall well with a 30px figure, a
+   bordered input inside it and a heading over it — three containers deep for
+   one number. It is now one text-field-sized box: the AMOUNT on the left, the
+   CURRENCY on the right, and the balance or the rate as small text UNDER it.
+   -------------------------------------------------------------------------- */
+.sf-amount {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 56px;
+  padding: 0 14px 0 16px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--sf-field);
+}
+.sf-amount.invalid { box-shadow: inset 0 0 0 1.5px var(--danger); }
+/* The input carries NO border of its own — the box is the field. */
+.sf-amount input,
+.sf-amount .sf-amount-value {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font-family: var(--font-sans);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--sf-text);
+  text-align: left;
+}
+.sf-amount input:hover,
+.sf-amount input:focus {
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+}
+.sf-amount input::placeholder { color: var(--sf-placeholder); }
+.sf-amount .sf-amount-value { display: flex; align-items: center; }
+/* The currency, on the right. A button where it can be changed, a plain span
+   where it cannot. */
+.sf-ccy {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--sf-text);
+  font-family: var(--font-sans);
+  font-size: 14.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.sf-ccy:hover:where(:not(:disabled)) { background: transparent; color: var(--sf-text); }
+.sf-ccy:active { transform: none; }
+.sf-ccy .ccy-mark, .sf-ccy svg { flex: 0 0 auto; }
+.sf-amount-note {
+  display: block;
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  color: var(--sf-muted);
+}
+.sf-amount-note.bad { color: var(--danger); }
+
+/* The back chevron: a tap target, not a band of empty space. */
+.sf-back.icon-btn {
+  width: 40px;
+  height: 40px;
+  min-height: 0;
+  margin: 0 0 2px -8px;
+  padding: 0;
+  background: transparent;
+}
+.sf-back.icon-btn:hover:where(:not(:disabled)) { background: transparent; }
+
+/* Who is being paid, above the amount. */
+.sf-payee {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.sf-payee-name { display: block; font-size: 16px; font-weight: 700; color: var(--sf-text); }
+.sf-payee-sub {
+  display: block; margin-top: 2px;
+  font-size: 13px; color: var(--sf-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }

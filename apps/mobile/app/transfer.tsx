@@ -6,6 +6,7 @@ import {
   exponentFor,
   formatAmount,
   isValidAmount,
+  networkLabel,
   sendableFor,
   symbolFor,
 } from '@xetral/client';
@@ -122,11 +123,12 @@ export default function Transfer() {
           accessibilityLabel="Back"
           hitSlop={8}
           style={{
-            width: 44,
-            height: 44,
+            width: 40,
+            height: 40,
+            marginLeft: -8,
+            marginBottom: 2,
             alignItems: 'center',
             justifyContent: 'center',
-            marginBottom: space.xs,
           }}
         >
           <BackChevron />
@@ -229,6 +231,10 @@ function ChooseRecipient({
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('');
   const [menu, setMenu] = useState<string | undefined>(undefined);
+  /* THE RAIL STAYS ON ONE LINE. Five chips do not fit a 360px handset, so
+     three are shown and the rest sit behind "More". */
+  const [allChips, setAllChips] = useState(false);
+  const CHIP_LIMIT = 3;
 
   /*
    * THE CHIPS ARE THE CURRENCIES THIS CUSTOMER ACTUALLY PAYS, not every
@@ -273,7 +279,7 @@ function ChooseRecipient({
           contentContainerStyle={{ gap: 8, paddingVertical: space.sm }}
         >
           <Chip label="All" grid on={filter === ''} onPress={() => setFilter('')} />
-          {currencies.map((currency) => (
+          {(allChips ? currencies : currencies.slice(0, CHIP_LIMIT)).map((currency) => (
             <Chip
               key={currency}
               label={currency}
@@ -282,6 +288,9 @@ function ChooseRecipient({
               onPress={() => setFilter(currency)}
             />
           ))}
+          {!allChips && currencies.length > CHIP_LIMIT && (
+            <Chip label="More" on={false} onPress={() => setAllChips(true)} />
+          )}
         </ScrollView>
       )}
 
@@ -359,7 +368,7 @@ function ChooseRecipient({
                     {r.display_name}
                   </Text>
                   <Text style={{ color: sf.muted, fontSize: 13 }} numberOfLines={1}>
-                    {r.rail_name ?? 'Xetral account'} {'  |  '}&middot;&middot;&middot;
+                    {railLabelOf(r)} {'  |  '}&middot;&middot;&middot;
                     {r.destination.slice(-4)}
                   </Text>
                 </View>
@@ -693,7 +702,7 @@ function RecipientDetails({
     { value: 'xetral', label: 'XETRAL' },
     ...(banks.data ?? []).map((bank) => ({
       value: bank.code,
-      label: isMomoCountry ? cleanNetworkName(bank.name) : bank.name,
+      label: isMomoCountry ? networkLabel(bank.code, bank.name) : bank.name,
     })),
   ];
 
@@ -898,6 +907,7 @@ function SendAmount({
   const client = useXetral();
   const styles = useStyles();
   const colors = useTheme();
+  const sf = useSf();
   const { busy, error, code, run } = useSubmit();
   const { key, next } = useIdempotencyKey();
 
@@ -938,117 +948,127 @@ function SendAmount({
    */
   const enough = isValidAmount(amount, exponentFor(sendCurrency));
 
+  /* A text-field-sized box, not a card: 56px, flat, one line. */
+  const amountBox = {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'space-between' as const,
+    gap: 12,
+    height: 56,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    backgroundColor: colors.field,
+  };
+
   return (
     <Panel bare>
-      <View style={[styles.row, { borderBottomWidth: 0, paddingTop: 0 }]}>
+      {/* WHO IS BEING PAID — the rail's own answer for the name where there
+          is one, and the number only when there is not. */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 18 }}>
         <View
-          style={[
-            styles.rowIcon,
-            { width: 46, height: 46, borderRadius: 999, backgroundColor: colors.brand },
-          ]}
+          style={{
+            width: 44,
+            height: 44,
+            borderRadius: 22,
+            backgroundColor: sf.avatarBg,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
         >
-          <Text style={{ color: colors.onBrand, fontFamily: font.sansSemi, fontSize: 15 }}>
+          <Text style={{ color: sf.avatarText, fontFamily: font.sansSemi, fontSize: 15 }}>
             {initialsOf(to.display_name)}
           </Text>
         </View>
-        <View style={{ flex: 1 }}>
-          <Text style={{ color: colors.text, fontFamily: font.sansSemi, fontSize: 15 }}>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={{ color: sf.text, fontFamily: font.sansSemi, fontSize: 16 }} numberOfLines={1}>
             {to.display_name}
           </Text>
-          <Text style={styles.muted} numberOfLines={1}>
-            {to.rail_name ?? 'Xetral account'} &middot; {to.destination}
+          <Text style={{ color: sf.muted, fontSize: 13, marginTop: 2 }} numberOfLines={1}>
+            {railLabelOf(to)} &middot; {to.destination}
           </Text>
         </View>
       </View>
 
-      <Text style={styles.h1}>
-        Send {to.currency} to {firstNameOf(to.display_name)}
+      {/* ONE STRAIGHT FIELD PER AMOUNT: the figure on the left, the currency on
+          the right, and what it means in small text under it. */}
+      <Text style={{ color: sf.muted, fontSize: 13, marginBottom: 6 }}>You send</Text>
+      <View style={[amountBox, amount !== '' && !enough ? { borderColor: colors.danger, borderWidth: 1.5 } : null]}>
+        <TextInput
+          value={amount}
+          onChangeText={setAmount}
+          keyboardType="decimal-pad"
+          placeholder="0"
+          placeholderTextColor={sf.muted}
+          accessibilityLabel="Amount to send"
+          style={{
+            flex: 1,
+            color: sf.text,
+            fontFamily: font.sansSemi,
+            fontSize: 20,
+            letterSpacing: -0.4,
+            fontVariant: ['tabular-nums'],
+            padding: 0,
+          }}
+        />
+        <Select
+          /* NOT EMPTY, even though the pill draws no caption: this string is
+             the sheet's own heading and the screen reader's label. */
+          label="Currency you send"
+          variant="pill"
+          value={sendCurrency}
+          onChange={setSendCurrency}
+          options={balances.map((b) => ({ value: b.currency, label: b.currency }))}
+          renderMark={(value) => <CurrencyMark currency={value} size={18} />}
+        />
+      </View>
+      <Text
+        style={{
+          color: amount !== '' && !enough ? colors.danger : sf.muted,
+          fontSize: 12.5,
+          marginTop: 6,
+        }}
+      >
+        {amount !== '' && !enough
+          ? `Enter an amount in ${sendCurrency}.`
+          : `Balance: ${formatAmount(balance, sendCurrency)}`}
       </Text>
 
-      <AmountCard invalid={amount !== '' && !enough}>
-        <Text style={styles.fieldLabel}>You send</Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
-          <Select
-            /* NOT EMPTY, even though the pill draws no caption: this string is
-               the sheet's own heading and the screen reader's label, so a blank
-               one leaves a sheet titled nothing and a control announced as
-               ": NGN". */
-            label="Currency you send"
-            variant="pill"
-            value={sendCurrency}
-            onChange={setSendCurrency}
-            options={balances.map((b) => ({ value: b.currency, label: b.currency }))}
-            renderMark={(value) => <CurrencyMark currency={value} size={18} />}
-          />
-          <TextInput
-            value={amount}
-            onChangeText={setAmount}
-            keyboardType="decimal-pad"
-            placeholder="0"
-            placeholderTextColor={colors.text3}
-            accessibilityLabel="Amount to send"
-            style={{
-              flex: 1,
-              textAlign: 'right',
-              color: colors.text,
-              fontFamily: font.displayBold,
-              fontSize: 30,
-              letterSpacing: -0.6,
-              fontVariant: ['tabular-nums'],
-            }}
-          />
-        </View>
-        <Text style={styles.muted}>Balance: {formatAmount(balance, sendCurrency)}</Text>
-        {amount !== '' && !enough && (
-          <Text style={styles.error}>Enter an amount in {sendCurrency}.</Text>
-        )}
-      </AmountCard>
-
-      <AmountCard>
-        <Text style={styles.fieldLabel}>{firstNameOf(to.display_name)} receives</Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 7,
-              paddingHorizontal: 12,
-              paddingVertical: 7,
-              borderRadius: radius.pill,
-              backgroundColor: colors.surfaceRaised,
-              borderColor: colors.edge,
-              borderWidth: 1,
-            }}
-          >
-            <CurrencyMark currency={to.currency} size={18} />
-            <Text style={{ color: colors.text, fontFamily: font.sansSemi, fontSize: 14 }}>
-              {to.currency}
-            </Text>
-          </View>
-          <Text
-            style={{
-              flex: 1,
-              textAlign: 'right',
-              color: colors.text,
-              fontFamily: font.displayBold,
-              fontSize: 30,
-              letterSpacing: -0.6,
-              fontVariant: ['tabular-nums'],
-            }}
-          >
-            {sameCurrency
-              ? formatAmount(amount === '' ? '0' : amount, to.currency)
-              : lands === undefined
-                ? '—'
-                : formatAmount(lands.receives, to.currency)}
+      <Text style={{ color: sf.muted, fontSize: 13, marginTop: 16, marginBottom: 6 }}>
+        {firstNameOf(to.display_name)} receives
+      </Text>
+      <View style={amountBox}>
+        <Text
+          style={{
+            flex: 1,
+            color: sf.text,
+            fontFamily: font.sansSemi,
+            fontSize: 20,
+            letterSpacing: -0.4,
+            fontVariant: ['tabular-nums'],
+          }}
+        >
+          {sameCurrency
+            ? formatAmount(amount === '' ? '0' : amount, to.currency)
+            : lands === undefined
+              ? '—'
+              : formatAmount(lands.receives, to.currency)}
+        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+          <CurrencyMark currency={to.currency} size={18} />
+          <Text style={{ color: sf.text, fontFamily: font.sansSemi, fontSize: 14.5 }}>
+            {to.currency}
           </Text>
         </View>
-        {!sameCurrency && lands !== undefined && (
-          <Text style={styles.muted}>
-            1 {sendCurrency} = {lands.rate} {to.currency}
-          </Text>
-        )}
-      </AmountCard>
+      </View>
+      <Text style={{ color: sf.muted, fontSize: 12.5, marginTop: 6, marginBottom: 18 }}>
+        {sameCurrency
+          ? to.kind === 'xetral'
+            ? 'Arrives instantly'
+            : 'Usually arrives within minutes'
+          : lands === undefined
+            ? 'Enter an amount to see the rate'
+            : `1 ${sendCurrency} = ${lands.rate} ${to.currency}`}
+      </Text>
 
       <Field
         label="Transaction PIN"
@@ -1196,21 +1216,10 @@ function useSf(): SfPalette {
   };
 }
 
-/**
- * The name a customer picks a network by.
- *
- * Flutterwave's catalogue says "MTN Mobile Money", "Vodafone Cash Ghana",
- * "AirtelTigo Money" — provider strings, not names. A picker is read at a
- * glance, so it reads MTN, VODAFONE, AIRTELTIGO, and XETRAL sits among them.
- */
-function cleanNetworkName(raw: string): string {
-  const cleaned = raw
-    .toUpperCase()
-    .replace(/\b(MOBILE\s*MONEY|MOMO|CASH|MONEY|WALLET|NETWORK|GHANA|KENYA|NIGERIA|LIMITED|LTD|PLC)\b/g, ' ')
-    .replace(/[^A-Z0-9 ]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return cleaned === '' ? raw.toUpperCase() : cleaned;
+/** The rail as it should READ on a row: "MTN", not "MTN Mobile Money". */
+function railLabelOf(to: Recipient): string {
+  if (to.kind === 'xetral') return 'XETRAL';
+  return networkLabel(to.rail_code, to.rail_name ?? 'XETRAL');
 }
 
 /** The New-recipient pill, fixed to the bottom-right of the screen. */

@@ -8,6 +8,7 @@ import {
   exponentFor,
   formatAmount,
   isValidAmount,
+  networkLabel,
   sendableFor,
   symbolFor,
 } from '@xetral/client';
@@ -98,7 +99,7 @@ function Transfer() {
   return (
     <Shell title="Send">
       {step !== 'who' && (
-        <button type="button" className="icon-btn back" onClick={back} aria-label="Back">
+        <button type="button" className="icon-btn back sf-back" onClick={back} aria-label="Back">
           <Icon name="chevronLeft" size={20} />
         </button>
       )}
@@ -192,6 +193,11 @@ function ChooseRecipient({
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('');
   const [menu, setMenu] = useState<string | undefined>(undefined);
+  /* THE RAIL STAYS ON ONE LINE. Five chips do not fit a 360px handset, so
+     three are shown and the rest sit behind "More" — which wraps them onto a
+     second line rather than scrolling them out of reach. */
+  const [allChips, setAllChips] = useState(false);
+  const CHIP_LIMIT = 3;
 
   /*
    * THE CHIPS ARE THE CURRENCIES THIS CUSTOMER ACTUALLY PAYS, not every
@@ -217,7 +223,7 @@ function ChooseRecipient({
 
   return (
     <section className="sf">
-      <h1 className="sf-title">Who do you want to send money to?</h1>
+      <h1 className="sf-title">Send money to who?</h1>
 
       <div className="sf-search">
         <Icon name="search" size={18} />
@@ -230,7 +236,11 @@ function ChooseRecipient({
       </div>
 
       {currencies.length > 0 && (
-        <div className="sf-chips" role="group" aria-label="Filter by currency">
+        <div
+          className={allChips ? 'sf-chips wrap' : 'sf-chips'}
+          role="group"
+          aria-label="Filter by currency"
+        >
           <button
             type="button"
             className={filter === '' ? 'sf-chip on' : 'sf-chip'}
@@ -245,7 +255,7 @@ function ChooseRecipient({
             </svg>
             All
           </button>
-          {currencies.map((currency) => (
+          {(allChips ? currencies : currencies.slice(0, CHIP_LIMIT)).map((currency) => (
             <button
               key={currency}
               type="button"
@@ -258,6 +268,11 @@ function ChooseRecipient({
               {currency}
             </button>
           ))}
+          {!allChips && currencies.length > CHIP_LIMIT && (
+            <button type="button" className="sf-chip" onClick={() => setAllChips(true)}>
+              More
+            </button>
+          )}
         </div>
       )}
 
@@ -282,7 +297,7 @@ function ChooseRecipient({
                 <span className="sf-recip-info">
                   <span className="sf-recip-name">{r.display_name}</span>
                   <span className="sf-recip-bank">
-                    {r.rail_name ?? 'Xetral account'} &nbsp;|&nbsp; &middot;&middot;&middot;
+                    {railLabelOf(r)} &nbsp;|&nbsp; &middot;&middot;&middot;
                     {r.destination.slice(-4)}
                   </span>
                 </span>
@@ -389,7 +404,7 @@ function ChooseCurrency({
 
   return (
     <section className="sf">
-      <h1 className="sf-title">What currency should your recipient receive?</h1>
+      <h1 className="sf-title">What currency are you sending?</h1>
 
       <div className="sf-search">
         <Icon name="search" size={18} />
@@ -512,7 +527,7 @@ function RecipientDetails({
     { value: 'xetral', label: 'XETRAL' },
     ...(banks.data ?? []).map((bank) => ({
       value: bank.code,
-      label: isMomoCountry ? cleanNetworkName(bank.name) : bank.name,
+      label: isMomoCountry ? networkLabel(bank.code, bank.name) : bank.name,
     })),
   ];
 
@@ -840,69 +855,74 @@ function SendAmount({
         });
       }}
     >
-      <header className="send-to">
-        <span className="row-icon">{initialsOf(to.display_name)}</span>
-        <span className="row-main">
-          <span className="row-title">{to.display_name}</span>
-          <span className="row-sub">
-            {to.rail_name ?? 'Xetral account'} &middot; {to.destination}
+      {/* WHO IS BEING PAID — the rail's own answer for the name where there is
+          one, and the number only when there is not. */}
+      <header className="sf-payee">
+        <span className="sf-avatar-wrap" style={{ width: 44, height: 44 }}>
+          <span className="sf-avatar" style={{ width: 44, height: 44, fontSize: 15 }}>
+            {initialsOf(to.display_name)}
+          </span>
+        </span>
+        <span className="sf-recip-info">
+          <span className="sf-payee-name">{to.display_name}</span>
+          <span className="sf-payee-sub">
+            {railLabelOf(to)} &middot; {to.destination}
           </span>
         </span>
       </header>
 
-      <h1>
-        Send {to.currency} to {firstNameOf(to.display_name)}
-      </h1>
+      {/* ONE STRAIGHT FIELD PER AMOUNT: the figure on the left, the currency on
+          the right, and what it means in small text under it. */}
+      <span className="sf-label">You send</span>
+      <div className={enough || amount === '' ? 'sf-amount' : 'sf-amount invalid'}>
+        <input
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          inputMode="decimal"
+          placeholder="0"
+          aria-label="Amount to send"
+        />
+        <Select
+          value={sendCurrency}
+          onChange={setSendCurrency}
+          options={balances.map((b) => ({ value: b.currency, label: b.currency }))}
+          renderMark={(value) => <CurrencyMark currency={value} size={18} />}
+          compact
+        />
+      </div>
+      <span className={amount !== '' && !enough ? 'sf-amount-note bad' : 'sf-amount-note'}>
+        {amount !== '' && !enough
+          ? `Enter an amount in ${sendCurrency}.`
+          : `Balance: ${formatAmount(balance, sendCurrency)}`}
+      </span>
 
-      <div className={enough || amount === '' ? 'amount-card' : 'amount-card invalid'}>
-        <span className="field-label">You send</span>
-        <div className="amount-row">
-          <Select
-            value={sendCurrency}
-            onChange={setSendCurrency}
-            options={balances.map((b) => ({ value: b.currency, label: b.currency }))}
-            renderMark={(value) => <CurrencyMark currency={value} size={18} />}
-            compact
-          />
-          <input
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            inputMode="decimal"
-            placeholder="0"
-            aria-label="Amount to send"
-          />
-        </div>
-        <span className="hint">
-          Balance: {formatAmount(balance, sendCurrency)}
+      <span className="sf-label" style={{ marginTop: 16 }}>
+        {firstNameOf(to.display_name)} receives
+      </span>
+      <div className="sf-amount">
+        <span className="sf-amount-value">
+          {sameCurrency
+            ? formatAmount(amount === '' ? '0' : amount, to.currency)
+            : lands === undefined
+              ? '—'
+              : formatAmount(lands.receives, to.currency)}
         </span>
-        {amount !== '' && !enough && (
-          <span className="error">Enter an amount in {sendCurrency}.</span>
-        )}
+        <span className="sf-ccy">
+          <CurrencyMark currency={to.currency} size={18} />
+          {to.currency}
+        </span>
       </div>
+      <span className="sf-amount-note">
+        {sameCurrency
+          ? to.kind === 'xetral'
+            ? 'Arrives instantly'
+            : 'Usually arrives within minutes'
+          : lands === undefined
+            ? 'Enter an amount to see the rate'
+            : `1 ${sendCurrency} = ${lands.rate} ${to.currency}`}
+      </span>
 
-      <div className="amount-card">
-        <span className="field-label">{firstNameOf(to.display_name)} receives</span>
-        <div className="amount-row">
-          <span className="currency-pill">
-            <CurrencyMark currency={to.currency} size={18} />
-            {to.currency}
-          </span>
-          <strong className="lands">
-            {sameCurrency
-              ? formatAmount(amount === '' ? '0' : amount, to.currency)
-              : lands === undefined
-                ? '—'
-                : formatAmount(lands.receives, to.currency)}
-          </strong>
-        </div>
-        {!sameCurrency && lands !== undefined && (
-          <span className="hint">
-            1 {sendCurrency} = {lands.rate} {to.currency}
-          </span>
-        )}
-      </div>
-
-      <label className="field">
+      <label className="field" style={{ marginTop: 18 }}>
         <span className="field-label">Transaction PIN</span>
         <input
           type="password"
@@ -913,11 +933,6 @@ function SendAmount({
           maxLength={12}
         />
       </label>
-
-      <p className="arrival">
-        <Icon name="zap" size={15} />
-        {to.kind === 'xetral' ? 'Arrives instantly' : 'Usually arrives within minutes'}
-      </p>
 
       <FormError error={error} code={code} />
       {done !== undefined && <p className="ok">{done}</p>}
@@ -966,14 +981,10 @@ function toRecipient(found: RecipientResolution): Recipient {
  * "AirtelTigo Money" — provider strings, not names. A picker is read at a
  * glance, so it reads MTN, VODAFONE, AIRTELTIGO, and XETRAL sits among them.
  */
-function cleanNetworkName(raw: string): string {
-  const cleaned = raw
-    .toUpperCase()
-    .replace(/\b(MOBILE\s*MONEY|MOMO|CASH|MONEY|WALLET|NETWORK|GHANA|KENYA|NIGERIA|LIMITED|LTD|PLC)\b/g, ' ')
-    .replace(/[^A-Z0-9 ]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return cleaned === '' ? raw.toUpperCase() : cleaned;
+/** The rail as it should READ on a row: "MTN", not "MTN Mobile Money". */
+function railLabelOf(to: Recipient): string {
+  if (to.kind === 'xetral') return 'XETRAL';
+  return networkLabel(to.rail_code, to.rail_name ?? 'XETRAL');
 }
 
 function initialsOf(name: string): string {

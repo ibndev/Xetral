@@ -31,7 +31,7 @@ const PROVIDER = 'flutterwave';
 export const FLUTTERWAVE_MOBILE_MONEY_NETWORKS: Readonly<Record<string, readonly PayoutBank[]>> = {
   GH: [
     { code: 'MTN', name: 'MTN Mobile Money' },
-    { code: 'VOD', name: 'Telecel Cash (formerly Vodafone Cash)' },
+    { code: 'VOD', name: 'Telecel Cash' },
     { code: 'ATL', name: 'AirtelTigo Money' },
   ],
   KE: [{ code: 'MPS', name: 'M-PESA' }],
