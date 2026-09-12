@@ -15,7 +15,7 @@ import type {
   XetralCountry,
 } from '@xetral/client';
 import { Shell } from '@/shell';
-import { Button, Field, FormError, Loading, Panel, Toast } from '@/ui';
+import { AmountCard, Button, Field, FormError, Loading, Panel, Toast } from '@/ui';
 import { Select } from '@/select';
 import { Icon } from '@/icon';
 import { CurrencyMark } from '@/currency-mark';
@@ -1062,34 +1062,6 @@ function SendAmount({
         }}
       />
     </Panel>
-  );
-}
-
-function AmountCard({
-  invalid = false,
-  children,
-}: {
-  readonly invalid?: boolean;
-  readonly children: React.ReactNode;
-}) {
-  const colors = useTheme();
-  return (
-    <View
-      style={{
-        gap: 6,
-        padding: space.md,
-        marginTop: space.md,
-        borderRadius: radius.md,
-        backgroundColor: colors.surface2,
-        // Transparent in light at rest, per `edge` — and red when the figure
-        // typed is not one this currency can hold, which is the one state that
-        // has to be visible on both grounds.
-        borderColor: invalid ? colors.danger : colors.edge,
-        borderWidth: 1,
-      }}
-    >
-      {children}
-    </View>
   );
 }
 

@@ -1,12 +1,24 @@
 import { useState } from 'react';
-import { Text, View } from 'react-native';
+import { Text, TextInput, View } from 'react-native';
 import { formatAmount, TRANSFER_CURRENCIES } from '@xetral/client';
 import type { FxQuote, FxTrade } from '@xetral/client';
 import { Shell } from '@/shell';
-import { Button, Done, Empty, Field, FormError, Loading, Panel, Toast } from '@/ui';
+import {
+  AmountCard,
+  Button,
+  Done,
+  Empty,
+  Field,
+  FormError,
+  Loading,
+  Panel,
+  Toast,
+} from '@/ui';
 import { Select } from '@/select';
+import { CurrencyMark } from '@/currency-mark';
+import { Icon } from '@/icon';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/hooks';
-import { font, radius, space, useStyles, useTheme } from '@/theme';
+import { font, space, useStyles, useTheme } from '@/theme';
 
 /**
  * Converting, and sending across currencies.
@@ -65,42 +77,96 @@ export default function Fx() {
       <Text style={styles.h1}>Convert</Text>
       <Text style={styles.lead}>The rate you see is the rate you get.</Text>
 
-      <Panel>
-        <Select
-          label="From"
-          value={from}
-          onChange={(next) => { setFrom(next); setQuote(undefined); }}
-          options={codes.map(option)}
-        />
+      {/* BARE, LIKE SEND. The page ground carries the flow and the wells are
+          the two hero amount cards — what leaves and what lands — rather than
+          a recessed grey panel wrapping a stack of dropdowns. */}
+      <Panel bare>
+        {/* WHAT LEAVES. The currency is a pill inside the amount row, the way
+            Send puts it, so the number and its denomination are one control. */}
+        <AmountCard>
+          <Text style={styles.fieldLabel}>You convert</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
+            <Select
+              label="Currency you convert"
+              variant="pill"
+              value={from}
+              onChange={(next) => { setFrom(next); setQuote(undefined); }}
+              options={codes.map(option)}
+              renderMark={(value) => <CurrencyMark currency={value} size={18} />}
+            />
+            <TextInput
+              value={amount}
+              onChangeText={(next) => {
+                // A quote describes ONE amount. Leaving a stale one on screen
+                // while the number under it changes is how somebody confirms a
+                // rate they were never shown.
+                setAmount(next);
+                setQuote(undefined);
+              }}
+              keyboardType="decimal-pad"
+              placeholder="0"
+              placeholderTextColor={colors.text3}
+              accessibilityLabel="Amount to convert"
+              style={{
+                flex: 1,
+                textAlign: 'right',
+                color: colors.text,
+                fontFamily: font.displayBold,
+                fontSize: 30,
+                letterSpacing: -0.6,
+                fontVariant: ['tabular-nums'],
+              }}
+            />
+          </View>
+          {from === to && (
+            <Text style={styles.error}>Pick two different currencies.</Text>
+          )}
+        </AmountCard>
 
-        <Select
-          label="To"
-          value={to}
-          onChange={(next) => { setTo(next); setQuote(undefined); }}
-          options={codes.map(option)}
-        />
-
-        <Field
-          label="Amount"
-          inputMode="decimal"
-          placeholder="0.00"
-          value={amount}
-          onChangeText={(next) => {
-            setAmount(next);
-            // A quote describes ONE amount. Leaving a stale one on screen
-            // while the number under it changes is how somebody confirms a
-            // rate they were never shown.
-            setQuote(undefined);
-          }}
-        />
+        {/* WHAT LANDS. The target currency is the pill — tap it to choose —
+            and the figure fills from a quote, a dash until one is fetched
+            because the rate is the operator's answer, not a default. */}
+        <AmountCard>
+          <Text style={styles.fieldLabel}>You receive</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
+            <Select
+              label="Currency you receive"
+              variant="pill"
+              value={to}
+              onChange={(next) => { setTo(next); setQuote(undefined); }}
+              options={codes.map(option)}
+              renderMark={(value) => <CurrencyMark currency={value} size={18} />}
+            />
+            <Text
+              style={{
+                flex: 1,
+                textAlign: 'right',
+                color: colors.text,
+                fontFamily: font.displayBold,
+                fontSize: 30,
+                letterSpacing: -0.6,
+                fontVariant: ['tabular-nums'],
+              }}
+            >
+              {quote === undefined ? '—' : formatAmount(quote.receives, quote.to)}
+            </Text>
+          </View>
+          {quote !== undefined && (
+            <Text style={styles.muted}>
+              {/* The spread is its own line, never folded into the rate — and
+                  credited on the FILL, not the quote. */}
+              1 {quote.from} = {quote.rate} {quote.to} · our fee{' '}
+              {formatAmount(quote.spread, quote.from)}
+            </Text>
+          )}
+        </AmountCard>
 
         {/* ACCENT, NOT QUIET. This is the only control that does anything until
             there is a quote, and `quiet` made it the faintest thing on the
-            screen — the same complaint the web's ghost-styled "Get a rate"
-            drew. `accent` is filled and obvious without spending the white the
-            primary Convert button owns on dark. */}
+            screen. `accent` is filled and obvious without spending the white
+            the primary Convert button owns on dark. */}
         <Button
-          label="Get a quote"
+          label={quote === undefined ? 'Get today’s rate' : 'Refresh rate'}
           accent
           busy={busy && quote === undefined}
           disabled={amount === '' || from === to}
@@ -115,32 +181,23 @@ export default function Fx() {
         {quote !== undefined && (
           <View
             style={{
-              marginTop: space.md,
-              padding: space.md,
-              borderRadius: radius.md,
-              backgroundColor: colors.surface2,
-              gap: 4,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 7,
+              marginTop: 2,
             }}
           >
-            <View style={styles.rowBetween}>
-              <Text style={styles.muted}>You receive</Text>
-              <Text style={styles.amount}>{formatAmount(quote.receives, quote.to)}</Text>
-            </View>
-            <View style={styles.rowBetween}>
-              <Text style={styles.muted}>Spread</Text>
-              <Text style={styles.amount}>{formatAmount(quote.spread, quote.from)}</Text>
-            </View>
+            <Icon name="zap" size={15} color={colors.text2} />
             <Text style={styles.hint}>
-              {/* Credited on the FILL, not the quote. A partial fill credited
-                  at quote would pay the difference out of the float. */}
-              If the market fills less than this, you receive what was filled.
+              This rate holds until {new Date(quote.expires_at).toLocaleTimeString()}
             </Text>
           </View>
         )}
 
         <Field
-          label="Send to (optional)"
-          placeholder="somebody@example.com"
+          label="Send to someone else (optional)"
+          placeholder="Their email or phone"
           inputMode="email"
           autoCapitalize="none"
           value={recipient}

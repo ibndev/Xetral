@@ -518,3 +518,62 @@ export function Toast({
     </Animated.View>
   );
 }
+
+/**
+ * A hero amount well — "You send" / "You receive", the same on Send and
+ * Convert. Shared rather than copied because two copies of the one figure a
+ * customer reads to decide what they are agreeing to is the drift the whole
+ * codebase is built to avoid. Transparent border in light at rest (per
+ * `edge`), red when the amount typed is not one the currency can hold — the
+ * one state that must read on both grounds.
+ */
+export function AmountCard({
+  invalid = false,
+  children,
+}: {
+  readonly invalid?: boolean;
+  readonly children: ReactNode;
+}) {
+  const colors = useTheme();
+  return (
+    <View
+      style={{
+        gap: 6,
+        padding: space.md,
+        marginTop: space.md,
+        borderRadius: radius.md,
+        backgroundColor: colors.surface2,
+        borderColor: invalid ? colors.danger : colors.edge,
+        borderWidth: 1,
+      }}
+    >
+      {children}
+    </View>
+  );
+}
+
+/**
+ * The raised currency pill that sits in the "receives" row — a mark and a
+ * code, lighter than the well behind it. The web draws the same thing as
+ * `.currency-pill`.
+ */
+export function CurrencyPill({ children }: { readonly children: ReactNode }) {
+  const colors = useTheme();
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 7,
+        paddingHorizontal: 12,
+        paddingVertical: 7,
+        borderRadius: radius.pill,
+        backgroundColor: colors.surfaceRaised,
+        borderColor: colors.edge,
+        borderWidth: 1,
+      }}
+    >
+      {children}
+    </View>
+  );
+}

@@ -5,6 +5,7 @@ import { formatAmount, TRANSFER_CURRENCIES } from '@xetral/client';
 import type { FxQuote } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { Select } from '@/ui/select';
+import { CurrencyMark } from '@/ui/currency-mark';
 import { FormError } from '@/ui/form-error';
 import { Icon } from '@/ui/icon';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/lib/hooks';
@@ -46,8 +47,16 @@ export default function Fx() {
   return (
     <Shell>
 
+      {/*
+        EDGE TO EDGE, LIKE SEND. Convert IS a remittance with the recipient
+        left off, and on the server it is the same one journal entry — so it
+        reads as the same flow the customer already knows: two hero amount
+        cards (what leaves, what lands), the rate stated as a line rather than
+        folded into a number, and the page ground carrying it rather than a
+        recessed grey box inside the page's own padding.
+      */}
       <form
-        className="card"
+        className="send-step"
         onSubmit={(event) => {
           event.preventDefault();
           void run(async () => {
@@ -86,87 +95,102 @@ export default function Fx() {
         }}
       >
         <h1>Convert</h1>
-        <h2>Between your own balances, or straight to someone else</h2>
+        <p className="lead">Between your own balances, or straight to someone else.</p>
 
-        <div className="field-row two">
-          <label id="fx-from-label">
-            From
+        {/* WHAT LEAVES. The currency lives in the amount row as a compact
+            picker, the way Send puts it, so the number and its denomination
+            are one control rather than a label floating above a dropdown. */}
+        <div className="amount-card">
+          <span className="field-label">You convert</span>
+          <div className="amount-row">
             <Select
-              labelledBy="fx-from-label"
               value={from}
               onChange={(value) => {
                 setFrom(value);
                 setQuote(undefined);
               }}
               options={CURRENCIES.map((c) => ({ value: c, label: c }))}
+              renderMark={(value) => <CurrencyMark currency={value} size={18} />}
+              compact
             />
-          </label>
-
-          <label id="fx-to-label">
-            To
-            <Select
-              labelledBy="fx-to-label"
-              value={to}
-              onChange={(value) => {
-                setTo(value);
+            <input
+              inputMode="decimal"
+              value={amount}
+              onChange={(e) => {
+                setAmount(e.target.value);
                 setQuote(undefined);
               }}
-              options={CURRENCIES.map((c) => ({ value: c, label: c }))}
+              placeholder="0"
+              aria-label="Amount to convert"
+              required
             />
-          </label>
+          </div>
+          {from === to && <span className="error">Pick two different currencies.</span>}
         </div>
 
-        <label>
-          Amount
-          <input
-            inputMode="decimal"
-            value={amount}
-            onChange={(e) => {
-              setAmount(e.target.value);
+        {/* WHAT LANDS. A quote fills the figure; until one is fetched it is a
+            dash, because the rate is the operator's answer and not a default. */}
+        <div className="amount-card">
+          <span className="field-label">You receive</span>
+          <div className="amount-row">
+            <span className="currency-pill">
+              <CurrencyMark currency={to} size={18} /> {to}
+            </span>
+            <strong className="lands">
+              {quote === undefined ? '—' : formatAmount(quote.receives, quote.to)}
+            </strong>
+          </div>
+          {/* The spread is its own line, never folded into the rate. A customer
+              comparing us against a bureau de change compares the number they
+              receive, and hiding our margin inside the rate makes that
+              comparison quietly dishonest. */}
+          {quote !== undefined && (
+            <span className="hint">
+              1 {quote.from} = {quote.rate} {quote.to} · our fee{' '}
+              {formatAmount(quote.spread, quote.from)}
+            </span>
+          )}
+        </div>
+
+        {/* To is chosen here, beside its own card, as a plain field — the
+            compact picker in the receive row would fight the landed figure for
+            the same space, so the choice sits under the two cards. */}
+        <label className="field" id="fx-to-field">
+          <span className="field-label">Convert to</span>
+          <Select
+            value={to}
+            onChange={(value) => {
+              setTo(value);
               setQuote(undefined);
             }}
-            required
+            options={CURRENCIES.map((c) => ({ value: c, label: c }))}
+            renderMark={(value) => <CurrencyMark currency={value} size={18} />}
           />
         </label>
 
-        <div className="actions" style={{ marginBottom: 14 }}>
-          <button
-            type="button"
-            className="accent small"
-            disabled={amount === '' || from === to}
-            onClick={() =>
-              void run(async () => {
-                setQuote(await client.fxQuote(from, to, amount));
-                return undefined;
-              })
-            }
-          >
-            Get a rate
-          </button>
-        </div>
+        <button
+          type="button"
+          className="quiet block"
+          disabled={busy || amount === '' || from === to}
+          onClick={() =>
+            void run(async () => {
+              setQuote(await client.fxQuote(from, to, amount));
+              return undefined;
+            })
+          }
+        >
+          {quote === undefined ? 'Get today’s rate' : 'Refresh rate'}
+        </button>
 
         {quote !== undefined && (
-          <div className="notice">
-            <p>
-              You send <strong className="amount">{formatAmount(quote.amount, quote.from)}</strong>{' '}
-              and receive{' '}
-              <strong className="amount">{formatAmount(quote.receives, quote.to)}</strong>.
-            </p>
-            {/*
-              The spread is shown as its own line, not folded into the rate. A
-              customer comparing us against a bureau de change is comparing the
-              number they receive, and hiding our margin inside the rate would
-              make that comparison quietly dishonest.
-            */}
-            <p className="hint">
-              Rate {quote.rate} · our fee {formatAmount(quote.spread, quote.from)} · this rate
-              holds until {new Date(quote.expires_at).toLocaleTimeString()}
-            </p>
-          </div>
+          <p className="arrival">
+            <Icon name="zap" size={15} /> This rate holds until{' '}
+            {new Date(quote.expires_at).toLocaleTimeString()}
+          </p>
         )}
 
-        <label>
-          Send to someone else (optional)
+        <label className="field">
+          <span className="field-label">Send to someone else (optional)</span>
           <input
             value={recipient}
             onChange={(e) => setRecipient(e.target.value)}
@@ -178,8 +202,8 @@ export default function Fx() {
             not a payment and asking for the PIN there teaches people to type
             it for things that are not payments. */}
         {recipient !== '' && (
-          <label>
-            Transaction PIN
+          <label className="field">
+            <span className="field-label">Transaction PIN</span>
             <input
               type="password"
               inputMode="numeric"
@@ -199,7 +223,6 @@ export default function Fx() {
           {busy ? 'Converting…' : recipient === '' ? 'Convert' : 'Convert and send'}
         </button>
 
-        {from === to && <p className="hint">Pick two different currencies.</p>}
         <FormError error={error} code={code} />
         {done !== undefined && <p className="ok">{done}</p>}
 
