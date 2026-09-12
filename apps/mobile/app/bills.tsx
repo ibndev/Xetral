@@ -1,9 +1,19 @@
 import { useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Pressable, Text, TextInput, View } from 'react-native';
 import { formatAmount, PURCHASE_SERVICES } from '@xetral/client';
 import type { CatalogueItem, Purchase, PurchaseService } from '@xetral/client';
 import { Shell } from '@/shell';
-import { Button, Done, Empty, Field, FormError, Loading, Panel } from '@/ui';
+import {
+  AmountCard,
+  Button,
+  CurrencyPill,
+  Done,
+  Empty,
+  Field,
+  FormError,
+  Loading,
+  Panel,
+} from '@/ui';
 import { Select } from '@/select';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/hooks';
 import { font, radius, space, useStyles, useTheme } from '@/theme';
@@ -157,13 +167,33 @@ function Buy({
       />
 
       {!fixedPrice && (
-        <Field
-          label="Amount (NGN)"
-          inputMode="decimal"
-          placeholder="1000.00"
-          value={amount}
-          onChangeText={setAmount}
-        />
+        <AmountCard>
+          <Text style={styles.fieldLabel}>Amount</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
+            <CurrencyPill>
+              <Text style={{ color: colors.text, fontFamily: font.sansSemi, fontSize: 14 }}>
+                {selected?.currency ?? 'NGN'}
+              </Text>
+            </CurrencyPill>
+            <TextInput
+              value={amount}
+              onChangeText={setAmount}
+              keyboardType="decimal-pad"
+              placeholder="0"
+              placeholderTextColor={colors.text3}
+              accessibilityLabel="Amount"
+              style={{
+                flex: 1,
+                textAlign: 'right',
+                color: colors.text,
+                fontFamily: font.displayBold,
+                fontSize: 30,
+                letterSpacing: -0.6,
+                fontVariant: ['tabular-nums'],
+              }}
+            />
+          </View>
+        </AmountCard>
       )}
 
       <Field

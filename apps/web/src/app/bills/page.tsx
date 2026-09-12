@@ -114,8 +114,11 @@ function Buy({ service, onBought }: { service: ServiceCode; onBought: () => void
   const fixedPrice = selected?.price !== null && selected?.price !== undefined;
 
   return (
+    /* EDGE TO EDGE, LIKE SEND. "Pick a thing, say who it is for, pay" is the
+       same shape as a transfer, so it wears the same bar rather than a grey
+       card wrapping generic labels. */
     <form
-      className="card"
+      className="send-step"
       onSubmit={(event) => {
         event.preventDefault();
         void run(async () => {
@@ -144,8 +147,8 @@ function Buy({ service, onBought }: { service: ServiceCode; onBought: () => void
         </div>
       )}
 
-      <label id="bills-item-label">
-        What to buy
+      <label className="field" id="bills-item-label">
+        <span className="field-label">What to buy</span>
         <Select
           labelledBy="bills-item-label"
           value={itemCode}
@@ -163,8 +166,8 @@ function Buy({ service, onBought }: { service: ServiceCode; onBought: () => void
         />
       </label>
 
-      <label>
-        {meta?.target}
+      <label className="field">
+        <span className="field-label">{meta?.target}</span>
         <input
           inputMode={meta?.mode === 'tel' ? 'tel' : meta?.mode === 'numeric' ? 'numeric' : 'text'}
           value={target}
@@ -174,48 +177,52 @@ function Buy({ service, onBought }: { service: ServiceCode; onBought: () => void
           }}
           required
         />
+        {/*
+          Verification is offered, not assumed. VTpass can confirm a meter
+          belongs to who the customer thinks it does; Airalo and Twilio have
+          nothing to confirm, and the server says so rather than pretending —
+          so a failure here is information, not a blocker.
+        */}
+        {(service === 'electricity' || service === 'data') && (
+          <span className="row toggle" style={{ borderTop: 0, paddingTop: 8, marginTop: 6 }}>
+            <button
+              type="button"
+              className="quiet small"
+              disabled={target === '' || itemCode === ''}
+              onClick={() =>
+                void run(async () => {
+                  const result = await client.verifyTarget({ service, itemCode, target });
+                  setVerified(result.name);
+                  return undefined;
+                })
+              }
+            >
+              Check this number
+            </button>
+            {verified !== undefined && <span className="badge ok">{verified}</span>}
+          </span>
+        )}
       </label>
 
-      {/*
-        Verification is offered, not assumed. VTpass can confirm a meter belongs
-        to who the customer thinks it does; Airalo and Twilio have nothing to
-        confirm, and the server says so rather than pretending — so a failure
-        here is information, not a blocker.
-      */}
-      {(service === 'electricity' || service === 'data') && (
-        <div className="actions" style={{ marginBottom: 12 }}>
-          <button
-            type="button"
-            className="ghost small"
-            disabled={target === '' || itemCode === ''}
-            onClick={() =>
-              void run(async () => {
-                const result = await client.verifyTarget({ service, itemCode, target });
-                setVerified(result.name);
-                return undefined;
-              })
-            }
-          >
-            Check this number
-          </button>
-          {verified !== undefined && <span className="badge ok">{verified}</span>}
+      {!fixedPrice && (
+        <div className="amount-card">
+          <span className="field-label">Amount</span>
+          <div className="amount-row">
+            <span className="currency-pill">{selected?.currency ?? 'NGN'}</span>
+            <input
+              inputMode="decimal"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="0"
+              aria-label="Amount"
+              required
+            />
+          </div>
         </div>
       )}
 
-      {!fixedPrice && (
-        <label>
-          Amount
-          <input
-            inputMode="decimal"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            required
-          />
-        </label>
-      )}
-
-      <label>
-        Transaction PIN
+      <label className="field">
+        <span className="field-label">Transaction PIN</span>
         <input
           type="password"
           inputMode="numeric"
