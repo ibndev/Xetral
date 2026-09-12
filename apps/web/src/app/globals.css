@@ -204,6 +204,34 @@
   /* Layout */
   --tabbar-h: 68px;
   --header-h: 60px;
+
+  /* The Send flow's own palette — the uploaded mockups' exact values.
+     Tokenised so the same rules serve dark, where the step must be a full
+     page on the app's ground rather than a white box floating in it. */
+  --sf-bg: #FFFFFF;
+  --sf-text: #111111;
+  --sf-muted: #9AA5B4;
+  --sf-section: #7B8FA1;
+  --sf-divider: #E8EAED;
+  --sf-rowline: #F0F2F5;
+  --sf-search-border: #DADDE3;
+  --sf-placeholder: #B2BCC8;
+  --sf-accent: #3B6FE8;
+  --sf-on-accent: #FFFFFF;
+  --sf-chip-bg: #FFFFFF;
+  --sf-chip-border: #D8DCE4;
+  --sf-chip-text: #2A2E3E;
+  --sf-avatar-bg: #ECEEF3;
+  --sf-avatar-text: #8E939F;
+  --sf-dots: #B0B8C4;
+  --sf-field: #E8E8E8;
+  --sf-field-text: #333333;
+  --sf-label: #888888;
+  --sf-sub: #999999;
+  --sf-sheet: #FFFFFF;
+  --sf-sheet-line: #F0F0F0;
+  --sf-handle: #DDDDDD;
+  --sf-radio: #CCCCCC;
 }
 
 [data-theme='dark'] {
@@ -258,6 +286,33 @@
   --shadow:    0 2px 8px rgba(0, 0, 0, .45);
   --shadow-md: 0 8px 24px rgba(0, 0, 0, .5);
   --shadow-lg: 0 16px 48px rgba(0, 0, 0, .6);
+
+  /* Send flow, dark: the app's own ground and lines, so the step is a full
+     page rather than the mockup's white sheet dropped into a dark app. */
+  --sf-bg: var(--bg);
+  --sf-text: var(--text);
+  --sf-muted: var(--text-3);
+  --sf-section: var(--text-2);
+  --sf-divider: var(--line);
+  --sf-rowline: var(--line);
+  --sf-search-border: var(--line-strong);
+  --sf-placeholder: var(--text-3);
+  --sf-accent: #5B8CFF;
+  --sf-on-accent: #0B1020;
+  --sf-chip-bg: transparent;
+  --sf-chip-border: var(--line-strong);
+  --sf-chip-text: var(--text);
+  --sf-avatar-bg: var(--surface-2);
+  --sf-avatar-text: var(--text-2);
+  --sf-dots: var(--text-3);
+  --sf-field: var(--field);
+  --sf-field-text: var(--text);
+  --sf-label: var(--text-2);
+  --sf-sub: var(--text-2);
+  --sf-sheet: var(--surface);
+  --sf-sheet-line: var(--line);
+  --sf-handle: var(--line-strong);
+  --sf-radio: var(--line-strong);
 }
 
 /* ═══════════════════════════ base ═══════════════════════════ */
@@ -3557,31 +3612,32 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
 }
 
 /* ===========================================================================
-   SEND FLOW — EXACT MOCKUP SPEC
+   SEND FLOW — THE UPLOADED MOCKUPS, EXACTLY
 
-   Three screens rebuilt one-for-one from the uploaded mockups (currency
-   select, recipient select, momo network). These are LIGHT and literal-
-   coloured on purpose: the mockups are the spec, down to the hex, and the
-   product owner does not accept a design that differs from them. The app's
-   own tokens are not used here, which is why the light-edges guard (which
-   forbids var(--line) box borders, not literal ones) does not fire.
+   Three steps drawn one-for-one from the specs: currency select, recipient
+   select, momo network. Everything here is TOKENISED rather than literal —
+   light resolves to the mockup's own hex, dark to the app's ground — because a
+   screen painted #FFFFFF regardless of theme is a white box sitting in a dark
+   page, which is what it was and what it must never be again.
 
-   Font is the app's self-hosted Inter — which is exactly what the currency
-   and recipient mockups call for; the network mockup's Roboto is served by
-   the same Inter, because the CSP admits no external font and one all-Inter
-   product reads better than a lone Roboto screen.
+   `body:has(.sf)` puts the step's ground on the PAGE, so the step is a full
+   screen rather than a card floating on one.
+
+   Every interactive row RESTATES `justify-content`, `padding`, `min-height`
+   and `background`, because the base `button` rule centres its content, pads
+   it 12/20 and fills it with `--brand`. Inheriting any of that is what put the
+   flags in the middle of the screen.
    =========================================================================== */
 
+/* THE STEP IS THE PAGE. */
+body:has(.sf) { background: var(--sf-bg); }
 .sf {
   font-family: var(--font-sans);
-  color: #111111;
+  color: var(--sf-text);
+  background: transparent;
   display: block;
-}
-/* The step sits on white, edge to edge — the Shell already carries the side
-   gutter, so this only adds the mockup's foot room. */
-.sf {
-  background: #FFFFFF;
-  padding: 0 0 24px;
+  /* Room for the fixed New-recipient pill and the tab bar under it. */
+  padding: 0 0 108px;
 }
 
 .sf-title {
@@ -3589,120 +3645,136 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
   font-weight: 800;
   line-height: 1.3;
   letter-spacing: -0.4px;
-  color: #111111;
-  margin: 6px 0 22px;
+  color: var(--sf-text);
+  margin: 2px 0 20px;
 }
 .sf-sub {
   font-size: 13px;
   font-weight: 400;
-  color: #999999;
-  margin: -14px 0 26px;
+  color: var(--sf-sub);
+  margin: -14px 0 24px;
 }
 
-/* Search — 52px bar, 1.2px #DADDE3, 14px radius */
+/* Search — 52px bar, 1.2px hairline, 14px radius. */
 .sf-search {
-  height: 52px;
-  border: 1.2px solid #DADDE3;
-  border-radius: 14px;
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 10px;
+  height: 52px;
   padding: 0 16px;
-  margin-bottom: 28px;
-  background: #FFFFFF;
+  margin-bottom: 24px;
+  border: 1.2px solid var(--sf-search-border);
+  border-radius: 14px;
+  background: transparent;
 }
+.sf-search svg { color: var(--sf-placeholder); flex: 0 0 auto; }
 .sf-search input {
   flex: 1;
   min-width: 0;
+  /* The base input rule pads 13/15 and floors at 50px; both are restated to
+     nothing here or the bar is a fat box instead of a 52px line. */
+  height: 100%;
+  min-height: 0;
+  padding: 0;
   border: 0;
   outline: none;
   background: transparent;
   font-family: var(--font-sans);
   font-size: 15px;
   font-weight: 400;
-  color: #111111;
-  padding: 0;
+  color: var(--sf-text);
 }
-.sf-search input::placeholder { color: #B2BCC8; }
-.sf-search svg { color: #B2BCC8; flex-shrink: 0; }
+.sf-search input:hover, .sf-search input:focus { border: 0; box-shadow: none; background: transparent; }
+.sf-search input::placeholder { color: var(--sf-placeholder); }
 
-/* --- currency-select sections --- */
-.sf-section { margin-bottom: 24px; }
+/* --- currency select --- */
+.sf-section { margin-bottom: 22px; }
 .sf-section-label {
   font-size: 13px;
   font-weight: 500;
-  color: #7B8FA1;
+  color: var(--sf-section);
   margin-bottom: 8px;
 }
-.sf-divider { height: 1px; background: #E8EAED; margin-bottom: 6px; }
+.sf-divider { height: 1px; background: var(--sf-divider); margin-bottom: 6px; }
 
 .sf-row {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 14px;
-  padding: 7px 0;
   width: 100%;
-  background: transparent;
+  min-height: 0;
+  padding: 7px 0;
   border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--sf-text);
   text-align: left;
+  white-space: normal;
   cursor: pointer;
   font-family: var(--font-sans);
 }
-.sf-row:hover:where(:not(:disabled)) { background: transparent; }
-.sf-row:active { background: transparent; }
+.sf-row:hover:where(:not(:disabled)) { background: transparent; color: var(--sf-text); }
+.sf-row:active { background: transparent; transform: none; }
 .sf-icon {
   width: 44px;
   height: 44px;
   border-radius: 50%;
   overflow: hidden;
-  flex-shrink: 0;
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: center;
 }
-.sf-cur-name { font-size: 16px; font-weight: 700; color: #111111; line-height: 1.25; }
-.sf-cur-code { font-size: 13px; font-weight: 400; color: #9AA5B4; margin-top: 2px; }
+.sf-cur-name { font-size: 16px; font-weight: 700; color: var(--sf-text); line-height: 1.25; }
+.sf-cur-code { font-size: 13px; font-weight: 400; color: var(--sf-muted); margin-top: 2px; }
 
-/* --- recipient-select --- */
+/* --- recipient select --- */
 .sf-chips {
   display: flex;
   gap: 8px;
   margin-bottom: 18px;
   overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
 }
 .sf-chips::-webkit-scrollbar { display: none; }
 .sf-chip {
-  height: 38px;
-  padding: 0 14px;
-  border: 1.5px solid #D8DCE4;
-  border-radius: 10px;
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 6px;
+  flex: 0 0 auto;
+  height: 38px;
+  min-height: 0;
+  padding: 0 14px;
+  border: 1.5px solid var(--sf-chip-border);
+  border-radius: 10px;
+  background: var(--sf-chip-bg);
+  color: var(--sf-chip-text);
   font-size: 13.5px;
   font-weight: 500;
-  color: #2A2E3E;
-  white-space: nowrap;
-  background: #FFFFFF;
-  flex-shrink: 0;
   cursor: pointer;
-  font-family: var(--font-sans);
 }
-.sf-chip:hover:where(:not(:disabled)) { background: #FFFFFF; }
-.sf-chip.on { border: 2px solid #3B6FE8; color: #3B6FE8; background: #FFFFFF; }
-.sf-chip.on:hover:where(:not(:disabled)) { background: #FFFFFF; color: #3B6FE8; }
+.sf-chip:hover:where(:not(:disabled)) { background: var(--sf-chip-bg); color: var(--sf-chip-text); }
+.sf-chip:active { transform: none; }
+.sf-chip.on {
+  border: 2px solid var(--sf-accent);
+  color: var(--sf-accent);
+  background: var(--sf-chip-bg);
+}
+.sf-chip.on:hover:where(:not(:disabled)) { background: var(--sf-chip-bg); color: var(--sf-accent); }
 .sf-chip-flag {
   width: 18px; height: 18px; border-radius: 50%;
-  overflow: hidden; flex-shrink: 0;
+  overflow: hidden; flex: 0 0 auto;
   display: flex; align-items: center; justify-content: center;
 }
 
 .sf-list-label {
   font-size: 13px;
   font-weight: 500;
-  color: #3B6FE8;
+  color: var(--sf-accent);
   margin-bottom: 8px;
 }
 
@@ -3711,189 +3783,230 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
   align-items: center;
   gap: 14px;
   padding: 16px 0;
-  border-bottom: 1px solid #F0F2F5;
+  border-bottom: 1px solid var(--sf-rowline);
 }
 .sf-recip-open {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 14px;
   flex: 1;
   min-width: 0;
-  background: transparent;
-  border: 0;
+  min-height: 0;
   padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--sf-text);
   text-align: left;
+  white-space: normal;
   cursor: pointer;
   font-family: var(--font-sans);
 }
-.sf-recip-open:hover:where(:not(:disabled)) { background: transparent; }
-.sf-avatar-wrap { position: relative; width: 54px; height: 54px; flex-shrink: 0; }
+.sf-recip-open:hover:where(:not(:disabled)) { background: transparent; color: var(--sf-text); }
+.sf-recip-open:active { background: transparent; transform: none; }
+.sf-avatar-wrap { position: relative; width: 54px; height: 54px; flex: 0 0 auto; }
 .sf-avatar {
   width: 54px; height: 54px; border-radius: 50%;
-  background: #ECEEF3;
+  background: var(--sf-avatar-bg);
   display: flex; align-items: center; justify-content: center;
-  font-size: 18px; font-weight: 600; color: #8E939F; letter-spacing: 0.5px;
+  font-size: 18px; font-weight: 600; color: var(--sf-avatar-text); letter-spacing: 0.5px;
 }
 .sf-avatar-flag {
   position: absolute; bottom: -2px; left: -2px;
   width: 20px; height: 20px; border-radius: 50%;
-  overflow: hidden; border: 2px solid #FFFFFF;
-  display: flex; align-items: center; justify-content: center; background: #fff;
+  overflow: hidden; border: 2px solid var(--sf-bg); background: var(--sf-bg);
+  display: flex; align-items: center; justify-content: center;
 }
 .sf-recip-info { flex: 1; min-width: 0; }
 .sf-recip-name {
   display: block;
-  font-size: 15.5px; font-weight: 700; color: #111111; margin-bottom: 3px;
+  font-size: 15.5px; font-weight: 700; color: var(--sf-text); margin-bottom: 3px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .sf-recip-bank {
   display: block;
-  font-size: 13px; font-weight: 400; color: #9AA5B4;
+  font-size: 13px; font-weight: 400; color: var(--sf-muted);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .sf-dots {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 3.5px; padding: 4px; flex-shrink: 0; cursor: pointer;
-  background: transparent; border: 0;
+  gap: 3.5px;
+  flex: 0 0 auto;
+  min-height: 0;
+  padding: 4px 2px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
 }
-.sf-dots span { width: 4px; height: 4px; border-radius: 50%; background: #B0B8C4; display: block; }
+.sf-dots:hover:where(:not(:disabled)) { background: transparent; }
+.sf-dots:active { transform: none; }
+.sf-dots span { width: 4px; height: 4px; border-radius: 50%; background: var(--sf-dots); display: block; }
 
-.sf-empty { color: #9AA5B4; font-size: 14px; padding: 24px 0; }
+.sf-empty { color: var(--sf-muted); font-size: 14px; padding: 22px 0; }
 
-/* The floating New-recipient pill. In-flow on the web step (not fixed) so it
-   cannot cover the last row on a short list — placed after the list, right
-   aligned, with the mockup's exact fill, radius and shadow. */
-.sf-newbtn-row { display: flex; justify-content: flex-end; margin-top: 20px; }
+/* THE NEW-RECIPIENT PILL IS FIXED, BOTTOM RIGHT, ALWAYS — the mockup's
+   position. It clears the tab bar and the home indicator. `.sf-newbtn-row` is
+   the spacer that stops it covering the last row of a long list. */
+.sf-newbtn-row { height: 0; }
 .sf-newbtn {
-  background: #3B6FE8;
-  color: #FFFFFF;
+  position: fixed;
+  right: 20px;
+  bottom: calc(var(--tabbar-h) + 20px + env(safe-area-inset-bottom, 0px));
+  z-index: 45;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 0;
+  padding: 14px 22px;
+  border: 0;
+  border-radius: 50px;
+  background: var(--sf-accent);
+  color: var(--sf-on-accent);
   font-family: var(--font-sans);
   font-size: 15px;
   font-weight: 600;
-  padding: 14px 22px;
-  border-radius: 50px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  border: 0;
   cursor: pointer;
-  box-shadow: 0 6px 20px rgba(59,111,232,0.4);
+  box-shadow: 0 6px 20px rgb(59 111 232 / 40%);
 }
-.sf-newbtn:hover:where(:not(:disabled)) { background: #3361d8; color: #fff; }
+.sf-newbtn:hover:where(:not(:disabled)) { background: var(--sf-accent); color: var(--sf-on-accent); }
 
-/* --- momo network screen --- */
+/* --- momo network form --- */
 .sf-group { margin-bottom: 16px; }
 .sf-label {
   display: block;
   font-size: 13px;
   font-weight: 400;
-  color: #888888;
+  color: var(--sf-label);
   margin-bottom: 6px;
 }
-.sf-field {
-  width: 100%;
-  height: 52px;
-  border-radius: 8px;
-  border: none;
-  background: #E8E8E8;
-  padding: 0 16px;
-  font-family: var(--font-sans);
-  font-size: 15px;
-  font-weight: 400;
-  color: #333333;
-  outline: none;
-}
-.sf-field::placeholder { color: #AAAAAA; }
-.sf-field[readonly] { color: #333333; }
-/* The network trigger — a select-shaped field. Blue border while its sheet is
-   open, plain grey field otherwise. */
+/* 52px, flat, no hairline — and every base-input property restated, or the
+   field renders 13px taller than the spec with a border it should not have. */
+.sf-field,
 .sf-select {
   width: 100%;
   height: 52px;
+  min-height: 0;
+  padding: 0 16px;
+  border: 0;
   border-radius: 8px;
-  border: none;
-  background: #E8E8E8;
-  padding: 0 42px 0 16px;
-  display: flex;
-  align-items: center;
-  cursor: pointer;
-  position: relative;
+  background: var(--sf-field);
+  color: var(--sf-field-text);
   font-family: var(--font-sans);
   font-size: 15px;
-  color: #333333;
+  font-weight: 400;
+  outline: none;
 }
-.sf-select.placeholder { color: #AAAAAA; }
-.sf-select.open { background: #FFFFFF; border: 2px solid #4285F4; }
+.sf-field:hover, .sf-field:focus { border: 0; box-shadow: none; background: var(--sf-field); }
+.sf-field::placeholder { color: var(--sf-placeholder); }
+.sf-select {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding-right: 42px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.sf-select:hover:where(:not(:disabled)) { background: var(--sf-field); color: var(--sf-field-text); }
+.sf-select:active { transform: none; }
+.sf-select.placeholder { color: var(--sf-placeholder); }
+/* Open: white, blue 2px — the mockup's active dropdown. */
+.sf-select.open {
+  background: var(--sf-bg);
+  border: 2px solid var(--sf-accent);
+  padding: 0 40px 0 14px;
+}
+.sf-select.open:hover:where(:not(:disabled)) { background: var(--sf-bg); }
 .sf-select-wrap { position: relative; }
 .sf-select-arrow {
   position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
-  color: #555; font-size: 11px; pointer-events: none; line-height: 1;
+  color: var(--sf-label); font-size: 11px; pointer-events: none; line-height: 1;
 }
 
-/* The primary continue button on the momo screen — a blue full-width action
-   matching the flow's accent. */
 .sf-primary {
   width: 100%;
   height: 54px;
+  min-height: 0;
+  margin-top: 8px;
+  padding: 0;
   border: 0;
   border-radius: 12px;
-  background: #3B6FE8;
-  color: #FFFFFF;
+  background: var(--sf-accent);
+  color: var(--sf-on-accent);
   font-family: var(--font-sans);
   font-size: 16px;
   font-weight: 600;
   cursor: pointer;
-  margin-top: 8px;
 }
-.sf-primary:hover:where(:not(:disabled)) { background: #3361d8; color: #fff; }
-.sf-primary:disabled { opacity: 0.5; cursor: default; }
+.sf-primary:hover:where(:not(:disabled)) { background: var(--sf-accent); color: var(--sf-on-accent); }
+.sf-primary:disabled { opacity: 0.45; cursor: default; }
 
-/* Bottom sheet for the network picker */
+/* --- the network bottom sheet --- */
 .sf-sheet-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.28);
-  z-index: 60;
+  /* ABOVE the tab bar (40) and everything else this page draws. A modal that
+     the navigation sits on top of is not a modal. */
+  z-index: 200;
+  background: rgb(0 0 0 / 28%);
   display: flex;
   align-items: flex-end;
   justify-content: center;
 }
 .sf-sheet {
   width: 100%;
-  max-width: 460px;
-  background: #FFFFFF;
+  max-width: 520px;
+  max-height: 80vh;
+  overflow-y: auto;
+  background: var(--sf-sheet);
   border-radius: 20px 20px 0 0;
-  padding-bottom: 8px;
-  animation: sf-sheet-up 0.2s ease;
+  padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  animation: sf-sheet-up 0.22s var(--ease, ease);
 }
 @keyframes sf-sheet-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
 .sf-sheet-handle-row { display: flex; justify-content: center; padding: 14px 0 0; }
-.sf-sheet-handle { width: 40px; height: 4px; background: #DDDDDD; border-radius: 2px; }
+.sf-sheet-handle { width: 40px; height: 4px; border-radius: 2px; background: var(--sf-handle); }
 .sf-sheet-head {
   display: flex; align-items: center; justify-content: space-between;
   padding: 16px 20px 14px;
 }
-.sf-sheet-title { font-size: 18px; font-weight: 700; color: #111111; }
+.sf-sheet-title { font-size: 18px; font-weight: 700; color: var(--sf-text); }
 .sf-sheet-close {
-  background: none; border: 0; cursor: pointer;
-  font-size: 18px; color: #555555; line-height: 1; padding: 4px;
+  min-height: 0;
+  padding: 4px;
+  border: 0;
+  background: transparent;
+  color: var(--sf-label);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
 }
+.sf-sheet-close:hover:where(:not(:disabled)) { background: transparent; color: var(--sf-text); }
 .sf-net {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 18px 20px;
-  border-top: 1px solid #F0F0F0;
-  cursor: pointer;
-  background: #fff; border-left: 0; border-right: 0; border-bottom: 0;
   width: 100%;
+  min-height: 0;
+  padding: 18px 20px;
+  border: 0;
+  border-top: 1px solid var(--sf-sheet-line);
+  border-radius: 0;
+  background: transparent;
+  cursor: pointer;
   font-family: var(--font-sans);
 }
-.sf-net-name { font-size: 15px; font-weight: 500; color: #222222; letter-spacing: 0.4px; }
+.sf-net:hover:where(:not(:disabled)) { background: transparent; }
+.sf-net:active { transform: none; }
+.sf-net-name {
+  font-size: 15px; font-weight: 500; color: var(--sf-text); letter-spacing: 0.4px;
+}
 .sf-radio {
   width: 22px; height: 22px; border-radius: 50%;
-  border: 2px solid #CCCCCC; background: #FFFFFF; flex-shrink: 0;
+  border: 2px solid var(--sf-radio); background: transparent; flex: 0 0 auto;
   display: flex; align-items: center; justify-content: center;
 }
-.sf-radio.on { border-color: #3B6FE8; }
+.sf-radio.on { border-color: var(--sf-accent); }
 .sf-radio.on::after {
-  content: ''; width: 11px; height: 11px; border-radius: 50%; background: #3B6FE8;
+  content: ''; width: 11px; height: 11px; border-radius: 50%; background: var(--sf-accent);
 }

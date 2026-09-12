@@ -21,7 +21,8 @@ import { Select } from '@/select';
 import { Icon } from '@/icon';
 import { CurrencyMark } from '@/currency-mark';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/hooks';
-import { font, radius, space, useStyles, useTheme } from '@/theme';
+import { font, radius, space, useResolvedScheme, useStyles, useTheme } from '@/theme';
+import type { Palette } from '@/theme';
 
 /**
  * SENDING MONEY, AS ONE FLOW — the web's screen, on a handset.
@@ -83,6 +84,12 @@ export default function Transfer() {
 
   const home = session.data?.home_currency ?? 'NGN';
 
+  const startNew = (): void => {
+    setChosen(undefined);
+    setDraft(undefined);
+    setStep('currency');
+  };
+
   const back = (): void => {
     if (step === 'amount') setStep('details');
     else if (step === 'details') setStep(arrivedWith === '' ? 'currency' : 'who');
@@ -98,7 +105,14 @@ export default function Transfer() {
          `exactOptionalPropertyTypes` refuses for an optional prop: an absent
          property and one holding `undefined` are different things here. */
       {...(step === 'who' ? { back: '/wallet' } : {})}
-      overlay={<Toast message={sent} tone="ok" onDone={() => setSent(undefined)} />}
+      overlay={
+        <>
+          <Toast message={sent} tone="ok" onDone={() => setSent(undefined)} />
+          {/* BOTTOM RIGHT, ALWAYS — over the screen rather than at the end of
+              the list, so it does not scroll away or cover the last row. */}
+          {step === 'who' && <NewRecipientPill onPress={startNew} />}
+        </>
+      }
     >
       {step !== 'who' && (
         <Pressable
@@ -133,11 +147,7 @@ export default function Transfer() {
             await client.removeRecipient(id);
             saved.reload();
           }}
-          onNew={() => {
-            setChosen(undefined);
-            setDraft(undefined);
-            setStep('currency');
-          }}
+          onNew={startNew}
         />
       )}
 
@@ -215,7 +225,7 @@ function ChooseRecipient({
   readonly onNew: () => void;
 }) {
   const styles = useStyles();
-  const colors = useTheme();
+  const sf = useSf();
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('');
   const [menu, setMenu] = useState<string | undefined>(undefined);
@@ -278,17 +288,17 @@ function ChooseRecipient({
       {loading && recipients.length === 0 ? (
         <Loading />
       ) : recipients.length === 0 ? (
-        <Text style={{ color: '#9AA5B4', fontSize: 14, paddingVertical: 20 }}>
+        <Text style={{ color: sf.muted, fontSize: 14, paddingVertical: 20 }}>
           Nobody here yet. Add the first person you want to pay and they stay on
           this list.
         </Text>
       ) : (
         <View>
           {/* "All recipients" — blue, per the mockup, over a hairline. */}
-          <Text style={{ color: '#3B6FE8', fontSize: 13, fontFamily: font.sansSemi, marginBottom: 8 }}>
+          <Text style={{ color: sf.accent, fontSize: 13, fontFamily: font.sansSemi, marginBottom: 8 }}>
             All recipients
           </Text>
-          <View style={{ height: 1, backgroundColor: '#E8EAED' }} />
+          <View style={{ height: 1, backgroundColor: sf.divider }} />
           {shown.map((r) => (
             <View
               key={r.id}
@@ -298,7 +308,7 @@ function ChooseRecipient({
                 gap: 14,
                 paddingVertical: 16,
                 borderBottomWidth: 1,
-                borderBottomColor: '#F0F2F5',
+                borderBottomColor: sf.rowline,
               }}
             >
               <Pressable
@@ -315,12 +325,12 @@ function ChooseRecipient({
                       width: 54,
                       height: 54,
                       borderRadius: 27,
-                      backgroundColor: '#ECEEF3',
+                      backgroundColor: sf.avatarBg,
                       alignItems: 'center',
                       justifyContent: 'center',
                     }}
                   >
-                    <Text style={{ color: '#8E939F', fontFamily: font.sansSemi, fontSize: 18 }}>
+                    <Text style={{ color: sf.avatarText, fontFamily: font.sansSemi, fontSize: 18 }}>
                       {initialsOf(r.display_name)}
                     </Text>
                   </View>
@@ -334,8 +344,8 @@ function ChooseRecipient({
                       borderRadius: 10,
                       overflow: 'hidden',
                       borderWidth: 2,
-                      borderColor: '#FFFFFF',
-                      backgroundColor: '#fff',
+                      borderColor: sf.bg,
+                      backgroundColor: sf.bg,
                     }}
                   >
                     <CurrencyMark currency={r.currency} size={16} />
@@ -343,12 +353,12 @@ function ChooseRecipient({
                 </View>
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text
-                    style={{ color: '#111111', fontFamily: font.sansSemi, fontSize: 15.5 }}
+                    style={{ color: sf.text, fontFamily: font.sansSemi, fontSize: 15.5 }}
                     numberOfLines={1}
                   >
                     {r.display_name}
                   </Text>
-                  <Text style={{ color: '#9AA5B4', fontSize: 13 }} numberOfLines={1}>
+                  <Text style={{ color: sf.muted, fontSize: 13 }} numberOfLines={1}>
                     {r.rail_name ?? 'Xetral account'} {'  |  '}&middot;&middot;&middot;
                     {r.destination.slice(-4)}
                   </Text>
@@ -370,14 +380,14 @@ function ChooseRecipient({
                 {[0, 1, 2].map((d) => (
                   <View
                     key={d}
-                    style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: '#B0B8C4' }}
+                    style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: sf.dots }}
                   />
                 ))}
               </Pressable>
             </View>
           ))}
           {shown.length === 0 && (
-            <Text style={{ color: '#9AA5B4', fontSize: 14, paddingVertical: 20 }}>
+            <Text style={{ color: sf.muted, fontSize: 14, paddingVertical: 20 }}>
               Nobody on this list matches that.
             </Text>
           )}
@@ -395,29 +405,6 @@ function ChooseRecipient({
         </View>
       )}
 
-      {/* The blue New-recipient pill, per the mockup. */}
-      <Pressable
-        onPress={onNew}
-        android_ripple={null}
-        accessibilityRole="button"
-        accessibilityLabel="New recipient"
-        style={{
-          alignSelf: 'flex-end',
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 8,
-          backgroundColor: '#3B6FE8',
-          borderRadius: 50,
-          paddingVertical: 14,
-          paddingHorizontal: 22,
-          marginTop: 20,
-        }}
-      >
-        <Icon name="plus" size={18} color="#FFFFFF" />
-        <Text style={{ color: '#FFFFFF', fontFamily: font.sansSemi, fontSize: 15 }}>
-          New recipient
-        </Text>
-      </Pressable>
     </Panel>
   );
 }
@@ -437,6 +424,7 @@ function Chip({
   readonly on: boolean;
   readonly onPress: () => void;
 }) {
+  const sf = useSf();
   return (
     <Pressable
       onPress={onPress}
@@ -450,11 +438,9 @@ function Chip({
         height: 38,
         paddingHorizontal: 14,
         borderRadius: 10,
-        // The mockup's chip: white either way, a BLUE OUTLINE when selected —
-        // not a filled pill. Literal colours, because these three Send steps
-        // are the uploaded mockup exactly.
-        backgroundColor: '#FFFFFF',
-        borderColor: on ? '#3B6FE8' : '#D8DCE4',
+        // The mockup's chip: a BLUE OUTLINE when selected, never a filled pill.
+        backgroundColor: sf.chipBg,
+        borderColor: on ? sf.accent : sf.chipBorder,
         borderWidth: on ? 2 : 1.5,
       }}
     >
@@ -467,7 +453,7 @@ function Chip({
                 width: 5.5,
                 height: 5.5,
                 borderRadius: 1.2,
-                backgroundColor: on ? '#3B6FE8' : '#2A2E3E',
+                backgroundColor: on ? sf.accent : sf.chipText,
               }}
             />
           ))}
@@ -480,7 +466,7 @@ function Chip({
       )}
       <Text
         style={{
-          color: on ? '#3B6FE8' : '#2A2E3E',
+          color: on ? sf.accent : sf.chipText,
           fontFamily: font.sansSemi,
           fontSize: 13.5,
         }}
@@ -553,7 +539,7 @@ function ChooseCurrency({
   readonly home: string;
   readonly onPick: (currency: string) => void;
 }) {
-  const styles = useStyles();
+  const sfEmpty = useSf();
   const [query, setQuery] = useState('');
 
   /*
@@ -593,7 +579,7 @@ function ChooseCurrency({
       ))}
 
       {favourites.length + stablecoins.length + rest.length === 0 && (
-        <Text style={{ color: '#9AA5B4', fontSize: 14, paddingVertical: 20 }}>
+        <Text style={{ color: sfEmpty.muted, fontSize: 14, paddingVertical: 20 }}>
           No currency matches that.
         </Text>
       )}
@@ -610,14 +596,15 @@ function CurrencyGroup({
   readonly codes: readonly string[];
   readonly onPick: (currency: string) => void;
 }) {
+  const sf = useSf();
   if (codes.length === 0) return null;
   return (
     <View style={{ marginTop: 24 }}>
-      {/* Section label #7B8FA1 over a hairline, per the mockup. */}
-      <Text style={{ color: '#7B8FA1', fontFamily: font.sansSemi, fontSize: 13, marginBottom: 8 }}>
+      {/* Section label over a hairline, per the mockup. */}
+      <Text style={{ color: sf.section, fontFamily: font.sansSemi, fontSize: 13, marginBottom: 8 }}>
         {heading}
       </Text>
-      <View style={{ height: 1, backgroundColor: '#E8EAED', marginBottom: 6 }} />
+      <View style={{ height: 1, backgroundColor: sf.divider, marginBottom: 6 }} />
       {codes.map((code) => (
         <Pressable
           key={code}
@@ -631,10 +618,10 @@ function CurrencyGroup({
             <CurrencyMark currency={code} size={44} />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={{ color: '#111111', fontFamily: font.sansSemi, fontSize: 16 }}>
+            <Text style={{ color: sf.text, fontFamily: font.sansSemi, fontSize: 16 }}>
               {currencyName(code)}
             </Text>
-            <Text style={{ color: '#9AA5B4', fontSize: 13, marginTop: 2 }}>
+            <Text style={{ color: sf.muted, fontSize: 13, marginTop: 2 }}>
               {code} ({symbolFor(code)})
             </Text>
           </View>
@@ -699,9 +686,15 @@ function RecipientDetails({
    * is first because it is instant and free, which is the answer most people
    * want when it applies.
    */
+  /* XETRAL IS IN EVERY SELECTOR — naira, dollar, the stablecoins and every
+     momo corridor — and a momo network is named the way people say it. */
+  const isMomoCountry = country?.payout_method === 'mobile_money';
   const rails = [
-    { value: 'xetral', label: 'Xetral account — instant, no fee' },
-    ...(banks.data ?? []).map((bank) => ({ value: bank.code, label: bank.name })),
+    { value: 'xetral', label: 'XETRAL' },
+    ...(banks.data ?? []).map((bank) => ({
+      value: bank.code,
+      label: isMomoCountry ? cleanNetworkName(bank.name) : bank.name,
+    })),
   ];
 
   const kind: RecipientKind =
@@ -796,14 +789,14 @@ function RecipientDetails({
       </View>
 
       <Select
-        label={country?.payout_method === 'mobile_money' ? 'Network' : 'Bank'}
+        label={isMomoCountry ? 'Network' : 'Bank'}
         value={rail}
         onChange={(next) => {
           setRail(next);
           setFound(undefined);
         }}
         options={rails}
-        placeholder={country?.payout_method === 'mobile_money' ? 'Network' : 'Bank'}
+        placeholder={isMomoCountry ? 'Network' : 'Bank'}
         searchable={rails.length > 6}
         searchPlaceholder="Search…"
       />
@@ -816,9 +809,11 @@ function RecipientDetails({
           setFound(undefined);
         }}
         onBlur={() => {
-          // A named rail confirms on blur so the name is on screen before the
-          // button; momo has nothing to confirm and waits for Continue.
-          if (kind === 'momo' || rail === '' || !enough) return;
+          /* EVERY RAIL RESOLVES ON BLUR, MOMO INCLUDED, so the holder's name is
+             on screen before the button is pressed. What must never happen
+             again is the name being a GATE — if the rail cannot answer, it is
+             simply absent and Continue still works. */
+          if (rail === '' || !enough) return;
           void run(async () => {
             setFound(await doResolve());
             return undefined;
@@ -1163,6 +1158,96 @@ function toRecipient(found: RecipientResolution): Recipient {
  * 42-point circle, which renders as an illegible smudge rather than as an
  * avatar — and the point of the disc is to be recognisable at a glance.
  */
+
+/**
+ * The Send flow's own palette.
+ *
+ * The mockups are LIGHT and literal, and painting those hexes unconditionally
+ * is what left a white screen sitting inside a dark app. Light resolves to the
+ * mockup's own values; dark resolves to the app's ground, so the step is a
+ * full page in either theme rather than a white box in one of them.
+ */
+type SfPalette = {
+  readonly text: string; readonly muted: string; readonly section: string;
+  readonly divider: string; readonly rowline: string;
+  readonly accent: string; readonly onAccent: string;
+  readonly chipBg: string; readonly chipBorder: string; readonly chipText: string;
+  readonly avatarBg: string; readonly avatarText: string; readonly dots: string;
+  readonly bg: string;
+};
+function useSf(): SfPalette {
+  const c: Palette = useTheme();
+  const light = useResolvedScheme() === 'light';
+  return {
+    text: light ? '#111111' : c.text,
+    muted: light ? '#9AA5B4' : c.text3,
+    section: light ? '#7B8FA1' : c.text2,
+    divider: light ? '#E8EAED' : c.line,
+    rowline: light ? '#F0F2F5' : c.line,
+    accent: light ? '#3B6FE8' : '#5B8CFF',
+    onAccent: light ? '#FFFFFF' : '#0B1020',
+    chipBg: light ? '#FFFFFF' : 'transparent',
+    chipBorder: light ? '#D8DCE4' : c.lineStrong,
+    chipText: light ? '#2A2E3E' : c.text,
+    avatarBg: light ? '#ECEEF3' : c.surface2,
+    avatarText: light ? '#8E939F' : c.text2,
+    dots: light ? '#B0B8C4' : c.text3,
+    bg: light ? '#FFFFFF' : c.bg,
+  };
+}
+
+/**
+ * The name a customer picks a network by.
+ *
+ * Flutterwave's catalogue says "MTN Mobile Money", "Vodafone Cash Ghana",
+ * "AirtelTigo Money" — provider strings, not names. A picker is read at a
+ * glance, so it reads MTN, VODAFONE, AIRTELTIGO, and XETRAL sits among them.
+ */
+function cleanNetworkName(raw: string): string {
+  const cleaned = raw
+    .toUpperCase()
+    .replace(/\b(MOBILE\s*MONEY|MOMO|CASH|MONEY|WALLET|NETWORK|GHANA|KENYA|NIGERIA|LIMITED|LTD|PLC)\b/g, ' ')
+    .replace(/[^A-Z0-9 ]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned === '' ? raw.toUpperCase() : cleaned;
+}
+
+/** The New-recipient pill, fixed to the bottom-right of the screen. */
+function NewRecipientPill({ onPress }: { readonly onPress: () => void }) {
+  const sf = useSf();
+  return (
+    <Pressable
+      onPress={onPress}
+      android_ripple={null}
+      accessibilityRole="button"
+      accessibilityLabel="New recipient"
+      style={{
+        position: 'absolute',
+        right: 20,
+        bottom: 24,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        backgroundColor: sf.accent,
+        borderRadius: 50,
+        paddingVertical: 14,
+        paddingHorizontal: 22,
+        shadowColor: '#3B6FE8',
+        shadowOpacity: 0.4,
+        shadowRadius: 20,
+        shadowOffset: { width: 0, height: 6 },
+        elevation: 6,
+      }}
+    >
+      <Icon name="plus" size={18} color={sf.onAccent} />
+      <Text style={{ color: sf.onAccent, fontFamily: font.sansSemi, fontSize: 15 }}>
+        New recipient
+      </Text>
+    </Pressable>
+  );
+}
+
 function initialsOf(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return '?';

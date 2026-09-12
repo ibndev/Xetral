@@ -497,9 +497,23 @@ function RecipientDetails({
    * is first because it is instant and free, which is the answer most people
    * want when it applies.
    */
+  /*
+   * XETRAL IS IN EVERY SELECTOR — naira, dollar, the stablecoins and every
+   * momo corridor — because "does this person already have an account?" is an
+   * answer in the same list, not a separate product. It is first because it is
+   * instant and free.
+   *
+   * A MOMO NETWORK IS NAMED THE WAY PEOPLE SAY IT: MTN, AIRTEL, VODAFONE. The
+   * rail returns things like "MTN Mobile Money Ghana", which is a provider
+   * catalogue string, not a name a customer picks from a list.
+   */
+  const isMomoCountry = country?.payout_method === 'mobile_money';
   const rails = [
-    { value: 'xetral', label: 'Xetral account — instant, no fee' },
-    ...(banks.data ?? []).map((bank) => ({ value: bank.code, label: bank.name })),
+    { value: 'xetral', label: 'XETRAL' },
+    ...(banks.data ?? []).map((bank) => ({
+      value: bank.code,
+      label: isMomoCountry ? cleanNetworkName(bank.name) : bank.name,
+    })),
   ];
 
   const kind: RecipientKind =
@@ -522,7 +536,6 @@ function RecipientDetails({
   const minimumDigits = mobileMoney ? 9 : 10;
   const enough = destination.replace(/[^0-9]/g, '').length >= minimumDigits;
 
-  const isMomoCountry = country?.payout_method === 'mobile_money';
   const pickerLabel = isMomoCountry ? 'Network' : 'Bank';
   const numberLabel = kind === 'bank' ? 'Account number' : 'Phone number';
   const railLabel = rails.find((r) => r.value === rail)?.label;
@@ -632,9 +645,14 @@ function RecipientDetails({
               setFound(undefined);
             }}
             onBlur={() => {
-              // A named rail confirms on blur so the name is on screen before
-              // the button; momo has nothing to confirm and waits for Continue.
-              if (kind === 'momo' || rail === '' || !enough) return;
+              /*
+               * EVERY RAIL RESOLVES ON BLUR, MOMO INCLUDED, so the holder's
+               * name is on screen before the button is pressed. Ghana's
+               * wallets DO resolve; what must never happen again is the name
+               * being a GATE — if the rail cannot answer, the name is simply
+               * absent and Continue still works.
+               */
+              if (rail === '' || !enough) return;
               void run(async () => {
                 setFound(await doResolve());
                 return undefined;
@@ -941,6 +959,23 @@ function toRecipient(found: RecipientResolution): Recipient {
  * 42-pixel circle, which renders as an illegible smudge rather than as an
  * avatar — and the point of the disc is to be recognisable at a glance.
  */
+/**
+ * The name a customer picks a network by.
+ *
+ * Flutterwave's catalogue says "MTN Mobile Money", "Vodafone Cash Ghana",
+ * "AirtelTigo Money" — provider strings, not names. A picker is read at a
+ * glance, so it reads MTN, VODAFONE, AIRTELTIGO, and XETRAL sits among them.
+ */
+function cleanNetworkName(raw: string): string {
+  const cleaned = raw
+    .toUpperCase()
+    .replace(/\b(MOBILE\s*MONEY|MOMO|CASH|MONEY|WALLET|NETWORK|GHANA|KENYA|NIGERIA|LIMITED|LTD|PLC)\b/g, ' ')
+    .replace(/[^A-Z0-9 ]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned === '' ? raw.toUpperCase() : cleaned;
+}
+
 function initialsOf(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return '?';
