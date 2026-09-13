@@ -24,7 +24,17 @@ describe('formatting without a float', () => {
   });
 
   it('falls back to a currency code when there is no symbol', () => {
-    expect(formatAmount('100.00', 'KES')).toBe('100.00 KES');
+    // USDC has none deliberately: its symbol is the dollar sign, and a USDC
+    // figure rendered `$100.00` beside a USD one is two assets drawn alike.
+    expect(formatAmount('100.00', 'USDC')).toBe('100.00 USDC');
+  });
+
+  it('spaces a LETTERED symbol off the digits and a glyph not at all', () => {
+    // `KSh1,250.00` runs the letters into the number and reads as one word.
+    expect(formatAmount('1250.00', 'KES')).toBe('KSh 1,250.00');
+    expect(formatAmount('1250.00', 'GHS')).toBe('₵1,250.00');
+    // `CA$` ends in a glyph, so it stays tight the way `$` does.
+    expect(formatAmount('1250.00', 'CAD')).toBe('CA$1,250.00');
   });
 
   it('handles amounts below one', () => {

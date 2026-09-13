@@ -97,6 +97,16 @@ function Drawn({ mark, size }: { readonly mark: Mark; readonly size: number }) {
             />
           );
         })}
+        {/* The canton, drawn over the stripes it covers. */}
+        {mark.canton !== undefined && (
+          <rect
+            x={0}
+            y={0}
+            width={size * mark.canton.width}
+            height={size * mark.canton.height}
+            fill={mark.canton.ground}
+          />
+        )}
         {mark.shield !== undefined && (
           /*
            * KENYA'S MAASAI SHIELD, as much of it as survives eighteen pixels.

@@ -9,7 +9,9 @@ import {
   exponentFor,
   formatAmount,
   isValidAmount,
+  nationalDigits,
   networkLabel,
+  phoneHint,
   sendableFor,
   symbolFor,
 } from '@xetral/client';
@@ -99,11 +101,10 @@ function Transfer() {
 
   return (
     <Shell title="Send">
-      {step !== 'who' && (
-        <button type="button" className="icon-btn back sf-back" onClick={back} aria-label="Back">
-          <Icon name="chevronLeft" size={20} />
-        </button>
-      )}
+      {/* THE WAY BACK IS AT THE BOTTOM RIGHT, not the top left. A chevron above
+          the heading cost a band of empty space on a handset and sat at the one
+          corner a thumb holding the phone cannot reach. */}
+      {step !== 'who' && <FlowBack onClick={back} />}
 
       {step === 'who' && (
         <ChooseRecipient
@@ -145,7 +146,23 @@ function Transfer() {
           onReady={(resolution, recipient) => {
             setDraft(resolution);
             setChosen(recipient);
-            setReceive(resolution.currency);
+            /*
+             * A XETRAL SEND KEEPS THE CURRENCY THE CUSTOMER CHOSE, and that is
+             * the whole of a bug that read as the flow defaulting to cedis.
+             *
+             * The server answers a Xetral lookup with the RECIPIENT'S OWN
+             * currency — a Ghanaian holds GHS — and this line overwrote the
+             * answer given one step earlier on a screen headed "What currency
+             * are you sending?". So somebody who chose naira, typed a Ghanaian
+             * friend's number and pressed Continue was quoted in cedis, with
+             * nothing on screen saying their choice had been discarded.
+             *
+             * A Xetral wallet is multi-currency, so paying a Ghanaian in naira
+             * is an ordinary transfer. Every OTHER kind keeps the server's
+             * answer: a momo wallet in Accra cannot receive naira, and there
+             * the currency really is a fact about the destination.
+             */
+            setReceive(resolution.kind === 'xetral' ? receive : resolution.currency);
             saved.reload();
             setStep('amount');
           }}
@@ -158,6 +175,10 @@ function Transfer() {
              carries everything a draft does, and a draft is what a new one
              becomes before it is saved. */
           to={chosen ?? toRecipient(draft as RecipientResolution)}
+          /* WHAT THE RECIPIENT RECEIVES IS THE FLOW'S ANSWER, not the row's.
+             A saved recipient sets it on being picked; the details step sets
+             it from the choice for Xetral and from the rail otherwise. */
+          receiveCurrency={receive === '' ? home : receive}
           balances={wallets.data ?? []}
           home={home}
           onSent={() => {
@@ -387,7 +408,22 @@ function ChooseCurrency({
     code.toLowerCase().includes(needle) ||
     currencyName(code).toLowerCase().includes(needle);
 
-  const favourites = all.filter((c) => (c === home || c === 'USD') && matches(c));
+  /*
+   * FAVOURITES ARE THE FOUR THIS PLATFORM OPERATES IN, in that order: naira,
+   * cedi, shilling, dollar — not "your own currency and the dollar".
+   *
+   * The narrower rule put ONE row above the fold for a Nigerian and made every
+   * corridor this product exists for — NGN to GHS, NGN to KES — something to
+   * be found by scrolling the alphabetical tail. A favourites list of one is a
+   * heading with nothing under it.
+   *
+   * `sendableFor` still decides what is OFFERED; this only decides the order,
+   * so a currency the platform cannot pay out never appears here either.
+   */
+  const FAVOURITE_ORDER = ['NGN', 'GHS', 'KES', 'USD'];
+  const favourites = [...all]
+    .filter((c) => FAVOURITE_ORDER.includes(c) && matches(c))
+    .sort((a, b) => FAVOURITE_ORDER.indexOf(a) - FAVOURITE_ORDER.indexOf(b));
   const stablecoins = all.filter((c) => (c === 'USDT' || c === 'USDC') && matches(c));
   const rest = all
     .filter((c) => !favourites.includes(c) && !stablecoins.includes(c) && matches(c))
@@ -448,7 +484,10 @@ function CurrencyGroup({
       {codes.map((code) => (
         <button key={code} type="button" className="sf-row" onClick={() => onPick(code)}>
           <span className="sf-icon">
-            <CurrencyMark currency={code} size={44} />
+            {/* 38, not 44. At the larger size the discs dominated a list that
+                is read by its NAMES, and four of them filled a handset screen
+                before the first divider. */}
+            <CurrencyMark currency={code} size={38} />
           </span>
           <span>
             <div className="sf-cur-name">{currencyName(code)}</div>
@@ -476,10 +515,21 @@ function CurrencyGroup({
  * THE ACCOUNT NAME IS FETCHED, NEVER TYPED — where the rail can answer. That
  * is the whole of what "the momo details cannot be found" was: the adapter
  * matched a network code and refused before making the call, so a Ghanaian
- * number whose owner Flutterwave will name was reported as unfindable. Where
- * the rail genuinely has none — Kenya's M-PESA — the screen ASKS FOR A LABEL
- * rather than refusing, because a bare number in an address book is how
- * somebody pays the wrong person.
+ * number whose owner Flutterwave will name was reported as unfindable.
+ *
+ * AND WHERE THE RAIL *CAN* ANSWER, SILENCE IS A REFUSAL. `name_status` tells
+ * the two apart: `unavailable` means no name enquiry EXISTS on this rail —
+ * Kenya's M-PESA, 067's rule — and the send goes on, because demanding a claim
+ * that cannot exist is an outage rather than a control. `failed` means one
+ * exists and did not answer, which on a Ghanaian wallet means the number is
+ * wrong or the wallet is dead. Money sent to a wallet is unrecoverable, so
+ * Continue is REFUSED there and the screen says which number to check.
+ *
+ * THE DIALLING CODE IS DRAWN, NOT TYPED. The currency step already fixed the
+ * country, so the field shows `+233` and holds the national digits — and the
+ * trunk zero comes off as it is typed, because `+233 0244…` is a number
+ * belonging to nobody and a customer must never be looking at a string the
+ * server is about to change behind them.
  */
 function RecipientDetails({
   receive,
@@ -497,7 +547,7 @@ function RecipientDetails({
 
   const country = countries.find((c) => c.currency === receive);
   const [rail, setRail] = useState('');
-  const [destination, setDestination] = useState(initialDestination.replace(/[^0-9]/g, ''));
+  const [destination, setDestination] = useState(nationalDigits(initialDestination));
   const [found, setFound] = useState<RecipientResolution | undefined>(undefined);
   const [sheet, setSheet] = useState(false);
 
@@ -559,15 +609,48 @@ function RecipientDetails({
   const numberLabel = kind === 'bank' ? 'Account number' : 'Phone number';
   const railLabel = rails.find((r) => r.value === rail)?.label;
 
+  /*
+   * A DIAL PREFIX NEEDS A COUNTRY, and `USD`, `USDT` and `USDC` belong to
+   * none — `sendableFor` offers them to everybody precisely because they are
+   * nobody's national money. A Xetral send in one of those falls back to the
+   * plain field, where the customer types the number whole, rather than being
+   * shown a `+` with nothing after it.
+   */
+  const dialCode = (country?.dial_code ?? '').replace(/[^0-9]/g, '');
+  const isPhone = kind !== 'bank' && dialCode !== '';
+
+  /**
+   * Ask the rail as soon as the field is left.
+   *
+   * ON BLUR RATHER THAN ON SUBMIT, so the holder's name is on screen before
+   * the button is pressed — and so a number that cannot be verified says so
+   * while the customer is still looking at the digits they typed.
+   */
+  function askTheRail(): void {
+    if (rail === '' || !enough) return;
+    void run(async () => {
+      setFound(await doResolve());
+      return undefined;
+    });
+  }
+
+  /*
+   * WHETHER THE NAME IS A GATE, decided by whether one could ever have come.
+   *
+   * `failed` is the only blocking answer, and it can only be given by a rail
+   * that HAS a name enquiry — Ghana's wallets, every bank, a Xetral account.
+   * `unavailable` is Kenya, where no such call exists at all, and gating on it
+   * would refuse every M-PESA send on a claim the rail cannot make.
+   */
+  const blocked = found?.name_status === 'failed';
+
   /**
    * Ask the server who holds this destination.
    *
-   * FOR MOMO THIS NEVER BLOCKS. The server's resolve path is now best-effort
-   * for a wallet — it returns the name where the rail can answer and null
-   * where it cannot, and never throws — so a momo send proceeds straight to
-   * the amount. A bank or a Xetral account still resolves a name to confirm,
-   * and a Xetral number that belongs to nobody still fails here, which is the
-   * one refusal on this screen that is real.
+   * IT ALWAYS ANSWERS — the resolve path does not throw on a rail that cannot
+   * name a holder — so what comes back carries `name_status`, and this screen
+   * decides what to do with it. A Xetral number that belongs to nobody still
+   * fails here, which is the one refusal on this screen that is a 404.
    */
   async function doResolve(): Promise<RecipientResolution> {
     return client.resolveRecipient({
@@ -613,20 +696,24 @@ function RecipientDetails({
         className="sf"
         onSubmit={(event) => {
           event.preventDefault();
-          if (rail === '' || !enough) return;
+          if (rail === '' || !enough || blocked) return;
           void run(async () => {
             /*
-             * ONE TAP FOR MOMO, TWO FOR A NAMED RAIL. A wallet has no name to
-             * confirm, so Continue resolves and proceeds in a single press —
-             * the mockup's flow. A bank or Xetral account shows the resolved
-             * name first, so the customer confirms who they are paying.
+             * THE NAME IS SHOWN BEFORE THE MONEY MOVES, wherever one exists.
+             *
+             * A rail that CAN name the holder shows it and the customer
+             * confirms; a rail that cannot — Kenya — proceeds in one press,
+             * because there is nothing to confirm and asking for a label
+             * instead is a confirmation screen that confirms nothing (043).
+             * A rail that can and DID NOT answer stops here: `blocked` above
+             * disables the button, and this re-check is the server-side half
+             * of that rule at the one place it matters.
              */
-            if (found !== undefined) {
-              await proceed(found);
-            } else {
-              const resolution = await doResolve();
-              if (kind === 'momo') await proceed(resolution);
-              else setFound(resolution);
+            const resolution = found ?? (await doResolve());
+            setFound(resolution);
+            if (resolution.name_status === 'failed') return undefined;
+            if (found !== undefined || resolution.name_status === 'unavailable') {
+              await proceed(resolution);
             }
             return undefined;
           });
@@ -650,60 +737,95 @@ function RecipientDetails({
             >
               {railLabel ?? pickerLabel}
             </button>
-            <span className="sf-select-arrow">{sheet ? '▲' : '▼'}</span>
+            {/* A DRAWN CHEVRON. `▼` is a font glyph, so it rendered as a fat
+                black triangle on Android and a hairline one on iOS — the same
+                control looking like a different control per device. */}
+            <span className={sheet ? 'sf-select-arrow up' : 'sf-select-arrow'}>
+              <Icon name="chevronDown" size={18} />
+            </span>
           </div>
         </div>
 
         <div className="sf-group">
           <span className="sf-label">{numberLabel}</span>
-          <input
-            className="sf-field"
-            value={destination}
-            onChange={(e) => {
-              setDestination(e.target.value);
-              setFound(undefined);
-            }}
-            onBlur={() => {
-              /*
-               * EVERY RAIL RESOLVES ON BLUR, MOMO INCLUDED, so the holder's
-               * name is on screen before the button is pressed. Ghana's
-               * wallets DO resolve; what must never happen again is the name
-               * being a GATE — if the rail cannot answer, the name is simply
-               * absent and Continue still works.
-               */
-              if (rail === '' || !enough) return;
-              void run(async () => {
-                setFound(await doResolve());
-                return undefined;
-              });
-            }}
-            inputMode="numeric"
-            placeholder={kind === 'bank' ? '0123456789' : 'Enter phone number'}
-            autoComplete="off"
-          />
+          {isPhone ? (
+            /*
+             * THE COUNTRY CODE IS A LABEL AND THE BOX HOLDS THE REST. One
+             * place a country is stated — 040's rule that a second picker
+             * lets somebody select Ghana and +234 — and it comes off the
+             * country the currency step already fixed.
+             */
+            <div className="sf-phone">
+              <span className="sf-dial">
+                +{(country?.dial_code ?? '').replace(/[^0-9]/g, '')}
+                <span className="sf-dial-country">{country?.name ?? ''}</span>
+              </span>
+              <input
+                value={destination}
+                onChange={(e) => {
+                  setDestination(nationalDigits(e.target.value));
+                  setFound(undefined);
+                }}
+                onBlur={askTheRail}
+                inputMode="numeric"
+                placeholder={phoneHint(country?.dial_code)}
+                autoComplete="off"
+                aria-label={numberLabel}
+              />
+            </div>
+          ) : (
+            <input
+              className="sf-field"
+              value={destination}
+              onChange={(e) => {
+                setDestination(e.target.value.replace(/[^0-9]/g, ''));
+                setFound(undefined);
+              }}
+              onBlur={askTheRail}
+              inputMode="numeric"
+              placeholder={kind === 'bank' ? '0123456789' : '+234 803 123 4567'}
+              autoComplete="off"
+            />
+          )}
         </div>
 
+        {/* THE NAME, THE MOMENT IT ARRIVES. Not a read-only input dressed as a
+            field — a field invites editing, and this is the rail's answer
+            rather than anything the customer may change. */}
         {found?.resolved_name != null && (
-          <div className="sf-group">
-            <span className="sf-label">Account name</span>
-            <input className="sf-field" value={found.resolved_name} readOnly />
-          </div>
+          <span className="sf-verified">
+            <Icon name="check" size={16} />
+            {found.resolved_name}
+          </span>
         )}
 
-        {/* THE NAME IS ASKED FOR AND MAY NOT COME. Saying so is the difference
-            between a screen that looks like it never tried and one that tells
-            the customer to check the number themselves. */}
-        {found !== undefined && found.resolved_name === null && (
-          <span className="sf-amount-note" style={{ marginTop: -6, marginBottom: 14 }}>
-            {railLabel ?? 'This rail'} could not confirm the account name — check the number
-            before you send.
+        {/*
+          A RAIL THAT CAN NAME A HOLDER AND DID NOT IS A STOP, not a warning.
+          Ghana's wallets resolve, so silence means the number is wrong or the
+          wallet is inactive — and momo is unrecoverable once sent. Kenya has
+          no name enquiry at all, so nothing is said and nothing is blocked.
+        */}
+        {blocked && (
+          <span className="sf-verify-bad">
+            We could not verify this {railLabel ?? 'account'} number. Check the digits with
+            your recipient — we will not send to a number nobody answers for.
           </span>
         )}
 
         <FormError error={error} code={code} />
 
-        <button type="submit" className="sf-primary" disabled={busy || rail === '' || !enough}>
-          {busy ? 'Checking…' : kind === 'momo' || found !== undefined ? 'Continue' : 'Check details'}
+        <button
+          type="submit"
+          className="sf-primary"
+          disabled={busy || rail === '' || !enough || blocked}
+        >
+          {busy
+            ? 'Checking…'
+            : blocked
+              ? 'Number not verified'
+              : found !== undefined
+                ? 'Continue'
+                : 'Check details'}
         </button>
       </form>
 
@@ -767,11 +889,16 @@ function RecipientDetails({
  */
 function SendAmount({
   to,
+  receiveCurrency,
   balances,
   home,
   onSent,
 }: {
   to: Recipient;
+  /** What the recipient RECEIVES, as the flow decided it — not as the row
+   *  records it. A Xetral account holds its own country's money and the
+   *  customer may have chosen to send something else. */
+  receiveCurrency: string;
   balances: readonly { currency: string; spendable: string }[];
   home: string;
   onSent: () => void;
@@ -784,8 +911,17 @@ function SendAmount({
   const [amount, setAmount] = useState('');
   const [pin, setPin] = useState('');
 
+  /*
+   * WHAT LANDS IS `receiveCurrency`, NOT `to.currency`, ON EVERY LINE BELOW.
+   *
+   * The row records what a Xetral recipient's own country uses; the flow
+   * records what the customer chose on the screen headed "What currency are
+   * you sending?". Reading the row is what made a naira send to a Ghanaian
+   * friend quote in cedis.
+   */
+  const lands_in = receiveCurrency;
   const balance = balances.find((b) => b.currency === sendCurrency)?.spendable ?? '0';
-  const sameCurrency = sendCurrency === to.currency;
+  const sameCurrency = sendCurrency === lands_in;
 
   /*
    * A QUOTE CARRIES THE AMOUNT IT IS A QUOTE FOR.
@@ -801,10 +937,10 @@ function SendAmount({
   const quote = useLoad(
     async () => {
       if (sameCurrency || !isValidAmount(amount, exponentFor(sendCurrency))) return undefined;
-      const got = await client.fxQuote(sendCurrency, to.currency, amount);
+      const got = await client.fxQuote(sendCurrency, lands_in, amount);
       return { forAmount: amount, ...got };
     },
-    [sendCurrency, to.currency, amount, sameCurrency],
+    [sendCurrency, lands_in, amount, sameCurrency],
   );
   const lands = quote.data?.forAmount === amount ? quote.data : undefined;
 
@@ -816,6 +952,11 @@ function SendAmount({
    * money — caught by `.semgrep/xetral.yml`, which is what that rule is for.
    */
   const enough = isValidAmount(amount, exponentFor(sendCurrency));
+
+  /* THE GAP BETWEEN A VALID AMOUNT AND ITS RATE, which is the only moment the
+     receiving box has nothing true to show. Saying "Converting…" there is the
+     difference between a screen that is working and one that is refusing. */
+  const converting = !sameCurrency && enough && lands === undefined && quote.code === undefined;
 
   return (
     <form
@@ -844,7 +985,7 @@ function SendAmount({
           } else if (to.kind === 'xetral') {
             await client.remit({
               from: sendCurrency,
-              to: to.currency,
+              to: lands_in,
               amount,
               recipient: to.destination,
               pin,
@@ -856,7 +997,7 @@ function SendAmount({
               bankCode: to.rail_code ?? '',
               accountNumber: to.destination,
               amount,
-              currency: to.currency,
+              currency: lands_in,
               pin,
               idempotencyKey: key,
             });
@@ -910,28 +1051,42 @@ function SendAmount({
           : `Balance: ${formatAmount(balance, sendCurrency)}`}
       </span>
 
-      <span className="sf-label" style={{ marginTop: 16 }}>
-        {firstNameOf(to.display_name)} receives
-      </span>
+      <span className="sf-label sf-label-next">Recipient receives</span>
       <div className="sf-amount">
-        {/* A FIGURE, NEVER A DASH. A dash in a money field reads as broken;
-            zero in the recipient's own currency reads as "nothing yet", and
-            the note under it carries the reason when there is one. */}
-        <span className="sf-amount-value">
-          {sameCurrency
-            ? formatAmount(amount === '' ? '0' : amount, to.currency)
-            : formatAmount(lands?.receives ?? '0', to.currency)}
-        </span>
+        {/*
+         * A FIGURE, NEVER A DASH AND NEVER A STALE ZERO.
+         *
+         * The conversion is automatic: type 100 naira and the cedi figure
+         * follows as soon as the quote lands. What it must not do is sit at
+         * zero in the gap — a zero beside a typed amount reads as "this
+         * corridor pays nothing", which is a sentence about the product. So
+         * while the rate is in flight the field says so, and only an EMPTY
+         * amount box renders a zero.
+         *
+         * The currency's own SYMBOL comes from `formatAmount` — ₵ for a cedi,
+         * KSh for a shilling — because a screen quoting "1,250.00 GHS" beside
+         * "₦100,000.00" is showing money in one currency and a database field
+         * in the other.
+         */}
+        {converting ? (
+          <span className="sf-amount-value waiting">Converting…</span>
+        ) : (
+          <span className="sf-amount-value">
+            {sameCurrency
+              ? formatAmount(amount === '' ? '0' : amount, lands_in)
+              : formatAmount(lands?.receives ?? '0', lands_in)}
+          </span>
+        )}
         <span className="sf-ccy">
-          <CurrencyMark currency={to.currency} size={18} />
-          {to.currency}
+          <CurrencyMark currency={lands_in} size={18} />
+          {lands_in}
         </span>
       </div>
       <span className={quote.code === 'pair_not_supported' ? 'sf-amount-note bad' : 'sf-amount-note'}>
         {!sameCurrency && lands !== undefined
-          ? `1 ${sendCurrency} = ${lands.rate} ${to.currency}`
+          ? `1 ${sendCurrency} = ${formatAmount(lands.rate, lands_in)}`
           : !sameCurrency && quote.code === 'pair_not_supported'
-            ? `We cannot convert ${sendCurrency} to ${to.currency} yet`
+            ? `We cannot convert ${sendCurrency} to ${lands_in} yet`
             : to.kind === 'xetral'
               ? 'Arrives instantly'
               : 'Usually arrives within minutes'}
@@ -1021,6 +1176,28 @@ function NewRecipientPill({ onClick }: { onClick: () => void }) {
   );
 }
 
+/**
+ * THE WAY BACK, at the bottom right of every step but the first.
+ *
+ * PORTALLED FOR THE SAME REASON THE PILL IS. `position: fixed` is contained
+ * by any ancestor carrying a transform, and the Shell's `<main>` has
+ * `screen-in`, whose animation creates exactly that — so a fixed child is laid
+ * out against a 900px-tall main and lands below the fold. Measured, not
+ * reasoned about, the first time it happened.
+ */
+function FlowBack({ onClick }: { onClick: () => void }) {
+  const [ready, setReady] = useState(false);
+  useEffect(() => setReady(true), []);
+  if (!ready) return null;
+  return createPortal(
+    <button type="button" className="sf-flow-back" onClick={onClick}>
+      <Icon name="chevronLeft" size={16} />
+      Back
+    </button>,
+    document.body,
+  );
+}
+
 /** The rail as it should READ on a row: "MTN", not "MTN Mobile Money". */
 function railLabelOf(to: Recipient): string {
   if (to.kind === 'xetral') return 'XETRAL';
@@ -1033,10 +1210,4 @@ function initialsOf(name: string): string {
   const first = parts[0]?.[0] ?? '';
   const last = parts.length > 1 ? (parts[parts.length - 1]?.[0] ?? '') : '';
   return `${first}${last}`.toUpperCase();
-}
-
-/** "Send GHS to Rabi" reads better than the whole legal name, and the whole
- *  name is on the header directly above it. */
-function firstNameOf(name: string): string {
-  return name.trim().split(/\s+/)[0] ?? name;
 }

@@ -63,6 +63,15 @@ export interface RecipientResolution {
    * not find the user name" about a number that is perfectly correct.
    */
   readonly resolved_name: string | null;
+  /**
+   * WHY the name is or is not there.
+   *
+   * `verified` the rail named the holder; `unavailable` the rail has no name
+   * enquiry at all; `failed` it has one and it did not answer. Only the last
+   * may stop a send — telling it from `unavailable` is the difference between
+   * refusing an unchecked Ghanaian number and breaking Kenya.
+   */
+  readonly name_status: 'verified' | 'unavailable' | 'failed';
 }
 
 interface RecipientRow {
@@ -186,6 +195,21 @@ export class RecipientBookService {
      * as a refusal is what stopped the Kenyan corridor; treating every wallet
      * as having it is what stopped the Ghanaian one. Told apart, both work.
      */
+    /*
+     * THREE ANSWERS, NOT TWO — and the difference decides whether a customer
+     * may continue.
+     *
+     *   verified    the rail named the holder
+     *   unavailable the rail HAS no name enquiry (M-PESA), so there is nothing
+     *               to wait for and the send proceeds
+     *   failed      the rail HAS one and it did not answer — an unknown number,
+     *               or the provider refusing. A Ghanaian wallet that cannot be
+     *               named is one nobody has checked, and the send must stop.
+     *
+     * Collapsing `failed` into `unavailable` is what let an unverified Ghanaian
+     * number through; collapsing it the other way is what stopped Kenya.
+     */
+    let nameStatus: 'verified' | 'unavailable' | 'failed' = 'unavailable';
     let resolved: string | null = null;
     try {
       const found = await this.payouts.lookupOrRefuse({
@@ -194,33 +218,28 @@ export class RecipientBookService {
         account_number: destination,
       });
       resolved = found.accountName;
+      nameStatus = 'verified';
     } catch (error: unknown) {
       /*
-       * FOR A WALLET, A NAME IS A BONUS AND NEVER A GATE — and this resolve
-       * path must not be STRICTER than the send path, which is the bug that
-       * kept "it cannot find the momo details" alive across three earlier
-       * fixes.
+       * WHAT A MISSING NAME MEANS DEPENDS ENTIRELY ON WHY IT IS MISSING.
        *
-       * `payout.service.#beneficiaryFor` does not look a momo name up AT ALL
-       * (`if (destination.mobile_money) return undefined`), so the send would
-       * have gone through — but this method, which gates the Continue button,
-       * only tolerated `name_unavailable` and RE-THREW everything else. So a
-       * Ghanaian wallet whose name enquiry answered `account_not_found`, or a
-       * moment when Flutterwave was unreachable, blocked a send that the very
-       * next layer would have completed without a name.
+       * `name_unavailable` is the rail saying it HAS no name enquiry — M-PESA.
+       * Nothing was checked because there is nothing to check, so the send
+       * proceeds; refusing there is what stopped the Kenyan corridor.
        *
-       * A momo lookup is therefore best-effort here: on ANY failure the name
-       * is simply null and the flow proceeds, exactly as the send path does.
-       * Only a BANK rail — where the bank's answer is the one claim about the
-       * beneficiary that does not come from the sender (043) — still surfaces
-       * a real failure, and even then a rail with no name enquiry is tolerated.
+       * Anything else is an enquiry that EXISTS and did not answer: an unknown
+       * Ghanaian wallet, or Flutterwave refusing. That is a number nobody has
+       * checked, and the screen must not let it through — which is the whole
+       * point of asking.
        */
-      if (body.kind === 'momo') {
+      if (isNameUnavailable(error)) {
+        nameStatus = 'unavailable';
+        this.#logger.log(`${iso} ${body.rail_code} has no name enquiry`);
+      } else if (body.kind === 'momo') {
+        nameStatus = 'failed';
         this.#logger.log(
-          `${iso} ${body.rail_code} momo name enquiry did not answer (${describe(error)}); proceeding without a name`,
+          `${iso} ${body.rail_code} name enquiry did not answer (${describe(error)})`,
         );
-      } else if (isNameUnavailable(error)) {
-        this.#logger.log(`${iso} ${body.rail_code} has no name enquiry; asking for a label instead`);
       } else {
         throw error;
       }
@@ -234,6 +253,7 @@ export class RecipientBookService {
       rail_name: rail.name,
       destination,
       resolved_name: resolved,
+      name_status: nameStatus,
     };
   }
 
@@ -411,6 +431,7 @@ export class RecipientBookService {
       currency: row.currency ?? 'NGN',
       rail_code: null,
       rail_name: null,
+      name_status: 'verified' as const,
       /* WHAT WAS MATCHED, never what was typed. The row is what a later send
          reads, and 043's rule is that a destination which the rail never saw
          is one nothing can reconcile afterwards. */

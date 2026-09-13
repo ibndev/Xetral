@@ -226,6 +226,10 @@
   --sf-dots: #B0B8C4;
   --sf-field: #E8E8E8;
   --sf-field-text: #333333;
+  /* THE DIAL PREFIX'S HAIRLINE. `--sf-divider` is #E8EAED, which against a
+     #E8E8E8 field is the same colour — the rule was there and invisible, so
+     the prefix and the number read as one run of text. */
+  --sf-dial-line: #CFD3D9;
   --sf-label: #888888;
   --sf-sub: #999999;
   --sf-sheet: #FFFFFF;
@@ -307,6 +311,7 @@
   --sf-dots: var(--text-3);
   --sf-field: var(--field);
   --sf-field-text: var(--text);
+  --sf-dial-line: var(--line-strong);
   --sf-label: var(--text-2);
   --sf-sub: var(--text-2);
   --sf-sheet: var(--surface);
@@ -3646,13 +3651,17 @@ body:has(.sf) { background: var(--sf-bg); }
   line-height: 1.3;
   letter-spacing: -0.4px;
   color: var(--sf-text);
-  margin: 2px 0 20px;
+  /* NO TOP MARGIN, because the back chevron that used to sit above it is
+     gone — the way back is a small pill at the bottom right of every step.
+     With the chevron removed, a 2px lead-in left the heading floating in the
+     band the chevron had occupied. */
+  margin: 0 0 16px;
 }
 .sf-sub {
   font-size: 13px;
   font-weight: 400;
   color: var(--sf-sub);
-  margin: -14px 0 24px;
+  margin: -10px 0 18px;
 }
 
 /* Search — 52px bar, 1.2px hairline, 14px radius. */
@@ -3727,7 +3736,7 @@ body:has(.sf) { background: var(--sf-bg); }
   align-items: center;
   justify-content: center;
 }
-.sf-cur-name { font-size: 16px; font-weight: 700; color: var(--sf-text); line-height: 1.25; }
+.sf-cur-name { font-size: 15.5px; font-weight: 700; color: var(--sf-text); line-height: 1.25; }
 .sf-cur-code { font-size: 13px; font-weight: 400; color: var(--sf-muted); margin-top: 2px; }
 
 /* --- recipient select --- */
@@ -3877,7 +3886,7 @@ body:has(.sf) { background: var(--sf-bg); }
 .sf-newbtn:hover:where(:not(:disabled)) { background: var(--sf-accent); color: var(--sf-on-accent); }
 
 /* --- momo network form --- */
-.sf-group { margin-bottom: 16px; }
+.sf-group { margin-bottom: 12px; }
 .sf-label {
   display: block;
   font-size: 13px;
@@ -3925,10 +3934,18 @@ body:has(.sf) { background: var(--sf-bg); }
 }
 .sf-select.open:hover:where(:not(:disabled)) { background: var(--sf-bg); }
 .sf-select-wrap { position: relative; }
+/* A DRAWN CHEVRON, NOT A TEXT TRIANGLE. `▼` renders in whatever glyph the
+   platform has for it — a fat black triangle on Android, a tiny one on iOS,
+   and a different weight again on Windows — so the one control on this step
+   that says "there is more here" looked like a different control on every
+   device. An inline SVG is the same stroke everywhere. */
 .sf-select-arrow {
   position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
-  color: var(--sf-label); font-size: 11px; pointer-events: none; line-height: 1;
+  display: flex; align-items: center;
+  color: var(--sf-label); pointer-events: none; line-height: 0;
+  transition: transform 0.18s var(--ease, ease);
 }
+.sf-select-arrow.up { transform: translateY(-50%) rotate(180deg); }
 
 .sf-primary {
   width: 100%;
@@ -4047,9 +4064,12 @@ body:has(.sf) { background: var(--sf-bg); }
   outline: none;
   background: transparent;
   font-family: var(--font-sans);
-  font-size: 20px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  /* SLIGHTLY SMALLER AND LIGHTER than it was. At 20/700 the figure was the
+     loudest thing on the screen and made a four-digit amount crowd the
+     currency beside it; 18/600 still reads as the primary value. */
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   color: var(--sf-text);
   text-align: left;
 }
@@ -4101,6 +4121,19 @@ body:has(.sf) { background: var(--sf-bg); }
 .sf-amount .xselect { width: auto; flex: 0 0 auto; }
 .sf-amount .xselect-trigger > svg { width: 16px; height: 16px; }
 
+/* THE SECOND LABEL SITS DIRECTLY ON ITS OWN BOX. The note above it already
+   closes the first pair, so a paragraph gap here would read as two unrelated
+   sections rather than as one conversion. */
+.sf-label-next { margin-top: 14px; }
+/* The gap between a typed amount and its rate. Lighter and smaller, because it
+   is a state rather than a figure — and never a zero, which would be a claim
+   about what the corridor pays. */
+.sf-amount .sf-amount-value.waiting {
+  font-size: 14.5px;
+  font-weight: 500;
+  color: var(--sf-muted);
+}
+
 /* The note belongs TO the box above it — a tight 5px, not a paragraph gap. */
 .sf-amount-note {
   display: block;
@@ -4111,16 +4144,112 @@ body:has(.sf) { background: var(--sf-bg); }
 }
 .sf-amount-note.bad { color: var(--danger); }
 
-/* The back chevron: a tap target, not a band of empty space. */
-.sf-back.icon-btn {
-  width: 40px;
-  height: 40px;
+/*
+ * THE WAY BACK IS A PILL AT THE BOTTOM RIGHT, on every step.
+ *
+ * It was a chevron at the TOP LEFT, which cost a band of empty space above
+ * the heading on a handset screen and sat at the one corner a thumb holding
+ * the phone cannot reach. This is the same fixed-and-portalled construction
+ * the New-recipient pill is, for the same reason: `.screen-in` carries an
+ * animation, an animation creates a containing block, and a `position: fixed`
+ * child of one is laid out against the CONTENT rather than the viewport.
+ *
+ * It is QUIET — the field grey, not the accent — because it is the way out of
+ * a step rather than the way through it, and the primary button is the one
+ * thing on the screen that may be blue.
+ */
+.sf-flow-back {
+  position: fixed;
+  right: 20px;
+  bottom: calc(var(--tabbar-h) + 10px + env(safe-area-inset-bottom, 0px));
+  z-index: 45;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   min-height: 0;
-  margin: 0 0 2px -8px;
-  padding: 0;
-  background: transparent;
+  padding: 11px 18px;
+  border: 0;
+  border-radius: 50px;
+  background: var(--sf-field);
+  color: var(--sf-field-text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 12%);
 }
-.sf-back.icon-btn:hover:where(:not(:disabled)) { background: transparent; }
+.sf-flow-back:hover:where(:not(:disabled)) { background: var(--sf-field); color: var(--sf-field-text); }
+.sf-flow-back:active { transform: none; }
+
+/*
+ * THE DIALLING CODE IS DRAWN IN FRONT OF THE NUMBER, never typed into it.
+ *
+ * One place a country is stated — 040's rule about a second picker letting
+ * somebody select Ghana and +234. The prefix comes off the country the
+ * CURRENCY step already fixed, so the box holds national digits and the field
+ * says out loud what is going to be sent.
+ */
+.sf-phone {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  width: 100%;
+  height: 52px;
+  border-radius: 8px;
+  background: var(--sf-field);
+  overflow: hidden;
+}
+.sf-dial {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  height: 100%;
+  padding: 0 12px 0 16px;
+  border-right: 1px solid var(--sf-dial-line);
+  color: var(--sf-field-text);
+  font-family: var(--font-sans);
+  font-size: 14.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.sf-dial .sf-dial-country { font-weight: 400; color: var(--sf-label); }
+.sf-phone input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  background: transparent;
+  color: var(--sf-field-text);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 400;
+}
+.sf-phone input:hover, .sf-phone input:focus { border: 0; box-shadow: none; background: transparent; }
+.sf-phone input::placeholder { color: var(--sf-placeholder); }
+
+/* The name the rail answered with, and the refusal when it did not. */
+.sf-verified {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -4px 0 12px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ok);
+}
+.sf-verify-bad {
+  display: block;
+  margin: -4px 0 12px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--danger);
+}
 
 /* Who is being paid, above the amount. */
 .sf-payee {

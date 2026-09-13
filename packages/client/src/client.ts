@@ -101,6 +101,45 @@ export function e164(dialCode: string, national: string): string {
 }
 
 /**
+ * WHAT A CUSTOMER TYPES INTO A NUMBER FIELD THAT ALREADY SHOWS ITS COUNTRY.
+ *
+ * THE TRUNK ZERO COMES OFF AS IT IS TYPED, and that is a decision about what
+ * the field MEANS rather than tidying. The Send screen draws `+233` in front
+ * of the box, so the box holds the NATIONAL SIGNIFICANT digits — and
+ * `+233 0244…` is not a number anybody has. Stripping it server-side as well
+ * (`internationalDigits`) is the protection; stripping it here is what makes
+ * the field say out loud what it is going to send, so a customer is never
+ * looking at a string the server is about to change behind them.
+ *
+ * ONE DEFINITION, EXPORTED, read by both apps. Two copies of "take the zero
+ * off" is the shape every one of this flow's four rounds of bugs had.
+ */
+export function nationalDigits(typed: string): string {
+  return typed.replace(/[^0-9]/g, '').replace(/^0+/, '');
+}
+
+/**
+ * The example number to show in an empty field, per dialling code.
+ *
+ * IT IS THE INTERNATIONAL SHAPE, because that is what the customer is
+ * building: the prefix is already on screen and the placeholder completes it.
+ * A generic "Enter phone number" taught nothing, and a customer who typed
+ * their number the way they write it at home got a refusal about an invalid
+ * account from a rail that had never seen a trunk zero.
+ */
+export function phoneHint(dialCode: string | null | undefined): string {
+  const code = (dialCode ?? '').replace(/[^0-9]/g, '');
+  const EXAMPLES: Record<string, string> = {
+    '234': '803 123 4567',
+    '233': '24 123 4567',
+    '254': '712 345 678',
+    '44': '7400 123456',
+    '1': '415 555 0123',
+  };
+  return EXAMPLES[code] ?? '123 456 789';
+}
+
+/**
  * A PHONE NUMBER AS SOMEBODY WOULD READ IT ALOUD, without the country.
  *
  * `users.phone` is E.164 — `+2348031234567` — which is the one shape the
@@ -444,6 +483,20 @@ export interface RecipientResolution {
   /** Digits only, normalised server-side into the form the rail accepts. */
   readonly destination: string;
   readonly resolved_name: string | null;
+  /**
+   * WHETHER THE RAIL ANSWERED, told apart from whether it CAN answer.
+   *
+   * `verified`    the rail named the holder, or the destination is a Xetral
+   *               account we resolved ourselves.
+   * `unavailable` no name enquiry exists on this rail — Kenya's M-PESA. The
+   *               send proceeds; a name was never obtainable, so demanding one
+   *               would be requiring a claim that cannot exist (067).
+   * `failed`      a name enquiry EXISTS and did not answer. Ghana is the case:
+   *               `/v3/accounts/resolve` takes a momo number, so silence means
+   *               the number is wrong or the wallet is inactive, and sending to
+   *               it is unrecoverable. The screens refuse to continue on this.
+   */
+  readonly name_status: 'verified' | 'unavailable' | 'failed';
 }
 
 export interface BankPayout {

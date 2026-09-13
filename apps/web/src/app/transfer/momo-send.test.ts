@@ -31,9 +31,12 @@ import { describe, expect, it } from 'vitest';
  *     the lookup AND by the button. Two definitions is what did it.
  *   - A floor PER RAIL, nine digits on a wallet, because a Ghanaian MTN number
  *     and a Kenyan Safaricom number are nine national digits.
- *   - A rail that cannot name its holder never DISABLES the way forward. It
- *     asks for a label instead, which is a different screen rather than a dead
- *     end.
+ *   - A rail that cannot name its holder never DISABLES the way forward —
+ *     Kenya's M-PESA has no name enquiry at all, and demanding a claim that
+ *     cannot exist is an outage rather than a control.
+ *   - A rail that CAN name one and did not DOES disable it. Ghana's numbers
+ *     resolve, so silence means the number is wrong or the wallet is dead, and
+ *     a mobile money send cannot be recalled.
  */
 const HERE = new URL('.', import.meta.url).pathname;
 const web = readFileSync(`${HERE}/page.tsx`, 'utf8');
@@ -75,27 +78,44 @@ describe('a mobile money send can actually be submitted', () => {
     }
   });
 
-  it('never gates a momo send on a name it cannot get', () => {
+  it('gates a momo send on whether a name COULD have come, never on a typed one', () => {
     /*
-     * THE FOURTH ROUND, AND THE REASON THIS ASSERTION INVERTED.
+     * THE FIFTH ROUND, AND THE ASSERTION MOVED AGAIN — because the question
+     * changed from "is there a name?" to "could there ever have been one?".
      *
-     * Earlier the screen collected a LABEL when the rail could not name the
-     * holder, which unblocked Kenya but still made the momo send a two-step,
-     * name-gated flow — and the resolve path it leaned on was STRICTER than the
-     * send path, so a Ghanaian wallet whose /v3/accounts/resolve answered
-     * `account_not_found` was refused a send the very next layer would have
-     * completed. The mockup's momo screen has no name and no label: country,
-     * network, number, go.
+     * Round four made momo ungated in both directions, which unblocked Kenya
+     * and also let a Ghanaian wallet through that Flutterwave had declined to
+     * name. Ghana's numbers DO resolve — `/v3/accounts/resolve` takes them —
+     * so silence there means the number is wrong or the wallet is inactive,
+     * and money sent to a mobile money wallet does not come back.
      *
-     * So the invariant is now the OPPOSITE of a label gate — momo must NOT be
-     * gated on `resolved_name` at all. The old `ready` expression and the
-     * label field are gone in both apps, and their return is the regression.
+     * `name_status` is what tells the two apart, and both halves are the
+     * invariant:
+     *
+     *   `unavailable`  no name enquiry EXISTS on this rail (Kenya). The send
+     *                  proceeds. Requiring a claim that cannot exist is an
+     *                  outage, not a control — 067's rule.
+     *   `failed`       one exists and did not answer. Continue is REFUSED.
+     *
+     * And neither is a LABEL the sender typed: a name the customer supplied,
+     * shown back as the account's, is a confirmation screen that confirms
+     * nothing while looking exactly like one (043). The old label field and
+     * its `ready` expression are gone in both apps and their return is the
+     * regression.
      */
     for (const [name, source] of APPS) {
       expect(source, name).not.toContain('label.trim().length >= 2');
       expect(source, name).not.toContain('Name this recipient');
-      // Momo proceeds in one tap: the submit resolves and goes straight on.
-      expect(source, name).toMatch(/kind === 'momo'[\s\S]{0,80}proceed\(/);
+
+      // A rail that CANNOT name a holder never blocks the way forward.
+      expect(source, `${name} lets an unnameable rail through`).toContain(
+        "name_status === 'unavailable'",
+      );
+      // A rail that CAN and did not is a stop, and the button says so.
+      expect(source, `${name} refuses an unverified number`).toContain(
+        "found?.name_status === 'failed'",
+      );
+      expect(source, `${name} disables Continue on it`).toMatch(/disabled=\{[^}]*blocked/);
     }
   });
 

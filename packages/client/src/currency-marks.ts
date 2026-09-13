@@ -56,6 +56,16 @@ export interface FlagMark {
    * keeps both renderers honest about what they are drawing.
    */
   readonly shield?: { readonly body: string; readonly edge: string };
+  /**
+   * A union in the top-left corner — the United States' canton.
+   *
+   * Given as FRACTIONS of the disc rather than pixels, because the same mark
+   * is drawn at 18px in a chip and 38px in a picker and the proportions have
+   * to hold at both. The stars are deliberately absent: fifty of them at
+   * eighteen pixels is noise, and what identifies the flag at this size is
+   * the stripes plus the block of blue.
+   */
+  readonly canton?: { readonly ground: string; readonly width: number; readonly height: number };
 }
 
 /** A symbol on a tinted disc, for money that is not one country's. */
@@ -96,15 +106,36 @@ export const CURRENCY_MARKS: Readonly<Record<string, CurrencyMark>> = {
 
   // Symbols, because a dollar is not a country's. The greens and blues are
   // each currency's own, so two dollars never look like the same money.
-  USD: { kind: 'symbol', symbol: '$', ink: '#1B7A4B', ground: '#E7F6EE' },
+  /*
+   * THE UNITED STATES' FLAG, not a green dollar sign on a pale disc.
+   *
+   * A dollar belongs to no country in this product's own framing — which is
+   * why USDT and USDC are brand discs — but USD itself is the United States',
+   * and a customer picking it looks for that flag. Thirteen stripes and the
+   * canton; no stars, because fifty of them at this size are a smudge.
+   */
+  USD: {
+    kind: 'flag',
+    direction: 'horizontal',
+    bands: [
+      '#B22234', '#FFFFFF', '#B22234', '#FFFFFF', '#B22234', '#FFFFFF', '#B22234',
+      '#FFFFFF', '#B22234', '#FFFFFF', '#B22234', '#FFFFFF', '#B22234',
+    ],
+    canton: { ground: '#3C3B6E', width: 0.46, height: 7 / 13 },
+  },
   GBP: { kind: 'symbol', symbol: '£', ink: '#3866E0', ground: '#EAF0FE' },
   EUR: { kind: 'symbol', symbol: '€', ink: '#3866E0', ground: '#EAF0FE' },
   JPY: { kind: 'symbol', symbol: '¥', ink: '#B7791F', ground: '#FDF3E2' },
 
   // The chains use each token's own brand colour, which is how they are shown
   // everywhere else a customer has seen them.
-  USDT: { kind: 'symbol', symbol: '₮', ink: '#0B8A7D', ground: '#E3F5F2' },
-  USDC: { kind: 'symbol', symbol: '$', ink: '#2775CA', ground: '#E6F0FB' },
+  /*
+   * THE TOKENS' OWN LOGOS: a SOLID brand disc with a white glyph, which is how
+   * Tether and Circle draw them and how every customer has seen them. The pale
+   * tint they had instead read as a disabled chip beside a real flag.
+   */
+  USDT: { kind: 'symbol', symbol: '₮', ink: '#FFFFFF', ground: '#26A17B' },
+  USDC: { kind: 'symbol', symbol: '$', ink: '#FFFFFF', ground: '#2775CA' },
   BTC: { kind: 'symbol', symbol: '₿', ink: '#C77405', ground: '#FDF3E2' },
 };
 

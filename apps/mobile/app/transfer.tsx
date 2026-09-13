@@ -7,7 +7,9 @@ import {
   exponentFor,
   formatAmount,
   isValidAmount,
+  nationalDigits,
   networkLabel,
+  phoneHint,
   sendableFor,
   symbolFor,
 } from '@xetral/client';
@@ -111,30 +113,15 @@ export default function Transfer() {
         <>
           <Toast message={sent} tone="ok" onDone={() => setSent(undefined)} />
           {/* BOTTOM RIGHT, ALWAYS — over the screen rather than at the end of
-              the list, so it does not scroll away or cover the last row. */}
-          {step === 'who' && <NewRecipientPill onPress={startNew} />}
+              the list, so it does not scroll away or cover the last row.
+              THE WAY BACK SITS THERE TOO, on every step after the first: a
+              chevron above the heading cost a band of empty space on a handset
+              and sat at the one corner a thumb holding the phone cannot
+              reach. */}
+          {step === 'who' ? <NewRecipientPill onPress={startNew} /> : <FlowBack onPress={back} />}
         </>
       }
     >
-      {step !== 'who' && (
-        <Pressable
-          onPress={back}
-          android_ripple={null}
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-          hitSlop={8}
-          style={{
-            width: 40,
-            height: 40,
-            marginLeft: -8,
-            marginBottom: 2,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <BackChevron />
-        </Pressable>
-      )}
 
       {step === 'who' && (
         <ChooseRecipient
@@ -173,7 +160,20 @@ export default function Transfer() {
           onReady={(resolution, recipient) => {
             setDraft(resolution);
             setChosen(recipient);
-            setReceive(resolution.currency);
+            /*
+             * A XETRAL SEND KEEPS THE CURRENCY THE CUSTOMER CHOSE.
+             *
+             * The server answers a Xetral lookup with the RECIPIENT'S OWN
+             * currency — a Ghanaian holds GHS — and this line overwrote the
+             * answer given one step earlier on a screen headed "What currency
+             * are you sending?". So somebody who chose naira and typed a
+             * Ghanaian friend's number was quoted in cedis, with nothing
+             * saying their choice had been discarded. A Xetral wallet is
+             * multi-currency, so paying a Ghanaian in naira is an ordinary
+             * transfer. Every other kind keeps the server's answer, where the
+             * currency really is a fact about the destination.
+             */
+            setReceive(resolution.kind === 'xetral' ? receive : resolution.currency);
             saved.reload();
             setStep('amount');
           }}
@@ -186,6 +186,8 @@ export default function Transfer() {
              carries everything a draft does, and a draft is what a new one
              becomes before it is saved. */
           to={chosen ?? toRecipient(draft as RecipientResolution)}
+          /* WHAT THE RECIPIENT RECEIVES IS THE FLOW'S ANSWER, not the row's. */
+          receiveCurrency={receive === '' ? home : receive}
           balances={wallets.data ?? []}
           home={home}
           onSent={(message) => {
@@ -575,7 +577,18 @@ function ChooseCurrency({
     code.toLowerCase().includes(needle) ||
     currencyName(code).toLowerCase().includes(needle);
 
-  const favourites = all.filter((c) => (c === home || c === 'USD') && matches(c));
+  /*
+   * FAVOURITES ARE THE FOUR THIS PLATFORM OPERATES IN, in that order.
+   *
+   * The narrower rule put ONE row above the fold for a Nigerian and made every
+   * corridor this product exists for — NGN to GHS, NGN to KES — something to
+   * be found by scrolling the alphabetical tail. `sendableFor` still decides
+   * what is offered; this only decides the order.
+   */
+  const FAVOURITE_ORDER = ['NGN', 'GHS', 'KES', 'USD'];
+  const favourites = [...all]
+    .filter((c) => FAVOURITE_ORDER.includes(c) && matches(c))
+    .sort((a, b) => FAVOURITE_ORDER.indexOf(a) - FAVOURITE_ORDER.indexOf(b));
   const stablecoins = all.filter((c) => (c === 'USDT' || c === 'USDC') && matches(c));
   const rest = all
     .filter((c) => !favourites.includes(c) && !stablecoins.includes(c) && matches(c))
@@ -589,7 +602,7 @@ function ChooseCurrency({
   }
 
   return (
-    <Panel bare title="What currency should your recipient receive?">
+    <Panel bare title="What currency are you sending?">
       <SearchField value={query} onChange={setQuery} placeholder="Search currency or country" />
 
       <CurrencyGroup heading="Favorites" codes={favourites} onPick={onPick} />
@@ -619,7 +632,7 @@ function CurrencyGroup({
   const sf = useSf();
   if (codes.length === 0) return null;
   return (
-    <View style={{ marginTop: 24 }}>
+    <View style={{ marginTop: 18 }}>
       {/* Section label over a hairline, per the mockup. */}
       <Text style={{ color: sf.section, fontFamily: font.sansSemi, fontSize: 13, marginBottom: 8 }}>
         {heading}
@@ -633,12 +646,14 @@ function CurrencyGroup({
           accessibilityRole="button"
           style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 7 }}
         >
-          {/* 44px circular mark. */}
-          <View style={{ width: 44, height: 44, borderRadius: 22, overflow: 'hidden' }}>
-            <CurrencyMark currency={code} size={44} />
+          {/* 38, not 44. At the larger size the discs dominated a list read by
+              its NAMES, and four of them filled a handset screen before the
+              first divider. */}
+          <View style={{ width: 38, height: 38, borderRadius: 19, overflow: 'hidden' }}>
+            <CurrencyMark currency={code} size={38} />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={{ color: sf.text, fontFamily: font.sansSemi, fontSize: 16 }}>
+            <Text style={{ color: sf.text, fontFamily: font.sansSemi, fontSize: 15.5 }}>
               {currencyName(code)}
             </Text>
             <Text style={{ color: sf.muted, fontSize: 13, marginTop: 2 }}>
@@ -665,10 +680,18 @@ function CurrencyGroup({
  * THE ACCOUNT NAME IS FETCHED, NEVER TYPED — where the rail can answer. That
  * is the whole of what "the momo details cannot be found" was: the adapter
  * matched a network code and refused before making the call, so a Ghanaian
- * number whose owner Flutterwave will name was reported as unfindable. Where
- * the rail genuinely has none — Kenya's M-PESA — the screen ASKS FOR A LABEL
- * rather than refusing, because a bare number in an address book is how
- * somebody pays the wrong person.
+ * number whose owner Flutterwave will name was reported as unfindable.
+ *
+ * AND WHERE THE RAIL *CAN* ANSWER, SILENCE IS A REFUSAL. `name_status` tells
+ * the two apart: `unavailable` means no name enquiry EXISTS — Kenya's M-PESA,
+ * 067's rule — and the send goes on, because demanding a claim that cannot
+ * exist is an outage rather than a control. `failed` means one exists and did
+ * not answer, which on a Ghanaian wallet means the number is wrong or the
+ * wallet is dead, and momo is unrecoverable once sent.
+ *
+ * THE DIALLING CODE IS DRAWN, NOT TYPED. The currency step already fixed the
+ * country, so the field shows `+233` and holds the national digits, with the
+ * trunk zero taken off as it is typed.
  */
 function RecipientDetails({
   receive,
@@ -689,7 +712,7 @@ function RecipientDetails({
 
   const country = countries.find((c) => c.currency === receive);
   const [rail, setRail] = useState('');
-  const [destination, setDestination] = useState(initialDestination.replace(/[^0-9]/g, ''));
+  const [destination, setDestination] = useState(nationalDigits(initialDestination));
   const [found, setFound] = useState<RecipientResolution | undefined>(undefined);
 
   const banks = useLoad(
@@ -743,14 +766,28 @@ function RecipientDetails({
   const minimumDigits = mobileMoney ? 9 : 10;
   const enough = destination.replace(/[^0-9]/g, '').length >= minimumDigits;
 
+  /*
+   * A DIAL PREFIX NEEDS A COUNTRY, and USD, USDT and USDC belong to none. A
+   * Xetral send in one of those falls back to a plain field where the number
+   * is typed whole, rather than a `+` with nothing after it.
+   */
+  const dialCode = (country?.dial_code ?? '').replace(/[^0-9]/g, '');
+  const isPhone = kind !== 'bank' && dialCode !== '';
+
+  /*
+   * WHETHER THE NAME IS A GATE, decided by whether one could ever have come.
+   * `failed` is the only blocking answer, and only a rail that HAS a name
+   * enquiry can give it.
+   */
+  const blocked = found?.name_status === 'failed';
+
   /**
    * Ask the server who holds this destination.
    *
-   * FOR MOMO THIS NEVER BLOCKS — the server's resolve path is best-effort for a
-   * wallet, returning the name where the rail can answer and null where it
-   * cannot, and never throwing. A bank or a Xetral account still resolves a
-   * name to confirm; a Xetral number belonging to nobody still fails, which is
-   * the one real refusal on this screen.
+   * IT ALWAYS ANSWERS — the resolve path does not throw on a rail that cannot
+   * name a holder — so what comes back carries `name_status` and this screen
+   * decides. A Xetral number belonging to nobody still 404s, which is the one
+   * refusal here that is not about a name.
    */
   async function doResolve(): Promise<RecipientResolution> {
     return client.resolveRecipient({
@@ -762,6 +799,19 @@ function RecipientDetails({
       ...(country === undefined ? {} : { country: country.code }),
       ...(kind === 'xetral' ? {} : { railCode: rail }),
       destination,
+    });
+  }
+
+  /**
+   * Ask the rail as soon as the field is left, so the holder's name is on
+   * screen before the button is pressed — and so a number that cannot be
+   * verified says so while the customer is still looking at the digits.
+   */
+  function askTheRail(): void {
+    if (rail === '' || !enough) return;
+    void run(async () => {
+      setFound(await doResolve());
+      return undefined;
     });
   }
 
@@ -824,77 +874,138 @@ function RecipientDetails({
         searchPlaceholder="Search…"
       />
 
-      <Field
-        label={numberLabel}
-        value={destination}
-        onChangeText={(next) => {
-          setDestination(next);
-          setFound(undefined);
-        }}
-        onBlur={() => {
-          /* EVERY RAIL RESOLVES ON BLUR, MOMO INCLUDED, so the holder's name is
-             on screen before the button is pressed. What must never happen
-             again is the name being a GATE — if the rail cannot answer, it is
-             simply absent and Continue still works. */
-          if (rail === '' || !enough) return;
-          void run(async () => {
-            setFound(await doResolve());
-            return undefined;
-          });
-        }}
-        keyboardType="number-pad"
-        placeholder={kind === 'bank' ? '0123456789' : 'Enter phone number'}
-        autoComplete="off"
-      />
-
-      {found?.resolved_name != null && (
+      {isPhone ? (
         <View>
-          <Text style={styles.label}>Account name</Text>
+          <Text style={styles.label}>{numberLabel}</Text>
           {/*
-            THE RAIL'S OWN ANSWER, and the only thing on this screen presented
-            as confirmation. A name the SENDER typed shown here would be a
-            confirmation screen that confirms nothing while looking exactly
-            like one — 043's rule.
+            THE COUNTRY CODE IS A LABEL AND THE BOX HOLDS THE REST. One place a
+            country is stated — 040's rule that a second picker lets somebody
+            select Ghana and +234 — and it comes off the country the currency
+            step already fixed.
           */}
           <View
             style={{
+              flexDirection: 'row',
+              alignItems: 'center',
               backgroundColor: colors.field,
               borderRadius: radius.md,
-              paddingHorizontal: 15,
-              paddingVertical: 14,
+              overflow: 'hidden',
+              marginBottom: space.md,
             }}
           >
-            <Text style={{ color: colors.text, fontFamily: font.sansSemi, fontSize: 15 }}>
-              {found.resolved_name}
-            </Text>
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 6,
+                paddingLeft: 15,
+                paddingRight: 12,
+                paddingVertical: 14,
+                borderRightWidth: 1,
+                borderRightColor: sf.dialLine,
+              }}
+            >
+              <Text style={{ color: colors.text, fontFamily: font.sansSemi, fontSize: 14.5 }}>
+                +{dialCode}
+              </Text>
+              <Text style={{ color: sf.label, fontSize: 14.5 }}>{country?.name ?? ''}</Text>
+            </View>
+            <TextInput
+              value={destination}
+              onChangeText={(next) => {
+                setDestination(nationalDigits(next));
+                setFound(undefined);
+              }}
+              onBlur={askTheRail}
+              keyboardType="number-pad"
+              placeholder={phoneHint(country?.dial_code)}
+              placeholderTextColor={sf.placeholder}
+              accessibilityLabel={numberLabel}
+              style={{
+                flex: 1,
+                paddingHorizontal: 14,
+                paddingVertical: 14,
+                color: colors.text,
+                fontFamily: font.sans,
+                fontSize: 15,
+              }}
+            />
           </View>
+        </View>
+      ) : (
+        <Field
+          label={numberLabel}
+          value={destination}
+          onChangeText={(next) => {
+            setDestination(next.replace(/[^0-9]/g, ''));
+            setFound(undefined);
+          }}
+          onBlur={askTheRail}
+          keyboardType="number-pad"
+          placeholder={kind === 'bank' ? '0123456789' : '+234 803 123 4567'}
+          autoComplete="off"
+        />
+      )}
+
+      {/* THE NAME, THE MOMENT IT ARRIVES — the rail's own answer, and the only
+          thing on this screen presented as confirmation. A name the SENDER
+          typed shown here would be a confirmation screen that confirms nothing
+          while looking exactly like one (043). */}
+      {found?.resolved_name != null && (
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 8,
+            marginTop: -4,
+            marginBottom: 12,
+          }}
+        >
+          <Icon name="check" size={16} color={colors.ok} />
+          <Text style={{ color: colors.ok, fontFamily: font.sansSemi, fontSize: 13.5, flex: 1 }}>
+            {found.resolved_name}
+          </Text>
         </View>
       )}
 
-      {found !== undefined && found.resolved_name === null && (
-        <Text style={{ color: sf.muted, fontSize: 12.5, marginTop: -4, marginBottom: 10 }}>
-          {railLabel ?? 'This rail'} could not confirm the account name — check the number before
-          you send.
+      {/* A RAIL THAT CAN NAME A HOLDER AND DID NOT IS A STOP, not a warning.
+          Kenya has no name enquiry at all, so nothing is said and nothing is
+          blocked there. */}
+      {blocked && (
+        <Text style={{ color: colors.danger, fontSize: 12.5, marginTop: -4, marginBottom: 12 }}>
+          We could not verify this {railLabel ?? 'account'} number. Check the digits with your
+          recipient — we will not send to a number nobody answers for.
         </Text>
       )}
 
       <FormError error={error} code={code} />
 
       <Button
-        label={busy ? 'Checking…' : kind === 'momo' || found !== undefined ? 'Continue' : 'Check details'}
+        label={
+          busy
+            ? 'Checking…'
+            : blocked
+              ? 'Number not verified'
+              : found !== undefined
+                ? 'Continue'
+                : 'Check details'
+        }
         busy={busy}
-        disabled={rail === '' || !enough}
+        disabled={rail === '' || !enough || blocked}
         onPress={() => {
-          if (rail === '' || !enough) return;
+          if (rail === '' || !enough || blocked) return;
           void run(async () => {
-            /* ONE TAP FOR MOMO, TWO FOR A NAMED RAIL. A wallet has no name to
-               confirm; a bank or Xetral account shows the resolved name first. */
-            if (found !== undefined) {
-              await proceed(found);
-            } else {
-              const resolution = await doResolve();
-              if (kind === 'momo') await proceed(resolution);
-              else setFound(resolution);
+            /*
+             * THE NAME IS SHOWN BEFORE THE MONEY MOVES, wherever one exists.
+             * A rail that cannot name a holder — Kenya — proceeds in one
+             * press, because there is nothing to confirm. A rail that can and
+             * did not answer stops here.
+             */
+            const resolution = found ?? (await doResolve());
+            setFound(resolution);
+            if (resolution.name_status === 'failed') return undefined;
+            if (found !== undefined || resolution.name_status === 'unavailable') {
+              await proceed(resolution);
             }
             return undefined;
           });
@@ -916,11 +1027,16 @@ function RecipientDetails({
  */
 function SendAmount({
   to,
+  receiveCurrency,
   balances,
   home,
   onSent,
 }: {
   readonly to: Recipient;
+  /** What the recipient RECEIVES, as the flow decided it — not as the row
+   *  records it. A Xetral account holds its own country's money and the
+   *  customer may have chosen to send something else. */
+  readonly receiveCurrency: string;
   readonly balances: readonly { currency: string; spendable: string }[];
   readonly home: string;
   readonly onSent: (message: string) => void;
@@ -936,8 +1052,17 @@ function SendAmount({
   const [amount, setAmount] = useState('');
   const [pin, setPin] = useState('');
 
+  /*
+   * WHAT LANDS IS `receiveCurrency`, NOT `to.currency`, ON EVERY LINE BELOW.
+   *
+   * The row records what a Xetral recipient's own country uses; the flow
+   * records what the customer chose on the screen headed "What currency are
+   * you sending?". Reading the row is what made a naira send to a Ghanaian
+   * friend quote in cedis.
+   */
+  const lands_in = receiveCurrency;
   const balance = balances.find((b) => b.currency === sendCurrency)?.spendable ?? '0';
-  const sameCurrency = sendCurrency === to.currency;
+  const sameCurrency = sendCurrency === lands_in;
 
   /*
    * A QUOTE CARRIES THE AMOUNT IT IS A QUOTE FOR.
@@ -953,10 +1078,10 @@ function SendAmount({
   const quote = useLoad(
     async () => {
       if (sameCurrency || !isValidAmount(amount, exponentFor(sendCurrency))) return undefined;
-      const got = await client.fxQuote(sendCurrency, to.currency, amount);
+      const got = await client.fxQuote(sendCurrency, lands_in, amount);
       return { forAmount: amount, ...got };
     },
-    [sendCurrency, to.currency, amount, sameCurrency],
+    [sendCurrency, lands_in, amount, sameCurrency],
   );
   const lands = quote.data?.forAmount === amount ? quote.data : undefined;
 
@@ -968,6 +1093,12 @@ function SendAmount({
    * money — caught by `.semgrep/xetral.yml`, which is what that rule is for.
    */
   const enough = isValidAmount(amount, exponentFor(sendCurrency));
+
+  /* THE GAP BETWEEN A VALID AMOUNT AND ITS RATE, which is the only moment the
+     receiving box has nothing true to show. Saying "Converting…" there is the
+     difference between a screen that is working and one that is refusing — a
+     zero beside a typed amount reads as "this corridor pays nothing". */
+  const converting = !sameCurrency && enough && lands === undefined && quote.code === undefined;
 
   /* A text-field-sized box, not a card: 56px, flat, one line. */
   const amountBox = {
@@ -1025,8 +1156,10 @@ function SendAmount({
             flex: 1,
             color: sf.text,
             fontFamily: font.sansSemi,
-            fontSize: 20,
-            letterSpacing: -0.4,
+            /* SLIGHTLY SMALLER AND LIGHTER. At 20 the figure was the loudest
+               thing on the screen and crowded the currency beside it. */
+            fontSize: 18,
+            letterSpacing: -0.2,
             fontVariant: ['tabular-nums'],
             padding: 0,
           }}
@@ -1054,37 +1187,56 @@ function SendAmount({
           : `Balance: ${formatAmount(balance, sendCurrency)}`}
       </Text>
 
-      <Text style={{ color: sf.muted, fontSize: 13, marginTop: 16, marginBottom: 6 }}>
-        {firstNameOf(to.display_name)} receives
+      <Text style={{ color: sf.muted, fontSize: 13, marginTop: 14, marginBottom: 6 }}>
+        Recipient receives
       </Text>
       <View style={amountBox}>
+        {/*
+         * A FIGURE, NEVER A DASH AND NEVER A STALE ZERO.
+         *
+         * The conversion is automatic: type 100 naira and the cedi figure
+         * follows as soon as the quote lands. What it must not do is sit at
+         * zero in the gap — that reads as a claim about what the corridor
+         * pays. The currency's own SYMBOL comes from `formatAmount`, so a cedi
+         * renders ₵ rather than a code beside a ₦ figure.
+         */}
         <Text
           style={{
             flex: 1,
-            color: sf.text,
-            fontFamily: font.sansSemi,
-            fontSize: 20,
-            letterSpacing: -0.4,
+            color: converting ? sf.muted : sf.text,
+            fontFamily: converting ? font.sans : font.sansSemi,
+            fontSize: converting ? 14.5 : 18,
+            letterSpacing: converting ? 0 : -0.2,
             fontVariant: ['tabular-nums'],
           }}
         >
-          {/* A FIGURE, NEVER A DASH — a dash in a money field reads as broken. */}
-          {sameCurrency
-            ? formatAmount(amount === '' ? '0' : amount, to.currency)
-            : formatAmount(lands?.receives ?? '0', to.currency)}
+          {converting
+            ? 'Converting…'
+            : sameCurrency
+              ? formatAmount(amount === '' ? '0' : amount, lands_in)
+              : formatAmount(lands?.receives ?? '0', lands_in)}
         </Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
-          <CurrencyMark currency={to.currency} size={18} />
+          <CurrencyMark currency={lands_in} size={18} />
           <Text style={{ color: sf.text, fontFamily: font.sansSemi, fontSize: 14.5 }}>
-            {to.currency}
+            {lands_in}
           </Text>
         </View>
       </View>
-      <Text style={{ color: sf.muted, fontSize: 12.5, marginTop: 6, marginBottom: 18 }}>
+      {/* DIRECTLY UNDER THE BOX — one line saying when it lands, which is what
+          the footer used to repeat further down the screen. */}
+      <Text
+        style={{
+          color: quote.code === 'pair_not_supported' ? colors.danger : sf.muted,
+          fontSize: 12.5,
+          marginTop: 6,
+          marginBottom: 16,
+        }}
+      >
         {!sameCurrency && lands !== undefined
-          ? `1 ${sendCurrency} = ${lands.rate} ${to.currency}`
+          ? `1 ${sendCurrency} = ${formatAmount(lands.rate, lands_in)}`
           : !sameCurrency && quote.code === 'pair_not_supported'
-            ? `We cannot convert ${sendCurrency} to ${to.currency} yet`
+            ? `We cannot convert ${sendCurrency} to ${lands_in} yet`
             : to.kind === 'xetral'
               ? 'Arrives instantly'
               : 'Usually arrives within minutes'}
@@ -1098,21 +1250,6 @@ function SendAmount({
         keyboardType="number-pad"
         maxLength={12}
       />
-
-      <View
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 7,
-          marginTop: space.md,
-        }}
-      >
-        <Icon name="zap" size={15} color={colors.text3} />
-        <Text style={styles.muted}>
-          {to.kind === 'xetral' ? 'Arrives instantly' : 'Usually arrives within minutes'}
-        </Text>
-      </View>
 
       <FormError error={error} code={code} />
 
@@ -1143,7 +1280,7 @@ function SendAmount({
             } else if (to.kind === 'xetral') {
               await client.remit({
                 from: sendCurrency,
-                to: to.currency,
+                to: lands_in,
                 amount,
                 recipient: to.destination,
                 pin,
@@ -1155,7 +1292,7 @@ function SendAmount({
                 bankCode: to.rail_code ?? '',
                 accountNumber: to.destination,
                 amount,
-                currency: to.currency,
+                currency: lands_in,
                 pin,
                 idempotencyKey: key,
               });
@@ -1214,6 +1351,8 @@ type SfPalette = {
   readonly chipBg: string; readonly chipBorder: string; readonly chipText: string;
   readonly avatarBg: string; readonly avatarText: string; readonly dots: string;
   readonly bg: string;
+  readonly label: string; readonly placeholder: string; readonly field: string;
+  readonly dialLine: string;
 };
 function useSf(): SfPalette {
   const c: Palette = useTheme();
@@ -1233,6 +1372,13 @@ function useSf(): SfPalette {
     avatarText: light ? '#8E939F' : c.text2,
     dots: light ? '#B0B8C4' : c.text3,
     bg: light ? '#FFFFFF' : c.bg,
+    label: light ? '#888888' : c.text2,
+    placeholder: light ? '#B2BCC8' : c.text3,
+    field: light ? '#E8E8E8' : c.field,
+    /* THE DIAL PREFIX'S HAIRLINE. The divider grey is the same colour as the
+       field, so the rule was there and invisible and the prefix read as one
+       run of text with the number. */
+    dialLine: light ? '#CFD3D9' : c.lineStrong,
   };
 }
 
@@ -1243,6 +1389,47 @@ function railLabelOf(to: Recipient): string {
 }
 
 /** The New-recipient pill, fixed to the bottom-right of the screen. */
+/**
+ * THE WAY BACK, at the bottom right of every step but the first.
+ *
+ * It was a chevron at the TOP LEFT, which cost a band of empty space above the
+ * heading and sat at the one corner a thumb holding the phone cannot reach.
+ * QUIET rather than accent-filled: it is the way out of a step, and the
+ * primary button is the one thing on the screen that may be blue.
+ */
+function FlowBack({ onPress }: { readonly onPress: () => void }) {
+  const sf = useSf();
+  const insets = useSafeAreaInsets();
+  return (
+    <Pressable
+      onPress={onPress}
+      android_ripple={null}
+      accessibilityRole="button"
+      accessibilityLabel="Back"
+      style={{
+        position: 'absolute',
+        right: 20,
+        bottom: 58 + 12 + insets.bottom,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        backgroundColor: sf.field,
+        borderRadius: 50,
+        paddingVertical: 11,
+        paddingHorizontal: 18,
+        shadowColor: '#000000',
+        shadowOpacity: 0.12,
+        shadowRadius: 14,
+        shadowOffset: { width: 0, height: 4 },
+        elevation: 4,
+      }}
+    >
+      <Icon name="chevronLeft" size={16} color={sf.text} />
+      <Text style={{ color: sf.text, fontFamily: font.sansSemi, fontSize: 14 }}>Back</Text>
+    </Pressable>
+  );
+}
+
 function NewRecipientPill({ onPress }: { readonly onPress: () => void }) {
   const sf = useSf();
   /* JUST ABOVE THE TAB BAR. The overlay is a sibling of the bar inside the
@@ -1287,10 +1474,4 @@ function initialsOf(name: string): string {
   const first = parts[0]?.[0] ?? '';
   const last = parts.length > 1 ? (parts[parts.length - 1]?.[0] ?? '') : '';
   return `${first}${last}`.toUpperCase();
-}
-
-/** "Send GHS to Rabi" reads better than the whole legal name, and the whole
- *  name is on the header directly above it. */
-function firstNameOf(name: string): string {
-  return name.trim().split(/\s+/)[0] ?? name;
 }

@@ -49,11 +49,28 @@ export function symbolFor(currency: string): string {
   return SYMBOLS[currency] ?? currency;
 }
 
+/*
+ * THE SYMBOL A CUSTOMER READS, per currency.
+ *
+ * GHS AND KES WERE MISSING AND THAT SHOWED ON THE SEND SCREEN. A Ghanaian
+ * being quoted "1,250.00 GHS" is being shown a currency CODE where every other
+ * currency on the same screen shows a symbol — so the one screen that has to
+ * read as money in two currencies at once read as money in one and a database
+ * field in the other.
+ *
+ * USDC DELIBERATELY HAS NONE. Its symbol is the dollar sign, and `$100.00`
+ * beside a USD figure of `$100.00` is two different assets rendered
+ * identically — the fallback `100.00 USDC` is the honest one. USDT keeps `₮`
+ * because that mark belongs to it alone.
+ */
 const SYMBOLS: Record<string, string> = {
   NGN: '₦',
   USD: '$',
   GBP: '£',
   EUR: '€',
+  GHS: '₵',
+  KES: 'KSh',
+  CAD: 'CA$',
   USDT: '₮',
   BTC: '₿',
 };
@@ -80,7 +97,15 @@ export function formatAmount(amount: string, currency: string): string {
   const suffix = symbol === '' ? ` ${currency}` : '';
   const body = fraction === '' ? grouped : `${grouped}.${fraction}`;
 
-  return `${negative ? '-' : ''}${symbol}${body}${suffix}`;
+  /*
+   * A LETTERED SYMBOL TAKES A SPACE AND A GLYPH DOES NOT. `₵1,250.00` is how a
+   * cedi amount is written; `KSh1,250.00` runs the letters into the digits and
+   * reads as one word. The test is the symbol's LAST character, so `CA$` — a
+   * glyph with letters in front of it — stays tight like `$`.
+   */
+  const gap = /[A-Za-z]$/.test(symbol) ? ' ' : '';
+
+  return `${negative ? '-' : ''}${symbol}${gap}${body}${suffix}`;
 }
 
 /**

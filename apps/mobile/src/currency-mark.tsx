@@ -96,6 +96,16 @@ function Drawn({ mark, size }: { readonly mark: Mark; readonly size: number }) {
         ))}
         {/* Kenya's shield, as much of it as survives at this size — see the
             web renderer, which explains why it is an ellipse and not a path. */}
+        {/* The canton, drawn over the stripes it covers. */}
+        {mark.canton !== undefined && (
+          <rect
+            x={0}
+            y={0}
+            width={size * mark.canton.width}
+            height={size * mark.canton.height}
+            fill={mark.canton.ground}
+          />
+        )}
         {mark.shield !== undefined && (
           <>
             <Ellipse cx={r} cy={r} rx={size * 0.17} ry={size * 0.34} fill={mark.shield.edge} />
