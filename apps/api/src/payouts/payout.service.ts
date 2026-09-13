@@ -604,6 +604,29 @@ export class PayoutService {
     } catch (error) {
       if (error instanceof ProviderRejectedError) {
         if (error.providerCode === 'name_unavailable') {
+          /*
+           * TWO VERY DIFFERENT THINGS ARRIVE HERE, and only one of them is
+           * fine.
+           *
+           * Kenya's M-PESA has no name enquiry at all — nothing was tried,
+           * nothing failed, and recording it would fill an operator's screen
+           * with a row a day about a product working exactly as designed.
+           *
+           * The other is a wallet resolver that WAS asked and refused every
+           * attempt: a v4 credential that does not authorise, a malformed
+           * field, a product not enabled on the account. That now degrades to
+           * this same answer rather than blocking the corridor — which is the
+           * right thing for the customer standing in Accra and would be
+           * INVISIBLE if it were silent, because the send succeeds and nobody
+           * ever learns the name lookup is broken.
+           *
+           * A TRAIL IS WHAT TELLS THEM APART. The adapter attaches `tried`
+           * only when it actually called something, so recording on its
+           * presence records the fault and not the design.
+           */
+          if (Array.isArray((error.cause as { tried?: unknown } | undefined)?.tried)) {
+            await this.#recordRefusal(body, error);
+          }
           throw new NotFoundException({ error: 'name_unavailable' });
         }
         /*

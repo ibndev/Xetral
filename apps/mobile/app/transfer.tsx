@@ -1324,6 +1324,15 @@ function SendAmount({
      difference between a screen that is working and one that is refusing — a
      zero beside a typed amount reads as "this corridor pays nothing". */
   const converting = !sameCurrency && enough && lands === undefined && quote.code === undefined;
+  /*
+   * BELOW THE CORRIDOR'S FLOOR, and it only counts once something was typed.
+   *
+   * `useLoad` keeps the last error while the next request is in flight, so
+   * gating on the amount being non-empty is what stops a stale refusal
+   * describing a box the customer has since cleared — the same reason the
+   * quote itself is stamped with `forAmount`.
+   */
+  const belowMinimum = amount !== '' && enough && quote.code === 'below_minimum';
 
   /* A text-field-sized box, not a card: 56px, flat, one line. */
   const amountBox = {
@@ -1403,17 +1412,28 @@ function SendAmount({
       {/* GREEN, because it is what the customer HAS — the only figure on this
           screen that is neither leaving nor landing, and without a colour it
           reads as a third amount. */}
+      {/*
+        THREE THINGS CAN GO UNDER THE BOX, AND ONLY ONE AT A TIME.
+
+        THE MINIMUM IS SHOWN ONLY ONCE A CUSTOMER HAS TYPED LESS THAN IT. A
+        corridor's floor printed on an empty field is noise on every send;
+        printed the moment somebody asks for 2 cedis it is the one sentence
+        that gets them to a working amount. Before this the refusal reached
+        the screen as nothing at all.
+      */}
       <Text
         style={{
-          color: amount !== '' && !enough ? colors.danger : colors.ok,
-          fontFamily: amount !== '' && !enough ? font.sans : font.sansSemi,
+          color: (amount !== '' && !enough) || belowMinimum ? colors.danger : colors.ok,
+          fontFamily: (amount !== '' && !enough) || belowMinimum ? font.sans : font.sansSemi,
           fontSize: 12.5,
           marginTop: 6,
         }}
       >
         {amount !== '' && !enough
           ? `Enter an amount in ${sendCurrency}.`
-          : `Balance: ${formatAmount(balance, sendCurrency)}`}
+          : belowMinimum
+            ? quote.error
+            : `Balance: ${formatAmount(balance, sendCurrency)}`}
       </Text>
 
       {/* THE LABEL BELONGS TO ITS BOX — 6px to the box below it, 14px to the
@@ -1489,7 +1509,10 @@ function SendAmount({
       <Button
         label={busy ? 'Sending…' : 'Continue'}
         busy={busy}
-        disabled={!enough || pin === ''}
+        /* Refused while the amount is below the floor: the note above says
+           what the minimum is, and letting this through would spend a PIN
+           attempt to be told the same thing by the server. */
+        disabled={!enough || belowMinimum || pin === ''}
         onPress={() => {
           void run(async () => {
             /*
@@ -1639,7 +1662,21 @@ function railLabelOf(to: Recipient): string {
  * QUIET rather than accent-filled: it is the way out of a step, and the
  * primary button is the one thing on the screen that may be blue.
  */
+/**
+ * QUIET IS NOT THE SAME AS INVISIBLE, and this was the second.
+ *
+ * It was `sf.field` — #E8E8E8 in light — with a 12% shadow, on a near-white
+ * ground. On a SHORT step like "How do you want to send GHS?" there is no
+ * content anywhere near it, so a pale pill floating in a field of white read
+ * as nothing being there at all. The same fault, and the same fix, as the
+ * web's `.sf-flow-back`: a control that floats has no container to belong to,
+ * so it needs its own edge.
+ *
+ * `surfaceRaised` is the token whose documented purpose is what floats, and
+ * `lineStrong` draws the edge in both themes.
+ */
 function FlowBack({ onPress }: { readonly onPress: () => void }) {
+  const c: Palette = useTheme();
   const sf = useSf();
   const insets = useSafeAreaInsets();
   return (
@@ -1655,15 +1692,17 @@ function FlowBack({ onPress }: { readonly onPress: () => void }) {
         flexDirection: 'row',
         alignItems: 'center',
         gap: 6,
-        backgroundColor: sf.field,
+        backgroundColor: c.surfaceRaised,
+        borderWidth: 1,
+        borderColor: c.lineStrong,
         borderRadius: 50,
         paddingVertical: 11,
         paddingHorizontal: 18,
         shadowColor: '#000000',
-        shadowOpacity: 0.12,
-        shadowRadius: 14,
-        shadowOffset: { width: 0, height: 4 },
-        elevation: 4,
+        shadowOpacity: 0.16,
+        shadowRadius: 20,
+        shadowOffset: { width: 0, height: 6 },
+        elevation: 6,
       }}
     >
       <Icon name="chevronLeft" size={16} color={sf.text} />

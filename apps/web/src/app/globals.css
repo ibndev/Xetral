@@ -4231,9 +4231,22 @@ body:has(.sf) { background: var(--sf-bg); }
  * animation, an animation creates a containing block, and a `position: fixed`
  * child of one is laid out against the CONTENT rather than the viewport.
  *
- * It is QUIET — the field grey, not the accent — because it is the way out of
- * a step rather than the way through it, and the primary button is the one
- * thing on the screen that may be blue.
+ * It is QUIET — not the accent — because it is the way out of a step rather
+ * than the way through it, and the primary button is the one thing on the
+ * screen that may be blue.
+ *
+ * BUT QUIET IS NOT THE SAME AS INVISIBLE, and the first version was the
+ * second. It was `--sf-field` (#E8E8E8) on a near-white ground with a 12%
+ * shadow — and on a SHORT step like "How do you want to send GHS?" there is
+ * no content anywhere near it, so a pale pill floating in a field of white
+ * read as nothing being there at all. Measured in a browser at 390px: the
+ * button was present, on top, fully opaque, and reported as missing.
+ *
+ * A CONTROL THAT FLOATS NEEDS AN EDGE, because it has no container to belong
+ * to. `--surface-raised` is the token whose whole documented purpose is
+ * "only what floats", `--line-strong` draws the edge in both themes, and the
+ * shadow is firm enough to separate it from the ground rather than to
+ * decorate it.
  */
 .sf-flow-back {
   position: fixed;
@@ -4246,17 +4259,21 @@ body:has(.sf) { background: var(--sf-bg); }
   gap: 6px;
   min-height: 0;
   padding: 11px 18px;
-  border: 0;
+  border: 1px solid var(--line-strong);
   border-radius: 50px;
-  background: var(--sf-field);
-  color: var(--sf-field-text);
+  background: var(--surface-raised);
+  color: var(--text);
   font-family: var(--font-sans);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 4px 14px rgb(0 0 0 / 12%);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 16%);
 }
-.sf-flow-back:hover:where(:not(:disabled)) { background: var(--sf-field); color: var(--sf-field-text); }
+/* Restated out loud, and NOT inside a hover query: `.sf-flow-back` is a
+   `<button>`, so the base `button:hover` fill applies to it unless this says
+   otherwise — the cascade collision `button-specificity.test.ts` exists
+   because of, which turned the network picker into a solid white pill. */
+.sf-flow-back:hover:where(:not(:disabled)) { background: var(--surface-raised); color: var(--text); }
 .sf-flow-back:active { transform: none; }
 
 /*

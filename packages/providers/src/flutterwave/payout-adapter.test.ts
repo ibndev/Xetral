@@ -29,31 +29,50 @@ function stub(responses: readonly unknown[]): {
 }
 
 /** A v4 client whose token exchange and calls are both stubbed. */
-function v4Stub(responses: readonly { status: number; body: unknown }[]): {
+/**
+ * A v4 stand-in that ROUTES BY URL rather than by position.
+ *
+ * It used to answer the nth request with the nth scripted body, and the
+ * adapter now asks `/mobile-networks` before it resolves anything — so every
+ * scripted resolve answered the network list instead, and three tests failed
+ * for a reason that had nothing to do with what they were testing. Position
+ * is the wrong key whenever the code under test may legitimately make one
+ * more call, which is the same argument the Expo adapter records about
+ * attributing a push ticket to a handset.
+ *
+ * `networks` defaults to EMPTY, which is the honest default: a deployment
+ * whose network list cannot be read falls back to the code this platform
+ * already holds, and most of these tests are about the resolve.
+ */
+function v4Stub(
+  resolves: readonly { status: number; body: unknown }[],
+  networks: readonly { id?: string; code?: string; name?: string }[] = [],
+): {
   v4: FlutterwaveV4Client;
   sent: { url: string; body: unknown }[];
 } {
   const sent: { url: string; body: unknown }[] = [];
   let i = 0;
+  const json = (body: unknown, status = 200): Response =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { 'content-type': 'application/json' },
+    });
+
   const v4 = new FlutterwaveV4Client({
     clientId: 'client-id',
     clientSecret: 'client-secret',
     fetch: async (url, init) => {
       if (url.includes('openid-connect/token')) {
-        return new Response(JSON.stringify({ access_token: 'tok', expires_in: 600 }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        });
+        return json({ access_token: 'tok', expires_in: 600 });
       }
       sent.push({
         url,
         body: init.body === undefined ? undefined : JSON.parse(String(init.body)),
       });
-      const next = responses[i++] ?? { status: 200, body: {} };
-      return new Response(JSON.stringify(next.body), {
-        status: next.status,
-        headers: { 'content-type': 'application/json' },
-      });
+      if (url.includes('/mobile-networks')) return json({ data: networks });
+      const next = resolves[i++] ?? { status: 200, body: {} };
+      return json(next.body, next.status);
     },
   });
   return { v4, sent };
@@ -147,8 +166,14 @@ describe('who holds the destination', () => {
       'MTN',
       '233553921133',
     );
-    expect(sent[0]?.url).toContain('/wallet-account/resolve');
-    expect(sent[0]?.body).toEqual({
+    /* THE NETWORK LIST IS ASKED FIRST, then the resolve. `mobile_network` is
+       typed as a bare string in their spec and their own network object
+       carries both an `id` and a `code`, so the adapter reads THEIR list
+       rather than asserting which one the field wants — the assertion that
+       cost five rounds, in the one place left that could still make it. */
+    const resolve = sent.find((r) => r.url.includes('/wallet-account/resolve'));
+    expect(resolve).toBeDefined();
+    expect(resolve?.body).toEqual({
       account_number: '233553921133',
       mobile_network: 'MTN',
       country: 'GH',
@@ -184,22 +209,82 @@ describe('who holds the destination', () => {
     ).rejects.toMatchObject({ providerCode: 'name_unavailable' });
   });
 
-  it('carries the refusal out, so somebody can read what the rail said', async () => {
-    // 069's point stands whatever endpoint is called: a refusal nobody can
-    // read is a refusal nobody can fix. The trail carries a number's SHAPE
-    // and never its digits — 016's rule that the way to hold less is to
-    // store less.
+  it('BLOCKS on a 404, because that is the rail naming nobody', async () => {
+    /*
+     * THE ONLY ANSWER THAT MAY STOP A SEND IS THE RAIL'S OWN VERDICT. A 404
+     * from the wallet resolver means Flutterwave looked and that number
+     * belongs to nobody — money sent there is unrecoverable, so `lookup`
+     * refuses and the screen refuses with it.
+     */
     const { client } = stub([]);
-    const { v4 } = v4Stub([
-      { status: 400, body: { message: 'wallet not found' } },
-    ]);
+    const { v4 } = v4Stub([{ status: 404, body: { message: 'wallet not found' } }]);
     const failed = await new FlutterwavePayoutAdapter(client, v4)
       .lookup('GH', 'MTN', '233553921133')
       .catch((error: unknown) => error);
     expect(failed).toMatchObject({ providerCode: 'unknown_account' });
     const trail = JSON.stringify((failed as { cause?: unknown }).cause);
-    expect(trail).toContain('wallet-account/resolve');
+    expect(trail).toContain('v4 resolve');
+    // The trail carries a number's SHAPE and never its digits — 016's rule
+    // that the way to hold less is to store less.
     expect(trail).not.toContain('233553921133');
+  });
+
+  it('DOES NOT BLOCK on a 400, because that is about our request', async () => {
+    /*
+     * THE REGRESSION THIS TEST EXISTS FOR, and it took the Ghanaian corridor
+     * down the day a v4 credential was pasted.
+     *
+     * Every non-2xx used to become `unknown_account`, which the Send screen
+     * refuses on. So a malformed field, a product not enabled on the account,
+     * or a client id that does not authorise stopped EVERY Ghanaian send —
+     * worded to each customer as their own number being wrong, which is the
+     * exact sentence five rounds of this were spent on.
+     *
+     * A 400 says the REQUEST was wrong, and the request is the part we wrote.
+     * So it degrades to `name_unavailable`: the screen asks for a label and
+     * the send proceeds, exactly as Kenya already does — and the refusal is
+     * still carried out, so `name_enquiry_refusals` can say what happened.
+     */
+    const { client } = stub([]);
+    const { v4 } = v4Stub([{ status: 400, body: { message: 'invalid mobile_network' } }]);
+    const failed = await new FlutterwavePayoutAdapter(client, v4)
+      .lookup('GH', 'MTN', '233553921133')
+      .catch((error: unknown) => error);
+    expect(failed).toMatchObject({ providerCode: 'name_unavailable' });
+    const trail = JSON.stringify((failed as { cause?: unknown }).cause);
+    expect(trail).toContain('invalid mobile_network');
+  });
+
+  it('tries the network spelling THEIR list gives before concluding anything', async () => {
+    /*
+     * `mobile_network` IS A BARE STRING IN THEIR SPEC and their own network
+     * object carries an `id` AND a `code` — while the sibling endpoint on the
+     * same specification names its field `bank_id` where it wants an id. The
+     * question is genuinely open, and picking one and writing a test that
+     * agrees is precisely what this file has now done wrong three times.
+     *
+     * So the code we hold goes first, and a refusal that is about the REQUEST
+     * moves to the value their own list gave. Bounded, provider-sourced, and
+     * recorded either way.
+     */
+    const { client } = stub([]);
+    const { v4, sent } = v4Stub(
+      [
+        { status: 400, body: { message: 'invalid mobile_network' } },
+        { status: 200, body: { account_name: 'RABI SIEDU' } },
+      ],
+      [{ id: 'mn_ghana_mtn', code: 'MTN', name: 'MTN Ghana' }],
+    );
+    const found = await new FlutterwavePayoutAdapter(client, v4).lookup(
+      'GH',
+      'MTN',
+      '233553921133',
+    );
+    expect(found.accountName).toBe('RABI SIEDU');
+    const networks = sent
+      .filter((r) => r.url.includes('/wallet-account/resolve'))
+      .map((r) => (r.body as { mobile_network: string }).mobile_network);
+    expect(networks).toEqual(['MTN', 'mn_ghana_mtn']);
   });
 
   it('still says M-PESA has no name enquiry, because it has none', async () => {

@@ -127,6 +127,21 @@ export class FxService {
       throw new UnprocessableEntityException({
         error: 'below_minimum',
         minimum: toMajor(money(BigInt(policy.min_base_minor), from)),
+        /*
+         * THE FIGURE, IN WORDS, BECAUSE `minimum` REACHED NOBODY.
+         *
+         * `ApiError` parses `detail` and nothing else off a refusal body, so
+         * this endpoint had been answering with the exact number a customer
+         * needed and every screen rendered "That amount is below the
+         * minimum." — a refusal with no way to comply, on the screen money
+         * leaves from. Somebody typing 2 cedis had to guess upward.
+         *
+         * The currency is stated because the minimum is a statement about the
+         * currency being SENT, and a bare "5.00" beside a naira balance and a
+         * cedi payout is a number nobody can place.
+         */
+        detail:
+          `The minimum is ${toMajor(money(BigInt(policy.min_base_minor), from))} ${from}.`,
       });
     }
 
@@ -200,6 +215,21 @@ export class FxService {
       throw new UnprocessableEntityException({
         error: 'below_minimum',
         minimum: toMajor(money(BigInt(policy.min_base_minor), from)),
+        /*
+         * THE FIGURE, IN WORDS, BECAUSE `minimum` REACHED NOBODY.
+         *
+         * `ApiError` parses `detail` and nothing else off a refusal body, so
+         * this endpoint had been answering with the exact number a customer
+         * needed and every screen rendered "That amount is below the
+         * minimum." — a refusal with no way to comply, on the screen money
+         * leaves from. Somebody typing 2 cedis had to guess upward.
+         *
+         * The currency is stated because the minimum is a statement about the
+         * currency being SENT, and a bare "5.00" beside a naira balance and a
+         * cedi payout is a number nobody can place.
+         */
+        detail:
+          `The minimum is ${toMajor(money(BigInt(policy.min_base_minor), from))} ${from}.`,
       });
     }
 

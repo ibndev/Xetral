@@ -97,6 +97,20 @@ function shape(digits: string): string {
   return digits.length <= 8 ? `${digits.length} digits` : `${digits.slice(0, 3)}…${digits.slice(-4)}`;
 }
 
+/**
+ * A failure, in a few words, for the trail.
+ *
+ * NEVER THE WHOLE ERROR. A provider's own sentence names our integration —
+ * 006's rule — and this string reaches `name_enquiry_refusals`, which an
+ * operator reads and a customer never does. The class name plus the message
+ * is what says "timeout" against "their API changed", which is the only
+ * distinction anybody acts on here.
+ */
+function describeError(error: unknown): string {
+  if (error instanceof Error) return `${error.name}: ${error.message}`;
+  return 'unknown failure';
+}
+
 const banksResponse = z.object({
   status: z.string().optional(),
   data: z
@@ -139,6 +153,54 @@ const walletResolveResponse = z.object({
   account_name: z.string().min(1).optional(),
   data: z.object({ account_name: z.string().min(1) }).optional(),
 });
+
+/**
+ * v4'S OWN LIST OF NETWORKS, which is how `mobile_network` stops being a guess.
+ *
+ * Every field is optional because the only thing this adapter needs from a row
+ * is a value to send, and a row that carries one of the two is still useful. A
+ * list that parses to nothing is not a contract error either: it means the
+ * translation is unavailable, which falls back to the code we already hold.
+ */
+interface MobileNetworkRow {
+  readonly code?: string;
+  readonly id?: string;
+  readonly name?: string;
+}
+
+const mobileNetworkList = z.object({
+  data: z
+    .array(
+      z.object({
+        id: z.union([z.number(), z.string()]).optional(),
+        code: z.string().min(1).optional(),
+        name: z.string().min(1).optional(),
+      }),
+    )
+    .optional(),
+});
+
+/**
+ * WHICH v4 REFUSALS ARE THE RAIL'S VERDICT ABOUT A WALLET, and which are ours.
+ *
+ * THIS DISTINCTION IS THE WHOLE FIX, and its absence is what the last round
+ * shipped. `lookup` answering `unknown_account` makes the Send screen REFUSE
+ * to continue — which is correct for "that wallet belongs to nobody" and is an
+ * OUTAGE for "our client id is wrong". Collapsed together, pasting a v4
+ * credential that does not work turned Ghana from a corridor that sent with a
+ * label into one that could not send at all, and told every customer their own
+ * number was the problem.
+ *
+ *   404, 422, or a 200 naming nobody   the resolver understood and could not
+ *                                      name this wallet. THE RAIL'S VERDICT.
+ *   anything else                      400 malformed, 401/403 credentials,
+ *                                      5xx, a timeout, a non-JSON body, or no
+ *                                      credentials at all. WE COULD NOT ASK.
+ *
+ * A 400 is the borderline one and it is deliberately on the "ours" side: it
+ * means the request was malformed, and the request is the part we wrote.
+ */
+const RAIL_VERDICT_STATUSES: ReadonlySet<string> = new Set(['http_404', 'http_422']);
 
 const resolveResponse = z.object({
   status: z.string().optional(),
@@ -186,9 +248,73 @@ export class FlutterwavePayoutAdapter implements PayoutPort {
    * wallet, which the screen handles by asking for a label.
    */
   readonly #v4: FlutterwaveV4Client | undefined;
+  /**
+   * v4's network list per country, fetched once.
+   *
+   * THE PROMISE IS CACHED, NOT THE RESULT, so two lookups racing on mount make
+   * one call — the single-flight rule `Session.refresh()` follows. A failed
+   * fetch is cached too and deliberately: the fallback is the code we already
+   * hold, and a country whose list cannot be read must not re-ask on every
+   * keystroke of a phone number.
+   */
+  readonly #networks = new Map<string, Promise<readonly MobileNetworkRow[]>>();
+
   constructor(client: FlutterwaveClient, v4?: FlutterwaveV4Client) {
     this.#client = client;
     this.#v4 = v4;
+  }
+
+  /**
+   * WHAT TO PUT IN `mobile_network`, ASKED OF FLUTTERWAVE RATHER THAN ASSUMED.
+   *
+   * Returns the candidates in order, most likely first: the code this platform
+   * already holds (`MTN`), then their own list's code and id for the matching
+   * network. Duplicates are dropped, so where their code equals ours — the
+   * expected case — this is exactly one call.
+   *
+   * IT NEVER THROWS. A network list that cannot be read is not a reason to
+   * refuse a lookup; the code we hold is the fallback, and 059's rule is that
+   * a missing route falls through rather than turning one absent row into an
+   * outage on the screen customers send money from.
+   */
+  async #networkValues(iso: string, ourCode: string): Promise<readonly string[]> {
+    const listed = await this.#networkList(iso);
+    const match = listed.find(
+      (n) =>
+        n.code?.toUpperCase() === ourCode.toUpperCase() ||
+        n.name?.toUpperCase().includes(ourCode.toUpperCase()) === true,
+    );
+    const out = [ourCode];
+    for (const value of [match?.code, match?.id]) {
+      if (value !== undefined && value !== '' && !out.includes(value)) out.push(value);
+    }
+    return out;
+  }
+
+  async #networkList(iso: string): Promise<readonly MobileNetworkRow[]> {
+    const v4 = this.#v4;
+    if (v4 === undefined) return [];
+
+    const cached = this.#networks.get(iso);
+    if (cached !== undefined) return cached;
+
+    const pending = (async (): Promise<readonly MobileNetworkRow[]> => {
+      try {
+        const body = await v4.request('GET', FLUTTERWAVE_V4_ENDPOINTS.mobileNetworks(iso));
+        const parsed = mobileNetworkList.safeParse(body);
+        if (!parsed.success) return [];
+        return (parsed.data.data ?? []).map((n) => ({
+          ...(n.code === undefined ? {} : { code: n.code }),
+          ...(n.id === undefined ? {} : { id: String(n.id) }),
+          ...(n.name === undefined ? {} : { name: n.name }),
+        }));
+      } catch {
+        /* Best effort, by design — see the doc comment above. */
+        return [];
+      }
+    })();
+    this.#networks.set(iso, pending);
+    return pending;
   }
 
   async banks(country: string, method?: PayoutMethod): Promise<readonly PayoutBank[]> {
@@ -312,28 +438,117 @@ export class FlutterwavePayoutAdapter implements PayoutPort {
         );
       }
 
-      let message = 'could not resolve that wallet';
-      try {
-        const body = await this.#v4.request('POST', FLUTTERWAVE_V4_ENDPOINTS.resolveWallet, {
-          account_number: accountNumber,
-          mobile_network: bankCode,
-          country: iso,
-        });
-        const parsed = walletResolveResponse.safeParse(body);
-        const name = parsed.success ? (parsed.data.data?.account_name ?? parsed.data.account_name) : undefined;
-        if (name !== undefined && name !== '') {
-          return { accountNumber, bankCode, accountName: name };
+      /*
+       * THE VALUES WORTH SENDING AS `mobile_network`, IN ORDER, AND THEY COME
+       * FROM FLUTTERWAVE RATHER THAN FROM US.
+       *
+       * Their spec types the field as a bare string and their own network
+       * object carries both an `id` and a `code`, while the sibling endpoint
+       * names its field `bank_id` where it wants an id. So the question is
+       * genuinely open, and the answer this repo has reached for three times —
+       * pick the plausible one and write a test that agrees — is what produced
+       * five rounds of a customer being told their number was wrong.
+       *
+       * `#networkValues` asks THEM. The code we already hold is the first
+       * candidate, their list's own code and id follow, and a malformed-request
+       * refusal moves to the next one. Bounded, provider-sourced, and every
+       * attempt is recorded, so the trail says which spelling answered rather
+       * than leaving the next round to guess again.
+       */
+      const candidates = await this.#networkValues(iso, bankCode);
+      const tried: string[] = [];
+      let verdict = false;
+
+      for (const candidate of candidates) {
+        let message: string;
+        try {
+          const body = await this.#v4.request('POST', FLUTTERWAVE_V4_ENDPOINTS.resolveWallet, {
+            account_number: accountNumber,
+            mobile_network: candidate,
+            country: iso,
+          });
+          const parsed = walletResolveResponse.safeParse(body);
+          const name = parsed.success
+            ? (parsed.data.data?.account_name ?? parsed.data.account_name)
+            : undefined;
+          if (name !== undefined && name !== '') {
+            return { accountNumber, bankCode, accountName: name };
+          }
+          /* ANSWERED, AND NAMED NOBODY. The resolver understood the request —
+             it is the rail's verdict about this wallet, and trying another
+             spelling of the network would not change it. */
+          tried.push(
+            `v4 resolve ${iso}/${candidate}/${shape(accountNumber)}: 200 with no name`,
+          );
+          verdict = true;
+          break;
+        } catch (error) {
+          if (!(error instanceof ProviderRejectedError)) {
+            /*
+             * A TIMEOUT, AN OUTAGE OR A CHANGED CONTRACT IS NOT A STATEMENT
+             * ABOUT THE CUSTOMER'S NUMBER, and it used to be rethrown from
+             * here — reaching the screen as a refusal that stops the send.
+             * Nothing about waiting or retyping fixes it, so it degrades to
+             * the answer Kenya already gives: no name, ask for a label.
+             */
+            throw new ProviderRejectedError(
+              PROVIDER,
+              `the wallet resolver could not be reached (${describeError(error)})`,
+              'name_unavailable',
+              error,
+            );
+          }
+          message = error.message;
+          tried.push(
+            `v4 resolve ${iso}/${candidate}/${shape(accountNumber)}: ` +
+              `${error.providerCode ?? 'refused'} ${message}`,
+          );
+          if (error.providerCode !== undefined && RAIL_VERDICT_STATUSES.has(error.providerCode)) {
+            verdict = true;
+            break;
+          }
+          /* Anything else is ours to fix — a malformed field, a credential,
+             an account not enabled for this product. Try the next spelling of
+             the network before concluding anything about the wallet. */
         }
-        message = parsed.success ? 'the wallet resolver named nobody' : parsed.error.message;
-      } catch (error) {
-        if (!(error instanceof ProviderRejectedError)) throw error;
-        message = error.message;
       }
 
-      throw new ProviderRejectedError(PROVIDER, message, 'unknown_account', {
-        keyMode: await this.#client.keyMode(),
-        tried: [`v4 /wallet-account/resolve ${iso}/${bankCode}/${shape(accountNumber)}: ${message}`],
-      });
+      const cause = { keyMode: await this.#client.keyMode(), tried };
+
+      if (verdict) {
+        /*
+         * THE RAIL ANSWERED AND COULD NOT NAME THIS WALLET. The send stops
+         * here, which is the whole point of asking: a mobile money transfer
+         * cannot be recalled, and a number nobody has checked is a number
+         * nobody has checked.
+         */
+        throw new ProviderRejectedError(
+          PROVIDER,
+          tried[tried.length - 1] ?? 'the wallet resolver could not name that number',
+          'unknown_account',
+          cause,
+        );
+      }
+
+      /*
+       * WE NEVER GOT AN ANSWER ABOUT THE WALLET, so we must not claim one.
+       *
+       * Every attempt failed for a reason that is about this integration
+       * rather than about the number — a credential, a malformed field, a
+       * product not enabled. Reported as `unknown_account` that is a total
+       * outage on the Ghanaian corridor WORDED AS the customer's mistake,
+       * which is precisely what pasting a v4 credential produced. The refusal
+       * is recorded either way: `name_enquiry_refusals` is where an operator
+       * reads exactly what was sent and exactly what came back.
+       */
+      throw new ProviderRejectedError(
+        PROVIDER,
+        tried.length === 0
+          ? 'no mobile network could be resolved for this country'
+          : `the wallet resolver refused every attempt: ${tried.join('; ')}`,
+        'name_unavailable',
+        cause,
+      );
     }
 
     /*

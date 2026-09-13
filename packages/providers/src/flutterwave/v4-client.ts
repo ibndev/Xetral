@@ -76,7 +76,21 @@ export const FLUTTERWAVE_V4_ENDPOINTS = {
   resolveWallet: '/wallet-account/resolve',
   /** A bank account. `{ account_number, bank_id, country }`. */
   resolveBankAccount: '/bank-account/resolve',
-  /** Mobile networks by country, which is what `mobile_network` takes. */
+  /**
+   * THE NETWORKS, AND WHY THIS IS CALLED RATHER THAN ASSUMED.
+   *
+   * `/wallet-account/resolve` takes a field called `mobile_network` and their
+   * specification says only `type: string`. Their `MobileNetwork` object
+   * carries BOTH an `id` and a `code`, and the sibling endpoint on the same
+   * spec — `/bank-account/resolve` — names its field `bank_id` when it wants
+   * an id. So the naming says `code` and the shape does not rule out `id`,
+   * and THIS REPO HAS NOW SHIPPED THREE PLAUSIBLE PROVIDER CONSTANTS THAT
+   * WERE WRONG.
+   *
+   * Rather than pick, the adapter reads this list and sends a value FROM IT.
+   * A guess made from the provider's own answer is recoverable; one made from
+   * a field name is what the last five rounds were.
+   */
   mobileNetworks: (country: string) =>
     `/mobile-networks?country=${encodeURIComponent(country)}`,
 } as const;
@@ -227,17 +241,33 @@ export class FlutterwaveV4Client {
     return { token: payload.access_token, expiresAt: Date.now() + safe * 1000 };
   }
 
-  async request(method: 'GET' | 'POST', path: string, body?: unknown): Promise<unknown> {
+  /**
+   * @param idempotent  whether this call CHANGES something, and therefore
+   *   carries `X-Idempotency-Key`. It defaults to FALSE, which is the opposite
+   *   of what this client used to do and is a correction rather than a tidy-up.
+   *
+   *   THE HEADER IS SPECIFIED AS `format: uuid` — "UUID-style key used to
+   *   safely retry POST requests" — and this client was sending 32 hex
+   *   characters, which is not one. A gateway that validates the format
+   *   answers 400, and a 400 on `/wallet-account/resolve` is indistinguishable
+   *   from "no such wallet" by the time it reaches a customer: it reads as
+   *   THEIR number being wrong. Both halves are fixed here — it is a real UUID
+   *   now, and a resolve does not send it at all, because a read has nothing
+   *   to make idempotent and the safest header is the one not sent.
+   */
+  async request(
+    method: 'GET' | 'POST',
+    path: string,
+    body?: unknown,
+    idempotent = false,
+  ): Promise<unknown> {
     const token = await this.#token();
     const response = await this.#send(`${this.#baseUrl}${path}`, {
       method,
       headers: {
         authorization: `Bearer ${token}`,
         'content-type': 'application/json',
-        /* Their own spec names this header on every mutating call. A resolve
-           mutates nothing, so it is harmless here and present so the one
-           place a v4 request is built already carries it. */
-        'x-idempotency-key': cryptoRandomId(),
+        ...(idempotent ? { 'x-idempotency-key': idempotencyKey() } : {}),
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
@@ -280,11 +310,23 @@ export class FlutterwaveV4Client {
     }
 
     if (!response.ok) {
+      /*
+       * THE STATUS TRAVELS WITH THE REFUSAL, and that is what lets a caller
+       * tell two opposite things apart.
+       *
+       * `/wallet-account/resolve` answering 404 is the RAIL'S VERDICT about a
+       * wallet — that number belongs to nobody, and a send to it is money
+       * gone. A 400 or a 403 is far more likely to be about US: a malformed
+       * field, a product not enabled on this account. Without the status a
+       * caller can only treat every non-2xx identically, which is how a
+       * misconfigured integration came to block every Ghanaian send while
+       * telling the customer their own number was wrong.
+       */
       const message = (payload as { message?: unknown; error?: unknown }).message;
       throw new ProviderRejectedError(
         PROVIDER,
         typeof message === 'string' ? message : `v4 ${method} ${path} returned ${response.status}`,
-        undefined,
+        `http_${response.status}`,
         text,
       );
     }
@@ -315,13 +357,16 @@ export class FlutterwaveV4Client {
 /**
  * An idempotency key for a v4 request.
  *
- * A CSPRNG, NEVER `Math.random`, and the local Semgrep rule refuses the other
- * one here. This particular value guards nothing — a resolve is a read — but
- * the one place a v4 request is built is the place a later money-moving call
- * would copy, and a predictable key on THAT is a way to collide two payouts.
+ * A REAL UUID, because their specification says `format: uuid` and this
+ * client used to send 32 bare hex characters. That is the same class of
+ * mistake as a bank code where a bank id was wanted: it looks right, it is
+ * the right length, and the only thing that rejects it is the gateway.
+ *
+ * `randomUUID` IS A CSPRNG, which the local Semgrep rule requires here. The
+ * value guards nothing on a read — which is why a read no longer sends one —
+ * but this is the place a later money-moving v4 call would copy, and a
+ * predictable key on THAT is a way to collide two payouts.
  */
-function cryptoRandomId(): string {
-  const bytes = new Uint8Array(16);
-  globalThis.crypto.getRandomValues(bytes);
-  return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
+function idempotencyKey(): string {
+  return globalThis.crypto.randomUUID();
 }

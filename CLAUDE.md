@@ -3557,6 +3557,10 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/065_push.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/066_retired_policy_delete.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/067_wallet_payouts_and_missing_details.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/068_recipients.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/069_name_enquiry.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/070_payout_methods.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/071_flutterwave_v4_and_ghana_bank.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/072_activate_account_gh_ke.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -3623,6 +3627,10 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/065_push.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/066_retired_policy_delete.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/067_wallet_payouts_and_missing_details.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/068_recipients.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/069_name_enquiry.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/070_payout_methods.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/071_flutterwave_v4_and_ghana_bank.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/072_activate_account_gh_ke.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

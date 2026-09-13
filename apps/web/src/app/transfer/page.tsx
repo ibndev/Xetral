@@ -1252,6 +1252,15 @@ function SendAmount({
      receiving box has nothing true to show. Saying "Converting…" there is the
      difference between a screen that is working and one that is refusing. */
   const converting = !sameCurrency && enough && lands === undefined && quote.code === undefined;
+  /*
+   * BELOW THE CORRIDOR'S FLOOR, and it only counts once something was typed.
+   *
+   * `useLoad` keeps the last error while the next request is in flight, so
+   * gating on the amount being non-empty is what stops a stale refusal
+   * describing a box the customer has since cleared — the same reason the
+   * quote itself is stamped with `forAmount`.
+   */
+  const belowMinimum = amount !== '' && enough && quote.code === 'below_minimum';
 
   return (
     <form
@@ -1356,16 +1365,33 @@ function SendAmount({
             compact
           />
         </div>
-        {/* GREEN, because it is what the customer HAS — the only figure on this
-            screen that is neither leaving nor landing. */}
+        {/*
+          THREE THINGS CAN GO UNDER THE BOX, AND ONLY ONE AT A TIME.
+
+          THE MINIMUM IS SHOWN ONLY ONCE A CUSTOMER HAS TYPED LESS THAN IT,
+          which is the whole of why it is here rather than in the placeholder.
+          A corridor's floor printed on an empty field is noise on every send;
+          printed the moment somebody asks for 2 cedis it is the one sentence
+          that gets them to a working amount. Before this the refusal reached
+          the screen as nothing at all — the quote failed, the "receives" line
+          fell back to a generic hint, and the customer was left to guess
+          upward.
+
+          GREEN for the balance, because it is what the customer HAS — the only
+          figure on this screen that is neither leaving nor landing.
+        */}
         <span
           className={
-            amount !== '' && !enough ? 'sf-amount-note bad' : 'sf-amount-note good'
+            (amount !== '' && !enough) || belowMinimum
+              ? 'sf-amount-note bad'
+              : 'sf-amount-note good'
           }
         >
           {amount !== '' && !enough
             ? `Enter an amount in ${sendCurrency}.`
-            : `Balance: ${formatAmount(balance, sendCurrency)}`}
+            : belowMinimum
+              ? quote.error
+              : `Balance: ${formatAmount(balance, sendCurrency)}`}
         </span>
       </div>
 
@@ -1427,7 +1453,10 @@ function SendAmount({
       <FormError error={error} code={code} />
       {done !== undefined && <p className="ok">{done}</p>}
 
-      <button type="submit" disabled={busy || !enough || pin === ''}>
+      {/* AND THE BUTTON IS REFUSED WHILE THE AMOUNT IS BELOW THE FLOOR. The
+          note above says what the minimum is; letting Continue through anyway
+          would spend a PIN attempt to be told the same thing by the server. */}
+      <button type="submit" disabled={busy || !enough || belowMinimum || pin === ''}>
         {busy ? 'Sending…' : 'Continue'}
       </button>
 

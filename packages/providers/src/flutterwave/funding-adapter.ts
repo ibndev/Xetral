@@ -69,41 +69,32 @@ export class FlutterwaveFundingAdapter implements FundingPort {
     const { customer, currency } = request;
 
     /*
-     * REFUSED BEFORE THE CALL, AND THIS IS THE ROOT CAUSE OF THE GENERIC
-     * FAILURE ON "ACTIVATE ACCOUNT" IN ACCRA AND NAIROBI.
+     * IT ASKS. IT DOES NOT DECIDE.
      *
-     * `POST /v3/virtual-account-numbers` issues a NIGERIAN NUBAN. It is an NGN
-     * product: there is no Ghanaian or Kenyan static account number on this
-     * API to ask for, and asking anyway produced a refusal or an unparseable
-     * shape that reached the customer as "We could not open your account
-     * number just now" — a sentence describing a temporary outage, for
-     * something that will never work however long anybody waits.
+     * This used to refuse every non-NGN currency here, in our own code,
+     * WITHOUT CALLING ANYTHING — on the reasoning that `/v3/virtual-account-
+     * numbers` is a Nigerian NUBAN product and `countries.funding_methods`
+     * already said so.
      *
-     * The platform's own data already said so. `countries.funding_methods` is
-     * `{mobile_money}` for GH and KE and `{virtual_account}` for NG, which is
-     * 051 recording exactly this fact — so a Ghanaian was being offered a
-     * product their own country row says does not exist for them.
+     * THAT IS THE EXACT SHAPE OF THE FAULT THAT COST FIVE ROUNDS ON THE MOBILE
+     * MONEY NAME. `RESOLVES_MOBILE_MONEY` was a flat assertion too, its test
+     * agreed with it because the same person wrote both, and the refusal a
+     * customer read had been invented here rather than said by Flutterwave.
+     * A belief about a provider, enforced before the call, is unfalsifiable:
+     * nothing in any log, table or screen can ever contradict it.
      *
-     * SO IT IS A NAMED REFUSAL rather than a call. `ProviderRejectedError`
-     * because they would understand and refuse: it is not an outage, the
-     * credential is fine, and no amount of retrying helps. The code lets the
-     * API answer something a screen can turn into a true sentence instead of
-     * an apology.
+     * SO THE REQUEST GOES OUT AND THEIR ANSWER IS RELAYED. If they do not
+     * issue in this currency they say so, in their own words, and
+     * `account_issue_refused` carries it to an operator — 006's rule, and a
+     * sentence somebody can act on rather than one we made up. If they DO —
+     * they have announced Ghanaian virtual accounts — it simply works, with
+     * no release needed to find out.
      *
-     * ENABLING IT LATER IS A ONE-LINE CHANGE HERE, and deliberately not a
-     * setting: if Flutterwave approves static accounts in a new market the
-     * adapter has to be re-verified against their response shape anyway.
+     * THE CURRENCY IS STILL STATED, never defaulted. 061's fault was asking
+     * for naira on behalf of every customer on the platform; the fix was to
+     * ask in the customer's own currency, and that is what reaches the wire
+     * here.
      */
-    if (currency !== 'NGN') {
-      throw new ProviderRejectedError(
-        PROVIDER,
-        `Flutterwave issues dedicated account numbers in NGN only; ${currency} was asked ` +
-          `for. In Ghana and Kenya money arrives by a mobile money charge rather than into ` +
-          `a static number, which is what countries.funding_methods already records.`,
-        'account_not_supported_here',
-      );
-    }
-
     const body = await this.#client.request('POST', '/v3/virtual-account-numbers', {
       email: customer.email,
       /* OURS AND STABLE ACROSS RETRIES. Without it a timeout followed by a

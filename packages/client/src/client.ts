@@ -511,13 +511,29 @@ export interface RecipientResolution {
    *
    * `verified`    the rail named the holder, or the destination is a Xetral
    *               account we resolved ourselves.
-   * `unavailable` no name enquiry exists on this rail — Kenya's M-PESA. The
-   *               send proceeds; a name was never obtainable, so demanding one
-   *               would be requiring a claim that cannot exist (067).
-   * `failed`      a name enquiry EXISTS and did not answer. Ghana is the case:
-   *               `/v3/accounts/resolve` takes a momo number, so silence means
-   *               the number is wrong or the wallet is inactive, and sending to
-   *               it is unrecoverable. The screens refuse to continue on this.
+   * `unavailable` NO NAME WAS OBTAINABLE, and the send proceeds with a label.
+   *               Two causes reach it and both are right to: a rail with no
+   *               name enquiry at all (Kenya's M-PESA), and a resolver this
+   *               deployment could not ask — no v4 credentials, a malformed
+   *               request, an outage. Demanding a name in either case
+   *               requires a claim that cannot exist (067), and the second
+   *               would close the whole Ghanaian corridor while telling each
+   *               customer their own number was wrong.
+   * `failed`      THE RAIL ANSWERED AND COULD NOT NAME THIS DESTINATION. Only
+   *               a verdict reaches it — a 404 or 422 from the wallet
+   *               resolver, or a 200 naming nobody — never a failure of ours.
+   *               A mobile money transfer cannot be recalled, so the screens
+   *               refuse to continue on this one.
+   *
+   * THE LINE BETWEEN THE LAST TWO IS "DID THE RESOLVER ANSWER ABOUT THIS
+   * ACCOUNT?" and it is load-bearing. Collapsed toward `failed`, a wrong
+   * credential is an outage worded as the customer's mistake; collapsed
+   * toward `unavailable`, an unchecked number is sent to.
+   *
+   * The wallet resolver is v4's `POST /wallet-account/resolve`. An earlier
+   * version of this comment named `/v3/accounts/resolve`, WHICH IS A BANK
+   * ACCOUNT LOOKUP and has no mobile money in it at all — that false claim,
+   * repeated across three files, is what five rounds of this were made of.
    */
   readonly name_status: 'verified' | 'unavailable' | 'failed';
 }
