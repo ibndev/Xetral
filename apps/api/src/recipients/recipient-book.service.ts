@@ -176,7 +176,18 @@ export class RecipientBookService {
       throw new BadRequestException({ error: 'invalid_request', fields: ['destination'] });
     }
 
-    const banks = await this.payouts.banks(iso);
+    /*
+     * THE CATALOGUE THAT MATCHES THE KIND, not the country's default.
+     *
+     * 070 lets Ghana and Kenya offer both rails, so `banks(iso)` alone answers
+     * the WALLET list there — and a Ghanaian bank code looked up in it is not
+     * found, which this method turns into `unsupported_network`. The customer
+     * would be told the bank they had just picked from a list does not exist.
+     */
+    const banks = await this.payouts.banks(
+      iso,
+      body.kind === 'momo' ? 'mobile_money' : 'bank',
+    );
     const rail = banks.find((bank) => bank.code === body.rail_code);
     if (rail === undefined) {
       /*

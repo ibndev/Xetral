@@ -56,6 +56,34 @@ describe('what a customer is offered to send to', () => {
     expect(sent[0]?.url).toBe('https://api.flutterwave.com/v3/banks/NG');
     expect(banks).toEqual([{ code: '044', name: 'Access Bank' }]);
   });
+
+  it('answers the BANK list for Ghana when a bank is asked for', async () => {
+    /*
+     * 070. A COUNTRY WITH TWO RAILS HAS TWO CATALOGUES.
+     *
+     * This used to short-circuit on "does this country have networks?", full
+     * stop — so Ghana's and Kenya's bank lists were unreachable through this
+     * adapter and a Ghanaian could only ever be offered a wallet. Returning
+     * banks to somebody choosing a wallet is 046's failure; returning WALLETS
+     * to somebody who asked for a bank is the same failure with the sides
+     * swapped, and one of the two had to become a parameter.
+     */
+    const { client, sent } = stub([
+      { status: 'success', data: [{ code: '130100', name: 'GCB Bank' }] },
+    ]);
+    const banks = await new FlutterwavePayoutAdapter(client).banks('GH', 'bank');
+    expect(sent[0]?.url).toBe('https://api.flutterwave.com/v3/banks/GH');
+    expect(banks).toEqual([{ code: '130100', name: 'GCB Bank' }]);
+  });
+
+  it('still answers the WALLET list when nothing is asked for', async () => {
+    // Undefined means what every caller written before 070 meant, so a client
+    // that has not shipped yet is unchanged rather than newly wrong.
+    const { client, sent } = stub([]);
+    const networks = await new FlutterwavePayoutAdapter(client).banks('GH');
+    expect(sent).toHaveLength(0);
+    expect(networks.map((n) => n.code)).toEqual(['MTN', 'VOD', 'ATL']);
+  });
 });
 
 describe('who holds the destination', () => {

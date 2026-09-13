@@ -17,18 +17,38 @@ import { z } from 'zod';
  */
 const accountNumber = z.string().trim().regex(/^[0-9]{6,20}$/);
 
+/**
+ * WHICH RAIL, where a country offers more than one.
+ *
+ * OPTIONAL, AND UNDEFINED MEANS THE COUNTRY'S DEFAULT — which is what every
+ * client written before 070 meant and still means. Making it required would
+ * refuse every Nigerian payout from an app that has not shipped yet, on a
+ * field whose answer for Nigeria has only ever been one thing.
+ *
+ * The service still checks it against `countries.payout_methods`: anything a
+ * client can send, a stolen session can send, and a rail a country does not
+ * offer is a destination normalised the wrong way.
+ */
+const payoutMethod = z.enum(['bank', 'mobile_money']).optional();
+
 export const lookupQuerySchema = z
   .object({
     country: z.string().trim().length(2).toUpperCase(),
     bank_code: z.string().trim().min(1).max(32),
     account_number: accountNumber,
+    method: payoutMethod,
   })
   .strict();
 
 export type LookupQuery = z.infer<typeof lookupQuerySchema>;
 
 export const banksQuerySchema = z
-  .object({ country: z.string().trim().length(2).toUpperCase() })
+  .object({
+    country: z.string().trim().length(2).toUpperCase(),
+    /* A country with two rails has two catalogues, and they are not
+       interchangeable: an MTN network code is not a bank code. */
+    method: payoutMethod,
+  })
   .strict();
 
 export const payoutSchema = z
@@ -36,6 +56,12 @@ export const payoutSchema = z
     country: z.string().trim().length(2).toUpperCase(),
     bank_code: z.string().trim().min(1).max(32),
     account_number: accountNumber,
+    /**
+     * WHICH RAIL. It decides how the destination is NORMALISED — a wallet
+     * number becomes E.164, a bank account number is left exactly as typed —
+     * so getting it wrong sends money to a number belonging to nobody.
+     */
+    method: payoutMethod,
     /**
      * DELIBERATELY ABSENT: the beneficiary's name.
      *

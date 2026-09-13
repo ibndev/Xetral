@@ -33,6 +33,9 @@ export interface XetralCountry {
    * not break; callers fall back to 'bank', which is the conservative answer.
    */
   readonly payout_method?: string;
+  /** EVERY rail money can LEAVE on here (070). Ghana and Kenya offer both a
+   *  wallet and a bank; `payout_method` is which one a screen opens on. */
+  readonly payout_methods?: readonly string[];
   /**
    * HOW SOMEBODY HERE PUTS MONEY IN — `virtual_account`, `mobile_money`, or
    * both. Optional so an app built against an API predating 051 does not
@@ -71,6 +74,7 @@ export const FALLBACK_COUNTRY: XetralCountry = {
   currency: 'NGN',
   enabled: true,
   payout_method: 'bank',
+  payout_methods: ['bank'],
   funding_methods: ['virtual_account'],
 };
 
@@ -810,13 +814,15 @@ export class XetralClient {
      * `switch ('NG' | 'GH' | 'KE')` in two apps is the thing 040 exists to
      * prevent, and it needs a release on the day a fourth country opens.
      *
-     * `payout_method` is 'bank' or 'mobile_money'. Null — an account whose
+     * `payout_methods` is every rail money can leave on where they are (070);
+     * `payout_method` is which one a screen opens on. Null — an account whose
      * country row is missing — reads as bank, the conservative answer,
      * because a bank transfer that refuses is recoverable and a send to a
      * number that is not a wallet is not.
      */
     country_name: string | null;
     payout_method: string | null;
+    payout_methods: readonly string[] | null;
   }> {
     return this.#get('/v1/auth/session');
   }
@@ -1142,8 +1148,21 @@ export class XetralClient {
    *  is not evidence.
    * ---------------------------------------------------------------- */
 
-  async payoutBanks(country: string): Promise<readonly PayoutBank[]> {
-    const query = new URLSearchParams({ country });
+  /**
+   * The catalogue for ONE rail.
+   *
+   * A country with two — Ghana and Kenya since 070 — has two catalogues, and
+   * they are not interchangeable: an MTN network code is not a bank code, and
+   * a picker built from the wrong one is a selection that fails at the
+   * transfer and reads to the customer as their own number being wrong.
+   * Omitted means the country's default, which is what every caller before
+   * 070 meant.
+   */
+  async payoutBanks(
+    country: string,
+    method?: 'bank' | 'mobile_money',
+  ): Promise<readonly PayoutBank[]> {
+    const query = new URLSearchParams({ country, ...(method === undefined ? {} : { method }) });
     const body = await this.#get<{ banks: PayoutBank[] }>(
       `/v1/payouts/banks?${query.toString()}`,
     );
@@ -1231,6 +1250,11 @@ export class XetralClient {
     country: string;
     bankCode: string;
     accountNumber: string;
+    /** WHICH RAIL. It decides how the server normalises the destination — a
+     *  wallet number to E.164, a bank account exactly as typed — so on a
+     *  country offering both (070) sending the wrong one sends money to a
+     *  number belonging to nobody. Omitted means the country's default. */
+    method?: 'bank' | 'mobile_money';
     amount: string;
     currency: string;
     narration?: string;
@@ -1241,6 +1265,7 @@ export class XetralClient {
       country: input.country,
       bank_code: input.bankCode,
       account_number: input.accountNumber,
+      ...(input.method === undefined ? {} : { method: input.method }),
       amount: input.amount,
       currency: input.currency,
       ...(input.narration === undefined ? {} : { narration: input.narration }),

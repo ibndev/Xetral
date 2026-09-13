@@ -5,6 +5,7 @@ import { ProviderContractError, ProviderRejectedError } from '../ports/errors.js
 import type {
   BeneficiaryLookup,
   PayoutBank,
+  PayoutMethod,
   PayoutPort,
   PayoutReceipt,
   PayoutRequest,
@@ -150,19 +151,24 @@ export class FlutterwavePayoutAdapter implements PayoutPort {
     this.#client = client;
   }
 
-  async banks(country: string): Promise<readonly PayoutBank[]> {
+  async banks(country: string, method?: PayoutMethod): Promise<readonly PayoutBank[]> {
     const iso = country.trim().toUpperCase();
 
     /*
-     * THE NETWORKS ARE THE ANSWER WHERE THERE ARE NETWORKS.
+     * THE NETWORKS ARE THE ANSWER WHERE THE CALLER ASKED FOR A WALLET.
      *
-     * Returning banks in Accra is the exact failure 046 records about
-     * offering a Nigerian bank list everywhere: a selection the customer's
-     * money cannot reach, which then fails at the transfer and reads to them
-     * as their own number being wrong.
+     * It used to be "where there ARE networks", full stop — which meant a
+     * country with a mobile money rail could never be asked for its banks at
+     * all, and Ghana's and Kenya's bank lists were unreachable through this
+     * adapter. Returning banks to somebody choosing a wallet is 046's failure;
+     * returning WALLETS to somebody who asked for a bank is the same failure
+     * with the sides swapped, and one of the two had to be a parameter.
+     *
+     * Undefined still means the wallet list where one exists, because that is
+     * what every caller written before 070 meant.
      */
     const networks = FLUTTERWAVE_MOBILE_MONEY_NETWORKS[iso];
-    if (networks !== undefined) return networks;
+    if (networks !== undefined && method !== 'bank') return networks;
 
     const body = await this.#client.request('GET', FLUTTERWAVE_ENDPOINTS.banks(iso));
     const parsed = banksResponse.safeParse(body);

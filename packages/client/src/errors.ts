@@ -272,11 +272,18 @@ const API_ERROR_CODES = [
    *   request rather than a refusal.
    * `recipient_exists` — already in their list. Almost never reached, because
    *   the service returns the existing row instead.
+   * `payout_method_not_supported` — a rail this country does not offer, from
+   *   `countries.payout_methods` (070). It exists because the method decides
+   *   how the destination is NORMALISED — a wallet number to E.164, a bank
+   *   account exactly as typed — so accepting one the country does not offer
+   *   would rewrite a bank account number as a phone number, in the direction
+   *   that cannot be recalled.
    */
   'cannot_send_to_self',
   'unsupported_network',
   'recipient_name_required',
   'recipient_exists',
+  'payout_method_not_supported',
   /*
    * `broadcast_not_found` — an announcement id that names nothing.
    *

@@ -129,6 +129,9 @@ export interface SessionSummary {
    */
   readonly country_name: string | null;
   readonly payout_method: string | null;
+  /** EVERY rail money can leave on where this customer is (070). Ghana and
+   *  Kenya offer two; `payout_method` is which one a screen opens on. */
+  readonly payout_methods: readonly string[] | null;
   /** The customer's own payment handle, or null if they have not been given
    *  one yet. `GET /v1/profile` mints one on first ask. */
   readonly handle: string | null;
@@ -649,6 +652,7 @@ export class AuthService {
     home_currency: string | null;
     country_name: string | null;
     payout_method: string | null;
+    payout_methods: readonly string[] | null;
     handle: string | null;
   }> {
     const [core, placement, handle] = await Promise.all([
@@ -754,6 +758,7 @@ export class AuthService {
     home_currency: string | null;
     country_name: string | null;
     payout_method: string | null;
+    payout_methods: readonly string[] | null;
   }> {
     try {
       const result = await this.pool.query<{
@@ -762,13 +767,19 @@ export class AuthService {
         home_currency: string | null;
         country_name: string | null;
         payout_method: string | null;
+        payout_methods: string[] | null;
       }>(
         `SELECT (SELECT k.full_name FROM kyc_submissions k
                   WHERE k.user_id = u.id ORDER BY k.created_at DESC LIMIT 1) AS kyc_name,
                 u.country,
                 c.currency AS home_currency,
                 c.name AS country_name,
-                c.payout_method
+                c.payout_method,
+                /* 070. Coalesced to the single value so a row written before
+                   it — or a country with one rail — reads as a set of one
+                   rather than as nothing, which the Send screen would draw as
+                   no way to send at all. */
+                COALESCE(c.payout_methods, ARRAY[c.payout_method]) AS payout_methods
            FROM users u
            LEFT JOIN countries c ON c.code = u.country
           WHERE u.uuid = $1`,
@@ -781,6 +792,7 @@ export class AuthService {
         home_currency: row?.home_currency ?? null,
         country_name: row?.country_name ?? null,
         payout_method: row?.payout_method ?? null,
+        payout_methods: row?.payout_methods ?? null,
       };
     } catch (error: unknown) {
       this.#logger.warn(
@@ -795,6 +807,7 @@ export class AuthService {
         home_currency: null,
         country_name: null,
         payout_method: null,
+        payout_methods: null,
       };
     }
   }

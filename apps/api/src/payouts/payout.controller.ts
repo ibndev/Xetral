@@ -26,7 +26,7 @@ export class PayoutController {
   async banks(@Query() query: unknown): Promise<{ banks: readonly PayoutBank[] }> {
     const parsed = banksQuerySchema.safeParse(query);
     if (!parsed.success) throw invalidRequest(parsed.error.issues);
-    return { banks: await this.payouts.banks(parsed.data.country) };
+    return { banks: await this.payouts.banks(parsed.data.country, parsed.data.method) };
   }
 
   @Get('lookup')

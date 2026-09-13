@@ -349,6 +349,10 @@ function sentenceFor(error: ApiError): string {
       return 'That is your own number. Choose somebody else to pay.';
     case 'unsupported_network':
       return 'That network cannot receive money in this country yet. Choose another.';
+    case 'payout_method_not_supported':
+      // Names the CHOICE rather than the country, because the way out is to
+      // go back one step and pick the other rail — which is on screen.
+      return 'Money cannot leave that way in this country. Go back and choose another way to send.';
     case 'recipient_name_required':
       // A REQUEST, NOT A REFUSAL. This rail cannot tell us who holds the
       // number, so the customer names them for their own list — which is why

@@ -17,6 +17,9 @@ import { DATABASE } from '../tokens.js';
  * the code does not know, and the database refuses to ENABLE a country whose
  * currency has no ceiling at every tier and no monitoring threshold.
  */
+/** A country as read from a database BEHIND 070, with no `payout_methods`. */
+type Narrow = Omit<Country, 'payout_methods'>;
+
 export interface Country {
   readonly code: string;
   readonly name: string;
@@ -33,6 +36,9 @@ export interface Country {
    * `switch` in two apps, for the reason 040 gives about countries.
    */
   readonly payout_method: string;
+  /** Every rail money can LEAVE on here. `payout_method` is which one a
+   *  screen opens on and is always one of these (070). */
+  readonly payout_methods: readonly string[];
   /**
    * HOW SOMEBODY HERE PUTS MONEY IN — `virtual_account`, `mobile_money`, or
    * both. The top-up screen renders one panel per entry, so adding one to a
@@ -53,11 +59,44 @@ export class CountriesService {
    * account opened there would be a customer in a place with no payout rail.
    */
   async open(): Promise<readonly Country[]> {
-    const result = await this.pool.query<Country>(
-      `SELECT code, name, dial_code, currency, enabled, payout_method, funding_methods
-         FROM countries WHERE enabled ORDER BY name`,
-    );
-    return result.rows;
+    try {
+      const result = await this.pool.query<Country>(
+        `SELECT code, name, dial_code, currency, enabled, payout_method,
+                payout_methods, funding_methods
+           FROM countries WHERE enabled ORDER BY name`,
+      );
+      return result.rows;
+    } catch {
+      return this.#widen(
+        await this.pool.query<Narrow>(
+          `SELECT code, name, dial_code, currency, enabled, payout_method,
+                  funding_methods
+             FROM countries WHERE enabled ORDER BY name`,
+        ),
+      );
+    }
+  }
+
+  /**
+   * WRITTEN OUT TWICE RATHER THAN BUILT ONCE, and the local Semgrep rule is
+   * what says so — it flagged the interpolated version the first time this was
+   * written and its own message names the remedy: Postgres has no parameter
+   * for a column list, so the statement is better written out twice than
+   * assembled from fragments.
+   *
+   * WHY THERE ARE TWO AT ALL: `payout_methods` arrives in 070 and this query
+   * serves the signup form. A column that does not exist yet does not come
+   * back null — the whole statement throws — so naming it unconditionally
+   * takes the country picker down on any deployment one migration behind,
+   * which is the exact failure 085 records about `describeSession` and
+   * `u.country`.
+   *
+   * The fallback DERIVES the set from the single value, which is what the
+   * country WAS before 070 and is therefore a claim about history rather than
+   * a guess — 050's argument, one column over.
+   */
+  #widen(result: { rows: Narrow[] }): readonly Country[] {
+    return result.rows.map((row) => ({ ...row, payout_methods: [row.payout_method] }));
   }
 
   /**
@@ -75,12 +114,24 @@ export class CountriesService {
    */
   async byCode(code: string): Promise<Country | undefined> {
     try {
-      const result = await this.pool.query<Country>(
-        `SELECT code, name, dial_code, currency, enabled, payout_method, funding_methods
-           FROM countries WHERE code = $1`,
-        [code.trim().toUpperCase()],
-      );
-      return result.rows[0];
+      const iso = code.trim().toUpperCase();
+      try {
+        const result = await this.pool.query<Country>(
+          `SELECT code, name, dial_code, currency, enabled, payout_method,
+                  payout_methods, funding_methods
+             FROM countries WHERE code = $1`,
+          [iso],
+        );
+        return result.rows[0];
+      } catch {
+        const result = await this.pool.query<Narrow>(
+          `SELECT code, name, dial_code, currency, enabled, payout_method,
+                  funding_methods
+             FROM countries WHERE code = $1`,
+          [iso],
+        );
+        return this.#widen(result)[0];
+      }
     } catch (error: unknown) {
       this.#logger.warn(
         `could not read country ${code}: ${

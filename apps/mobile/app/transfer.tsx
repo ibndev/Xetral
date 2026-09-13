@@ -709,7 +709,36 @@ function CurrencyGroup({
  */
 function methodsFor(country: XetralCountry | undefined): readonly Method[] {
   if (country === undefined) return ['xetral'];
-  return country.payout_method === 'mobile_money' ? ['momo', 'xetral'] : ['bank', 'xetral'];
+
+  /*
+   * READ FROM `payout_methods`, WHICH IS A SET SINCE 070.
+   *
+   * It was `payout_method`, one value, so a country offered a wallet OR a
+   * bank and never both — and in Ghana and Kenya it is both: most people are
+   * paid into an MTN or M-PESA wallet, plenty into a bank account. Widening
+   * the screen alone would have been worse than the gap: the SERVER
+   * normalised the destination by that same single value, so a bank account
+   * number typed on a country marked `mobile_money` was rewritten as a phone
+   * number and sent to a wallet nobody holds. 070 made the column a set and
+   * the request carry which one, so both halves now agree.
+   *
+   * ORDERED BY THE COUNTRY'S OWN DEFAULT, so the rail most people there use
+   * is the first row rather than whichever happens to sort first.
+   */
+  const offered = country.payout_methods ?? [country.payout_method];
+  const rails: Method[] = [];
+  for (const rail of offered) {
+    if (rail === 'mobile_money') rails.push('momo');
+    else if (rail === 'bank') rails.push('bank');
+  }
+  const opensOn: Method = country.payout_method === 'mobile_money' ? 'momo' : 'bank';
+  rails.sort((a, b) => Number(b === opensOn) - Number(a === opensOn));
+
+  /* XETRAL LAST RATHER THAN FIRST, deliberately: a customer who came here to
+     pay a bank or a wallet should not have to read past an option about this
+     app. It is never absent, because a transfer between two balances here is
+     not a rail and is always available. */
+  return [...rails, 'xetral'];
 }
 
 const METHOD_COPY: Readonly<Record<Method, { title: string; sub: string }>> = {
@@ -857,8 +886,14 @@ function RecipientDetails({
   const [found, setFound] = useState<RecipientResolution | undefined>(undefined);
 
   const banks = useLoad(
-    async () => (country === undefined ? [] : client.payoutBanks(country.code)),
-    [country?.code],
+    /* THE CATALOGUE FOR THE RAIL THE CUSTOMER CHOSE. A country offering both
+       (070) has two, and they are not interchangeable — an MTN network code is
+       not a bank code. */
+    async () =>
+      country === undefined || method === 'xetral'
+        ? []
+        : client.payoutBanks(country.code, method === 'momo' ? 'mobile_money' : 'bank'),
+    [country?.code, method],
   );
 
   /*
@@ -1450,6 +1485,11 @@ function SendAmount({
                 country: to.country,
                 bankCode: to.rail_code ?? '',
                 accountNumber: to.destination,
+                /* WHICH RAIL, from the recipient's own kind rather than from the
+                   country's default. Ghana and Kenya offer both since 070, and the
+                   server normalises the destination by this — a wallet number to
+                   E.164, a bank account exactly as typed. */
+                method: to.kind === 'momo' ? 'mobile_money' : 'bank',
                 amount,
                 currency: lands_in,
                 pin,

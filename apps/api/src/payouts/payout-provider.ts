@@ -4,6 +4,7 @@ import type { ProviderRouterService } from '../routing/provider-router.service.j
 import type {
   BeneficiaryLookup,
   PayoutBank,
+  PayoutMethod,
   PayoutPort,
   PayoutReceipt,
   PayoutRequest,
@@ -136,8 +137,8 @@ export class SwitchingPayoutPort implements PayoutPort {
     return this.#fallback;
   }
 
-  async banks(country: string): Promise<readonly PayoutBank[]> {
-    return this.#adapterFor(await this.providerForCountry(country)).banks(country);
+  async banks(country: string, method?: PayoutMethod): Promise<readonly PayoutBank[]> {
+    return this.#adapterFor(await this.providerForCountry(country)).banks(country, method);
   }
 
   async lookup(

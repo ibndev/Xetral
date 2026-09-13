@@ -39,6 +39,8 @@ const INTRODUCED_BY: Readonly<Record<string, string>> = {
   'cards.colour': '045_card_fee_split.sql',
   'bank_payouts.provider': '046_payout_provider.sql',
   'countries.payout_method': '046_payout_provider.sql',
+  'countries.payout_methods': '070_payout_methods.sql',
+  'bank_payouts.payout_method': '070_payout_methods.sql',
 };
 
 export function isMissingSchema(error: unknown): boolean {

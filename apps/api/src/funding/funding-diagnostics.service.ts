@@ -330,6 +330,10 @@ export class FundingDiagnosticsService {
       ['cards.colour', '045_card_fee_split.sql'],
       ['bank_payouts.provider', '046_payout_provider.sql'],
       ['countries.payout_method', '046_payout_provider.sql'],
+      /* Ghana and Kenya offer both a wallet and a bank. Without this the
+         Send screen shows one rail and the server normalises by the other. */
+      ['countries.payout_methods', '070_payout_methods.sql'],
+      ['bank_payouts.payout_method', '070_payout_methods.sql'],
       ['error_events.last_reference', '047_error_reference.sql'],
     ];
 

@@ -142,9 +142,9 @@ export class PayoutService {
   ) {}
 
   /** Banks — or Mobile Money networks — a customer may send to. */
-  async banks(country: string): Promise<readonly PayoutBank[]> {
+  async banks(country: string, method?: 'bank' | 'mobile_money'): Promise<readonly PayoutBank[]> {
     try {
-      return await this.port.banks(country);
+      return await this.port.banks(country, method);
     } catch (error) {
       // See `#relay`. "The bank list could not be loaded" with a 500 behind it
       // is the exact shape 046 records: nothing broken except a credential
@@ -404,11 +404,22 @@ export class PayoutService {
    * is not a near miss — it is a number their transfers API cannot route, and
    * it comes back as a refusal about the account rather than about the format.
    *
-   * WHICH RAIL THIS IS COMES FROM THE COUNTRY, not from the bank code and not
-   * from a list in this file. 046 put `payout_method` on `countries` precisely
-   * so the SCREEN would stop offering a product the customer's money cannot
-   * reach, and this is the server reading the same row — one source of truth
-   * for one question, which is the rule this codebase keeps relearning.
+   * WHICH RAIL THIS IS COMES FROM THE REQUEST NOW, AND IS CHECKED AGAINST THE
+   * COUNTRY — which is 070 correcting 046 rather than reversing it.
+   *
+   * 046 put ONE value on `countries` so the SCREEN would stop offering a
+   * product the customer's money cannot reach, and this method read the same
+   * row. That was right while a country had one rail. Ghana and Kenya have
+   * two: most people are paid into a wallet, plenty into a bank account, and
+   * with one column the second was unreachable — worse, a bank account number
+   * typed on a country marked `mobile_money` was REWRITTEN as a phone number
+   * and sent to a wallet nobody holds.
+   *
+   * So the caller says which, and the country still decides what is allowed.
+   * `payout_methods` is the set it offers; a rail outside it is refused here
+   * rather than normalised the wrong way, because anything a client can send
+   * a stolen session can send. An absent `method` means the country's default,
+   * which is exactly what every caller written before 070 meant.
    *
    * A BANK DESTINATION IS LEFT EXACTLY AS TYPED. A NUBAN has no dialling code
    * and no trunk zero to strip, and an account number beginning with a zero is
@@ -416,14 +427,22 @@ export class PayoutService {
    */
   async #destinationFor(body: PayoutBody): Promise<PayoutDestination> {
     const country = await this.countries.byCode(body.country);
+    const method = this.#railFor(country, body.method);
 
-    if (country?.payout_method !== 'mobile_money') {
+    if (method !== 'mobile_money') {
       return {
         country: body.country,
         bank_code: body.bank_code,
         account_number: body.account_number,
         mobile_money: false,
       };
+    }
+
+    /* `#railFor` can only answer `mobile_money` from a country row, so this is
+       unreachable — stated rather than asserted, because a cast here would be
+       the compiler being told something instead of asked. */
+    if (country === undefined) {
+      throw new UnprocessableEntityException({ error: 'country_not_supported' });
     }
 
     const msisdn = internationalDigits(country.dial_code, body.account_number);
@@ -446,6 +465,36 @@ export class PayoutService {
       account_number: msisdn,
       mobile_money: true,
     };
+  }
+
+  /**
+   * The rail a request means, refusing one the country does not offer.
+   *
+   * THE REFUSAL IS THE POINT. Normalisation follows from this answer, so a
+   * rail chosen freely by a caller would let somebody post a bank account
+   * number as `mobile_money` and have it rewritten into a phone number — in
+   * the direction that cannot be recalled. The country's own `payout_methods`
+   * is the whole of what is permitted.
+   *
+   * UNROUTED FALLS BACK TO THE COUNTRY'S DEFAULT rather than refusing, because
+   * a deployment behind 070 has no `payout_methods` and every client that
+   * predates it sends no `method` — and refusing there would turn one missing
+   * column into an outage on the screen money leaves from. 059's argument
+   * about an unrouted currency, applied to a migration rather than a corridor.
+   */
+  #railFor(
+    country: { payout_method: string; payout_methods?: readonly string[] } | undefined,
+    asked: 'bank' | 'mobile_money' | undefined,
+  ): string {
+    const fallback = country?.payout_method ?? 'bank';
+    if (asked === undefined) return fallback;
+
+    const offered = country?.payout_methods;
+    if (offered === undefined || offered.length === 0) return fallback;
+    if (!offered.includes(asked)) {
+      throw new UnprocessableEntityException({ error: 'payout_method_not_supported' });
+    }
+    return asked;
   }
 
   /**
@@ -503,6 +552,10 @@ export class PayoutService {
    * answer is an empty string and a screen that says so, never an echo.
    */
   async lookupOrRefuse(body: LookupQuery): Promise<{ accountName: string }> {
+    /* The method never reaches the adapter: it decides which CATALOGUE a code
+       came from, and the adapter already tells a network code from a bank code
+       by looking it up in its own table. It is on the query so a caller cannot
+       be refused for sending it. */
     try {
       const found = await this.port.lookup(
         body.country,
@@ -848,7 +901,13 @@ export class PayoutService {
       throw error;
     }
 
-    const banks = await this.port.banks(destination.country);
+    /* THE RIGHT CATALOGUE, or the name beside the code is wrong. A Ghanaian
+       bank code looked up in the wallet list finds nothing and the row records
+       the code as its own name — which is what an operator then reads. */
+    const banks = await this.port.banks(
+      destination.country,
+      destination.mobile_money ? 'mobile_money' : 'bank',
+    );
     const bankName =
       banks.find((bank: PayoutBank) => bank.code === destination.bank_code)?.name ??
       destination.bank_code;
@@ -857,9 +916,9 @@ export class PayoutService {
       `INSERT INTO bank_payouts
          (user_id, reference, idempotency_key, country, bank_code, bank_name,
           account_number, account_name, narration, currency, amount_minor,
-          fee_minor, tax_minor, reserve_entry_id)
+          fee_minor, tax_minor, reserve_entry_id, payout_method)
        VALUES ($1::bigint, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::bigint,
-               $12::bigint, $13::bigint, $14::bigint)
+               $12::bigint, $13::bigint, $14::bigint, $15)
        ON CONFLICT (user_id, idempotency_key) DO NOTHING
        RETURNING id`,
       [
@@ -889,6 +948,16 @@ export class PayoutService {
         split.gross.amount.toString(),
         split.tax.amount.toString(),
         entryId,
+        /*
+         * WHICH RAIL IT WENT OUT ON, recorded at the moment of sending and
+         * immutable by trigger — like the provider since 046 and the
+         * destination since 043. The number beside it was normalised FOR this
+         * rail, so reading the rail off the country afterwards would make
+         * every payout in flight unverifiable the instant an operator changed
+         * what that country offers, and an unverifiable payout is one nothing
+         * can settle or reverse.
+         */
+        destination.mobile_money ? 'mobile_money' : 'bank',
       ],
     );
 

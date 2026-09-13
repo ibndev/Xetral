@@ -100,7 +100,7 @@ COMMENT ON TABLE name_enquiry_refusals IS
  * refused is the rail genuinely not naming that account. A row that has not
  * been seen for days is history.
  */
-CREATE VIEW name_enquiry_failures AS
+CREATE OR REPLACE VIEW name_enquiry_failures AS
 SELECT r.provider,
        r.country,
        r.rail_code,

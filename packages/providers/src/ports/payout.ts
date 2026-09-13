@@ -125,11 +125,33 @@ export interface PayoutReceipt {
   readonly failureReason?: string | undefined;
 }
 
+/**
+ * WHICH RAIL MONEY LEAVES ON, where a country has more than one.
+ *
+ * 046 put ONE value on the country and that was right at the time — the Send
+ * screen was offering a Nigerian bank list in Accra. What it cannot say is
+ * "both", and Ghana and Kenya are both: most people there are paid into a
+ * wallet, plenty into a bank account, and Flutterwave serves the two from one
+ * transfers endpoint with different destination shapes.
+ *
+ * So the CALLER says which. Undefined means "whatever this country's default
+ * is", which is what every caller written before 070 meant.
+ */
+export type PayoutMethod = 'bank' | 'mobile_money';
+
 export interface PayoutPort {
   readonly provider: string;
 
-  /** Banks a customer may send to in this country. */
-  banks(country: string): Promise<readonly PayoutBank[]>;
+  /**
+   * Banks — or mobile money networks — a customer may send to in this country.
+   *
+   * ONE CALL FOR BOTH, because the question is the same one: what may the
+   * `bank_code` on a transfer be? A country with two rails answers it twice,
+   * and a picker built from the wrong one is 046's fault exactly — a selection
+   * the customer's money cannot reach, which fails at the transfer and reads
+   * to them as their own number being wrong.
+   */
+  banks(country: string, method?: PayoutMethod): Promise<readonly PayoutBank[]>;
 
   /**
    * Who holds this account.
