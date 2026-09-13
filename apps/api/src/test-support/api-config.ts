@@ -69,6 +69,9 @@ export function testApiConfig(databaseUrl: string, overrides: Partial<ApiConfig>
     paystackBaseUrl: 'https://api.paystack.co',
     flutterwaveSecretKey: undefined,
     flutterwaveWebhookHash: undefined,
+    flutterwaveV4ClientId: undefined,
+    flutterwaveV4ClientSecret: undefined,
+    flutterwaveV4BaseUrl: undefined,
     flutterwaveBaseUrl: 'https://api.flutterwave.com',
     paystackPreferredBank: undefined,
     // Undefined by default, so a suite that does not name it gets the

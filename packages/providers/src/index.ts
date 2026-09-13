@@ -36,6 +36,7 @@ export * from './exchangerate/exchangerate-adapter.js';
 export * from './ports/checkout.js';
 export * from './paystack/checkout-adapter.js';
 export * from './flutterwave/client.js';
+export * from './flutterwave/v4-client.js';
 export * from './flutterwave/checkout-adapter.js';
 export * from './flutterwave/payout-adapter.js';
 export * from './flutterwave/webhooks.js';

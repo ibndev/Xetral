@@ -11,13 +11,13 @@ import {
 import type { Pool, PoolClient } from 'pg';
 import { InsufficientFundsError, LedgerService, posting } from '@xetral/ledger';
 import { ProviderError, ProviderRejectedError, ProviderTimeoutError } from '@xetral/providers';
-import type { PayoutBank, PayoutPort, PayoutReceipt } from '@xetral/providers';
+import type { PayoutBank, PayoutBranch, PayoutPort, PayoutReceipt } from '@xetral/providers';
 import { applyBasisPoints, fromMajor, money, toMajor } from '@xetral/shared';
 import type { Currency, Money } from '@xetral/shared';
 import { DATABASE, LEDGER, PAYOUT_PORT } from '../tokens.js';
 import { internationalDigits } from '../phone.js';
 import { CountriesService } from '../countries/countries.service.js';
-import type { LookupQuery, PayoutBody } from './dto.js';
+import type { BranchesQuery, LookupQuery, PayoutBody } from './dto.js';
 import { AffordabilityService } from '../wallet/affordability.service.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { SpendingLimitService } from '../wallet/spending-limits.service.js';
@@ -57,6 +57,8 @@ import { NotificationService } from '../notifications/notification.service.js';
  */
 interface PayoutDestination {
   readonly country: string;
+  /** The destination branch, where the corridor requires one — Ghana today. */
+  readonly branch_code?: string | undefined;
   readonly bank_code: string;
   /** Digits only. For a wallet this is the international form — `233…` — and
    *  never the trunk-zero spelling the customer typed. */
@@ -301,6 +303,14 @@ export class PayoutService {
         bankCode: destination.bank_code,
         accountNumber: destination.account_number,
         /*
+         * THE BRANCH, WHERE THE CORRIDOR REQUIRES ONE — Ghana, today.
+         * Flutterwave refuses a Ghanaian transfer without it, which would
+         * have made 070's new bank rail fail on every send.
+         */
+        ...(destination.branch_code === undefined
+          ? {}
+          : { branchCode: destination.branch_code }),
+        /*
          * WHO SENT IT, because one corridor is refused without it.
          *
          * Kenya's M-PESA payout is treated as a cross-border remittance and
@@ -435,6 +445,7 @@ export class PayoutService {
         bank_code: body.bank_code,
         account_number: body.account_number,
         mobile_money: false,
+        ...(body.branch_code === undefined ? {} : { branch_code: body.branch_code }),
       };
     }
 
@@ -464,6 +475,7 @@ export class PayoutService {
       bank_code: body.bank_code,
       account_number: msisdn,
       mobile_money: true,
+      ...(body.branch_code === undefined ? {} : { branch_code: body.branch_code }),
     };
   }
 
@@ -551,6 +563,32 @@ export class PayoutService {
    * sender typed confirms nothing — so where the rail cannot answer, the
    * answer is an empty string and a screen that says so, never an echo.
    */
+  /**
+   * The branches of one bank, where the corridor requires one.
+   *
+   * `bankId` IS NOT `bank_code`. Flutterwave's bank list answers
+   * `{ id, code, name }` and the branches path takes the ID — two different
+   * values for one bank, and passing the code answers nothing. So this reads
+   * the bank OUT of the list rather than trusting a caller to know the
+   * difference, which also means a code this rail does not offer finds no bank
+   * and answers an empty list rather than reaching the provider.
+   *
+   * EMPTY IS A VALID ANSWER, not a failure: only Ghana needs a branch code and
+   * everywhere else the screen draws no picker. A provider that could not be
+   * asked is relayed, because a bank list that cannot load is 046's fault and
+   * this is the same screen.
+   */
+  async branches(query: BranchesQuery): Promise<readonly PayoutBranch[]> {
+    try {
+      const banks = await this.port.banks(query.country, 'bank');
+      const bank = banks.find((b: PayoutBank) => b.code === query.bank_code);
+      if (bank?.id === undefined || this.port.branches === undefined) return [];
+      return await this.port.branches(query.country, bank.id);
+    } catch (error) {
+      throw this.#relay(error, 'listing bank branches');
+    }
+  }
+
   async lookupOrRefuse(body: LookupQuery): Promise<{ accountName: string }> {
     /* The method never reaches the adapter: it decides which CATALOGUE a code
        came from, and the adapter already tells a network code from a bank code
@@ -916,9 +954,9 @@ export class PayoutService {
       `INSERT INTO bank_payouts
          (user_id, reference, idempotency_key, country, bank_code, bank_name,
           account_number, account_name, narration, currency, amount_minor,
-          fee_minor, tax_minor, reserve_entry_id, payout_method)
+          fee_minor, tax_minor, reserve_entry_id, payout_method, branch_code)
        VALUES ($1::bigint, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::bigint,
-               $12::bigint, $13::bigint, $14::bigint, $15)
+               $12::bigint, $13::bigint, $14::bigint, $15, $16)
        ON CONFLICT (user_id, idempotency_key) DO NOTHING
        RETURNING id`,
       [
@@ -958,6 +996,10 @@ export class PayoutService {
          * can settle or reverse.
          */
         destination.mobile_money ? 'mobile_money' : 'bank',
+        /* PART OF THE DESTINATION, and immutable with it (043): the row
+           records what the rail was GIVEN. Ghana refuses a transfer without
+           one. */
+        destination.branch_code ?? null,
       ],
     );
 

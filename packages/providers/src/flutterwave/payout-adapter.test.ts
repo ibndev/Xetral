@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ghs, kes, ngn } from './test-money.js';
 import { FlutterwaveClient } from './client.js';
 import { FlutterwavePayoutAdapter } from './payout-adapter.js';
+import { FlutterwaveV4Client } from './v4-client.js';
 import { ProviderRejectedError } from '../ports/errors.js';
 
 function stub(responses: readonly unknown[]): {
@@ -25,6 +26,37 @@ function stub(responses: readonly unknown[]): {
     },
   });
   return { client, sent };
+}
+
+/** A v4 client whose token exchange and calls are both stubbed. */
+function v4Stub(responses: readonly { status: number; body: unknown }[]): {
+  v4: FlutterwaveV4Client;
+  sent: { url: string; body: unknown }[];
+} {
+  const sent: { url: string; body: unknown }[] = [];
+  let i = 0;
+  const v4 = new FlutterwaveV4Client({
+    clientId: 'client-id',
+    clientSecret: 'client-secret',
+    fetch: async (url, init) => {
+      if (url.includes('openid-connect/token')) {
+        return new Response(JSON.stringify({ access_token: 'tok', expires_in: 600 }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      sent.push({
+        url,
+        body: init.body === undefined ? undefined : JSON.parse(String(init.body)),
+      });
+      const next = responses[i++] ?? { status: 200, body: {} };
+      return new Response(JSON.stringify(next.body), {
+        status: next.status,
+        headers: { 'content-type': 'application/json' },
+      });
+    },
+  });
+  return { v4, sent };
 }
 
 describe('what a customer is offered to send to', () => {
@@ -87,33 +119,87 @@ describe('what a customer is offered to send to', () => {
 });
 
 describe('who holds the destination', () => {
-  it('ASKS for a Ghanaian wallet, instead of refusing to ask', async () => {
+  it('asks v4 for a Ghanaian wallet, because v3 has no wallet resolver', async () => {
     /*
-     * THE TEST THAT ENCODED THE BUG, rewritten to encode the fact.
+     * FIVE ROUNDS, AND THIS TEST HAS NOW ENCODED THREE DIFFERENT BELIEFS.
      *
-     * It used to assert that a `GH`/`MTN` lookup threw `name_unavailable`
-     * WITHOUT CALLING ANYTHING — and it passed, for three rounds, while
-     * customers in Accra were reporting that their momo details could not be
-     * found. Flutterwave's own documentation for `/v3/accounts/resolve` lists
-     * GHANAIAN MOBILE MONEY NUMBERS among what it accepts, so the refusal was
-     * this adapter's invention and the test was agreeing with it.
+     * It first asserted that a `GH`/`MTN` lookup threw `name_unavailable`
+     * WITHOUT CALLING ANYTHING, and passed while customers in Accra reported
+     * the opposite. Then it asserted a v3 `/accounts/resolve` call, on the
+     * strength of a SEARCH SNIPPET, and passed while the same customers
+     * reported the same thing.
      *
-     * A test written from the same assumption as the code passes everything
-     * and fails on the first live call. It is the lesson Phase 3 records about
-     * the Bitnob endpoint table, in a second place.
+     * FLUTTERWAVE'S OWN v3 SPECIFICATION says that endpoint "resolves a BANK
+     * ACCOUNT number ... account_bank: Bank code (3 DIGITS)". We were sending
+     * `MTN` and twelve digits. No spelling of either was ever going to work.
+     *
+     * THE WALLET RESOLVER IS v4's `POST /wallet-account/resolve`, taking
+     * `{ account_number, mobile_network, country }`. A test written from the
+     * same assumption as the code passes everything; only the vendor's own
+     * specification settles it, which is Phase 3's lesson for the third time.
      */
-    const { client, sent } = stub([
-      { status: 'success', data: { account_name: 'RABI SIEDU' } },
+    const { client } = stub([]);
+    const { v4, sent } = v4Stub([
+      { status: 200, body: { account_name: 'RABI SIEDU', account_number: '233553921133' } },
     ]);
-    const found = await new FlutterwavePayoutAdapter(client).lookup('GH', 'MTN', '233553921133');
-    expect(sent[0]?.url).toBe('https://api.flutterwave.com/v3/accounts/resolve');
-    // The NETWORK code goes in `account_bank` and the number goes in
-    // INTERNATIONAL form — what `phone.ts` produces and what the row records.
-    expect(sent[0]?.body).toMatchObject({
-      account_bank: 'MTN',
+    const found = await new FlutterwavePayoutAdapter(client, v4).lookup(
+      'GH',
+      'MTN',
+      '233553921133',
+    );
+    expect(sent[0]?.url).toContain('/wallet-account/resolve');
+    expect(sent[0]?.body).toEqual({
       account_number: '233553921133',
+      mobile_network: 'MTN',
+      country: 'GH',
     });
     expect(found.accountName).toBe('RABI SIEDU');
+    // The number that will be SENT is unchanged — 067's rule that the row
+    // records what the provider was given.
+    expect(found.accountNumber).toBe('233553921133');
+  });
+
+  it('reads the name whether it is wrapped in `data` or not', async () => {
+    // Their published schema answers at the top level; several of their
+    // surfaces wrap a payload. Being tolerant on a READ costs nothing and
+    // being wrong costs every Ghanaian send — the Bitnob card-shape call.
+    const { client } = stub([]);
+    const { v4 } = v4Stub([{ status: 200, body: { data: { account_name: 'KWAME MENSAH' } } }]);
+    const found = await new FlutterwavePayoutAdapter(client, v4).lookup('GH', 'MTN', '233240000000');
+    expect(found.accountName).toBe('KWAME MENSAH');
+  });
+
+  it('says the NAME IS UNAVAILABLE when nobody has pasted the v4 credentials', async () => {
+    /*
+     * A CREDENTIAL NOBODY HAS IS NOT A NUMBER THAT IS WRONG, and the
+     * difference decides whether a customer can send at all. 069's tri-state
+     * turns `name_unavailable` into "ask for a label and go on" — Kenya's
+     * behaviour — and `unknown_account` into a refusal. Reporting a missing
+     * credential as the second would block every Ghanaian send on something
+     * the customer cannot do anything about.
+     */
+    const { client } = stub([]);
+    await expect(
+      new FlutterwavePayoutAdapter(client).lookup('GH', 'MTN', '233553921133'),
+    ).rejects.toMatchObject({ providerCode: 'name_unavailable' });
+  });
+
+  it('carries the refusal out, so somebody can read what the rail said', async () => {
+    // 069's point stands whatever endpoint is called: a refusal nobody can
+    // read is a refusal nobody can fix. The trail carries a number's SHAPE
+    // and never its digits — 016's rule that the way to hold less is to
+    // store less.
+    const { client } = stub([]);
+    const { v4 } = v4Stub([
+      { status: 400, body: { message: 'wallet not found' } },
+    ]);
+    const failed = await new FlutterwavePayoutAdapter(client, v4)
+      .lookup('GH', 'MTN', '233553921133')
+      .catch((error: unknown) => error);
+    expect(failed).toMatchObject({ providerCode: 'unknown_account' });
+    const trail = JSON.stringify((failed as { cause?: unknown }).cause);
+    expect(trail).toContain('wallet-account/resolve');
+    expect(trail).not.toContain('233553921133');
   });
 
   it('still says M-PESA has no name enquiry, because it has none', async () => {
@@ -133,79 +219,6 @@ describe('who holds the destination', () => {
       new FlutterwavePayoutAdapter(client).lookup('KE', 'MPS', '254712345678'),
     ).rejects.toMatchObject({ providerCode: 'name_unavailable' });
     expect(sent).toHaveLength(0);
-  });
-
-  it('asks a SECOND way when Ghana refuses the stored spelling', async () => {
-    /*
-     * ROUND FOUR, AND WHY THIS IS NOT ANOTHER ASSERTED CONSTANT.
-     *
-     * The previous round made the adapter ASK for a Ghanaian wallet instead of
-     * refusing to — and then asserted one payload shape and threw the
-     * provider's refusal away. So a number reached Flutterwave, Flutterwave
-     * said no, and the sentence it said no with reached no log, no table and
-     * no screen: three rounds of "it cannot find the momo details" with no
-     * recorded evidence of what was actually answered.
-     *
-     * A LOOKUP IS A READ, so it may be asked more than one way. The stored
-     * number is E.164 (`233…`, what a transfer carries); the national
-     * spelling is `0…`, which is how the number is written in Accra and the
-     * shape their own Ghanaian examples use. A TRANSFER would never be
-     * retried like this — one retry is how a payout becomes two.
-     */
-    const { client, sent } = stub([
-      { status: 'error', message: 'Sorry, that account number is invalid' },
-      { status: 'success', data: { account_name: 'RABI SIEDU' } },
-    ]);
-    const found = await new FlutterwavePayoutAdapter(client).lookup('GH', 'MTN', '233553921133');
-    expect(sent).toHaveLength(2);
-    expect(sent[0]?.body).toMatchObject({ account_number: '233553921133' });
-    expect(sent[1]?.body).toMatchObject({ account_number: '0553921133', account_bank: 'MTN' });
-    expect(found.accountName).toBe('RABI SIEDU');
-    // The name is the RAIL'S and the number is still the one that will be
-    // SENT — 067's rule that a row must record what the provider was given.
-    expect(found.accountNumber).toBe('233553921133');
-  });
-
-  it('carries every refusal out, so somebody can read what the rail said', async () => {
-    /*
-     * THE HALF THAT WAS MISSING FOR THREE ROUNDS. `lookupOrRefuse` mapped a
-     * `ProviderRejectedError` straight to `account_not_found` and LOGGED
-     * NOTHING — so the only fact that could have ended this, Flutterwave's own
-     * sentence, existed nowhere. `cause` carries the shapes tried and what was
-     * said to each, and the payout service writes it to
-     * `name_enquiry_refusals`.
-     *
-     * It carries the KEY'S MODE and never the key: their sandbox cannot verify
-     * a real account at all, so a deployment on `FLWSECK_TEST-…` refuses every
-     * genuine number for a reason that has nothing to do with the number.
-     */
-    const { client } = stub([
-      { status: 'error', message: 'Sorry, that account number is invalid' },
-      { status: 'error', message: 'Sorry, that account number is invalid' },
-      { status: 'success', data: [{ code: 'MTN', name: 'MTN Mobile Money Ghana' }] },
-    ]);
-    await expect(
-      new FlutterwavePayoutAdapter(client).lookup('GH', 'MTN', '233553921133'),
-    ).rejects.toMatchObject({
-      providerCode: 'unknown_account',
-      cause: { keyMode: expect.any(String), tried: expect.any(Array) },
-    });
-  });
-
-  it('NEVER puts a whole mobile number in the trail', async () => {
-    // A refusals table holding whole numbers is a list of customers' contacts.
-    // 016's rule: the way to hold less is to store less.
-    const { client } = stub([
-      { status: 'error', message: 'no' },
-      { status: 'error', message: 'no' },
-      { status: 'success', data: [] },
-    ]);
-    const failed = await new FlutterwavePayoutAdapter(client)
-      .lookup('GH', 'MTN', '233553921133')
-      .catch((error: unknown) => error);
-    const trail = JSON.stringify((failed as { cause?: unknown }).cause);
-    expect(trail).not.toContain('233553921133');
-    expect(trail).not.toContain('0553921133');
   });
 
   it('asks the bank, and returns the BANK\'s answer', async () => {

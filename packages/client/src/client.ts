@@ -446,6 +446,19 @@ export interface PayoutBank {
 }
 
 /**
+ * A BRANCH OF A BANK, which one corridor genuinely requires.
+ *
+ * Flutterwave refuses a Ghanaian transfer without a `destination_branch_code`.
+ * Everywhere else the list comes back empty and no picker is drawn, so the
+ * question "does this corridor need one?" is answered by the server rather
+ * than hardcoded in two apps.
+ */
+export interface PayoutBranch {
+  readonly code: string;
+  readonly name: string;
+}
+
+/**
  * WHICH RAIL REACHES A RECIPIENT — derived, never chosen by a customer.
  *
  * `xetral` moves between two accounts here and never leaves; `bank` and `momo`
@@ -463,6 +476,10 @@ export interface Recipient {
   readonly currency: string;
   readonly rail_code: string | null;
   readonly rail_name: string | null;
+  /** The destination branch, where the corridor requires one — Ghana today.
+   *  On the ROW because a saved recipient is tapped WITHOUT re-reading, and
+   *  the screen that picks a branch is the one that tap skips. */
+  readonly branch_code: string | null;
   readonly destination: string;
   /** What the list shows. */
   readonly display_name: string;
@@ -484,6 +501,8 @@ export interface RecipientResolution {
   readonly currency: string;
   readonly rail_code: string | null;
   readonly rail_name: string | null;
+  /** The destination branch, where the corridor requires one — Ghana today. */
+  readonly branch_code: string | null;
   /** Digits only, normalised server-side into the form the rail accepts. */
   readonly destination: string;
   readonly resolved_name: string | null;
@@ -1169,6 +1188,23 @@ export class XetralClient {
     return body.banks;
   }
 
+  /**
+   * The branches of one bank, or an empty list where none is needed.
+   *
+   * EMPTY IS THE COMMON ANSWER and is not a failure — only Ghana requires a
+   * branch code on a transfer today, and a screen draws the picker only when
+   * this comes back with something in it. That keeps "does this corridor need
+   * a branch?" a question the SERVER answers rather than one two apps
+   * hardcode, which is 040's argument about a country being data.
+   */
+  async payoutBranches(country: string, bankCode: string): Promise<readonly PayoutBranch[]> {
+    const query = new URLSearchParams({ country, bank_code: bankCode });
+    const body = await this.#get<{ branches: PayoutBranch[] }>(
+      `/v1/payouts/branches?${query.toString()}`,
+    );
+    return body.branches;
+  }
+
   async lookupBankAccount(input: {
     country: string;
     bankCode: string;
@@ -1225,6 +1261,10 @@ export class XetralClient {
     kind: RecipientKind;
     country?: string;
     railCode?: string;
+    /** Part of the destination where a corridor requires one, so it is stored
+     *  on the row: a saved recipient is tapped WITHOUT re-reading, and the
+     *  screen that picks a branch is the one that tap skips. */
+    branchCode?: string;
     destination: string;
     label?: string;
   }): Promise<Recipient> {
@@ -1232,6 +1272,7 @@ export class XetralClient {
       kind: input.kind,
       ...(input.country === undefined ? {} : { country: input.country }),
       ...(input.railCode === undefined ? {} : { rail_code: input.railCode }),
+      ...(input.branchCode === undefined ? {} : { branch_code: input.branchCode }),
       destination: input.destination,
       ...(input.label === undefined ? {} : { label: input.label }),
     });
@@ -1250,6 +1291,9 @@ export class XetralClient {
     country: string;
     bankCode: string;
     accountNumber: string;
+    /** The destination branch, where the corridor requires one. Ghana refuses
+     *  a transfer without it; everywhere else this is absent. */
+    branchCode?: string;
     /** WHICH RAIL. It decides how the server normalises the destination — a
      *  wallet number to E.164, a bank account exactly as typed — so on a
      *  country offering both (070) sending the wrong one sends money to a
@@ -1266,6 +1310,7 @@ export class XetralClient {
       bank_code: input.bankCode,
       account_number: input.accountNumber,
       ...(input.method === undefined ? {} : { method: input.method }),
+      ...(input.branchCode === undefined ? {} : { branch_code: input.branchCode }),
       amount: input.amount,
       currency: input.currency,
       ...(input.narration === undefined ? {} : { narration: input.narration }),

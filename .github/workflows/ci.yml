@@ -156,6 +156,7 @@ jobs:
             -f packages/ledger/sql/068_recipients.sql \
             -f packages/ledger/sql/069_name_enquiry.sql \
             -f packages/ledger/sql/070_payout_methods.sql \
+            -f packages/ledger/sql/071_flutterwave_v4_and_ghana_bank.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       - name: Ledger and identity invariants
@@ -233,6 +234,7 @@ jobs:
                    packages/ledger/sql/068_recipients.test.sql \
                    packages/ledger/sql/069_name_enquiry.test.sql \
                    packages/ledger/sql/070_payout_methods.test.sql \
+                   packages/ledger/sql/071_flutterwave_v4_and_ghana_bank.test.sql \
                    packages/ledger/sql/099_least_privilege.test.sql; do
             echo "== $f"
             psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
@@ -342,6 +344,7 @@ jobs:
             -f packages/ledger/sql/068_recipients.sql \
             -f packages/ledger/sql/069_name_enquiry.sql \
             -f packages/ledger/sql/070_payout_methods.sql \
+            -f packages/ledger/sql/071_flutterwave_v4_and_ghana_bank.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       # ------------------------------------------------------------------

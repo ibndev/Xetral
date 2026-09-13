@@ -42,6 +42,25 @@ export const lookupQuerySchema = z
 
 export type LookupQuery = z.infer<typeof lookupQuerySchema>;
 
+/**
+ * The branch, where a corridor requires one.
+ *
+ * Ghana today, and `branches()` is what says so: a rail needing none answers
+ * an empty list and no picker is drawn. Optional here because every other
+ * corridor sends nothing, and the shape is deliberately narrow — a branch code
+ * is `GH190101`, never free text.
+ */
+const branchCode = z.string().trim().regex(/^[A-Za-z0-9-]{2,32}$/).optional();
+
+export const branchesQuerySchema = z
+  .object({
+    country: z.string().trim().length(2).toUpperCase(),
+    bank_code: z.string().trim().min(1).max(32),
+  })
+  .strict();
+
+export type BranchesQuery = z.infer<typeof branchesQuerySchema>;
+
 export const banksQuerySchema = z
   .object({
     country: z.string().trim().length(2).toUpperCase(),
@@ -62,6 +81,8 @@ export const payoutSchema = z
      * so getting it wrong sends money to a number belonging to nobody.
      */
     method: payoutMethod,
+    /** Ghana refuses a transfer without one — see `branchCode` above. */
+    branch_code: branchCode,
     /**
      * DELIBERATELY ABSENT: the beneficiary's name.
      *

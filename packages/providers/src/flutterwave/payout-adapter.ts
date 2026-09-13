@@ -5,12 +5,14 @@ import { ProviderContractError, ProviderRejectedError } from '../ports/errors.js
 import type {
   BeneficiaryLookup,
   PayoutBank,
+  PayoutBranch,
   PayoutMethod,
   PayoutPort,
   PayoutReceipt,
   PayoutRequest,
 } from '../ports/payout.js';
 import { FLUTTERWAVE_ENDPOINTS, type FlutterwaveClient } from './client.js';
+import { FLUTTERWAVE_V4_ENDPOINTS, type FlutterwaveV4Client } from './v4-client.js';
 
 const PROVIDER = 'flutterwave';
 
@@ -39,54 +41,50 @@ export const FLUTTERWAVE_MOBILE_MONEY_NETWORKS: Readonly<Record<string, readonly
 };
 
 /**
- * WHERE A WALLET NUMBER CAN BE RESOLVED TO A NAME, AND WHERE IT CANNOT.
+ * WHERE A WALLET NUMBER CAN BE RESOLVED TO A NAME, AND ON WHICH API VERSION.
  *
- * THIS FILE SPENT THREE ROUNDS ASSERTING THAT NO MOBILE MONEY WALLET HAS A
- * NAME ENQUIRY. That is false, and it is false in the one country this
- * platform's customers were complaining about. Flutterwave's own
- * documentation for `/v3/accounts/resolve` lists what it accepts: Nigerian
- * bank accounts, Ghanaian bank accounts, GHANAIAN MOBILE MONEY NUMBERS, and a
- * Flutterwave merchant id.
+ * THIS FILE HAS NOW BEEN WRONG ABOUT THIS TWICE, IN OPPOSITE DIRECTIONS.
  *
- * So "we cannot find the momo details" was never the provider's answer. The
- * adapter refused to ask: it matched the network code, threw
- * `name_unavailable` and never made the call. Every layer above then did
- * exactly what it was told, correctly, all the way to a screen saying the name
- * could not be found — about a number whose name Flutterwave will return on
- * request. A REFUSAL THIS CODE INVENTED, relayed faithfully by everything
- * downstream, is the hardest kind of fault to see: every component is
- * behaving.
+ * First it asserted that NO mobile money wallet has a name enquiry, and threw
+ * without calling anything. Then — two rounds ago, on the strength of a
+ * SEARCH SNIPPET rather than a specification — it asserted that v3's
+ * `/accounts/resolve` accepts Ghanaian mobile money numbers, and called it.
+ * Both were guesses and the second replaced one wrong belief with another.
  *
- * KENYA IS NOT ON THAT LIST, and that is the reason this is a table rather
- * than a flag. M-PESA is absent from what resolve accepts, so there
- * `name_unavailable` is the true answer and stays — 043's rule holds where it
- * applies. What was wrong was applying it everywhere.
+ * FLUTTERWAVE'S OWN v3 SPECIFICATION SETTLES IT. `POST /v3/accounts/resolve`
+ * is described as: "Resolve a BANK ACCOUNT number ... Requires account_number
+ * (10 digits) and account_bank (bank code). account_bank: Bank code (3
+ * DIGITS)." We were sending `MTN` and a twelve-digit phone number. THERE IS
+ * NO MOBILE MONEY IN v3'S RESOLVER AT ALL, so no spelling of either field was
+ * ever going to work — which is why the previous round's careful two-shape
+ * retry changed nothing.
+ *
+ * THE WALLET RESOLVER IS IN v4: `POST /wallet-account/resolve`, taking
+ * `{ account_number, mobile_network, country }`, beside a separate
+ * `/bank-account/resolve`. Two endpoints, because they are two questions.
+ * `FlutterwaveV4Client` is how this adapter asks it; money still moves on v3.
+ *
+ * SO THIS SET IS NOW ABOUT THE PRODUCT, NOT THE ENDPOINT: which countries'
+ * wallets Flutterwave will name at all. Kenya's M-PESA is absent from what
+ * they resolve, so `name_unavailable` remains the true answer there — 043's
+ * rule holds where it applies, and what was wrong was applying it everywhere.
  */
 const RESOLVES_MOBILE_MONEY: ReadonlySet<string> = new Set(['GH']);
 
-interface Attempt {
-  readonly account_bank: string;
-  readonly account_number: string;
-}
-
 /**
- * The national spelling of a stored E.164 number — `233553921133` becomes
- * `0553921133`.
+ * WHERE A TRANSFER CARRIES A BRANCH CODE.
  *
- * NOT A CONVERSION FOR ANYTHING THAT MOVES MONEY. `bank_payouts.account_number`
- * is immutable and is what a transfer carries (067), and this never touches
- * it: it exists only so a READ can be asked a second way when the provider
- * refuses the first. Undefined where the number does not start with the
- * country's dialling code, because then it is already national.
+ * FLUTTERWAVE, VERBATIM: "When transferring to Ghanaian bank accounts and
+ * mobile money wallets, you need to pass the branch code of the institution or
+ * telco in your Initiate Transfer request as destination_branch_code."
+ *
+ * A TABLE RATHER THAN A RULE, for the reason this file has now relearned
+ * twice: the countries that need one are a fact about Flutterwave's Ghanaian
+ * integration, not something derivable from anything else here. Nigeria and
+ * Kenya do not, and sending an empty one would be a field their API has to
+ * decide what to do with.
  */
-const DIAL_CODES: Readonly<Record<string, string>> = { GH: '233', KE: '254', NG: '234' };
-
-function nationalForm(digits: string, iso: string): string | undefined {
-  const code = DIAL_CODES[iso];
-  if (code === undefined || !digits.startsWith(code)) return undefined;
-  const rest = digits.slice(code.length);
-  return rest === '' ? undefined : `0${rest}`;
-}
+const REQUIRES_BRANCH_CODE: ReadonlySet<string> = new Set(['GH']);
 
 /**
  * A number's SHAPE, for the trail — never the number.
@@ -101,7 +99,45 @@ function shape(digits: string): string {
 
 const banksResponse = z.object({
   status: z.string().optional(),
-  data: z.array(z.object({ code: z.string().min(1), name: z.string().min(1) })).optional(),
+  data: z
+    .array(
+      z.object({
+        /* THE BANK'S OWN ID, which is NOT its code and is what the branches
+           call takes as a path parameter. Dropping it — which this schema did
+           — made Ghanaian branch codes unreachable, and a Ghanaian transfer
+           without one is refused. */
+        id: z.union([z.number(), z.string()]).optional(),
+        code: z.string().min(1),
+        name: z.string().min(1),
+      }),
+    )
+    .optional(),
+});
+
+const branchesResponse = z.object({
+  status: z.string().optional(),
+  data: z
+    .array(
+      z.object({
+        branch_code: z.string().min(1),
+        branch_name: z.string().min(1),
+      }),
+    )
+    .optional(),
+});
+
+/**
+ * v4'S WALLET RESOLVER, AND WHY THE READ IS TOLERANT.
+ *
+ * Their published schema answers `{ account_number, account_name,
+ * mobile_network, country }` at the top level; several of their surfaces wrap
+ * a payload in `data`. Accepting both costs nothing on a READ and being wrong
+ * costs every Ghanaian send — the call `card-adapter.ts` already makes about
+ * Bitnob's two card shapes.
+ */
+const walletResolveResponse = z.object({
+  account_name: z.string().min(1).optional(),
+  data: z.object({ account_name: z.string().min(1) }).optional(),
 });
 
 const resolveResponse = z.object({
@@ -144,11 +180,15 @@ const transferResponse = z.object({
 export class FlutterwavePayoutAdapter implements PayoutPort {
   readonly provider = PROVIDER;
   readonly #client: FlutterwaveClient;
-  /** Their catalogue, per country, for the life of the process. */
-  readonly #listedBanks = new Map<string, readonly PayoutBank[]>();
-
-  constructor(client: FlutterwaveClient) {
+  /**
+   * v4, FOR ONE READ. Optional because a deployment that has not pasted the
+   * v4 credentials still pays out perfectly on v3 — it just cannot name a
+   * wallet, which the screen handles by asking for a label.
+   */
+  readonly #v4: FlutterwaveV4Client | undefined;
+  constructor(client: FlutterwaveClient, v4?: FlutterwaveV4Client) {
     this.#client = client;
+    this.#v4 = v4;
   }
 
   async banks(country: string, method?: PayoutMethod): Promise<readonly PayoutBank[]> {
@@ -175,7 +215,46 @@ export class FlutterwavePayoutAdapter implements PayoutPort {
     if (!parsed.success || parsed.data.data === undefined) {
       throw new ProviderContractError(PROVIDER, `unexpected /v3/banks/${iso} response`);
     }
-    return parsed.data.data.map((bank) => ({ code: bank.code, name: bank.name }));
+    return parsed.data.data.map((bank) => ({
+      code: bank.code,
+      name: bank.name,
+      ...(bank.id === undefined ? {} : { id: String(bank.id) }),
+    }));
+  }
+
+  /**
+   * THE BRANCHES OF ONE BANK, and Ghana cannot be paid without one.
+   *
+   * FLUTTERWAVE, VERBATIM: "When transferring to Ghanaian bank accounts and
+   * mobile money wallets, you need to pass the branch code of the institution
+   * or telco in your Initiate Transfer request as destination_branch_code."
+   *
+   * 070 gave Ghana a bank rail and every transfer on it would have been
+   * refused without this — a whole product added and immediately broken, for a
+   * field nothing in this package had ever heard of. Found by reading their
+   * specification rather than by a customer reporting it, which is the only
+   * part of the last five rounds that went differently.
+   *
+   * `bankId` IS NOT `bankCode`. Their bank list answers `{ id, code, name }`
+   * and the branches path takes the ID; this adapter's schema used to drop it
+   * entirely, which is what made the branch codes unreachable.
+   */
+  async branches(country: string, bankId: string): Promise<readonly PayoutBranch[]> {
+    const iso = country.trim().toUpperCase();
+    if (!REQUIRES_BRANCH_CODE.has(iso)) return [];
+
+    const body = await this.#client.request(
+      'GET',
+      FLUTTERWAVE_ENDPOINTS.branches(bankId),
+    );
+    const parsed = branchesResponse.safeParse(body);
+    if (!parsed.success || parsed.data.data === undefined) {
+      throw new ProviderContractError(PROVIDER, `unexpected /v3/banks/${bankId}/branches response`);
+    }
+    return parsed.data.data.map((branch) => ({
+      code: branch.branch_code,
+      name: branch.branch_name,
+    }));
   }
 
   async lookup(
@@ -204,131 +283,94 @@ export class FlutterwavePayoutAdapter implements PayoutPort {
     }
 
     /*
-     * A LOOKUP IS A READ, SO IT MAY BE ASKED MORE THAN ONE WAY — and that is
-     * the difference between this and every other call in this package.
+     * A WALLET GOES TO v4 AND A BANK ACCOUNT STAYS ON v3, because those are
+     * the two endpoints that exist.
      *
-     * ROUND FOUR ON ONE COMPLAINT, and the reason it kept coming back is that
-     * ONE payload shape was ASSERTED and its refusal was thrown away. The
-     * previous round fixed the adapter's refusal to ask; a Ghanaian number
-     * then reached `/v3/accounts/resolve`, Flutterwave said no, and the
-     * sentence it said no WITH reached no log line, no table and no screen.
-     * Three rounds of "it cannot find the momo details" with no recorded
-     * evidence anywhere of what the provider actually answered.
-     *
-     * So this stops asserting a shape. It tries the ones that can be true,
-     * in order, and CARRIES EVERY REFUSAL OUT on the error so the caller can
-     * write them down:
-     *
-     *   1. the number as stored — E.164 digits, `233553921133`, which is what
-     *      `phone.ts` produces and what a transfer carries;
-     *   2. the NATIONAL form, `0553921133` — how the number is written in
-     *      Accra, and the shape their own Ghanaian examples use;
-     *   3. the operator's code AS FLUTTERWAVE LISTS IT, if `/v3/banks/GH`
-     *      names it differently from the code a TRANSFER takes. A transfer
-     *      code and a resolve code being the same string is an assumption,
-     *      and it is exactly the class of assumption this file has now been
-     *      wrong about twice.
-     *
-     * Bounded at four calls, none of which moves money, and only reached on a
-     * path that is otherwise refusing every customer. A TRANSFER would never
-     * be retried this way — one is how a payout becomes two.
+     * The previous round tried the number in two spellings against v3 and
+     * recorded every refusal, which was a careful answer to the wrong
+     * question: v3's resolver is bank-shaped and a mobile money number is not
+     * a bank account however it is written. The trail that work built is kept
+     * — `cause` still carries what was tried and what was said — because 069's
+     * point stands: a refusal nobody can read is a refusal nobody can fix.
      */
-    const attempts: Attempt[] = [{ account_bank: bankCode, account_number: accountNumber }];
-    const national = nationalForm(accountNumber, iso);
-    if (isWallet && national !== undefined) {
-      attempts.push({ account_bank: bankCode, account_number: national });
+    if (isWallet) {
+      if (this.#v4 === undefined || !(await this.#v4.configured())) {
+        /*
+         * NOBODY HAS PASTED THE v4 CREDENTIALS, which is not the same as the
+         * rail refusing — and the difference decides whether a customer can
+         * send at all. `name_unavailable` means a name was never obtainable,
+         * so the screen asks for a label and the send proceeds, exactly as it
+         * does in Kenya. Reporting this as `unknown_account` would block every
+         * Ghanaian send on a credential the customer cannot paste.
+         */
+        throw new ProviderRejectedError(
+          PROVIDER,
+          'this deployment has no Flutterwave v4 client id and secret, so a ' +
+            'mobile money wallet cannot be named. Paste both on the Provider ' +
+            'keys screen.',
+          'name_unavailable',
+        );
+      }
+
+      let message = 'could not resolve that wallet';
+      try {
+        const body = await this.#v4.request('POST', FLUTTERWAVE_V4_ENDPOINTS.resolveWallet, {
+          account_number: accountNumber,
+          mobile_network: bankCode,
+          country: iso,
+        });
+        const parsed = walletResolveResponse.safeParse(body);
+        const name = parsed.success ? (parsed.data.data?.account_name ?? parsed.data.account_name) : undefined;
+        if (name !== undefined && name !== '') {
+          return { accountNumber, bankCode, accountName: name };
+        }
+        message = parsed.success ? 'the wallet resolver named nobody' : parsed.error.message;
+      } catch (error) {
+        if (!(error instanceof ProviderRejectedError)) throw error;
+        message = error.message;
+      }
+
+      throw new ProviderRejectedError(PROVIDER, message, 'unknown_account', {
+        keyMode: await this.#client.keyMode(),
+        tried: [`v4 /wallet-account/resolve ${iso}/${bankCode}/${shape(accountNumber)}: ${message}`],
+      });
     }
 
-    const tried: string[] = [];
+    /*
+     * A BANK ACCOUNT, ON v3, WHICH IS WHAT THAT ENDPOINT IS FOR. `account_bank`
+     * is the bank code from `/v3/banks/:country` and `account_number` is the
+     * account exactly as typed — a NUBAN has no dialling code and an account
+     * beginning with a zero is an ordinary account.
+     */
     let lastMessage = 'could not resolve that account';
-
-    for (let index = 0; index < attempts.length; index += 1) {
-      const attempt = attempts[index]!;
-      try {
-        const body = await this.#client.request(
-          'POST',
-          FLUTTERWAVE_ENDPOINTS.resolveAccount,
-          attempt,
-        );
-        const parsed = resolveResponse.safeParse(body);
-        if (parsed.success && parsed.data.data !== undefined) {
-          return {
-            accountNumber,
-            bankCode,
-            accountName: parsed.data.data.account_name,
-          };
-        }
-        lastMessage = parsed.success
-          ? (parsed.data.message ?? lastMessage)
-          : `unexpected /v3/accounts/resolve response: ${parsed.error.message}`;
-      } catch (error) {
-        // A refusal is an answer and the next shape may be accepted. Anything
-        // else — unreachable, timed out, a broken contract — is not about the
-        // shape at all and must not be re-sent under another spelling.
-        if (!(error instanceof ProviderRejectedError)) throw error;
-        lastMessage = error.message;
+    try {
+      const body = await this.#client.request('POST', FLUTTERWAVE_ENDPOINTS.resolveAccount, {
+        account_number: accountNumber,
+        account_bank: bankCode,
+      });
+      const parsed = resolveResponse.safeParse(body);
+      if (parsed.success && parsed.data.data !== undefined) {
+        return { accountNumber, bankCode, accountName: parsed.data.data.account_name };
       }
-      tried.push(`${attempt.account_bank}/${shape(attempt.account_number)}: ${lastMessage}`);
-
-      /*
-       * ASK FLUTTERWAVE WHAT THEY CALL THIS OPERATOR, once, after their own
-       * answer has ruled out the code we hold. Their list is data from the
-       * provider rather than another constant of ours — which is the whole
-       * lesson this package records twice about plausible tables.
-       */
-      if (isWallet && index === attempts.length - 1 && !tried.some((t) => t.startsWith('listed:'))) {
-        const listed = await this.#listedCodeFor(iso, bankCode);
-        if (listed !== undefined && listed !== bankCode) {
-          attempts.push({ account_bank: listed, account_number: accountNumber });
-          tried.push(`listed: ${iso} names this operator ${listed}`);
-        }
-      }
+      lastMessage = parsed.success
+        ? (parsed.data.message ?? lastMessage)
+        : `unexpected /v3/accounts/resolve response: ${parsed.error.message}`;
+    } catch (error) {
+      if (!(error instanceof ProviderRejectedError)) throw error;
+      lastMessage = error.message;
     }
 
     /*
      * An unknown account and an unreachable bank answer the SAME WAY to the
      * customer — 043's rule, and distinguishing them maps which numbers are
-     * live where. What changes here is that the detail no longer evaporates:
-     * `cause` carries every shape tried and what the provider said to each,
-     * and the payout service writes that to `name_enquiry_refusals` where an
-     * operator can read it. The customer still gets a code.
+     * live where. The detail does not evaporate: `cause` carries what was
+     * tried and what was said, and the payout service writes it to
+     * `name_enquiry_refusals` where an operator can read it.
      */
     throw new ProviderRejectedError(PROVIDER, lastMessage, 'unknown_account', {
       keyMode: await this.#client.keyMode(),
-      tried,
+      tried: [`v3 /accounts/resolve ${bankCode}/${shape(accountNumber)}: ${lastMessage}`],
     });
-  }
-
-  /**
-   * The code Flutterwave's OWN `/v3/banks/:country` list gives this operator.
-   *
-   * Cached for the life of the process: it is a catalogue, it changes rarely,
-   * and this is reached only after a refusal. `undefined` when their list does
-   * not name the operator at all — in which case the code we hold is the only
-   * one there is, and saying so in the trail is worth more than another guess.
-   */
-  async #listedCodeFor(iso: string, networkCode: string): Promise<string | undefined> {
-    const network = FLUTTERWAVE_MOBILE_MONEY_NETWORKS[iso]?.find((n) => n.code === networkCode);
-    if (network === undefined) return undefined;
-    try {
-      let listed = this.#listedBanks.get(iso);
-      if (listed === undefined) {
-        const body = await this.#client.request('GET', FLUTTERWAVE_ENDPOINTS.banks(iso));
-        const parsed = banksResponse.safeParse(body);
-        listed = parsed.success ? (parsed.data.data ?? []) : [];
-        this.#listedBanks.set(iso, listed);
-      }
-      // Matched on the FIRST WORD of the operator's name — "MTN Mobile Money"
-      // against "MTN MOBILE MONEY GHANA" — because a catalogue string is
-      // never the name in our table and an equality match would find nothing.
-      const first = (network.name.split(/\s+/)[0] ?? '').toLowerCase();
-      return listed.find((bank) => bank.name.toLowerCase().startsWith(first))?.code;
-    } catch {
-      // Learning the code is a courtesy on a path that is already failing; a
-      // second failure must not replace the provider's own sentence about the
-      // lookup with one about a bank list.
-      return undefined;
-    }
   }
 
   async send<C extends Currency>(request: PayoutRequest<C>): Promise<PayoutReceipt> {
@@ -355,6 +397,22 @@ export class FlutterwavePayoutAdapter implements PayoutPort {
        * it is told.
        */
       debit_currency: request.debitCurrency ?? request.amount.currency,
+      /*
+       * GHANA REFUSES A TRANSFER WITHOUT ONE, and 070 gave Ghana a bank rail
+       * that would have failed on every single send without this line.
+       *
+       * FLUTTERWAVE, VERBATIM: "When transferring to Ghanaian bank accounts
+       * and mobile money wallets, you need to pass the branch code of the
+       * institution or telco in your Initiate Transfer request as
+       * destination_branch_code."
+       *
+       * SPREAD RATHER THAN SENT EMPTY. Every other corridor has no branch
+       * code, and an empty string is a field their API has to decide what to
+       * do with — the same reason `narration` is spread rather than defaulted.
+       */
+      ...(request.branchCode === undefined || request.branchCode === ''
+        ? {}
+        : { destination_branch_code: request.branchCode }),
       ...(request.narration === undefined ? {} : { narration: request.narration }),
       /* OURS, derived from the customer's key. Their side de-duplicates on
        * it, so a retry after a timeout is one payout at their end too — and

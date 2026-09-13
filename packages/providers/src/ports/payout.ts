@@ -20,6 +20,33 @@ export interface PayoutBank {
   /** The provider's code for this bank. Opaque, and passed back verbatim. */
   readonly code: string;
   readonly name: string;
+  /**
+   * THE PROVIDER'S OWN ID FOR THE BANK, WHICH IS NOT ITS CODE.
+   *
+   * Flutterwave answer `{ id: 280, code: "GH280100", name: … }` and the
+   * branches call takes the ID. Optional because no other rail has one, and
+   * because a country that needs no branch code never asks.
+   */
+  readonly id?: string;
+}
+
+/**
+ * A BRANCH OF A BANK, which one corridor genuinely requires.
+ *
+ * FLUTTERWAVE, VERBATIM: "When transferring to Ghanaian bank accounts and
+ * mobile money wallets, you need to pass the branch code of the institution or
+ * telco in your Initiate Transfer request as destination_branch_code."
+ *
+ * It is a port method rather than a detail inside the adapter because the
+ * SCREEN has to ask for it — a customer paying a Ghanaian bank account picks a
+ * branch, the way they pick a bank. Where a rail needs none, `branches()`
+ * answers an empty list and no picker is drawn, so the question "does this
+ * corridor need one?" is answered by the adapter rather than by a `switch` in
+ * two apps — 040's argument about a country being data.
+ */
+export interface PayoutBranch {
+  readonly code: string;
+  readonly name: string;
 }
 
 /** Who the bank says holds this account. */
@@ -49,6 +76,14 @@ export interface PayoutRequest<C extends Currency = Currency> {
   readonly country: string;
   readonly bankCode: string;
   readonly accountNumber: string;
+  /**
+   * THE BRANCH, WHERE THE CORRIDOR REQUIRES ONE — Ghana, today.
+   *
+   * Undefined everywhere else, and sending an empty string instead would be a
+   * field their API has to decide what to do with. 070 gave Ghana a bank rail
+   * and every transfer on it would have been refused without this.
+   */
+  readonly branchCode?: string | undefined;
   /**
    * The name the LOOKUP returned, carried through so the adapter sends what
    * the customer was shown. Passing the sender's own text here would defeat
@@ -152,6 +187,16 @@ export interface PayoutPort {
    * to them as their own number being wrong.
    */
   banks(country: string, method?: PayoutMethod): Promise<readonly PayoutBank[]>;
+
+  /**
+   * Branches of one bank, or an empty list where the corridor needs none.
+   *
+   * EMPTY IS THE COMMON ANSWER and is not a failure. Only Ghana requires a
+   * branch code today, so every other rail answers nothing and the screen
+   * draws no picker — which keeps "does this need a branch?" a question the
+   * adapter answers rather than one two apps hardcode.
+   */
+  branches?(country: string, bankId: string): Promise<readonly PayoutBranch[]>;
 
   /**
    * Who holds this account.

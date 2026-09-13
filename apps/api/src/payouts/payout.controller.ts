@@ -2,8 +2,13 @@ import { BadRequestException, Body, Controller, Get, HttpCode, Inject, Post, Que
 import type { AuthenticatedRequest } from '../auth/auth.guard.js';
 import { PayoutService } from './payout.service.js';
 import type { PayoutView } from './payout.service.js';
-import { banksQuerySchema, lookupQuerySchema, payoutSchema } from './dto.js';
-import type { PayoutBank } from '@xetral/providers';
+import {
+  banksQuerySchema,
+  branchesQuerySchema,
+  lookupQuerySchema,
+  payoutSchema,
+} from './dto.js';
+import type { PayoutBank, PayoutBranch } from '@xetral/providers';
 
 /**
  * Sending money out of the platform, to a bank.
@@ -27,6 +32,20 @@ export class PayoutController {
     const parsed = banksQuerySchema.safeParse(query);
     if (!parsed.success) throw invalidRequest(parsed.error.issues);
     return { banks: await this.payouts.banks(parsed.data.country, parsed.data.method) };
+  }
+
+  /**
+   * The branches of one bank, or nothing where the corridor needs none.
+   *
+   * AN EMPTY LIST IS THE COMMON ANSWER and is not a failure — only Ghana
+   * requires a branch code today. A catalogue, so no PIN, exactly like the
+   * bank list it follows.
+   */
+  @Get('branches')
+  async branches(@Query() query: unknown): Promise<{ branches: readonly PayoutBranch[] }> {
+    const parsed = branchesQuerySchema.safeParse(query);
+    if (!parsed.success) throw invalidRequest(parsed.error.issues);
+    return { branches: await this.payouts.branches(parsed.data) };
   }
 
   @Get('lookup')

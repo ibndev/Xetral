@@ -15,6 +15,7 @@ import {
   PaystackPayoutAdapter,
   FlutterwavePayoutAdapter,
   FlutterwaveClient,
+  FlutterwaveV4Client,
   FlutterwaveFundingAdapter,
   BitnobPayoutAdapter,
   TwilioAdapter,
@@ -285,6 +286,39 @@ export function flutterwaveWebhookHash(
   if (credentials === undefined) return async () => config.flutterwaveWebhookHash;
   return () =>
     credentials.secretFor('flutterwave', 'webhook_hash', config.flutterwaveWebhookHash);
+}
+
+/**
+ * THE v4 PAIR, FOR ONE READ.
+ *
+ * v4 authorises with OAuth2 client credentials rather than a bearer secret
+ * key, and this platform uses it for exactly one thing: `POST
+ * /wallet-account/resolve`, the endpoint that names the holder of a mobile
+ * money wallet. v3 has no such endpoint at all — its `/accounts/resolve` is a
+ * BANK-account resolver taking a three-digit bank code, which is why five
+ * rounds of fixing the v3 call changed nothing.
+ *
+ * RESOLVED PER CALL, like every other credential, so an operator pasting them
+ * on `/admin/credentials` does not wait for a restart. Returns `undefined`
+ * where nothing is set, which the client turns into `name_unavailable` — the
+ * send proceeds with a label, exactly as it does in Kenya.
+ */
+export function flutterwaveV4Credentials(
+  config: ApiConfig,
+  credentials?: ProviderCredentialService,
+): { clientId: () => Promise<string | undefined>; clientSecret: () => Promise<string | undefined> } {
+  if (credentials === undefined) {
+    return {
+      clientId: async () => config.flutterwaveV4ClientId,
+      clientSecret: async () => config.flutterwaveV4ClientSecret,
+    };
+  }
+  return {
+    clientId: () =>
+      credentials.secretFor('flutterwave', 'v4_client_id', config.flutterwaveV4ClientId),
+    clientSecret: () =>
+      credentials.secretFor('flutterwave', 'v4_client_secret', config.flutterwaveV4ClientSecret),
+  };
 }
 
 export function bitnobCredentials(
@@ -675,6 +709,16 @@ export function createPayoutPort(
         new FlutterwaveClient({
           baseUrl: flutterwaveBaseUrl,
           secretKey: flutterwaveSecretKey(config, credentials),
+        }),
+        /* v4, for the wallet name enquiry and nothing else. Constructed
+           unconditionally: it answers `configured()` false where the
+           credentials are absent, which the adapter turns into
+           `name_unavailable` rather than a refusal. */
+        new FlutterwaveV4Client({
+          ...(config.flutterwaveV4BaseUrl === undefined
+            ? {}
+            : { baseUrl: config.flutterwaveV4BaseUrl }),
+          ...flutterwaveV4Credentials(config, credentials),
         }),
       ),
     );

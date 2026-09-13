@@ -705,6 +705,7 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
        *  - sending moves money that cannot be recalled.
        */
       .authenticated('GET', '/v1/payouts/banks', { pin: false })
+      .authenticated('GET', '/v1/payouts/branches', { pin: false })
       .authenticated('GET', '/v1/payouts/lookup', { pin: false })
       .authenticated('GET', '/v1/payouts', { pin: false })
       .authenticated('POST', '/v1/payouts', { pin: true })

@@ -45,6 +45,9 @@ export const resolveRecipientSchema = z
     country: z.string().trim().length(2).toUpperCase().optional(),
     /** Bank code or mobile money network. Absent for `xetral`. */
     rail_code: z.string().trim().min(1).max(32).optional(),
+    /* The destination branch, where the corridor requires one. Ghana refuses
+       a transfer without it; every other rail sends none. */
+    branch_code: z.string().trim().regex(/^[A-Za-z0-9-]{2,32}$/).optional(),
     destination: typedDestination,
   })
   .strict();
@@ -56,6 +59,9 @@ export const createRecipientSchema = z
     kind: recipientKind,
     country: z.string().trim().length(2).toUpperCase().optional(),
     rail_code: z.string().trim().min(1).max(32).optional(),
+    /* The destination branch, where the corridor requires one. Ghana refuses
+       a transfer without it; every other rail sends none. */
+    branch_code: z.string().trim().regex(/^[A-Za-z0-9-]{2,32}$/).optional(),
     destination: typedDestination,
     /**
      * WHAT THE CUSTOMER CALLS THEM, and it is only used where the rail cannot

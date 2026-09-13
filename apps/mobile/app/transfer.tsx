@@ -884,6 +884,9 @@ function RecipientDetails({
   const [rail, setRail] = useState(method === 'xetral' ? 'xetral' : '');
   const [destination, setDestination] = useState(nationalDigits(initialDestination));
   const [found, setFound] = useState<RecipientResolution | undefined>(undefined);
+  /* GHANA REFUSES A BANK TRANSFER WITHOUT A BRANCH CODE. Nowhere else asks,
+     so the picker exists only when the server answers with branches. */
+  const [branch, setBranch] = useState('');
 
   const banks = useLoad(
     /* THE CATALOGUE FOR THE RAIL THE CUSTOMER CHOSE. A country offering both
@@ -921,6 +924,21 @@ function RecipientDetails({
 
   const railLabel = rails.find((r) => r.value === rail)?.label;
   const kind: RecipientKind = method;
+
+  /*
+   * THE BRANCHES OF THE CHOSEN BANK, and an empty list is the common answer.
+   * Flutterwave refuses a Ghanaian transfer without a branch code; the SERVER
+   * decides which corridors need one, so this screen draws a picker when
+   * something comes back and nothing when it does not.
+   */
+  const branches = useLoad(
+    async () =>
+      country === undefined || method !== 'bank' || rail === ''
+        ? []
+        : client.payoutBranches(country.code, rail),
+    [country?.code, method, rail],
+  );
+  const needsBranch = (branches.data ?? []).length > 0;
   /* Nothing to choose on a Xetral send. */
   const needsRail = method !== 'xetral';
 
@@ -976,6 +994,7 @@ function RecipientDetails({
          through THAT country's dial code, not the sender's. */
       ...(country === undefined ? {} : { country: country.code }),
       ...(kind === 'xetral' ? {} : { railCode: rail }),
+      ...(branch === '' ? {} : { branchCode: branch }),
       destination,
     });
   }
@@ -1002,6 +1021,7 @@ function RecipientDetails({
         kind: resolution.kind,
         ...(resolution.country === '' ? {} : { country: resolution.country }),
         ...(resolution.rail_code === null ? {} : { railCode: resolution.rail_code }),
+        ...(resolution.branch_code === null ? {} : { branchCode: resolution.branch_code }),
         destination: resolution.destination,
         ...(resolution.resolved_name === null
           ? { label: destination.replace(/[^0-9]/g, '') }
@@ -1052,10 +1072,28 @@ function RecipientDetails({
           onChange={(next) => {
             setRail(next);
             setFound(undefined);
+            /* A BRANCH BELONGS TO A BANK. Keeping the old one would send to a
+               branch of a different bank, which the rail refuses in a sentence
+               about the account. */
+            setBranch('');
           }}
           options={rails}
           placeholder={isMomoCountry ? 'Network' : 'Bank'}
           searchable={rails.length > 6}
+          searchPlaceholder="Search…"
+        />
+      )}
+
+      {/* ONLY WHERE THE RAIL ASKS. Ghana refuses a transfer without a branch;
+          every other corridor answers an empty list and this is not drawn. */}
+      {needsBranch && (
+        <Select
+          label="Branch"
+          value={branch}
+          onChange={setBranch}
+          options={(branches.data ?? []).map((b) => ({ value: b.code, label: b.name }))}
+          placeholder="Branch"
+          searchable={(branches.data ?? []).length > 6}
           searchPlaceholder="Search…"
         />
       )}
@@ -1177,9 +1215,10 @@ function RecipientDetails({
                 : 'Check details'
         }
         busy={busy}
-        disabled={(needsRail && rail === '') || !enough || blocked}
+        disabled={(needsRail && rail === '') || (needsBranch && branch === '') || !enough || blocked}
         onPress={() => {
-          if ((needsRail && rail === '') || !enough || blocked) return;
+          if ((needsRail && rail === '') || (needsBranch && branch === '') || !enough || blocked)
+            return;
           void run(async () => {
             /*
              * THE NAME IS SHOWN BEFORE THE MONEY MOVES, wherever one exists.
@@ -1489,7 +1528,10 @@ function SendAmount({
                    country's default. Ghana and Kenya offer both since 070, and the
                    server normalises the destination by this — a wallet number to
                    E.164, a bank account exactly as typed. */
-                method: to.kind === 'momo' ? 'mobile_money' : 'bank',
+                  method: to.kind === 'momo' ? 'mobile_money' : 'bank',
+                /* OFF THE SAVED ROW: a recipient is tapped without re-reading,
+                   and the screen that picks a branch is the one that skips. */
+                ...(to.branch_code === null ? {} : { branchCode: to.branch_code }),
                 amount,
                 currency: lands_in,
                 pin,
@@ -1519,6 +1561,7 @@ function toRecipient(found: RecipientResolution): Recipient {
     currency: found.currency,
     rail_code: found.rail_code,
     rail_name: found.rail_name,
+    branch_code: found.branch_code,
     destination: found.destination,
     display_name: found.resolved_name ?? found.destination,
     resolved_name: found.resolved_name,

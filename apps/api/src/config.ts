@@ -112,6 +112,21 @@ export interface ApiConfig {
    */
   readonly flutterwaveSecretKey: string | undefined;
   readonly flutterwaveWebhookHash: string | undefined;
+  /**
+   * THE v4 PAIR, AND v4 IS USED FOR ONE READ.
+   *
+   * `POST /wallet-account/resolve` names the holder of a mobile money wallet.
+   * v3 has no such endpoint — its `/accounts/resolve` is a BANK-account
+   * resolver taking a three-digit bank code — so without these two a Ghanaian
+   * recipient cannot be named and the screen asks for a label instead, exactly
+   * as it does in Kenya. Money still moves on the v3 secret key.
+   */
+  readonly flutterwaveV4ClientId: string | undefined;
+  readonly flutterwaveV4ClientSecret: string | undefined;
+  /** Two public sources disagree about v4's host, so it is a value with a
+   *  documented default rather than a constant this repo has to be right
+   *  about — the lesson its provider tables have taught twice. */
+  readonly flutterwaveV4BaseUrl: string | undefined;
   readonly flutterwaveBaseUrl: string | undefined;
   /** Bare host: `https://api.paystack.co`. */
   readonly paystackBaseUrl: string | undefined;
@@ -859,6 +874,9 @@ export function loadConfig(env: Env): ApiConfig {
     paystackSecretKey: optional(env, 'PAYSTACK_SECRET_KEY'),
     flutterwaveSecretKey: optional(env, 'FLUTTERWAVE_SECRET_KEY'),
     flutterwaveWebhookHash: optional(env, 'FLUTTERWAVE_WEBHOOK_HASH'),
+    flutterwaveV4ClientId: optional(env, 'FLUTTERWAVE_V4_CLIENT_ID'),
+    flutterwaveV4ClientSecret: optional(env, 'FLUTTERWAVE_V4_CLIENT_SECRET'),
+    flutterwaveV4BaseUrl: optional(env, 'FLUTTERWAVE_V4_BASE_URL'),
     flutterwaveBaseUrl:
       optional(env, 'FLUTTERWAVE_BASE_URL') ?? 'https://api.flutterwave.com',
     paystackBaseUrl: optional(env, 'PAYSTACK_BASE_URL') ?? 'https://api.paystack.co',

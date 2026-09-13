@@ -784,12 +784,19 @@ Schema: `packages/ledger/sql/059_provider_routing.sql`. Router in
   secret key authorises every outbound call correctly and rejects every
   webhook — which from inside is indistinguishable from a broken integration
   rather than a missing box.
-- **WHICH WALLETS HAVE A NAME ENQUIRY IS A TABLE, AND THIS FILE HAD IT
-  WRONG.** It said, flatly, that a mobile money wallet has none. Flutterwave's
-  own documentation for `/v3/accounts/resolve` lists what it accepts —
-  Nigerian bank accounts, Ghanaian bank accounts, GHANAIAN MOBILE MONEY
-  NUMBERS, and a merchant id — so the claim was false in the one country the
-  complaints were coming from. `RESOLVES_MOBILE_MONEY` is that list.
+- **WHICH WALLETS HAVE A NAME ENQUIRY IS A TABLE, AND THIS FILE HAS NOW HAD
+  IT WRONG TWICE, IN OPPOSITE DIRECTIONS.** It first said flatly that a mobile
+  money wallet has none. It then said — on the strength of a SEARCH SNIPPET —
+  that `/v3/accounts/resolve` accepts Ghanaian mobile money numbers. **BOTH
+  WERE GUESSES.** Flutterwave's own v3 specification describes that endpoint
+  as "Resolve a BANK ACCOUNT number ... account_bank: Bank code (3 DIGITS)".
+  We were sending `MTN` and twelve digits: THERE IS NO MOBILE MONEY IN v3'S
+  RESOLVER AT ALL, which is why a careful two-spelling retry against it
+  changed nothing. **THE WALLET RESOLVER IS v4's `POST
+  /wallet-account/resolve`**, taking `{ account_number, mobile_network,
+  country }`, beside a separate `/bank-account/resolve`.
+  `RESOLVES_MOBILE_MONEY` is now about the PRODUCT — which countries'
+  wallets Flutterwave will name — and Kenya is genuinely absent.
   `name_unavailable` remains its own refusal, told apart from
   `account_not_found` — which stays indistinguishable from an unreachable
   bank, per 043 — and it is now raised only where no such call exists. What

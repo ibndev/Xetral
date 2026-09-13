@@ -727,6 +727,10 @@ function RecipientDetails({
   const [destination, setDestination] = useState(nationalDigits(initialDestination));
   const [found, setFound] = useState<RecipientResolution | undefined>(undefined);
   const [sheet, setSheet] = useState(false);
+  /* GHANA REFUSES A BANK TRANSFER WITHOUT A BRANCH CODE. Nowhere else asks,
+     so the picker exists only when the server answers with branches. */
+  const [branch, setBranch] = useState('');
+  const [branchSheet, setBranchSheet] = useState(false);
 
   /* THE CATALOGUE FOR THE RAIL THE CUSTOMER CHOSE. A country offering both
      (070) has two, and they are not interchangeable — an MTN network code is
@@ -771,6 +775,25 @@ function RecipientDetails({
   }));
 
   const kind: RecipientKind = method;
+
+  /*
+   * THE BRANCHES OF THE CHOSEN BANK, and an empty list is the common answer.
+   *
+   * Flutterwave refuses a Ghanaian transfer without a `destination_branch_code`
+   * — 070 gave Ghana a bank rail and every send on it would have failed. The
+   * SERVER decides whether a corridor needs one, so this screen draws a picker
+   * when something comes back and nothing when it does not, rather than
+   * carrying a list of countries that need branches.
+   */
+  const branches = useLoad(
+    async () =>
+      country === undefined || method !== 'bank' || rail === ''
+        ? []
+        : client.payoutBranches(country.code, rail),
+    [country?.code, method, rail],
+  );
+  const needsBranch = (branches.data ?? []).length > 0;
+  const branchName = (branches.data ?? []).find((b) => b.code === branch)?.name;
 
   /*
    * ENOUGH TYPED TO BE WORTH ASKING ABOUT, and the floor is PER RAIL.
@@ -848,6 +871,10 @@ function RecipientDetails({
          normalises through THAT country's dial code, not the sender's. */
       ...(country === undefined ? {} : { country: country.code }),
       ...(kind === 'xetral' ? {} : { railCode: rail }),
+      /* Ghana refuses a transfer without a branch, and this is the screen
+         that picks one — so it travels with the resolution to the row a later
+         tap will send from without re-reading. */
+      ...(branch === '' ? {} : { branchCode: branch }),
       destination,
     });
   }
@@ -866,6 +893,7 @@ function RecipientDetails({
         kind: resolution.kind,
         ...(resolution.country === '' ? {} : { country: resolution.country }),
         ...(resolution.rail_code === null ? {} : { railCode: resolution.rail_code }),
+        ...(resolution.branch_code === null ? {} : { branchCode: resolution.branch_code }),
         destination: resolution.destination,
         ...(resolution.resolved_name === null
           ? { label: destination.replace(/[^0-9]/g, '') }
@@ -884,6 +912,7 @@ function RecipientDetails({
         onSubmit={(event) => {
           event.preventDefault();
           if ((needsRail && rail === '') || !enough || blocked) return;
+          if (needsBranch && branch === '') return;
           void run(async () => {
             /*
              * THE NAME IS SHOWN BEFORE THE MONEY MOVES, wherever one exists.
@@ -939,6 +968,29 @@ function RecipientDetails({
             </span>
           </div>
         </div>
+        )}
+
+        {/* ONLY WHERE THE RAIL ASKS. Ghana refuses a transfer without a
+            branch; every other corridor answers an empty list and this is
+            not drawn at all. */}
+        {needsBranch && (
+          <div className="sf-group">
+            <span className="sf-label">Branch</span>
+            <div className="sf-select-wrap">
+              <button
+                type="button"
+                className={
+                  branchSheet ? 'sf-select open' : branchName ? 'sf-select' : 'sf-select placeholder'
+                }
+                onClick={() => setBranchSheet(true)}
+              >
+                {branchName ?? 'Branch'}
+              </button>
+              <span className={branchSheet ? 'sf-select-arrow up' : 'sf-select-arrow'}>
+                <Icon name="chevronDown" size={18} />
+              </span>
+            </div>
+          </div>
         )}
 
         <div className="sf-group">
@@ -1012,7 +1064,9 @@ function RecipientDetails({
         <button
           type="submit"
           className="sf-primary"
-          disabled={busy || (needsRail && rail === '') || !enough || blocked}
+          disabled={
+            busy || (needsRail && rail === '') || (needsBranch && branch === '') || !enough || blocked
+          }
         >
           {busy
             ? 'Checking…'
@@ -1023,6 +1077,48 @@ function RecipientDetails({
                 : 'Check details'}
         </button>
       </form>
+
+      {branchSheet && (
+        <div
+          className="sf-sheet-overlay"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setBranchSheet(false)}
+        >
+          <div className="sf-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="sf-sheet-handle-row">
+              <div className="sf-sheet-handle" />
+            </div>
+            <div className="sf-sheet-head">
+              <span className="sf-sheet-title">Select a branch</span>
+              <button
+                type="button"
+                className="sf-sheet-close"
+                aria-label="Close"
+                onClick={() => setBranchSheet(false)}
+              >
+                ✕
+              </button>
+            </div>
+            <div>
+              {(branches.data ?? []).map((b) => (
+                <button
+                  key={b.code}
+                  type="button"
+                  className="sf-net"
+                  onClick={() => {
+                    setBranch(b.code);
+                    setBranchSheet(false);
+                  }}
+                >
+                  <span className="sf-net-name">{b.name}</span>
+                  <span className={branch === b.code ? 'sf-radio on' : 'sf-radio'} />
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {sheet && (
         <div
@@ -1057,6 +1153,10 @@ function RecipientDetails({
                   onClick={() => {
                     setRail(r.value);
                     setFound(undefined);
+                    /* A BRANCH BELONGS TO A BANK. Keeping the old one would
+                       send a transfer to a branch of a different bank, which
+                       the rail would refuse in a sentence about the account. */
+                    setBranch('');
                     setSheet(false);
                   }}
                 >
@@ -1196,6 +1296,10 @@ function SendAmount({
                  server normalises the destination by this — a wallet number to
                  E.164, a bank account exactly as typed. */
               method: to.kind === 'momo' ? 'mobile_money' : 'bank',
+              /* OFF THE SAVED ROW. A Ghanaian bank recipient is tapped from
+                 the list without re-reading, so the branch has to be on the
+                 row rather than asked again on a screen that tap skips. */
+              ...(to.branch_code === null ? {} : { branchCode: to.branch_code }),
               amount,
               currency: lands_in,
               pin,
@@ -1345,6 +1449,7 @@ function toRecipient(found: RecipientResolution): Recipient {
     currency: found.currency,
     rail_code: found.rail_code,
     rail_name: found.rail_name,
+    branch_code: found.branch_code,
     destination: found.destination,
     display_name: found.resolved_name ?? found.destination,
     resolved_name: found.resolved_name,

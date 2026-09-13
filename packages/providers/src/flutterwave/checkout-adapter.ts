@@ -29,7 +29,11 @@ export const FLUTTERWAVE_PAYMENT_OPTIONS: Readonly<Record<string, string>> = {
   /* Ghana: MTN, Vodafone/Telecel and AirtelTigo all sit behind this one
    * option — Flutterwave renders the network picker itself, which is why
    * this platform does not carry a Ghanaian network list of its own. */
-  GHS: 'mobilemoneyghana',
+  /* BOTH, because Ghana can be paid on both since 071 and a customer whose
+     Send screen offers a bank transfer should be able to fund from one.
+     Flutterwave's own announcement — "Pay With Bank Transfer Is Now Available
+     In Ghana" — and Kenya has carried `banktransfer` here since 059. */
+  GHS: 'mobilemoneyghana,banktransfer',
   /* Kenya: M-Pesa, plus a bank transfer for the payer who has no wallet. */
   KES: 'mpesa,banktransfer',
   /* Dollars belong to no country and have no wallet rail, so a card is the

@@ -415,6 +415,41 @@ export const PROVIDERS: readonly Item[] = [
       'happens to come back to the page.',
   },
   {
+    name: 'FLUTTERWAVE_V4_CLIENT_ID',
+    kind: 'env',
+    failure: 'silent',
+    flow: 'naming a mobile money recipient',
+    ifMissed:
+      'THE NAME ON A GHANAIAN WALLET COMES FROM v4, and this is one half of ' +
+      'its OAuth2 pair. v3 has no wallet resolver at all — its ' +
+      '/accounts/resolve is a BANK-account lookup taking a three-digit bank ' +
+      'code — which is why five rounds of fixing the v3 call changed nothing. ' +
+      'Unset, a Ghanaian recipient cannot be named: the send still works and ' +
+      'the screen asks the customer for a label, exactly as it does in Kenya. ' +
+      'Money still moves on FLUTTERWAVE_SECRET_KEY.',
+  },
+  {
+    name: 'FLUTTERWAVE_V4_CLIENT_SECRET',
+    kind: 'env',
+    failure: 'silent',
+    flow: 'naming a mobile money recipient',
+    ifMissed:
+      'The other half. Both or neither: one alone authorises nothing and the ' +
+      'name enquiry is skipped exactly as if neither were set.',
+  },
+  {
+    name: 'FLUTTERWAVE_V4_BASE_URL',
+    kind: 'env',
+    failure: 'default-is-deliberate',
+    flow: 'naming a mobile money recipient',
+    ifMissed:
+      'TWO PUBLIC SOURCES DISAGREE about v4\'s host — their published OpenAPI ' +
+      'says api.flutterwave.cloud/f4b/production and their own developer blog ' +
+      'says f4bexperience.flutterwave.com. The specification is the default. ' +
+      'This exists so a wrong one is a setting rather than a release, which is ' +
+      'the lesson this repo\'s provider tables have taught twice.',
+  },
+  {
     name: 'FLUTTERWAVE_BASE_URL',
     kind: 'env',
     failure: 'default-is-deliberate',

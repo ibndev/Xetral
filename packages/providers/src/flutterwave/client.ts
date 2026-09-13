@@ -87,6 +87,15 @@ export const FLUTTERWAVE_ENDPOINTS = {
   /** Paying out. `country` is an ISO code here — NG, GH, KE — unlike
    *  Paystack, whose `country` is the lowercase NAME. */
   banks: (country: string) => `/v3/banks/${encodeURIComponent(country)}`,
+  /**
+   * THE BRANCHES OF ONE BANK, keyed by the bank's ID rather than its code.
+   *
+   * Their bank list answers `{ id, code, name }` and these two are different
+   * values — `id: 280`, `code: "GH280100"`. Passing the code here answers
+   * nothing, which on the Ghanaian bank rail is a transfer that cannot be
+   * built rather than a list that is short.
+   */
+  branches: (bankId: string) => `/v3/banks/${encodeURIComponent(bankId)}/branches`,
   resolveAccount: '/v3/accounts/resolve',
   transfers: '/v3/transfers',
   getTransfer: (id: string) => `/v3/transfers/${encodeURIComponent(id)}`,

@@ -31,6 +31,16 @@ export interface RecipientView {
   readonly currency: string;
   readonly rail_code: string | null;
   readonly rail_name: string | null;
+  /**
+   * THE DESTINATION BRANCH, where the corridor requires one — Ghana today.
+   *
+   * ON THE SAVED ROW rather than asked again at send time, because 068's whole
+   * argument is that the first screen is a list of people TAPPED WITHOUT
+   * RE-READING. A Ghanaian bank recipient with no branch would be tapped, sent
+   * to, refused by Flutterwave, and the screen that asks for a branch is the
+   * one that tap skips.
+   */
+  readonly branch_code: string | null;
   /** Digits only, in the form the rail accepts. */
   readonly destination: string;
   /** What the list shows. */
@@ -53,6 +63,8 @@ export interface RecipientResolution {
   readonly currency: string;
   readonly rail_code: string | null;
   readonly rail_name: string | null;
+  /** The destination branch, where the corridor requires one — Ghana today. */
+  readonly branch_code: string | null;
   readonly destination: string;
   /**
    * The rail's own answer, or null.
@@ -81,6 +93,7 @@ interface RecipientRow {
   currency: string;
   rail_code: string | null;
   rail_name: string | null;
+  branch_code: string | null;
   destination: string;
   display_name: string;
   resolved_name: string | null;
@@ -121,6 +134,7 @@ export class RecipientBookService {
   async list(userUuid: string): Promise<readonly RecipientView[]> {
     const rows = await this.pool.query<RecipientRow>(
       `SELECT r.uuid, r.kind::text AS kind, r.country, r.currency, r.rail_code,
+              r.branch_code,
               r.rail_name, r.destination, r.display_name, r.resolved_name,
               r.last_used_at, r.created_at
          FROM recipients r
@@ -262,6 +276,11 @@ export class RecipientBookService {
       currency: country.currency,
       rail_code: rail.code,
       rail_name: rail.name,
+      /* CARRIED THROUGH FROM THE REQUEST. Ghana refuses a transfer without a
+         branch, and the screen that picks one is the details screen — so it
+         travels with the resolution to the row that a later tap will send
+         from without re-reading. */
+      branch_code: body.branch_code ?? null,
       destination,
       resolved_name: resolved,
       name_status: nameStatus,
@@ -294,11 +313,12 @@ export class RecipientBookService {
       const inserted = await this.pool.query<RecipientRow>(
         `INSERT INTO recipients
            (user_id, kind, country, currency, rail_code, rail_name, destination,
-            display_name, resolved_name)
-         SELECT u.id, $2::recipient_kind, $3, $4, $5, $6, $7, $8, $9
+            display_name, resolved_name, branch_code)
+         SELECT u.id, $2::recipient_kind, $3, $4, $5, $6, $7, $8, $9, $10
            FROM users u WHERE u.uuid = $1
          RETURNING uuid, kind::text AS kind, country, currency, rail_code, rail_name,
-                   destination, display_name, resolved_name, last_used_at, created_at`,
+                   branch_code, destination, display_name, resolved_name,
+                   last_used_at, created_at`,
         [
           userUuid,
           found.kind,
@@ -442,6 +462,8 @@ export class RecipientBookService {
       currency: row.currency ?? 'NGN',
       rail_code: null,
       rail_name: null,
+      /* A Xetral account is not on a rail and has no branch. */
+      branch_code: null,
       name_status: 'verified' as const,
       /* WHAT WAS MATCHED, never what was typed. The row is what a later send
          reads, and 043's rule is that a destination which the rail never saw
@@ -459,6 +481,7 @@ export class RecipientBookService {
   ): Promise<RecipientView | undefined> {
     const rows = await this.pool.query<RecipientRow>(
       `SELECT r.uuid, r.kind::text AS kind, r.country, r.currency, r.rail_code,
+              r.branch_code,
               r.rail_name, r.destination, r.display_name, r.resolved_name,
               r.last_used_at, r.created_at
          FROM recipients r
@@ -482,6 +505,7 @@ function toView(row: RecipientRow): RecipientView {
     currency: row.currency,
     rail_code: row.rail_code,
     rail_name: row.rail_name,
+    branch_code: row.branch_code,
     destination: row.destination,
     display_name: row.display_name,
     resolved_name: row.resolved_name,
