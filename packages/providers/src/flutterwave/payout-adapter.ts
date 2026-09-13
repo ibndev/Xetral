@@ -63,6 +63,41 @@ export const FLUTTERWAVE_MOBILE_MONEY_NETWORKS: Readonly<Record<string, readonly
  */
 const RESOLVES_MOBILE_MONEY: ReadonlySet<string> = new Set(['GH']);
 
+interface Attempt {
+  readonly account_bank: string;
+  readonly account_number: string;
+}
+
+/**
+ * The national spelling of a stored E.164 number — `233553921133` becomes
+ * `0553921133`.
+ *
+ * NOT A CONVERSION FOR ANYTHING THAT MOVES MONEY. `bank_payouts.account_number`
+ * is immutable and is what a transfer carries (067), and this never touches
+ * it: it exists only so a READ can be asked a second way when the provider
+ * refuses the first. Undefined where the number does not start with the
+ * country's dialling code, because then it is already national.
+ */
+const DIAL_CODES: Readonly<Record<string, string>> = { GH: '233', KE: '254', NG: '234' };
+
+function nationalForm(digits: string, iso: string): string | undefined {
+  const code = DIAL_CODES[iso];
+  if (code === undefined || !digits.startsWith(code)) return undefined;
+  const rest = digits.slice(code.length);
+  return rest === '' ? undefined : `0${rest}`;
+}
+
+/**
+ * A number's SHAPE, for the trail — never the number.
+ *
+ * `233…1133` says which spelling was tried and identifies nobody. A refusals
+ * table holding whole mobile numbers would be a list of customers' contacts,
+ * which is the thing 016 records about storing less rather than guarding more.
+ */
+function shape(digits: string): string {
+  return digits.length <= 8 ? `${digits.length} digits` : `${digits.slice(0, 3)}…${digits.slice(-4)}`;
+}
+
 const banksResponse = z.object({
   status: z.string().optional(),
   data: z.array(z.object({ code: z.string().min(1), name: z.string().min(1) })).optional(),
@@ -108,6 +143,8 @@ const transferResponse = z.object({
 export class FlutterwavePayoutAdapter implements PayoutPort {
   readonly provider = PROVIDER;
   readonly #client: FlutterwaveClient;
+  /** Their catalogue, per country, for the life of the process. */
+  readonly #listedBanks = new Map<string, readonly PayoutBank[]>();
 
   constructor(client: FlutterwaveClient) {
     this.#client = client;
@@ -161,31 +198,131 @@ export class FlutterwavePayoutAdapter implements PayoutPort {
     }
 
     /*
-     * THE SAME TWO FIELDS FOR BOTH, which is why one call serves both rails.
-     * For a bank, `account_bank` is the bank code and `account_number` is the
-     * account. For a Ghanaian wallet, `account_bank` is the NETWORK code and
-     * `account_number` is the number IN INTERNATIONAL FORM — `233…`, which is
-     * what `phone.ts` produces and what the row already records.
+     * A LOOKUP IS A READ, SO IT MAY BE ASKED MORE THAN ONE WAY — and that is
+     * the difference between this and every other call in this package.
+     *
+     * ROUND FOUR ON ONE COMPLAINT, and the reason it kept coming back is that
+     * ONE payload shape was ASSERTED and its refusal was thrown away. The
+     * previous round fixed the adapter's refusal to ask; a Ghanaian number
+     * then reached `/v3/accounts/resolve`, Flutterwave said no, and the
+     * sentence it said no WITH reached no log line, no table and no screen.
+     * Three rounds of "it cannot find the momo details" with no recorded
+     * evidence anywhere of what the provider actually answered.
+     *
+     * So this stops asserting a shape. It tries the ones that can be true,
+     * in order, and CARRIES EVERY REFUSAL OUT on the error so the caller can
+     * write them down:
+     *
+     *   1. the number as stored — E.164 digits, `233553921133`, which is what
+     *      `phone.ts` produces and what a transfer carries;
+     *   2. the NATIONAL form, `0553921133` — how the number is written in
+     *      Accra, and the shape their own Ghanaian examples use;
+     *   3. the operator's code AS FLUTTERWAVE LISTS IT, if `/v3/banks/GH`
+     *      names it differently from the code a TRANSFER takes. A transfer
+     *      code and a resolve code being the same string is an assumption,
+     *      and it is exactly the class of assumption this file has now been
+     *      wrong about twice.
+     *
+     * Bounded at four calls, none of which moves money, and only reached on a
+     * path that is otherwise refusing every customer. A TRANSFER would never
+     * be retried this way — one is how a payout becomes two.
      */
-    const body = await this.#client.request('POST', FLUTTERWAVE_ENDPOINTS.resolveAccount, {
-      account_number: accountNumber,
-      account_bank: bankCode,
-    });
-    const parsed = resolveResponse.safeParse(body);
-    if (!parsed.success || parsed.data.data === undefined) {
-      // An unknown account and an unreachable bank answer the same way, which
-      // is 043's rule: distinguishing them maps which numbers are live where.
-      throw new ProviderRejectedError(
-        PROVIDER,
-        parsed.success ? (parsed.data.message ?? 'could not resolve that account') : parsed.error.message,
-        'unknown_account',
-      );
+    const attempts: Attempt[] = [{ account_bank: bankCode, account_number: accountNumber }];
+    const national = nationalForm(accountNumber, iso);
+    if (isWallet && national !== undefined) {
+      attempts.push({ account_bank: bankCode, account_number: national });
     }
-    return {
-      accountNumber,
-      bankCode,
-      accountName: parsed.data.data.account_name,
-    };
+
+    const tried: string[] = [];
+    let lastMessage = 'could not resolve that account';
+
+    for (let index = 0; index < attempts.length; index += 1) {
+      const attempt = attempts[index]!;
+      try {
+        const body = await this.#client.request(
+          'POST',
+          FLUTTERWAVE_ENDPOINTS.resolveAccount,
+          attempt,
+        );
+        const parsed = resolveResponse.safeParse(body);
+        if (parsed.success && parsed.data.data !== undefined) {
+          return {
+            accountNumber,
+            bankCode,
+            accountName: parsed.data.data.account_name,
+          };
+        }
+        lastMessage = parsed.success
+          ? (parsed.data.message ?? lastMessage)
+          : `unexpected /v3/accounts/resolve response: ${parsed.error.message}`;
+      } catch (error) {
+        // A refusal is an answer and the next shape may be accepted. Anything
+        // else — unreachable, timed out, a broken contract — is not about the
+        // shape at all and must not be re-sent under another spelling.
+        if (!(error instanceof ProviderRejectedError)) throw error;
+        lastMessage = error.message;
+      }
+      tried.push(`${attempt.account_bank}/${shape(attempt.account_number)}: ${lastMessage}`);
+
+      /*
+       * ASK FLUTTERWAVE WHAT THEY CALL THIS OPERATOR, once, after their own
+       * answer has ruled out the code we hold. Their list is data from the
+       * provider rather than another constant of ours — which is the whole
+       * lesson this package records twice about plausible tables.
+       */
+      if (isWallet && index === attempts.length - 1 && !tried.some((t) => t.startsWith('listed:'))) {
+        const listed = await this.#listedCodeFor(iso, bankCode);
+        if (listed !== undefined && listed !== bankCode) {
+          attempts.push({ account_bank: listed, account_number: accountNumber });
+          tried.push(`listed: ${iso} names this operator ${listed}`);
+        }
+      }
+    }
+
+    /*
+     * An unknown account and an unreachable bank answer the SAME WAY to the
+     * customer — 043's rule, and distinguishing them maps which numbers are
+     * live where. What changes here is that the detail no longer evaporates:
+     * `cause` carries every shape tried and what the provider said to each,
+     * and the payout service writes that to `name_enquiry_refusals` where an
+     * operator can read it. The customer still gets a code.
+     */
+    throw new ProviderRejectedError(PROVIDER, lastMessage, 'unknown_account', {
+      keyMode: await this.#client.keyMode(),
+      tried,
+    });
+  }
+
+  /**
+   * The code Flutterwave's OWN `/v3/banks/:country` list gives this operator.
+   *
+   * Cached for the life of the process: it is a catalogue, it changes rarely,
+   * and this is reached only after a refusal. `undefined` when their list does
+   * not name the operator at all — in which case the code we hold is the only
+   * one there is, and saying so in the trail is worth more than another guess.
+   */
+  async #listedCodeFor(iso: string, networkCode: string): Promise<string | undefined> {
+    const network = FLUTTERWAVE_MOBILE_MONEY_NETWORKS[iso]?.find((n) => n.code === networkCode);
+    if (network === undefined) return undefined;
+    try {
+      let listed = this.#listedBanks.get(iso);
+      if (listed === undefined) {
+        const body = await this.#client.request('GET', FLUTTERWAVE_ENDPOINTS.banks(iso));
+        const parsed = banksResponse.safeParse(body);
+        listed = parsed.success ? (parsed.data.data ?? []) : [];
+        this.#listedBanks.set(iso, listed);
+      }
+      // Matched on the FIRST WORD of the operator's name — "MTN Mobile Money"
+      // against "MTN MOBILE MONEY GHANA" — because a catalogue string is
+      // never the name in our table and an equality match would find nothing.
+      const first = (network.name.split(/\s+/)[0] ?? '').toLowerCase();
+      return listed.find((bank) => bank.name.toLowerCase().startsWith(first))?.code;
+    } catch {
+      // Learning the code is a courtesy on a path that is already failing; a
+      // second failure must not replace the provider's own sentence about the
+      // lookup with one about a bank list.
+      return undefined;
+    }
   }
 
   async send<C extends Currency>(request: PayoutRequest<C>): Promise<PayoutReceipt> {

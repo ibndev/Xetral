@@ -1343,12 +1343,21 @@ export class AdminController {
    * "quiet because nothing is being called".
    */
   @Get('providers')
-  async providers(): Promise<{ degraded: readonly unknown[]; recent: readonly unknown[] }> {
-    const [degraded, recent] = await Promise.all([
+  async providers(): Promise<{
+    degraded: readonly unknown[];
+    recent: readonly unknown[];
+    nameEnquiry: readonly unknown[];
+  }> {
+    const [degraded, recent, nameEnquiry] = await Promise.all([
       this.providerHealth.degraded(),
       this.providerHealth.recent(),
+      /* WHY A RECIPIENT COULD NOT BE NAMED. It rides on this screen rather
+         than its own because it is the same question — is the rail answering?
+         — and 031's argument is that a check on its own interval is one more
+         thing an operator can forget to look at. */
+      this.providerHealth.nameEnquiryFailures(),
     ]);
-    return { degraded, recent };
+    return { degraded, recent, nameEnquiry };
   }
 
   @Get('settings')

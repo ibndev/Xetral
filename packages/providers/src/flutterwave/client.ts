@@ -105,6 +105,31 @@ export class FlutterwaveClient {
     this.#timeoutMs = options.timeoutMs ?? 15_000;
   }
 
+  /**
+   * TEST KEY OR LIVE KEY, read off the key itself.
+   *
+   * FLUTTERWAVE'S SANDBOX CANNOT VERIFY A REAL ACCOUNT. Their own
+   * documentation says only test accounts resolve in test mode, and a real
+   * one returns an error — so a deployment holding `FLWSECK_TEST-…` gets
+   * every genuine Ghanaian mobile money number refused by
+   * `/v3/accounts/resolve`, correctly, for a reason that has nothing to do
+   * with the number.
+   *
+   * FROM INSIDE THE APP THAT IS INDISTINGUISHABLE FROM A WRONG NUMBER, which
+   * is why this exists: the refusal is recorded with the key's mode beside
+   * it, so an operator reading `/admin/providers` sees "test key" rather than
+   * three rounds of customers being told to check digits that were correct.
+   * It is a claim about the KEY'S PREFIX and never about its value — nothing
+   * here returns, logs or stores the key.
+   */
+  async keyMode(): Promise<'test' | 'live' | 'unset' | 'unknown'> {
+    const key = typeof this.#secretKey === 'string' ? this.#secretKey : await this.#secretKey();
+    if (key === undefined || key === '') return 'unset';
+    if (/^FLWSECK_TEST-/i.test(key)) return 'test';
+    if (/^FLWSECK-/i.test(key)) return 'live';
+    return 'unknown';
+  }
+
   async request(method: 'GET' | 'POST', path: string, body?: unknown): Promise<unknown> {
     // Asked BEFORE the timer starts, so a slow credential read cannot eat the
     // provider's own budget — and refused here rather than sent as

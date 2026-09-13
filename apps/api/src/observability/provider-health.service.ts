@@ -73,6 +73,30 @@ export class ProviderHealthService {
     );
     return rows.rows as Record<string, unknown>[];
   }
+
+  /**
+   * RAILS THAT CANNOT NAME A RECIPIENT, and the one screen where four rounds
+   * of "it says it cannot find the momo details" becomes answerable.
+   *
+   * A REJECTION IS NOT ILL HEALTH — 037's own rule, and it is why this is a
+   * separate read rather than a column on the health buckets. A rail refusing
+   * a name enquiry is behaving exactly as designed when the number is wrong;
+   * what makes it worth a screen is that the same refusal is also what a
+   * SANDBOX KEY produces for every correct number, and the two are
+   * indistinguishable from inside the application.
+   *
+   * `key_mode` is the field that tells them apart. It is read off the key's
+   * prefix and the key itself never leaves the adapter.
+   */
+  async nameEnquiryFailures(): Promise<readonly Record<string, unknown>[]> {
+    const rows = await this.pool.query(
+      `SELECT provider, country, rail_code, refusals::text, key_mode,
+              last_message, last_tried, first_seen_at, last_seen_at
+         FROM name_enquiry_failures
+        LIMIT 50`,
+    );
+    return rows.rows as Record<string, unknown>[];
+  }
 }
 
 /** What a thrown error means for the provider's health. */

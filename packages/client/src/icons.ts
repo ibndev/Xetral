@@ -23,7 +23,7 @@ export type IconName =
   | 'shield' | 'lock' | 'user' | 'settings' | 'logout'
   | 'chevronRight' | 'chevronDown' | 'chevronLeft' | 'arrowRight' | 'arrowUpRight'
   | 'check' | 'close' | 'eye' | 'eyeOff' | 'copy' | 'info' | 'alert'
-  | 'sun' | 'moon' | 'clock' | 'trend' | 'bank' | 'users' | 'file';
+  | 'sun' | 'moon' | 'clock' | 'trend' | 'bank' | 'users' | 'file' | 'phone';
 
 export const ICON_PATHS: Readonly<Record<IconName, string>> = {
   home:        'M3 10.5 12 3l9 7.5M5.5 9.5V20h13V9.5M9.5 20v-5.5h5V20',
@@ -72,6 +72,9 @@ export const ICON_PATHS: Readonly<Record<IconName, string>> = {
   bank:        'M3 9.5 12 4l9 5.5M4.5 9.5v9M9.5 9.5v9M14.5 9.5v9M19.5 9.5v9M3 21h18',
   users:       'M9 11.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM2.5 20.5a6.5 6.5 0 0 1 13 0M16 5.2a3.5 3.5 0 0 1 0 6.6M17.5 14.6a6.5 6.5 0 0 1 4 6',
   file:        'M6 2.5h8L19 7.5v14H6zM14 2.5V8h5M9 13h6M9 17h4',
+  /* A HANDSET, for the mobile money method — where money moves to a
+     wallet on a phone number rather than to a bank. */
+  phone:       'M6.5 2.5h11a2 2 0 0 1 2 2v15a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-15a2 2 0 0 1 2-2ZM10.5 18.2h3',
 };
 
 /** Icons that are closed shapes rather than strokes. A renderer must fill

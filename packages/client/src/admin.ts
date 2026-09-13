@@ -654,6 +654,31 @@ export interface AdminProviderHealth {
     readonly last_seen: string;
     readonly last_error: string | null;
   }[];
+  /**
+   * RAILS THAT CANNOT NAME A RECIPIENT, and why.
+   *
+   * Separate from health because a refusal is not ill health (037) — a rail
+   * declining to name an account is behaving correctly when the number is
+   * wrong. What makes it worth a table is that the SAME refusal is what a
+   * SANDBOX KEY returns for every correct number, and from inside the
+   * application the two are indistinguishable. `key_mode` is what tells them
+   * apart; it is read off the key's prefix and no key ever crosses this
+   * boundary.
+   */
+  readonly nameEnquiry: readonly {
+    readonly provider: string;
+    readonly country: string;
+    readonly rail_code: string;
+    readonly refusals: string;
+    readonly key_mode: 'test' | 'live' | 'unset' | 'unknown';
+    /** The provider's OWN sentence. Never shown to a customer — 006's rule. */
+    readonly last_message: string;
+    /** Every shape the lookup was asked in, and what was said to each. Carries
+     *  a number's SHAPE (`233…1133`) and never its digits. */
+    readonly last_tried: string;
+    readonly first_seen_at: string;
+    readonly last_seen_at: string;
+  }[];
 }
 
 export class AdminClient {

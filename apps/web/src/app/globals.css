@@ -3947,6 +3947,60 @@ body:has(.sf) { background: var(--sf-bg); }
 }
 .sf-select-arrow.up { transform: translateY(-50%) rotate(180deg); }
 
+/*
+ * HOW THE MONEY REACHES THEM — rows, not cards.
+ *
+ * Two or three answers to one question, each a line of text with a mark
+ * beside it. A card per method would make two options fill a handset screen
+ * and would read as three products rather than as one choice; `.sf-row` is
+ * the same construction the currency list uses, which is why they feel like
+ * one flow.
+ *
+ * The base `button` rule centres its content, pads it 12/20 and fills it with
+ * `--brand`, so every one of those is restated. Inheriting any of it is what
+ * put the currency flags in the middle of the screen two rounds ago.
+ */
+.sf-methods { display: grid; gap: 4px; margin-top: 4px; }
+.sf-method {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 14px;
+  width: 100%;
+  min-height: 0;
+  padding: 14px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--sf-text);
+  font-family: var(--font-sans);
+  text-align: left;
+  cursor: pointer;
+}
+.sf-method:hover:where(:not(:disabled)) { background: transparent; color: var(--sf-text); }
+.sf-method:active { transform: none; }
+.sf-method-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
+  /* A tint of the accent rather than the accent: the mark identifies the row,
+     it does not compete with the primary button further down any screen. */
+  background: color-mix(in srgb, var(--sf-accent) 12%, transparent);
+  color: var(--sf-accent);
+}
+.sf-method-text { display: grid; gap: 3px; min-width: 0; }
+.sf-method-title { font-size: 15.5px; font-weight: 700; line-height: 1.3; }
+.sf-method-sub {
+  font-size: 13.5px;
+  font-weight: 400;
+  line-height: 1.4;
+  color: var(--sf-muted);
+}
+
 .sf-primary {
   width: 100%;
   height: 54px;
@@ -4121,10 +4175,33 @@ body:has(.sf) { background: var(--sf-bg); }
 .sf-amount .xselect { width: auto; flex: 0 0 auto; }
 .sf-amount .xselect-trigger > svg { width: 16px; height: 16px; }
 
-/* THE SECOND LABEL SITS DIRECTLY ON ITS OWN BOX. The note above it already
-   closes the first pair, so a paragraph gap here would read as two unrelated
-   sections rather than as one conversion. */
-.sf-label-next { margin-top: 14px; }
+/*
+ * A LABEL, ITS BOX AND ITS NOTE ARE ONE GRID CHILD — and that is the whole
+ * fix, rather than a third pass at margins.
+ *
+ * `.send-step` is `display: grid; gap: 16px`, so EVERY child of the form was
+ * 16px from its neighbour and the margins written on `.sf-label` and
+ * `.sf-amount-note` were ADDED to it — grid gaps do not collapse margins. So
+ * "You send" sat 22px above its own box and the balance 21px below it, and
+ * two rounds of tightening those margins moved the spacing by five pixels
+ * each time while the 16px underneath them never changed.
+ *
+ * Wrapping the three in one block makes the gap apply BETWEEN the two amounts
+ * instead of inside each of them. It is structural: a label can no longer
+ * drift away from the box it names, whatever the form's gap becomes later.
+ */
+.sf-amount-block { display: grid; gap: 6px; }
+.sf-amount-block > .sf-label,
+.sf-amount-block > .sf-amount-note { margin: 0; }
+
+/*
+ * THE BALANCE IS GREEN because it is what the customer HAS. On a screen whose
+ * other figures are what is about to leave and what will land, the one number
+ * that is neither reads as a third amount unless it is coloured as a state —
+ * the same reason money arriving is green and money leaving is red in the
+ * activity list.
+ */
+.sf-amount-note.good { color: var(--ok); font-weight: 600; }
 /* The gap between a typed amount and its rate. Lighter and smaller, because it
    is a state rather than a figure — and never a zero, which would be a claim
    about what the corridor pays. */

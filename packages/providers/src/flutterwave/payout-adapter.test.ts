@@ -107,6 +107,79 @@ describe('who holds the destination', () => {
     expect(sent).toHaveLength(0);
   });
 
+  it('asks a SECOND way when Ghana refuses the stored spelling', async () => {
+    /*
+     * ROUND FOUR, AND WHY THIS IS NOT ANOTHER ASSERTED CONSTANT.
+     *
+     * The previous round made the adapter ASK for a Ghanaian wallet instead of
+     * refusing to — and then asserted one payload shape and threw the
+     * provider's refusal away. So a number reached Flutterwave, Flutterwave
+     * said no, and the sentence it said no with reached no log, no table and
+     * no screen: three rounds of "it cannot find the momo details" with no
+     * recorded evidence of what was actually answered.
+     *
+     * A LOOKUP IS A READ, so it may be asked more than one way. The stored
+     * number is E.164 (`233…`, what a transfer carries); the national
+     * spelling is `0…`, which is how the number is written in Accra and the
+     * shape their own Ghanaian examples use. A TRANSFER would never be
+     * retried like this — one retry is how a payout becomes two.
+     */
+    const { client, sent } = stub([
+      { status: 'error', message: 'Sorry, that account number is invalid' },
+      { status: 'success', data: { account_name: 'RABI SIEDU' } },
+    ]);
+    const found = await new FlutterwavePayoutAdapter(client).lookup('GH', 'MTN', '233553921133');
+    expect(sent).toHaveLength(2);
+    expect(sent[0]?.body).toMatchObject({ account_number: '233553921133' });
+    expect(sent[1]?.body).toMatchObject({ account_number: '0553921133', account_bank: 'MTN' });
+    expect(found.accountName).toBe('RABI SIEDU');
+    // The name is the RAIL'S and the number is still the one that will be
+    // SENT — 067's rule that a row must record what the provider was given.
+    expect(found.accountNumber).toBe('233553921133');
+  });
+
+  it('carries every refusal out, so somebody can read what the rail said', async () => {
+    /*
+     * THE HALF THAT WAS MISSING FOR THREE ROUNDS. `lookupOrRefuse` mapped a
+     * `ProviderRejectedError` straight to `account_not_found` and LOGGED
+     * NOTHING — so the only fact that could have ended this, Flutterwave's own
+     * sentence, existed nowhere. `cause` carries the shapes tried and what was
+     * said to each, and the payout service writes it to
+     * `name_enquiry_refusals`.
+     *
+     * It carries the KEY'S MODE and never the key: their sandbox cannot verify
+     * a real account at all, so a deployment on `FLWSECK_TEST-…` refuses every
+     * genuine number for a reason that has nothing to do with the number.
+     */
+    const { client } = stub([
+      { status: 'error', message: 'Sorry, that account number is invalid' },
+      { status: 'error', message: 'Sorry, that account number is invalid' },
+      { status: 'success', data: [{ code: 'MTN', name: 'MTN Mobile Money Ghana' }] },
+    ]);
+    await expect(
+      new FlutterwavePayoutAdapter(client).lookup('GH', 'MTN', '233553921133'),
+    ).rejects.toMatchObject({
+      providerCode: 'unknown_account',
+      cause: { keyMode: expect.any(String), tried: expect.any(Array) },
+    });
+  });
+
+  it('NEVER puts a whole mobile number in the trail', async () => {
+    // A refusals table holding whole numbers is a list of customers' contacts.
+    // 016's rule: the way to hold less is to store less.
+    const { client } = stub([
+      { status: 'error', message: 'no' },
+      { status: 'error', message: 'no' },
+      { status: 'success', data: [] },
+    ]);
+    const failed = await new FlutterwavePayoutAdapter(client)
+      .lookup('GH', 'MTN', '233553921133')
+      .catch((error: unknown) => error);
+    const trail = JSON.stringify((failed as { cause?: unknown }).cause);
+    expect(trail).not.toContain('233553921133');
+    expect(trail).not.toContain('0553921133');
+  });
+
   it('asks the bank, and returns the BANK\'s answer', async () => {
     const { client, sent } = stub([
       { status: 'success', data: { account_name: 'ADEBAYO OKON' } },

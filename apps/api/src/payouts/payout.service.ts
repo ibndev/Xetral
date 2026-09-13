@@ -515,9 +515,65 @@ export class PayoutService {
         if (error.providerCode === 'name_unavailable') {
           throw new NotFoundException({ error: 'name_unavailable' });
         }
+        /*
+         * THE LINE THAT WAS MISSING FOR FOUR ROUNDS.
+         *
+         * A rejection landed here, became `account_not_found`, and NOTHING
+         * WAS WRITTEN DOWN — `#relay` is the only thing on this method that
+         * logs and this branch never reaches it. So Flutterwave's own sentence
+         * about a Ghanaian mobile money number, the single fact that would
+         * have ended "it says it cannot find the momo details", existed in no
+         * log line, no table and no screen. Every round after that was
+         * therefore a guess about a provider's behaviour, which is the failure
+         * this repo already records twice about the Bitnob endpoint table.
+         *
+         * The customer's answer does not change — 043's rule is that an
+         * unknown account and an unreachable bank must read identically, or
+         * the endpoint maps which numbers are live where. What changes is that
+         * the reason is now answerable.
+         */
+        await this.#recordRefusal(body, error);
         throw new NotFoundException({ error: 'account_not_found' });
       }
       throw this.#relay(error, 'looking up a beneficiary');
+    }
+  }
+
+  /**
+   * Write down why a name enquiry refused.
+   *
+   * BEST EFFORT, ALWAYS. A failure to record why a lookup failed must never
+   * become a second failure on top of it — the rule `checkout_refusals`
+   * already follows, and the reason `record_error` swallows everything.
+   *
+   * IT CARRIES NO NUMBER AND NO KEY. The adapter's trail holds the SHAPE that
+   * was tried (`233…1133`) and the key's MODE, never the digits and never the
+   * credential.
+   */
+  async #recordRefusal(body: LookupQuery, error: ProviderRejectedError): Promise<void> {
+    const detail = error.cause as { keyMode?: unknown; tried?: unknown } | undefined;
+    const keyMode =
+      typeof detail?.keyMode === 'string' &&
+      ['test', 'live', 'unset', 'unknown'].includes(detail.keyMode)
+        ? detail.keyMode
+        : 'unknown';
+    const tried = Array.isArray(detail?.tried) ? detail.tried.join(' | ') : 'one shape';
+
+    this.#logger.warn(
+      `a name enquiry was refused by ${error.provider} for ${body.country}/` +
+        `${body.bank_code} on a ${keyMode} key: ${error.message} [${tried}]`,
+    );
+    try {
+      await this.pool.query(
+        `SELECT record_name_enquiry_refusal($1, $2, $3, $4, $5, $6)`,
+        [error.provider, body.country, body.bank_code, error.message, tried, keyMode],
+      );
+    } catch (cause) {
+      this.#logger.warn(
+        `could not record that name enquiry refusal: ${
+          cause instanceof Error ? cause.message : 'unknown'
+        }`,
+      );
     }
   }
 

@@ -103,6 +103,67 @@ export default function Providers() {
         </div>
       )}
 
+      {health.data !== undefined && health.data.nameEnquiry.length > 0 && (
+        <div className="panel">
+          <h2>Recipient names that could not be confirmed</h2>
+          <p className="lead">
+            A rail that cannot name a recipient refuses every send on that
+            corridor, and the customer is told to check a number that is
+            correct. This is the provider&rsquo;s own reason.
+          </p>
+          <table>
+            <thead>
+              <tr>
+                <th>Rail</th>
+                <th className="right">Refusals</th>
+                <th>Key</th>
+                <th>What the provider said</th>
+              </tr>
+            </thead>
+            <tbody>
+              {health.data.nameEnquiry.map((row) => (
+                <tr key={`${row.provider}:${row.country}:${row.rail_code}`}>
+                  <td>
+                    {row.provider} &middot; {row.country} {row.rail_code}
+                  </td>
+                  <td className="right amount">{row.refusals}</td>
+                  <td>
+                    {/*
+                      THE FIELD MOST LIKELY TO ANSWER THE WHOLE THING.
+                      Flutterwave's sandbox cannot verify a real account —
+                      their own documentation says only test accounts resolve
+                      in test mode — so a deployment on a test key refuses
+                      every genuine number, correctly, for a reason that has
+                      nothing to do with the number.
+                    */}
+                    {row.key_mode === 'test' ? (
+                      <span className="badge danger">test key</span>
+                    ) : row.key_mode === 'unset' ? (
+                      <span className="badge danger">no key</span>
+                    ) : (
+                      <span className="muted">{row.key_mode}</span>
+                    )}
+                  </td>
+                  <td className="muted">
+                    {row.last_message}
+                    <br />
+                    <span className="hint">{row.last_tried}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {health.data.nameEnquiry.some((row) => row.key_mode === 'test') && (
+            <p className="hint">
+              A <strong>test key</strong> cannot verify a real account at all.
+              Paste the live secret key on{' '}
+              <Link href="/admin/credentials">Provider keys</Link> — until then
+              every correct number on that corridor is refused.
+            </p>
+          )}
+        </div>
+      )}
+
       {health.data !== undefined && health.data.recent.length > 0 && (
         <div className="panel">
           <h2>Everything, including what is fine</h2>

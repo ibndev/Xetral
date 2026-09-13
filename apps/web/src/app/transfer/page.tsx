@@ -16,6 +16,7 @@ import {
   symbolFor,
 } from '@xetral/client';
 import type {
+  IconName,
   Recipient,
   RecipientKind,
   RecipientResolution,
@@ -61,7 +62,24 @@ export default function TransferPage() {
   );
 }
 
-type Step = 'who' | 'currency' | 'details' | 'amount';
+type Step = 'who' | 'currency' | 'method' | 'details' | 'amount';
+
+/**
+ * HOW THE MONEY REACHES THEM, asked as its own step.
+ *
+ * IT USED TO BE A ROW IN THE NETWORK PICKER — "XETRAL" sitting above MTN,
+ * Telecel and AirtelTigo — which put two different questions in one list. A
+ * customer choosing between "an account on this app" and "a mobile money
+ * wallet" is choosing a PRODUCT; a customer choosing between MTN and Telecel
+ * is choosing a network. Collapsing them made the first choice look like a
+ * fourth network, and it meant the number field and its label had to be right
+ * for both before either had been decided.
+ *
+ * The order is what makes the rest of the flow derivable: currency fixes the
+ * country, the METHOD fixes the rail, and the rail decides what is asked for
+ * and whether a name can be looked up.
+ */
+type Method = 'xetral' | 'bank' | 'momo';
 
 function Transfer() {
   const client = useXetral();
@@ -90,12 +108,15 @@ function Transfer() {
   /** What the RECIPIENT receives. Chosen on step two and read by every step
    *  after it, because it decides the country, the rail and the conversion. */
   const [receive, setReceive] = useState('');
+  /** How it reaches them — step three, and what the details form is FOR. */
+  const [method, setMethod] = useState<Method>('xetral');
 
   const home = session.data?.home_currency ?? 'NGN';
 
   const back = () => {
     if (step === 'amount') setStep('details');
-    else if (step === 'details') setStep(arrivedWith === '' ? 'currency' : 'who');
+    else if (step === 'details') setStep(arrivedWith === '' ? 'method' : 'who');
+    else if (step === 'method') setStep('currency');
     else if (step === 'currency') setStep('who');
   };
 
@@ -133,6 +154,17 @@ function Transfer() {
           home={home}
           onPick={(currency) => {
             setReceive(currency);
+            setStep('method');
+          }}
+        />
+      )}
+
+      {step === 'method' && (
+        <ChooseMethod
+          receive={receive === '' ? home : receive}
+          countries={countries.data ?? []}
+          onPick={(picked) => {
+            setMethod(picked);
             setStep('details');
           }}
         />
@@ -141,6 +173,7 @@ function Transfer() {
       {step === 'details' && (
         <RecipientDetails
           receive={receive === '' ? home : receive}
+          method={method}
           countries={countries.data ?? []}
           initialDestination={arrivedWith}
           onReady={(resolution, recipient) => {
@@ -501,6 +534,116 @@ function CurrencyGroup({
   );
 }
 
+/* ------------------------------------------------------------ step 2 and a half */
+
+/**
+ * WHAT THIS PLATFORM CAN ACTUALLY DELIVER, per country.
+ *
+ * A XETRAL ACCOUNT IS ALWAYS ONE OF THEM, in every currency, because it is a
+ * transfer between two balances on this platform rather than a rail at all.
+ *
+ * THE OTHER TWO COME FROM `countries.payout_method`, and that is why a country
+ * offers one of them rather than both. 046 put that column there so the SCREEN
+ * would stop offering a product the customer's money cannot reach, and 067
+ * made the SERVER read the same row: the destination is normalised as a phone
+ * number where it says `mobile_money` and left as typed where it says `bank`.
+ * One value, one shape. Offering both in Ghana would send a bank account
+ * number down a path that normalises it as an MTN wallet — the failure 046
+ * exists to prevent, in the direction that cannot be recalled.
+ *
+ * So a country that pays out by wallet offers Mobile Money and Xetral, one
+ * that pays out to banks offers Bank transfer and Xetral, and a currency
+ * belonging to no country — the dollar and the stablecoins — offers Xetral
+ * alone, which is the truth about what can be paid out in it.
+ */
+function methodsFor(country: XetralCountry | undefined): readonly Method[] {
+  if (country === undefined) return ['xetral'];
+  return country.payout_method === 'mobile_money'
+    ? ['momo', 'xetral']
+    : ['bank', 'xetral'];
+}
+
+const METHOD_COPY: Readonly<Record<Method, { title: string; sub: string; icon: IconName }>> = {
+  bank: {
+    title: 'Send via bank transfer',
+    sub: 'Use bank transfer to send money to a previous or new recipient',
+    icon: 'bank',
+  },
+  momo: {
+    title: 'Send via Mobile Money',
+    sub: 'Send to a mobile money wallet instantly',
+    icon: 'phone',
+  },
+  xetral: {
+    title: 'Send to a Xetral user',
+    sub: 'Instant and free, straight to their Xetral balance',
+    icon: 'send',
+  },
+};
+
+/**
+ * How the money reaches them.
+ *
+ * THE STEP THAT WAS MISSING, and its absence is what made the network picker
+ * carry two questions. "Xetral, a bank, or a wallet?" is a question about the
+ * PRODUCT; "MTN or Telecel?" is a question about a network — and a list that
+ * asked both put the Xetral account in the position of a fourth mobile money
+ * operator.
+ *
+ * IT IS SKIPPED WHERE THERE IS ONE ANSWER. A screen offering a single option
+ * is a tap that asks nothing, so a currency with one deliverable method goes
+ * straight on to the details.
+ */
+function ChooseMethod({
+  receive,
+  countries,
+  onPick,
+}: {
+  receive: string;
+  countries: readonly XetralCountry[];
+  onPick: (method: Method) => void;
+}) {
+  const country = countries.find((c) => c.currency === receive);
+  const methods = methodsFor(country);
+
+  /* ONE ANSWER IS NOT A QUESTION. `useEffect` rather than picking during the
+     render, because setting a parent's state while rendering a child is what
+     React refuses — and the list has to have been computed to know. */
+  useEffect(() => {
+    if (methods.length === 1 && methods[0] !== undefined) onPick(methods[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [receive]);
+  if (methods.length === 1) return null;
+
+  return (
+    <section className="sf">
+      <h1 className="sf-title">How do you want to send {receive}?</h1>
+
+      <div className="sf-methods">
+        {methods.map((method) => (
+          <button
+            key={method}
+            type="button"
+            className="sf-method"
+            onClick={() => onPick(method)}
+          >
+            <span className="sf-method-icon">
+              {/* THE SHARED TABLE, not a mark drawn here. `@xetral/client`'s
+                  icons are what both apps render, so a method row on the phone
+                  and on the web cannot come to show different glyphs. */}
+              <Icon name={METHOD_COPY[method].icon} size={22} />
+            </span>
+            <span className="sf-method-text">
+              <span className="sf-method-title">{METHOD_COPY[method].title}</span>
+              <span className="sf-method-sub">{METHOD_COPY[method].sub}</span>
+            </span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 /* ------------------------------------------------------------------ step 3 */
 
 /**
@@ -533,11 +676,15 @@ function CurrencyGroup({
  */
 function RecipientDetails({
   receive,
+  method,
   countries,
   initialDestination,
   onReady,
 }: {
   receive: string;
+  /** Decided one step earlier. It is what this form is FOR, so nothing here
+   *  re-derives it from a row in the rail picker. */
+  method: Method;
   countries: readonly XetralCountry[];
   initialDestination: string;
   onReady: (resolution: RecipientResolution, saved: Recipient | undefined) => void;
@@ -546,7 +693,10 @@ function RecipientDetails({
   const { busy, error, code, run } = useSubmit();
 
   const country = countries.find((c) => c.currency === receive);
-  const [rail, setRail] = useState('');
+  /* A XETRAL SEND HAS NO RAIL TO PICK, so the picker is not drawn and the
+     value is settled. Where there is one, it starts empty: a default network
+     is a network somebody sends to without choosing it. */
+  const [rail, setRail] = useState(method === 'xetral' ? 'xetral' : '');
   const [destination, setDestination] = useState(nationalDigits(initialDestination));
   const [found, setFound] = useState<RecipientResolution | undefined>(undefined);
   const [sheet, setSheet] = useState(false);
@@ -567,26 +717,26 @@ function RecipientDetails({
    * want when it applies.
    */
   /*
-   * XETRAL IS IN EVERY SELECTOR — naira, dollar, the stablecoins and every
-   * momo corridor — because "does this person already have an account?" is an
-   * answer in the same list, not a separate product. It is first because it is
-   * instant and free.
+   * THE PICKER ASKS ONE QUESTION NOW, and that is the whole of what moving the
+   * method out changed.
    *
-   * A MOMO NETWORK IS NAMED THE WAY PEOPLE SAY IT: MTN, AIRTEL, VODAFONE. The
-   * rail returns things like "MTN Mobile Money Ghana", which is a provider
-   * catalogue string, not a name a customer picks from a list.
+   * `XETRAL` used to sit in this list above MTN, Telecel and AirtelTigo — so a
+   * customer choosing between "an account on this app" and "a mobile money
+   * wallet" was choosing from the same control as somebody choosing between
+   * two networks, and the Xetral account read as a fourth operator. The method
+   * step asks that first; this list is now only networks, or only banks.
+   *
+   * A MOMO NETWORK IS NAMED THE WAY PEOPLE SAY IT: MTN, TELECEL, AIRTELTIGO.
+   * The rail returns "MTN Mobile Money Ghana", a provider catalogue string
+   * rather than a name a customer picks from a list.
    */
-  const isMomoCountry = country?.payout_method === 'mobile_money';
-  const rails = [
-    { value: 'xetral', label: 'XETRAL' },
-    ...(banks.data ?? []).map((bank) => ({
-      value: bank.code,
-      label: isMomoCountry ? networkLabel(bank.code, bank.name) : bank.name,
-    })),
-  ];
+  const isMomoCountry = method === 'momo';
+  const rails = (banks.data ?? []).map((bank) => ({
+    value: bank.code,
+    label: isMomoCountry ? networkLabel(bank.code, bank.name) : bank.name,
+  }));
 
-  const kind: RecipientKind =
-    rail === 'xetral' ? 'xetral' : country?.payout_method === 'mobile_money' ? 'momo' : 'bank';
+  const kind: RecipientKind = method;
 
   /*
    * ENOUGH TYPED TO BE WORTH ASKING ABOUT, and the floor is PER RAIL.
@@ -606,6 +756,9 @@ function RecipientDetails({
   const enough = destination.replace(/[^0-9]/g, '').length >= minimumDigits;
 
   const pickerLabel = isMomoCountry ? 'Network' : 'Bank';
+  /* Nothing to choose on a Xetral send: the destination is a Xetral account
+     and the only question left is the number. */
+  const needsRail = method !== 'xetral';
   const numberLabel = kind === 'bank' ? 'Account number' : 'Phone number';
   const railLabel = rails.find((r) => r.value === rail)?.label;
 
@@ -627,7 +780,7 @@ function RecipientDetails({
    * while the customer is still looking at the digits they typed.
    */
   function askTheRail(): void {
-    if (rail === '' || !enough) return;
+    if ((needsRail && rail === '') || !enough) return;
     void run(async () => {
       setFound(await doResolve());
       return undefined;
@@ -696,7 +849,7 @@ function RecipientDetails({
         className="sf"
         onSubmit={(event) => {
           event.preventDefault();
-          if (rail === '' || !enough || blocked) return;
+          if ((needsRail && rail === '') || !enough || blocked) return;
           void run(async () => {
             /*
              * THE NAME IS SHOWN BEFORE THE MONEY MOVES, wherever one exists.
@@ -720,13 +873,20 @@ function RecipientDetails({
         }}
       >
         <h1 className="sf-title">Who are you sending to?</h1>
-        <p className="sf-sub">Fill in the necessary details of your recipient</p>
+        <p className="sf-sub">
+          {method === 'xetral'
+            ? 'Their Xetral phone number — the money arrives instantly'
+            : method === 'momo'
+              ? 'Fill in the mobile money details of your recipient'
+              : 'Fill in the bank details of your recipient'}
+        </p>
 
         <div className="sf-group">
           <span className="sf-label">Recipient country</span>
           <input className="sf-field" value={country?.name ?? receive} readOnly />
         </div>
 
+        {needsRail && (
         <div className="sf-group">
           <span className="sf-label">{pickerLabel}</span>
           <div className="sf-select-wrap">
@@ -745,6 +905,7 @@ function RecipientDetails({
             </span>
           </div>
         </div>
+        )}
 
         <div className="sf-group">
           <span className="sf-label">{numberLabel}</span>
@@ -817,7 +978,7 @@ function RecipientDetails({
         <button
           type="submit"
           className="sf-primary"
-          disabled={busy || rail === '' || !enough || blocked}
+          disabled={busy || (needsRail && rail === '') || !enough || blocked}
         >
           {busy
             ? 'Checking…'
@@ -1028,71 +1189,87 @@ function SendAmount({
 
       {/* ONE STRAIGHT FIELD PER AMOUNT: the figure on the left, the currency on
           the right, and what it means in small text under it. */}
-      <span className="sf-label">You send</span>
-      <div className={enough || amount === '' ? 'sf-amount' : 'sf-amount invalid'}>
-        <input
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          inputMode="decimal"
-          placeholder="0"
-          aria-label="Amount to send"
-        />
-        <Select
-          value={sendCurrency}
-          onChange={setSendCurrency}
-          options={balances.map((b) => ({ value: b.currency, label: b.currency }))}
-          renderMark={(value) => <CurrencyMark currency={value} size={18} />}
-          compact
-        />
-      </div>
-      <span className={amount !== '' && !enough ? 'sf-amount-note bad' : 'sf-amount-note'}>
-        {amount !== '' && !enough
-          ? `Enter an amount in ${sendCurrency}.`
-          : `Balance: ${formatAmount(balance, sendCurrency)}`}
-      </span>
-
-      <span className="sf-label sf-label-next">Recipient receives</span>
-      <div className="sf-amount">
-        {/*
-         * A FIGURE, NEVER A DASH AND NEVER A STALE ZERO.
-         *
-         * The conversion is automatic: type 100 naira and the cedi figure
-         * follows as soon as the quote lands. What it must not do is sit at
-         * zero in the gap — a zero beside a typed amount reads as "this
-         * corridor pays nothing", which is a sentence about the product. So
-         * while the rate is in flight the field says so, and only an EMPTY
-         * amount box renders a zero.
-         *
-         * The currency's own SYMBOL comes from `formatAmount` — ₵ for a cedi,
-         * KSh for a shilling — because a screen quoting "1,250.00 GHS" beside
-         * "₦100,000.00" is showing money in one currency and a database field
-         * in the other.
-         */}
-        {converting ? (
-          <span className="sf-amount-value waiting">Converting…</span>
-        ) : (
-          <span className="sf-amount-value">
-            {sameCurrency
-              ? formatAmount(amount === '' ? '0' : amount, lands_in)
-              : formatAmount(lands?.receives ?? '0', lands_in)}
-          </span>
-        )}
-        <span className="sf-ccy">
-          <CurrencyMark currency={lands_in} size={18} />
-          {lands_in}
+      {/*
+        ONE GRID CHILD PER AMOUNT — the label, the box and the note together.
+        `.send-step` has a 16px gap between children, so as three siblings the
+        label sat 22px above its own box with the margins added on top. The
+        label belongs TO the box; the gap belongs BETWEEN the two amounts.
+      */}
+      <div className="sf-amount-block">
+        <span className="sf-label">You send</span>
+        <div className={enough || amount === '' ? 'sf-amount' : 'sf-amount invalid'}>
+          <input
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            inputMode="decimal"
+            placeholder="0"
+            aria-label="Amount to send"
+          />
+          <Select
+            value={sendCurrency}
+            onChange={setSendCurrency}
+            options={balances.map((b) => ({ value: b.currency, label: b.currency }))}
+            renderMark={(value) => <CurrencyMark currency={value} size={18} />}
+            compact
+          />
+        </div>
+        {/* GREEN, because it is what the customer HAS — the only figure on this
+            screen that is neither leaving nor landing. */}
+        <span
+          className={
+            amount !== '' && !enough ? 'sf-amount-note bad' : 'sf-amount-note good'
+          }
+        >
+          {amount !== '' && !enough
+            ? `Enter an amount in ${sendCurrency}.`
+            : `Balance: ${formatAmount(balance, sendCurrency)}`}
         </span>
       </div>
-      <span className={quote.code === 'pair_not_supported' ? 'sf-amount-note bad' : 'sf-amount-note'}>
-        {!sameCurrency && lands !== undefined
-          ? `1 ${sendCurrency} = ${formatAmount(lands.rate, lands_in)}`
-          : !sameCurrency && quote.code === 'pair_not_supported'
-            ? `We cannot convert ${sendCurrency} to ${lands_in} yet`
-            : to.kind === 'xetral'
-              ? 'Arrives instantly'
-              : 'Usually arrives within minutes'}
-      </span>
 
-      <label className="field" style={{ marginTop: 18 }}>
+      <div className="sf-amount-block">
+        <span className="sf-label">{firstNameOf(to.display_name)} receives</span>
+        <div className="sf-amount">
+          {/*
+           * A FIGURE, NEVER A DASH AND NEVER A STALE ZERO.
+           *
+           * The conversion is automatic: type 100 naira and the cedi figure
+           * follows as soon as the quote lands. What it must not do is sit at
+           * zero in the gap — a zero beside a typed amount reads as "this
+           * corridor pays nothing", which is a sentence about the product. So
+           * while the rate is in flight the field says so, and only an EMPTY
+           * amount box renders a zero.
+           *
+           * The currency's own SYMBOL comes from `formatAmount` — ₵ for a cedi,
+           * KSh for a shilling — because a screen quoting "1,250.00 GHS" beside
+           * "₦100,000.00" is showing money in one currency and a database field
+           * in the other.
+           */}
+          {converting ? (
+            <span className="sf-amount-value waiting">Converting…</span>
+          ) : (
+            <span className="sf-amount-value">
+              {sameCurrency
+                ? formatAmount(amount === '' ? '0' : amount, lands_in)
+                : formatAmount(lands?.receives ?? '0', lands_in)}
+            </span>
+          )}
+          <span className="sf-ccy">
+            <CurrencyMark currency={lands_in} size={18} />
+            {lands_in}
+          </span>
+        </div>
+        <span className={quote.code === 'pair_not_supported' ? 'sf-amount-note bad' : 'sf-amount-note'}>
+          {!sameCurrency && lands !== undefined
+            ? `1 ${sendCurrency} = ${formatAmount(lands.rate, lands_in)}`
+            : !sameCurrency && quote.code === 'pair_not_supported'
+              ? `We cannot convert ${sendCurrency} to ${lands_in} yet`
+              : to.kind === 'xetral'
+                ? 'Arrives instantly'
+                : 'Usually arrives within minutes'}
+        </span>
+      </div>
+
+      <label className="field">
         <span className="field-label">Transaction PIN</span>
         <input
           type="password"
@@ -1202,6 +1379,18 @@ function FlowBack({ onClick }: { onClick: () => void }) {
 function railLabelOf(to: Recipient): string {
   if (to.kind === 'xetral') return 'XETRAL';
   return networkLabel(to.rail_code, to.rail_name ?? 'XETRAL');
+}
+
+/**
+ * The name on the RECEIVING label — "Rabi receives", "553921133 receives".
+ *
+ * The whole legal name is on the header two rows above it, so repeating it
+ * here wraps the label onto a second line on a 360px handset and says nothing
+ * new. Where the rail could not name the holder, `display_name` is the number
+ * and this is the number — which is what the customer typed and recognises.
+ */
+function firstNameOf(name: string): string {
+  return name.trim().split(/\s+/)[0] ?? name;
 }
 
 function initialsOf(name: string): string {

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -54,7 +54,18 @@ import type { Palette } from '@/theme';
  * The two apps are held to the same route list by `parity.test.ts` and to the
  * same answer about whether a payout is reviewable by `momo-send.test.ts`.
  */
-type Step = 'who' | 'currency' | 'details' | 'amount';
+type Step = 'who' | 'currency' | 'method' | 'details' | 'amount';
+
+/**
+ * HOW THE MONEY REACHES THEM, asked as its own step.
+ *
+ * IT USED TO BE A ROW IN THE NETWORK PICKER — "XETRAL" above MTN, Telecel and
+ * AirtelTigo — which put two questions in one list. Choosing between "an
+ * account on this app" and "a mobile money wallet" is choosing a PRODUCT;
+ * choosing between MTN and Telecel is choosing a network, and collapsing them
+ * made the first look like a fourth operator.
+ */
+type Method = 'xetral' | 'bank' | 'momo';
 
 export default function Transfer() {
   const client = useXetral();
@@ -83,6 +94,8 @@ export default function Transfer() {
   /** What the RECIPIENT receives. Chosen on step two and read by every step
    *  after it, because it decides the country, the rail and the conversion. */
   const [receive, setReceive] = useState('');
+  /** How it reaches them — step three, and what the details form is FOR. */
+  const [method, setMethod] = useState<Method>('xetral');
 
   const [sent, setSent] = useState<string | undefined>(undefined);
 
@@ -96,7 +109,8 @@ export default function Transfer() {
 
   const back = (): void => {
     if (step === 'amount') setStep('details');
-    else if (step === 'details') setStep(arrivedWith === '' ? 'currency' : 'who');
+    else if (step === 'details') setStep(arrivedWith === '' ? 'method' : 'who');
+    else if (step === 'method') setStep('currency');
     else if (step === 'currency') setStep('who');
   };
 
@@ -147,6 +161,17 @@ export default function Transfer() {
           home={home}
           onPick={(currency) => {
             setReceive(currency);
+            setStep('method');
+          }}
+        />
+      )}
+
+      {step === 'method' && (
+        <ChooseMethod
+          receive={receive === '' ? home : receive}
+          countries={countries.data ?? []}
+          onPick={(picked) => {
+            setMethod(picked);
             setStep('details');
           }}
         />
@@ -155,6 +180,7 @@ export default function Transfer() {
       {step === 'details' && (
         <RecipientDetails
           receive={receive === '' ? home : receive}
+          method={method}
           countries={countries.data ?? []}
           initialDestination={arrivedWith}
           onReady={(resolution, recipient) => {
@@ -666,6 +692,115 @@ function CurrencyGroup({
   );
 }
 
+/* ------------------------------------------------------------ step 2 and a half */
+
+/**
+ * WHAT THIS PLATFORM CAN ACTUALLY DELIVER, per country.
+ *
+ * A XETRAL ACCOUNT IS ALWAYS ONE OF THEM — it is a transfer between two
+ * balances here rather than a rail at all. The other two come from
+ * `countries.payout_method`, and that is why a country offers ONE of them:
+ * 046 put that column there so the screen would stop offering a product the
+ * customer's money cannot reach, and 067 made the SERVER read the same row —
+ * the destination is normalised as a phone number where it says
+ * `mobile_money` and left as typed where it says `bank`. Offering both in
+ * Ghana would send a bank account number down a path that normalises it as an
+ * MTN wallet, in the direction that cannot be recalled.
+ */
+function methodsFor(country: XetralCountry | undefined): readonly Method[] {
+  if (country === undefined) return ['xetral'];
+  return country.payout_method === 'mobile_money' ? ['momo', 'xetral'] : ['bank', 'xetral'];
+}
+
+const METHOD_COPY: Readonly<Record<Method, { title: string; sub: string }>> = {
+  bank: {
+    title: 'Send via bank transfer',
+    sub: 'Use bank transfer to send money to a previous or new recipient',
+  },
+  momo: { title: 'Send via Mobile Money', sub: 'Send to a mobile money wallet instantly' },
+  xetral: {
+    title: 'Send to a Xetral user',
+    sub: 'Instant and free, straight to their Xetral balance',
+  },
+};
+
+/**
+ * How the money reaches them.
+ *
+ * SKIPPED WHERE THERE IS ONE ANSWER. A screen offering a single option is a
+ * tap that asks nothing, so a currency with one deliverable method goes
+ * straight on to the details.
+ */
+function ChooseMethod({
+  receive,
+  countries,
+  onPick,
+}: {
+  readonly receive: string;
+  readonly countries: readonly XetralCountry[];
+  readonly onPick: (method: Method) => void;
+}) {
+  const sf = useSf();
+  const country = countries.find((c) => c.currency === receive);
+  const methods = methodsFor(country);
+
+  useEffect(() => {
+    if (methods.length === 1 && methods[0] !== undefined) onPick(methods[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [receive]);
+  if (methods.length === 1) return null;
+
+  return (
+    <Panel bare title={`How do you want to send ${receive}?`}>
+      <View style={{ marginTop: 4 }}>
+        {methods.map((method) => (
+          <Pressable
+            key={method}
+            onPress={() => onPick(method)}
+            android_ripple={null}
+            accessibilityRole="button"
+            style={{
+              flexDirection: 'row',
+              alignItems: 'flex-start',
+              gap: 14,
+              paddingVertical: 14,
+            }}
+          >
+            <View
+              style={{
+                width: 46,
+                height: 46,
+                borderRadius: 12,
+                alignItems: 'center',
+                justifyContent: 'center',
+                /* A TINT of the accent rather than the accent: the mark
+                   identifies the row, it does not compete with the primary
+                   button. Written as an alpha suffix because React Native has
+                   no `color-mix`. */
+                backgroundColor: `${sf.accent}1F`,
+              }}
+            >
+              <Icon
+                name={method === 'bank' ? 'bank' : method === 'momo' ? 'phone' : 'send'}
+                size={22}
+                color={sf.accent}
+              />
+            </View>
+            <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+              <Text style={{ color: sf.text, fontFamily: font.sansSemi, fontSize: 15.5 }}>
+                {METHOD_COPY[method].title}
+              </Text>
+              <Text style={{ color: sf.muted, fontSize: 13.5, lineHeight: 19 }}>
+                {METHOD_COPY[method].sub}
+              </Text>
+            </View>
+          </Pressable>
+        ))}
+      </View>
+    </Panel>
+  );
+}
+
 /* ------------------------------------------------------------------ step 3 */
 
 /**
@@ -695,11 +830,15 @@ function CurrencyGroup({
  */
 function RecipientDetails({
   receive,
+  method,
   countries,
   initialDestination,
   onReady,
 }: {
   readonly receive: string;
+  /** Decided one step earlier. It is what this form is FOR, so nothing here
+   *  re-derives it from a row in the rail picker. */
+  readonly method: Method;
   readonly countries: readonly XetralCountry[];
   readonly initialDestination: string;
   readonly onReady: (resolution: RecipientResolution, saved: Recipient | undefined) => void;
@@ -711,7 +850,9 @@ function RecipientDetails({
   const { busy, error, code, run } = useSubmit();
 
   const country = countries.find((c) => c.currency === receive);
-  const [rail, setRail] = useState('');
+  /* A XETRAL SEND HAS NO RAIL TO PICK. Where there is one it starts empty: a
+     default network is a network somebody sends to without choosing it. */
+  const [rail, setRail] = useState(method === 'xetral' ? 'xetral' : '');
   const [destination, setDestination] = useState(nationalDigits(initialDestination));
   const [found, setFound] = useState<RecipientResolution | undefined>(undefined);
 
@@ -730,21 +871,23 @@ function RecipientDetails({
    * is first because it is instant and free, which is the answer most people
    * want when it applies.
    */
-  /* XETRAL IS IN EVERY SELECTOR — naira, dollar, the stablecoins and every
-     momo corridor — and a momo network is named the way people say it. */
-  const isMomoCountry = country?.payout_method === 'mobile_money';
-  const rails = [
-    { value: 'xetral', label: 'XETRAL' },
-    ...(banks.data ?? []).map((bank) => ({
-      value: bank.code,
-      label: isMomoCountry ? networkLabel(bank.code, bank.name) : bank.name,
-    })),
-  ];
+  /*
+   * THE PICKER ASKS ONE QUESTION NOW. `XETRAL` used to sit in this list above
+   * MTN, Telecel and AirtelTigo, so choosing a PRODUCT and choosing a NETWORK
+   * came from the same control and the Xetral account read as a fourth
+   * operator. The method step asks that first; this list is only networks, or
+   * only banks.
+   */
+  const isMomoCountry = method === 'momo';
+  const rails = (banks.data ?? []).map((bank) => ({
+    value: bank.code,
+    label: isMomoCountry ? networkLabel(bank.code, bank.name) : bank.name,
+  }));
 
   const railLabel = rails.find((r) => r.value === rail)?.label;
-
-  const kind: RecipientKind =
-    rail === 'xetral' ? 'xetral' : country?.payout_method === 'mobile_money' ? 'momo' : 'bank';
+  const kind: RecipientKind = method;
+  /* Nothing to choose on a Xetral send. */
+  const needsRail = method !== 'xetral';
 
   const numberLabel =
     kind === 'bank' ? 'Account number' : kind === 'momo' ? 'Mobile Money number' : 'Phone number';
@@ -808,7 +951,7 @@ function RecipientDetails({
    * verified says so while the customer is still looking at the digits.
    */
   function askTheRail(): void {
-    if (rail === '' || !enough) return;
+    if ((needsRail && rail === '') || !enough) return;
     void run(async () => {
       setFound(await doResolve());
       return undefined;
@@ -839,7 +982,13 @@ function RecipientDetails({
     <Panel
       bare
       title="Who are you sending to?"
-      subtitle="Fill in the necessary details of your recipient"
+      subtitle={
+        method === 'xetral'
+          ? 'Their Xetral phone number — the money arrives instantly'
+          : method === 'momo'
+            ? 'Fill in the mobile money details of your recipient'
+            : 'Fill in the bank details of your recipient'
+      }
     >
       <Text style={styles.label}>Recipient country</Text>
       {/*
@@ -861,18 +1010,20 @@ function RecipientDetails({
         </Text>
       </View>
 
-      <Select
-        label={isMomoCountry ? 'Network' : 'Bank'}
-        value={rail}
-        onChange={(next) => {
-          setRail(next);
-          setFound(undefined);
-        }}
-        options={rails}
-        placeholder={isMomoCountry ? 'Network' : 'Bank'}
-        searchable={rails.length > 6}
-        searchPlaceholder="Search…"
-      />
+      {needsRail && (
+        <Select
+          label={isMomoCountry ? 'Network' : 'Bank'}
+          value={rail}
+          onChange={(next) => {
+            setRail(next);
+            setFound(undefined);
+          }}
+          options={rails}
+          placeholder={isMomoCountry ? 'Network' : 'Bank'}
+          searchable={rails.length > 6}
+          searchPlaceholder="Search…"
+        />
+      )}
 
       {isPhone ? (
         <View>
@@ -991,9 +1142,9 @@ function RecipientDetails({
                 : 'Check details'
         }
         busy={busy}
-        disabled={rail === '' || !enough || blocked}
+        disabled={(needsRail && rail === '') || !enough || blocked}
         onPress={() => {
-          if (rail === '' || !enough || blocked) return;
+          if ((needsRail && rail === '') || !enough || blocked) return;
           void run(async () => {
             /*
              * THE NAME IS SHOWN BEFORE THE MONEY MOVES, wherever one exists.
@@ -1175,9 +1326,13 @@ function SendAmount({
           renderMark={(value) => <CurrencyMark currency={value} size={18} />}
         />
       </View>
+      {/* GREEN, because it is what the customer HAS — the only figure on this
+          screen that is neither leaving nor landing, and without a colour it
+          reads as a third amount. */}
       <Text
         style={{
-          color: amount !== '' && !enough ? colors.danger : sf.muted,
+          color: amount !== '' && !enough ? colors.danger : colors.ok,
+          fontFamily: amount !== '' && !enough ? font.sans : font.sansSemi,
           fontSize: 12.5,
           marginTop: 6,
         }}
@@ -1187,8 +1342,12 @@ function SendAmount({
           : `Balance: ${formatAmount(balance, sendCurrency)}`}
       </Text>
 
+      {/* THE LABEL BELONGS TO ITS BOX — 6px to the box below it, 14px to the
+          note above. The web needed a wrapper for this because its form is a
+          grid with a gap; here the margins are the whole spacing, so the same
+          rhythm is written out directly. */}
       <Text style={{ color: sf.muted, fontSize: 13, marginTop: 14, marginBottom: 6 }}>
-        Recipient receives
+        {firstNameOf(to.display_name)} receives
       </Text>
       <View style={amountBox}>
         {/*
@@ -1466,6 +1625,15 @@ function NewRecipientPill({ onPress }: { readonly onPress: () => void }) {
       </Text>
     </Pressable>
   );
+}
+
+/**
+ * The name on the RECEIVING label — "Rabi receives", "553921133 receives".
+ * The whole legal name is on the header two rows above it, and repeating it
+ * wraps the label onto a second line on a 360px handset.
+ */
+function firstNameOf(name: string): string {
+  return name.trim().split(/\s+/)[0] ?? name;
 }
 
 function initialsOf(name: string): string {
