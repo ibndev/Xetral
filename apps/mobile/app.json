@@ -22,7 +22,11 @@
         "android.permission.WRITE_EXTERNAL_STORAGE"
       ],
       "softwareKeyboardLayoutMode": "resize",
-      "versionCode": 1
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon/xetral.png",
+        "backgroundColor": "#0D1B3E"
+      }
     },
     "plugins": [
       "expo-router",
@@ -39,6 +43,7 @@
     ],
     "extra": {
       "apiUrl": "https://app.xetral.com/api/x"
-    }
+    },
+    "icon": "./assets/icon/xetral.png"
   }
 }

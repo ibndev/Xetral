@@ -98,7 +98,28 @@ function Drawn({ mark, size }: { readonly mark: Mark; readonly size: number }) {
             web renderer, which explains why it is an ellipse and not a path. */}
         {/* The canton, drawn over the stripes it covers. */}
         {mark.canton !== undefined && (
-          <rect
+          /*
+           * `Rect`, NOT `rect`, AND THIS ONE CLOSED THE APP.
+           *
+           * `react-native-svg` exports components; the lowercase names are the
+           * DOM's. React Native looks a lowercase tag up in its native view
+           * registry, finds nothing, and throws "View config getting a
+           * callback for component 'rect' must be a function (received
+           * undefined)" — which unmounts the tree and, in a release build,
+           * closes the app.
+           *
+           * IT WAS INVISIBLE TO EVERYTHING. The compiler allows any lowercase
+           * JSX tag as an intrinsic element, every sibling in this same block
+           * is correctly capitalised so a diff reads as consistent, and the
+           * canton belongs to exactly ONE flag — the United States'. So the
+           * app worked everywhere except the moment a USD mark rendered, which
+           * is the currency picker on the Send screen: "I click Send money and
+           * it exits and stops working".
+           *
+           * `svg-primitives.test.ts` now fails the build on a lowercase SVG
+           * tag anywhere in this app.
+           */
+          <Rect
             x={0}
             y={0}
             width={size * mark.canton.width}
