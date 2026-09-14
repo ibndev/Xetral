@@ -40,8 +40,21 @@ END $$;
 -- entry and the screen offers it on the next load. If that needed a migration
 -- the column would not be doing its job.
 DO $$
-DECLARE v_gh TEXT[];
+DECLARE v_gh TEXT[]; v_was TEXT[];
 BEGIN
+    /*
+     * WHAT IT FOUND, PUT BACK — never a value typed here.
+     *
+     * This restored `{mobile_money}`, which was Ghana's resting state on the
+     * day this file was written and stopped being it when 071 added
+     * `bank_transfer`. These suites share one database and run in file order,
+     * so the restore silently UNDID a later migration and 071's own test then
+     * failed three files later, with nothing about the failure pointing here.
+     *
+     * A suite must put back what it found, not what it remembers.
+     */
+    SELECT funding_methods INTO v_was FROM countries WHERE code = 'GH';
+
     UPDATE countries
        SET funding_methods = ARRAY['mobile_money', 'virtual_account']
      WHERE code = 'GH';
@@ -51,16 +64,17 @@ BEGIN
         RAISE EXCEPTION 'TEST FAILED: a country cannot hold two funding methods';
     END IF;
 
-    -- Put it back: these suites share one database and a row left changed is
-    -- a setting every later file is subject to.
-    UPDATE countries SET funding_methods = ARRAY['mobile_money'] WHERE code = 'GH';
+    UPDATE countries SET funding_methods = v_was WHERE code = 'GH';
     RAISE NOTICE 'PASS: a country can offer both, without a migration';
 END $$;
 
 \echo '=== 4. An open country with NO way in is visible ==='
 DO $$
-DECLARE v_seen BIGINT;
+DECLARE v_seen BIGINT; v_was TEXT[];
 BEGIN
+    -- What it found, put back — see the block above.
+    SELECT funding_methods INTO v_was FROM countries WHERE code = 'KE';
+
     UPDATE countries SET funding_methods = '{}' WHERE code = 'KE';
 
     SELECT count(*) INTO v_seen FROM countries_without_a_way_in WHERE code = 'KE';
@@ -69,7 +83,7 @@ BEGIN
     END IF;
 
     -- A country that is CLOSED is not a gap: nobody there has an account.
-    UPDATE countries SET funding_methods = ARRAY['mobile_money'] WHERE code = 'KE';
+    UPDATE countries SET funding_methods = v_was WHERE code = 'KE';
     SELECT count(*) INTO v_seen FROM countries_without_a_way_in WHERE code = 'KE';
     IF v_seen <> 0 THEN
         RAISE EXCEPTION 'TEST FAILED: a country with a rail is still reported';

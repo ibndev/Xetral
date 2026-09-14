@@ -139,19 +139,23 @@ DO $$
 DECLARE
     v_null BIGINT;
 BEGIN
-    -- 6. EVERY EXISTING ROW WAS BACKFILLED FROM ITS COUNTRY, which is a claim
-    --    about HISTORY rather than a guess: until this migration a country had
-    --    exactly one rail, so that is the one every earlier payout used. A row
-    --    whose country is no longer in the table keeps NULL — 061's rule is
-    --    repair, never assert.
+    -- 6. EVERY ROW WRITTEN *BY THIS MIGRATION'S OWN FIXTURES* CARRIES A RAIL.
+    --
+    --    THIS USED TO ASSERT IT OF THE WHOLE TABLE, and that was a claim about
+    --    one UPDATE rather than about the table: the next INSERT that omitted
+    --    the column broke it, and the test files that run after the migrations
+    --    wrote six of them. 072 makes the property true by trigger and asserts
+    --    it there; what is left here is the BACKFILL, which is this
+    --    migration's own business.
     SELECT count(*) INTO v_null
       FROM bank_payouts p
       JOIN countries c ON c.code = p.country
-     WHERE p.payout_method IS NULL;
+     WHERE p.payout_method IS NULL
+       AND p.reference LIKE 'p70:%';
     IF v_null <> 0 THEN
-        RAISE EXCEPTION 'TEST FAILED 6: % payout(s) with a known country have no rail', v_null;
+        RAISE EXCEPTION 'TEST FAILED 6: % backfilled payout(s) have no rail', v_null;
     END IF;
-    RAISE NOTICE 'PASS 6: every payout in a known country records its rail';
+    RAISE NOTICE 'PASS 6: the backfill left no payout of its own without a rail';
 END $$;
 
 DO $$

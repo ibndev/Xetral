@@ -33,18 +33,75 @@
 BEGIN;
 
 /*
- * GHANA AND KENYA MAY NOW ASK FOR AN ACCOUNT NUMBER.
+ * AND THE COLUMN IS DELIBERATELY NOT TOUCHED — a correction to this
+ * migration's own first draft, which turned CI red.
  *
- * APPENDED, NEVER REPLACED. Both rows carry `mobile_money` (051) and
- * `bank_transfer` (071), and every one of those is still true — this adds a
- * third way in rather than choosing between them. Guarded on absence so the
- * migration is idempotent and so an operator who has already decided
- * otherwise is not overruled, which is 061's rule: repair, never assert.
+ * It appended `virtual_account` to Ghana and Kenya, and 051's invariant says
+ * in as many words: "a NUBAN is offered outside Nigeria" is a TEST FAILURE.
+ * That invariant is right and the append was wrong, for a reason that is
+ * about the word rather than about the product: a NUBAN is a NIGERIAN bank
+ * account number. Whatever Flutterwave issues in Accra, it is not one, and
+ * `funding_methods` is what the SCREEN reads to decide which rails to name.
+ *
+ * THE BUTTON DID NOT NEED THE COLUMN ANYWAY. Add Money no longer gates
+ * Activate Account on `funding_methods` at all — it offers it wherever the
+ * platform operates and lets the rail answer, which is the whole point of the
+ * adapter no longer refusing non-NGN currencies in its own code. So the data
+ * change bought nothing and cost an invariant.
+ *
+ * WHAT IS RECORDED HERE INSTEAD is the DECISION and the view that watches it.
+ * If Flutterwave is confirmed to issue dedicated numbers in a new market, the
+ * column and 051's assertion move together, in one migration, with the
+ * provider's own answer as the evidence — rather than one of them drifting
+ * ahead of the other because a button needed to appear.
  */
-UPDATE countries
-   SET funding_methods = funding_methods || ARRAY['virtual_account']::TEXT[]
- WHERE code IN ('GH', 'KE')
-   AND NOT ('virtual_account' = ANY (funding_methods));
+
+/*
+ * EVERY PAYOUT RECORDS ITS RAIL, INCLUDING THE ONES NOBODY TOLD.
+ *
+ * 070 added `bank_payouts.payout_method` and BACKFILLED it from the country,
+ * then asserted that no payout in a known country is left without one. That
+ * assertion was true at the moment the migration ran and false ever after: it
+ * describes a one-off UPDATE rather than a property of the table, so the next
+ * INSERT that omits the column breaks it. CI found it immediately — six rows,
+ * written by the test files that run AFTER the migrations.
+ *
+ * A BACKFILL IS NOT AN INVARIANT. The fix is not to weaken the assertion, it
+ * is to make the thing it asserts actually true: the column is filled from
+ * the country on the way in, by the same reasoning the backfill used — until
+ * 070 a country had exactly one rail, so the country IS the evidence for a
+ * row that did not say. Rule 4: if it protects money it is a constraint or a
+ * trigger, not a statement somebody remembered to make.
+ *
+ * IT NEVER OVERRIDES. A service that names the rail — which every live path
+ * does, since 070 put it in the INSERT — is untouched, and the immutability
+ * trigger 070 installed still refuses a later change. This only speaks for
+ * the rows that arrive silent.
+ */
+CREATE OR REPLACE FUNCTION bank_payout_rail_from_country()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF NEW.payout_method IS NULL THEN
+        SELECT c.payout_method INTO NEW.payout_method
+          FROM countries c
+         WHERE c.code = NEW.country;
+    END IF;
+    RETURN NEW;
+END $$;
+
+DROP TRIGGER IF EXISTS bank_payout_rail_default ON bank_payouts;
+CREATE TRIGGER bank_payout_rail_default
+    BEFORE INSERT ON bank_payouts
+    FOR EACH ROW EXECUTE FUNCTION bank_payout_rail_from_country();
+
+/* And the rows already written by anything that ran between 070 and here. */
+UPDATE bank_payouts p
+   SET payout_method = c.payout_method
+  FROM countries c
+ WHERE c.code = p.country
+   AND p.payout_method IS NULL;
 
 /**
  * WHERE A COUNTRY MAY ASK FOR AN ACCOUNT AND NO RAIL IS ROUTED TO ANSWER.

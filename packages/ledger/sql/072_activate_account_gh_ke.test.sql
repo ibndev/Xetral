@@ -7,34 +7,42 @@ DO $$
 DECLARE
     v_in TEXT[];
 BEGIN
-    -- 1. GHANA AND KENYA MAY ASK. The button is offered; whether Flutterwave
-    --    answers is Flutterwave's to say, which is the whole correction.
+    -- 1. THE COLUMN STILL SAYS A NUBAN IS NIGERIAN, and 051 still agrees.
+    --
+    --    This migration's first draft appended `virtual_account` to Ghana and
+    --    Kenya so the Add Money button would appear there, and 051's
+    --    invariant — "a NUBAN is offered outside Nigeria" is a TEST FAILURE —
+    --    turned red. The invariant was right: a NUBAN is a NIGERIAN account
+    --    number, and whatever Flutterwave issues in Accra is not one.
+    --
+    --    The button never needed the column. The screen offers it wherever
+    --    the platform operates and the rail answers, so what was bought was
+    --    nothing and what was spent was an invariant.
     SELECT funding_methods INTO v_in FROM countries WHERE code = 'GH';
-    IF NOT ('virtual_account' = ANY (v_in)) THEN
-        RAISE EXCEPTION 'TEST FAILED 1a: GH funds by %', v_in;
+    IF 'virtual_account' = ANY (v_in) THEN
+        RAISE EXCEPTION 'TEST FAILED 1a: GH claims a NUBAN (051 refuses this)';
     END IF;
     SELECT funding_methods INTO v_in FROM countries WHERE code = 'KE';
-    IF NOT ('virtual_account' = ANY (v_in)) THEN
-        RAISE EXCEPTION 'TEST FAILED 1b: KE funds by %', v_in;
+    IF 'virtual_account' = ANY (v_in) THEN
+        RAISE EXCEPTION 'TEST FAILED 1b: KE claims a NUBAN (051 refuses this)';
     END IF;
-    RAISE NOTICE 'PASS 1: Ghana and Kenya may ask for an account number';
+    RAISE NOTICE 'PASS 1: a dedicated account number is still Nigeria''s alone';
 END $$;
 
 DO $$
 DECLARE
     v_in TEXT[];
 BEGIN
-    -- 2. AND THE OTHER TWO WAYS IN SURVIVED. Appending a third must not be a
-    --    decision against the first two: a wallet charge and a bank transfer
-    --    are how most money actually arrives in both countries, and 051 and
-    --    071 each recorded one of them.
+    -- 2. AND THE TWO REAL WAYS IN SURVIVED. 051 gave both countries the
+    --    wallet and 071 gave them bank transfer; neither is affected by a
+    --    button that asks a provider a question.
     SELECT funding_methods INTO v_in FROM countries WHERE code = 'GH';
     IF NOT ('mobile_money' = ANY (v_in) AND 'bank_transfer' = ANY (v_in)) THEN
-        RAISE EXCEPTION 'TEST FAILED 2a: GH lost a funding method: %', v_in;
+        RAISE EXCEPTION 'TEST FAILED 2a: GH funds by %', v_in;
     END IF;
     SELECT funding_methods INTO v_in FROM countries WHERE code = 'KE';
     IF NOT ('mobile_money' = ANY (v_in) AND 'bank_transfer' = ANY (v_in)) THEN
-        RAISE EXCEPTION 'TEST FAILED 2b: KE lost a funding method: %', v_in;
+        RAISE EXCEPTION 'TEST FAILED 2b: KE funds by %', v_in;
     END IF;
     RAISE NOTICE 'PASS 2: the wallet and bank-transfer rails are untouched';
 END $$;
@@ -43,9 +51,7 @@ DO $$
 DECLARE
     v_in TEXT[];
 BEGIN
-    -- 3. NIGERIA IS UNCHANGED. Its dedicated NUBAN is a different product
-    --    from a checkout account, and 071's argument is that calling one the
-    --    other makes Add Money hand back something that expires.
+    -- 3. NIGERIA IS UNCHANGED.
     SELECT funding_methods INTO v_in FROM countries WHERE code = 'NG';
     IF v_in <> ARRAY['virtual_account'] THEN
         RAISE EXCEPTION 'TEST FAILED 3: NG funds by %', v_in;
@@ -80,4 +86,51 @@ BEGIN
             COALESCE(v_decision, 'nothing');
     END IF;
     RAISE NOTICE 'PASS 5: the unrouted-account view is classified';
+END $$;
+
+DO $$
+DECLARE
+    v_user  BIGINT;
+    v_entry BIGINT;
+    v_rail  TEXT;
+BEGIN
+    -- 6. A PAYOUT THAT DOES NOT NAME ITS RAIL GETS THE COUNTRY'S, ON THE WAY
+    --    IN. 070 backfilled and then asserted the result, which is a claim
+    --    about one UPDATE rather than about the table — the next silent INSERT
+    --    broke it, and CI found six of them. This is the property itself.
+    SELECT id INTO v_user FROM users WHERE email = 'p70-rails@example.test';
+    IF v_user IS NULL THEN
+        RAISE EXCEPTION 'TEST FAILED 6: the 070 fixture is missing';
+    END IF;
+    SELECT reserve_entry_id INTO v_entry FROM bank_payouts WHERE reference = 'p70:ref-1';
+
+    INSERT INTO bank_payouts
+        (user_id, reference, idempotency_key, country, bank_code, bank_name,
+         account_number, currency, amount_minor, fee_minor, reserve_entry_id)
+    VALUES (v_user, 'p72:silent', 'p72:silent', 'GH', 'MTN', 'MTN Mobile Money',
+            '233553921133', 'GHS', 500, 0, v_entry);
+
+    SELECT payout_method INTO v_rail FROM bank_payouts WHERE reference = 'p72:silent';
+    IF v_rail IS DISTINCT FROM 'mobile_money' THEN
+        RAISE EXCEPTION 'TEST FAILED 6: a silent GH payout recorded %',
+            COALESCE(v_rail, 'nothing');
+    END IF;
+    RAISE NOTICE 'PASS 6: a payout that names no rail takes its country''s';
+END $$;
+
+DO $$
+DECLARE
+    v_null BIGINT;
+BEGIN
+    -- 7. AND NOTHING IN A KNOWN COUNTRY IS LEFT WITHOUT ONE. 070's assertion,
+    --    now that the trigger above makes it true of every row rather than of
+    --    the ones that happened to exist when a migration ran.
+    SELECT count(*) INTO v_null
+      FROM bank_payouts p
+      JOIN countries c ON c.code = p.country
+     WHERE p.payout_method IS NULL;
+    IF v_null <> 0 THEN
+        RAISE EXCEPTION 'TEST FAILED 7: % payout(s) with a known country have no rail', v_null;
+    END IF;
+    RAISE NOTICE 'PASS 7: every payout in a known country records its rail';
 END $$;
