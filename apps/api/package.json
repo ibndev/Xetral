@@ -12,7 +12,7 @@
     "test:e2e": "vitest run --config vitest.e2e.config.ts"
   },
   "devDependencies": {
-    "@nestjs/testing": "^11.2.1",
+    "@nestjs/testing": "^11.2.3",
     "@types/express": "^5.0.6",
     "@types/pg": "^8.23.1",
     "@types/supertest": "^7.2.1",
