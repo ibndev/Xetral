@@ -4358,3 +4358,153 @@ body:has(.sf) { background: var(--sf-bg); }
   font-size: 13px; color: var(--sf-muted);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+
+/* ===========================================================================
+   THE PICKER SHEET — every dropdown in the product, as a modal.
+
+   WHY THIS REPLACED A PANEL. An absolutely positioned list hanging off its
+   trigger can WIDEN THE PAGE: give it a `min-width`, open it from a control
+   already near the right edge, and it extends past the viewport. The layout
+   viewport grows to contain it and a phone browser zooms out to show the
+   lot — so the whole app renders small and every `position: fixed` control,
+   the Send flow's way back included, is laid out against a viewport wider
+   than the screen and lands off it. "The page is over expanded and Back is
+   off the screen, I have to zoom in with two fingers."
+
+   IT IS A CLASS OF BUG RATHER THAN ONE BUG: any dropdown, on any screen,
+   near any edge, in any language whose labels happen to be longer. A modal
+   is fixed to the viewport, so its size is bounded BY the screen instead of
+   contributing to the page's width, and no arithmetic about where a trigger
+   sits can move it.
+
+   AND IT IS THE BETTER CONTROL ON A HANDSET. A full-width sheet has room for
+   a flag, a label, a hint and a check at a tappable size; a 232px panel
+   hanging off a pill has room for none of that. It is what the phone app
+   already does, so the two platforms now draw one thing.
+   =========================================================================== */
+.xsheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0;
+  background: rgb(6 8 15 / 52%);
+  /* The sheet animates, the backdrop does not move: a ground that slides is
+     the page moving, which is the impression this whole rule exists to end. */
+  animation: fade var(--t) var(--ease) both;
+}
+.xsheet {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  /* NEVER WIDER THAN THE SCREEN, which is the entire point. */
+  max-width: min(520px, 100vw);
+  max-height: min(76vh, 620px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  border-radius: 20px 20px 0 0;
+  background: var(--surface-raised);
+  box-shadow: 0 -10px 40px rgb(0 0 0 / 26%);
+  animation: sheet-rise 260ms cubic-bezier(.22, 1.12, .36, 1) both;
+  overflow: hidden;
+}
+@keyframes sheet-rise {
+  from { transform: translateY(16px); opacity: 0; }
+  to   { transform: none; opacity: 1; }
+}
+/* On anything with room, a centred dialog rather than a bottom sheet: a strip
+   glued to the bottom of a 1400px window is a phone control on a desktop. */
+@media (min-width: 720px) {
+  .xsheet-backdrop { align-items: center; padding: 24px; }
+  .xsheet { border-radius: 18px; box-shadow: 0 18px 60px rgb(0 0 0 / 30%); }
+}
+.xsheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 16px 10px;
+}
+.xsheet-title {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+/* Transparent in EVERY state, said out loud rather than omitted: this is a
+   `<button>`, so `button:hover` paints it otherwise — the cascade collision
+   `button-specificity.test.ts` exists because of. */
+.xsheet-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.xsheet-close:hover:where(:not(:disabled)) { background: transparent; color: var(--text); }
+.xsheet-close:active { transform: none; }
+
+/* INSIDE THE SHEET THE LIST IS ORDINARY FLOW. Every absolute placement the
+   panel needed is neutralised here in ONE place rather than per variant —
+   `.ccy-select`, `.dial-select` and the rest each carried their own `left`,
+   `right` and `min-width`, and a variant that kept one would be a sheet with
+   a list floating out of it. */
+.xsheet .xselect-list,
+.xsheet .xselect-search,
+.xsheet .xselect-empty {
+  position: static;
+  inset: auto;
+  left: auto;
+  right: auto;
+  top: auto;
+  bottom: auto;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+.xsheet .xselect-list {
+  flex: 1 1 auto;
+  max-height: none;
+  padding: 4px 8px 12px;
+  overflow-y: auto;
+  /* Momentum on iOS, and a scroll that stays inside the sheet rather than
+     handing the gesture to the page under it. */
+  overscroll-behavior: contain;
+}
+.xsheet .xselect-list > li {
+  /* A THUMB TARGET. 44px is the floor every platform guideline names, and the
+     panel's rows were sized for a pointer. */
+  min-height: 48px;
+  padding: 12px 12px;
+  border-radius: 10px;
+}
+.xsheet .xselect-search {
+  margin: 0 16px 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--field);
+}
+
+/* ===========================================================================
+   AND NO PAGE SCROLLS SIDEWAYS.
+
+   The rule above removes the cause this app actually had; this is the belt
+   to its braces, because the failure is invisible in review and on a laptop
+   — a window 1400px wide never reveals a 380px screen's overflow. Tables,
+   code blocks and diagrams opt back in with their own `overflow-x: auto`
+   container, which is the only shape allowed to scroll horizontally.
+   =========================================================================== */
+html, body { overflow-x: hidden; }

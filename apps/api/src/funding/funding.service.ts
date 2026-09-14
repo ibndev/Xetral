@@ -661,10 +661,35 @@ function toAccountView(row: AccountRow): VirtualAccountView {
   return {
     account_number: row.account_number,
     bank_name: row.bank_name,
-    account_name: row.account_name,
+    account_name: customerNameOf(row.account_name),
     currency: row.currency,
     status: row.status,
   };
+}
+
+/**
+ * THE CUSTOMER'S OWN NAME, not the business's and theirs.
+ *
+ * A rail names a dedicated account after the MERCHANT and the holder —
+ * `XETRAL/OLAWALE IDRIS`, `XETRAL-OLAWALE IDRIS` — because from the bank's
+ * side the account belongs to the platform and is operated for a customer.
+ * That is true and it is not what somebody reads on the screen they opened to
+ * be paid into: their own account, described by somebody else's name first.
+ *
+ * THE ROW KEEPS WHAT THE PROVIDER SAID and this trims only what is SHOWN.
+ * The stored value is what the bank will display to a sender and what a
+ * reconciliation has to match, so rewriting it would make our record disagree
+ * with the rail's — 006's rule that a virtual account row describes what was
+ * issued rather than what we would have preferred.
+ *
+ * IT TRIMS A PREFIX AND NEVER INVENTS ONE. A name with no separator is
+ * returned unchanged, and so is one whose trailing part is empty — the
+ * failure to avoid is a blank where a name was, which reads as something that
+ * did not load.
+ */
+export function customerNameOf(accountName: string): string {
+  const tail = accountName.split(/[/\\|]/).pop()?.trim() ?? '';
+  return tail === '' ? accountName.trim() : tail;
 }
 
 /**

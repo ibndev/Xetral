@@ -90,7 +90,11 @@ export default function AddMoney() {
    * Activate could never succeed and answered "try again shortly" about
    * something permanent. Falls back to TRUE while the country list loads.
    */
-  const usesVirtualAccount = countries.data === undefined || funding.includes('virtual_account');
+  /* THE BUTTON IS OFFERED WHEREVER THE PLATFORM OPERATES, and the rail
+     answers — see the web screen's comment. Gating it on `funding_methods`
+     made the control depend on a MIGRATION rather than on the provider, so a
+     deployment behind 072 showed no button at all with nothing saying why. */
+  const usesVirtualAccount = true;
 
   const has = account.data != null;
 

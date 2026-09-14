@@ -90,7 +90,26 @@ export default function AddMoney() {
    * overwhelming majority and its rail works, so a moment of showing the
    * button is better than a moment of hiding the only way in.
    */
-  const usesVirtualAccount = countries.data === undefined || funding.includes('virtual_account');
+  /*
+   * THE BUTTON IS OFFERED WHEREVER THE PLATFORM OPERATES, and the rail
+   * answers. This reverses the gate for the second time, deliberately.
+   *
+   * It was ungated, then gated on `funding_methods` carrying
+   * `virtual_account` — correct reasoning about a button that could never
+   * succeed, and it made the control depend on a MIGRATION rather than on the
+   * provider. 072 adds the row for Ghana and Kenya; a deployment that has not
+   * applied it yet shows no button at all, with nothing on screen saying why,
+   * which is the silence 061 records: three correct code fixes that changed
+   * nothing because the answer was data.
+   *
+   * AND THE ADAPTER NO LONGER ASSERTS. It used to refuse every non-NGN
+   * currency in its own code before calling anything — the same unfalsifiable
+   * shape as the momo name belief. It asks now, so a refusal is
+   * Flutterwave's own sentence carried to an operator as
+   * `account_issue_refused`, which is something somebody can act on. A hidden
+   * button is a silence nobody can.
+   */
+  const usesVirtualAccount = true;
 
   const has = account.data != null;
 

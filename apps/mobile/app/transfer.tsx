@@ -1273,7 +1273,38 @@ function SendAmount({
   const { busy, error, code, run } = useSubmit();
   const { key, next } = useIdempotencyKey();
 
-  const [sendCurrency, setSendCurrency] = useState(home);
+  /*
+   * A PAYOUT CARRIES ONE CURRENCY, AND THIS SCREEN USED TO SEND IT TWO.
+   *
+   * THE BUG, WHICH WAS WORSE THAN THE REFUSAL IT PRODUCED. `payToBank` was
+   * called with `amount` — the figure the customer TYPED, in the currency
+   * they were sending — and `currency: lands_in`, the currency it LANDS in.
+   * Those describe different things, and `/v1/payouts` performs no
+   * conversion: it debits `walletAccount(user, currency)` by that amount.
+   *
+   * So a Ghanaian with ₵8.32 asking to send 2 cedis to a Nigerian bank had
+   * ₦2 requested from a naira wallet holding nothing, and read "Your balance
+   * will not cover this" beside a balance that plainly covered it. THE
+   * DANGEROUS HALF IS THE OTHER CUSTOMER: somebody who DOES hold naira would
+   * have had the request succeed and ₦2 leave, where the screen had just
+   * promised ₦235.01. A wrong amount actually leaving is worse than a
+   * refusal, and nothing in the ledger would have been unbalanced by it.
+   *
+   * THE CURRENCY IS THEREFORE FIXED FOR A PAYOUT, not corrected at the call
+   * site. A bank account or a wallet receives exactly one currency, so the
+   * send currency IS the payout currency — there is no second one for the
+   * two to disagree about. Converting first is a separate, deliberate act on
+   * the Convert screen, which is where a customer can see the rate they are
+   * accepting rather than having one applied inside a send.
+   *
+   * A XETRAL RECIPIENT IS UNCHANGED and keeps the picker: a different
+   * currency there is a REMITTANCE, which converts and pays in ONE entry —
+   * 008's rule — so the two currencies are the point rather than a mismatch.
+   */
+  const [sendCurrency, setSendCurrency] = useState(
+    to.kind === 'xetral' ? home : receiveCurrency,
+  );
+  const currencyIsFixed = to.kind !== 'xetral';
   const [amount, setAmount] = useState('');
   const [pin, setPin] = useState('');
 
@@ -1398,16 +1429,29 @@ function SendAmount({
             padding: 0,
           }}
         />
-        <Select
-          /* NOT EMPTY, even though the pill draws no caption: this string is
-             the sheet's own heading and the screen reader's label. */
-          label="Currency you send"
-          variant="pill"
-          value={sendCurrency}
-          onChange={setSendCurrency}
-          options={balances.map((b) => ({ value: b.currency, label: b.currency }))}
-          renderMark={(value) => <CurrencyMark currency={value} size={18} />}
-        />
+        {/* STATED, NOT OFFERED, where the rail decides it. A picker whose
+            only valid answer is the one already shown is a control that can
+            only be got wrong — and getting it wrong here sent two different
+            sums of money in one request. */}
+        {currencyIsFixed ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <CurrencyMark currency={sendCurrency} size={18} />
+            <Text style={{ color: sf.text, fontFamily: font.sansSemi, fontSize: 15 }}>
+              {sendCurrency}
+            </Text>
+          </View>
+        ) : (
+          <Select
+            /* NOT EMPTY, even though the pill draws no caption: this string is
+               the sheet's own heading and the screen reader's label. */
+            label="Currency you send"
+            variant="pill"
+            value={sendCurrency}
+            onChange={setSendCurrency}
+            options={balances.map((b) => ({ value: b.currency, label: b.currency }))}
+            renderMark={(value) => <CurrencyMark currency={value} size={18} />}
+          />
+        )}
       </View>
       {/* GREEN, because it is what the customer HAS — the only figure on this
           screen that is neither leaving nor landing, and without a colour it
@@ -1556,7 +1600,11 @@ function SendAmount({
                    and the screen that picks a branch is the one that skips. */
                 ...(to.branch_code === null ? {} : { branchCode: to.branch_code }),
                 amount,
-                currency: lands_in,
+                /* THE CURRENCY THE AMOUNT IS IN, which for a payout is fixed
+                   to the recipient's own — see `currencyIsFixed` above. It used
+                   to be `lands_in` while `amount` was the send currency's
+                   figure, which is a request describing two different sums. */
+                currency: sendCurrency,
                 pin,
                 idempotencyKey: key,
               });

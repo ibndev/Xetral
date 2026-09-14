@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Icon } from '@/ui/icon';
 
 export interface SelectOption {
@@ -12,6 +13,16 @@ export interface SelectOption {
 }
 
 export interface SelectProps {
+  /**
+   * The sheet's heading, since the open list is now a MODAL.
+   *
+   * Optional, and absent it is read from `labelledBy` — the visible `<label>`
+   * every form caller already points at — falling back to the placeholder.
+   * Deriving it means the forty-odd existing call sites get a real heading
+   * without each having to repeat a string that is already on the screen
+   * beside them.
+   */
+  readonly label?: string;
   readonly value: string;
   readonly onChange: (value: string) => void;
   readonly options: readonly SelectOption[];
@@ -88,6 +99,7 @@ export interface SelectProps {
  * cost of position tracking on scroll and resize.
  */
 export function Select({
+  label,
   value,
   onChange,
   options,
@@ -305,6 +317,27 @@ export function Select({
     }
   }
 
+  /*
+   * A PORTAL NEEDS A DOCUMENT, and the first render happens without one.
+   *
+   * The same latch the Send flow's Back pill uses: `createPortal` reaches for
+   * `document.body`, which does not exist while Next renders this on the
+   * server, so the sheet is mounted only after the component has.
+   */
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  /* WHAT THE SHEET SAYS IT IS CHOOSING. A panel hanging off a trigger is read
+     in the trigger's context; a sheet covering the screen has none of that.
+     The visible `<label>` a form already points at is the truest source, so
+     it is read from there when the caller named one. */
+  const [derived, setDerived] = useState('');
+  useEffect(() => {
+    if (!open || labelledBy === undefined) return;
+    setDerived(document.getElementById(labelledBy)?.textContent?.trim() ?? '');
+  }, [open, labelledBy]);
+  const sheetTitle = label ?? (derived === '' ? placeholder : derived);
+
   return (
     <div
       className={`xselect${compact === true ? ' is-compact' : ''}`}
@@ -340,6 +373,58 @@ export function Select({
         <Icon name="chevronDown" size={18} />
       </button>
 
+      {/*
+        THE OPEN LIST IS A MODAL, NOT A PANEL HANGING OFF THE TRIGGER.
+
+        AS AN ABSOLUTELY POSITIONED CHILD IT COULD WIDEN THE PAGE. A list with
+        a `min-width` opened from a trigger already near the right edge
+        extends past the viewport, the layout viewport grows to fit it, and a
+        phone browser zooms out to show the lot — which is what "the page is
+        over expanded and Back is off the screen, I have to zoom in with two
+        fingers" was. Every `position: fixed` control is then laid out against
+        a viewport wider than the screen, so the way back moves off it. That
+        is a whole CLASS of bug: any dropdown, on any screen, near any edge.
+
+        A MODAL CANNOT DO IT. It is fixed to the viewport, so its size is
+        bounded by the screen rather than contributing to the page's width,
+        and no arithmetic about where the trigger happens to sit can move it.
+        It is also the better control on a handset: a full-width sheet with
+        room for a flag, a label and a check beats a 232px panel hanging off a
+        pill.
+
+        PORTALLED TO `document.body`, because `.screen-in` carries an
+        animation and an animation creates a containing block — a `fixed`
+        child of one is laid out against the CONTENT, which is the same trap
+        the Send flow's Back pill records.
+      */}
+      {open &&
+        mounted &&
+        createPortal(
+          <div
+            className="xsheet-backdrop"
+            role="presentation"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) setOpen(false);
+            }}
+          >
+            <div className="xsheet" role="presentation" onMouseDown={(e) => e.stopPropagation()}>
+              {/* A SHEET NEEDS A HEADING. A panel hanging off a trigger is
+                  read in the context of the trigger; a sheet covering the
+                  screen has none, so it says what is being chosen. */}
+              <div className="xsheet-head">
+                <span className="xsheet-title">{sheetTitle}</span>
+                <button
+                  type="button"
+                  className="xsheet-close"
+                  aria-label="Close"
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    setOpen(false);
+                  }}
+                >
+                  <Icon name="close" size={18} />
+                </button>
+              </div>
       {open && searchable && (
         /*
           THE FILTER SITS INSIDE THE OPEN LIST, not above the trigger.
@@ -421,6 +506,10 @@ export function Select({
           ))}
         </ul>
       )}
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

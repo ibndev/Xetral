@@ -55,3 +55,57 @@ describe('the dropdowns this app draws', () => {
     expect(users.length).toBeGreaterThan(5);
   });
 });
+
+/**
+ * THE OPEN LIST IS A MODAL, AND IT HAS TO STAY ONE.
+ *
+ * As a panel absolutely positioned against its trigger it could WIDEN THE
+ * PAGE — a `min-width` plus a trigger near the right edge extends past the
+ * viewport, the layout viewport grows, and a phone browser zooms out to show
+ * the lot. Every `position: fixed` control is then laid out against something
+ * wider than the screen, which is how the Send flow's way back ended up off
+ * it and needed a two-finger zoom to reach.
+ *
+ * The failure is invisible on a laptop: a 1400px window never reveals a
+ * 380px screen's overflow, and the picker looks correct in both themes. So it
+ * is asserted rather than remembered — the argument `select-coverage` already
+ * makes about a native `<select>` looking fine on the machine it was built on.
+ */
+describe('the picker is a modal, not a panel', () => {
+  const source = readFileSync(
+    join(new URL('.', import.meta.url).pathname, 'select.tsx'),
+    'utf8',
+  );
+  const css = readFileSync(
+    join(new URL('.', import.meta.url).pathname, '..', 'app', 'globals.css'),
+    'utf8',
+  );
+
+  it('portals the open list out of the trigger', () => {
+    // `.screen-in` carries an animation and an animation creates a containing
+    // block, so a `fixed` child of one is laid out against the CONTENT — the
+    // same trap the Send flow's Back pill records.
+    expect(source).toContain('createPortal');
+    expect(source).toContain('document.body');
+    expect(source).toContain('xsheet-backdrop');
+  });
+
+  it('bounds the sheet by the viewport rather than by its contents', () => {
+    expect(/\.xsheet-backdrop\s*\{[^}]*position:\s*fixed/.test(css)).toBe(true);
+    // The cap is what makes "can never widen the page" true rather than
+    // merely likely: a sheet is at most the screen.
+    expect(/\.xsheet\s*\{[^}]*max-width:\s*min\(520px,\s*100vw\)/.test(css)).toBe(true);
+  });
+
+  it('neutralises the panel placement inside the sheet, in ONE place', () => {
+    // Each picker variant carried its own `left`, `right` and `min-width`; a
+    // variant that kept one would be a list floating out of the sheet.
+    const block = css.slice(css.indexOf('.xsheet .xselect-list,'));
+    expect(block.slice(0, 400)).toContain('position: static');
+    expect(block.slice(0, 400)).toContain('min-width: 0');
+  });
+
+  it('refuses a page that can scroll sideways', () => {
+    expect(/html,\s*body\s*\{[^}]*overflow-x:\s*hidden/.test(css)).toBe(true);
+  });
+});
