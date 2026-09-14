@@ -6,6 +6,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as SystemUI from 'expo-system-ui';
 import { ThemeChoiceContext, isThemeChoice, useResolvedScheme, useTheme } from '@/theme';
 import type { ThemeChoice } from '@/theme';
+import { CrashBoundary } from '@/crash-boundary';
 import { ScreenPrivacy } from '@/screen-privacy';
 import { THEME_CHOICE, readPreference, writePreference } from '@/preferences';
 
@@ -104,7 +105,25 @@ export default function Layout() {
          * the app switcher is the picture nobody chose to take.
          */}
         <ScreenPrivacy>
-          <Chrome />
+          {/*
+           * INSIDE THE PROVIDERS AND OUTSIDE EVERY SCREEN.
+           *
+           * A render that throws anywhere below here used to unmount the whole
+           * tree, and a release build has nothing above it to catch that — so
+           * Android was left with a blank Activity and closed the app. "I
+           * click Send money and it exits and stops working" names no screen,
+           * no file and no line, which is the worst possible report of the
+           * worst possible failure.
+           *
+           * It is the OUTERMOST thing that can fail and still be recovered
+           * from: above it are only the theme and the privacy cover, and a
+           * boundary that sat inside a screen would be one more thing the next
+           * screen forgets — the argument `ScreenPrivacy` directly above makes
+           * about wrapping everything rather than each screen.
+           */}
+          <CrashBoundary>
+            <Chrome />
+          </CrashBoundary>
         </ScreenPrivacy>
       </ThemeChoiceContext.Provider>
     </SafeAreaProvider>

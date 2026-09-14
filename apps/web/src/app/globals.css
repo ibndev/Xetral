@@ -4508,3 +4508,57 @@ body:has(.sf) { background: var(--sf-bg); }
    container, which is the only shape allowed to scroll horizontally.
    =========================================================================== */
 html, body { overflow-x: hidden; }
+
+/* ---------------------------------------------------------------------------
+   THE SENT CONFIRMATION.
+
+   It reuses the sheet's backdrop rather than growing a second overlay system:
+   one fixed, viewport-bounded ground, two things that can sit on it. A dialog
+   is CENTRED at every width, unlike the picker, because it is read rather than
+   scrolled and a strip glued to the bottom of the screen reads as a toast —
+   which is precisely what this replaced.
+   --------------------------------------------------------------------------- */
+.xsheet-backdrop.is-dialog { align-items: center; padding: 24px; }
+.xdialog {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  width: 100%;
+  max-width: min(380px, 100vw);
+  padding: 28px 24px 20px;
+  border-radius: 20px;
+  background: var(--surface-raised);
+  box-shadow: 0 18px 60px rgb(0 0 0 / 30%);
+  text-align: center;
+  animation: sheet-rise 260ms cubic-bezier(.22, 1.12, .36, 1) both;
+}
+/* The emoji lives in the TITLE and is the whole illustration — a tick in a
+   green circle is the same idea drawn worse and needs an asset per theme. The
+   heading is sized so it reads as a celebration rather than a label. */
+.xdialog-title {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 21px;
+  font-weight: 700;
+  color: var(--text);
+}
+.xdialog-body {
+  margin: 0 0 8px;
+  font-family: var(--font-sans);
+  font-size: 14.5px;
+  line-height: 1.5;
+  color: var(--text-2);
+  /* The recipient's name is outside-controlled text of arbitrary length, and a
+     name with no spaces must not push this box wider than the screen. */
+  overflow-wrap: anywhere;
+}
+.xdialog-ok {
+  width: 100%;
+  min-height: 48px;
+  border: 0;
+  border-radius: 999px;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}

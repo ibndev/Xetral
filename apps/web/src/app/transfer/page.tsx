@@ -14,6 +14,8 @@ import {
   phoneHint,
   sendableFor,
   symbolFor,
+  SENT_TITLE,
+  sentMessage,
 } from '@xetral/client';
 import type {
   IconName,
@@ -100,6 +102,13 @@ function Transfer() {
    */
   const arrivedWith = params.get('to') ?? '';
   const [step, setStep] = useState<Step>(arrivedWith === '' ? 'who' : 'details');
+
+  /* WHAT WAS JUST SENT, held until the customer dismisses it. Cleared by the
+     dialog's own button rather than by a timer: a confirmation that money
+     left should not disappear because somebody looked away. */
+  const [sent, setSent] = useState<
+    { amount: string; currency: string; name: string } | undefined
+  >(undefined);
 
   /** The recipient being paid — chosen from the list, or built by the flow. */
   const [chosen, setChosen] = useState<Recipient | undefined>(undefined);
@@ -214,14 +223,82 @@ function Transfer() {
           receiveCurrency={receive === '' ? home : receive}
           balances={wallets.data ?? []}
           home={home}
-          onSent={() => {
+          onSent={(result) => {
+            setSent(result);
             saved.reload();
             wallets.reload();
             setStep('who');
           }}
         />
       )}
+
+      {/*
+        MONEY LEAVING DESERVES A DIALOG, not a toast that fades.
+
+        A strip at the bottom saying "Sent to Olawale" names no amount and
+        removes itself after a few seconds, so a customer who looked away has
+        no confirmation at all of the one action in this product that cannot
+        be undone. This one states the figure and the name and waits to be
+        dismissed.
+      */}
+      {sent !== undefined && (
+        <SentDialog
+          amount={sent.amount}
+          currency={sent.currency}
+          name={sent.name}
+          onClose={() => setSent(undefined)}
+        />
+      )}
     </Shell>
+  );
+}
+
+/**
+ * The confirmation, portalled for the reason the Back pill is: `.screen-in`
+ * carries an animation, an animation creates a containing block, and a
+ * `position: fixed` child of one is laid out against the CONTENT rather than
+ * the viewport.
+ */
+function SentDialog({
+  amount,
+  currency,
+  name,
+  onClose,
+}: {
+  amount: string;
+  currency: string;
+  name: string;
+  onClose: () => void;
+}) {
+  const [ready, setReady] = useState(false);
+  useEffect(() => setReady(true), []);
+  if (!ready) return null;
+
+  return createPortal(
+    <div
+      className="xsheet-backdrop is-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="sent-title"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className="xdialog">
+        {/* THE EMOJI IS IN THE TITLE, and only there. It was drawn twice —
+            once large above the heading and once inside `SENT_TITLE` — which
+            renders as two party poppers stacked on one another. Rendered and
+            looked at, which is the only way that shows up. */}
+        <h2 className="xdialog-title" id="sent-title">
+          {SENT_TITLE}
+        </h2>
+        <p className="xdialog-body">{sentMessage(amount, currency, name)}</p>
+        <button type="button" className="xdialog-ok" onClick={onClose} autoFocus>
+          OK
+        </button>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -1196,7 +1273,10 @@ function SendAmount({
   receiveCurrency: string;
   balances: readonly { currency: string; spendable: string }[];
   home: string;
-  onSent: () => void;
+  /* WHAT LEFT AND WHO GOT IT, because the confirmation names both. A
+     callback taking nothing meant the parent had to re-derive an amount the
+     step it just finished already knew. */
+  onSent: (sent: { amount: string; currency: string; name: string }) => void;
 }) {
   const client = useXetral();
   const { busy, error, code, done, run } = useSubmit();
@@ -1353,7 +1433,7 @@ function SendAmount({
           next();
           setAmount('');
           setPin('');
-          onSent();
+          onSent({ amount, currency: sendCurrency, name: to.display_name });
           return `Sent to ${to.display_name}.`;
         });
       }}

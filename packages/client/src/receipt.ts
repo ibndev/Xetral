@@ -86,3 +86,32 @@ export function statusWords(t: TransactionDetail): string {
       return 'Completed';
   }
 }
+
+/**
+ * WHAT THE SUCCESS DIALOG SAYS, once, for both apps.
+ *
+ * A toast at the bottom of the screen saying "Sent to Olawale" is the weakest
+ * possible confirmation of the strongest possible action: it names no amount,
+ * it fades on its own, and a customer who looked away has no way to know the
+ * money went. Money leaving is the one moment in this product that deserves a
+ * dialog somebody has to dismiss.
+ *
+ * ONE FORMATTER, for the reason `formatReceipt` directly above is one: two
+ * copies of "what a successful send says" drift, and the copy that drifts is
+ * the one a customer screenshots and sends to the person asking whether they
+ * were paid.
+ *
+ * THE AMOUNT IS WHAT LEFT, in the currency it left in — never the converted
+ * figure. A customer's own record is of their own account, and "₵2.00 was
+ * sent" is checkable against their balance where "₦235.01" is not.
+ *
+ * `formatAmount` rather than `Intl.NumberFormat`, because the latter takes a
+ * NUMBER and there is no `toNumber` in this package.
+ */
+export function sentMessage(amount: string, currency: string, recipient: string): string {
+  const who = recipient.trim();
+  return `${formatAmount(amount, currency)} was sent successfully${who === '' ? '' : ` to ${who}`}.`;
+}
+
+/** The dialog's heading, so the two apps cannot drift on the wording either. */
+export const SENT_TITLE = '🎉 Sent Successfully';

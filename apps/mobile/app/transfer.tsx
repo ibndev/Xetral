@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -12,6 +12,8 @@ import {
   phoneHint,
   sendableFor,
   symbolFor,
+  SENT_TITLE,
+  sentMessage,
 } from '@xetral/client';
 import type {
   Recipient,
@@ -20,7 +22,7 @@ import type {
   XetralCountry,
 } from '@xetral/client';
 import { Shell } from '@/shell';
-import { AmountCard, Button, Field, FormError, Loading, Panel, Toast } from '@/ui';
+import { AmountCard, Button, Field, FormError, Loading, Panel } from '@/ui';
 import { Select } from '@/select';
 import { Icon } from '@/icon';
 import { CurrencyMark } from '@/currency-mark';
@@ -97,7 +99,12 @@ export default function Transfer() {
   /** How it reaches them — step three, and what the details form is FOR. */
   const [method, setMethod] = useState<Method>('xetral');
 
-  const [sent, setSent] = useState<string | undefined>(undefined);
+  /* WHAT WAS JUST SENT, held until the customer dismisses it. Cleared by the
+     dialog's own button rather than by a timer: a confirmation that money left
+     should not disappear because somebody looked away. */
+  const [sent, setSent] = useState<
+    { amount: string; currency: string; name: string } | undefined
+  >(undefined);
 
   const home = session.data?.home_currency ?? 'NGN';
 
@@ -125,7 +132,22 @@ export default function Transfer() {
       {...(step === 'who' ? { back: '/wallet' } : {})}
       overlay={
         <>
-          <Toast message={sent} tone="ok" onDone={() => setSent(undefined)} />
+          {/*
+            MONEY LEAVING DESERVES A DIALOG, not a toast that fades.
+
+            A strip saying "Sent to Olawale" names no amount and removes
+            itself after a few seconds, so a customer who looked away has no
+            confirmation at all of the one action in this product that cannot
+            be undone.
+          */}
+          {sent !== undefined && (
+            <SentDialog
+              amount={sent.amount}
+              currency={sent.currency}
+              name={sent.name}
+              onClose={() => setSent(undefined)}
+            />
+          )}
           {/* BOTTOM RIGHT, ALWAYS — over the screen rather than at the end of
               the list, so it does not scroll away or cover the last row.
               THE WAY BACK SITS THERE TOO, on every step after the first: a
@@ -1264,7 +1286,8 @@ function SendAmount({
   readonly receiveCurrency: string;
   readonly balances: readonly { currency: string; spendable: string }[];
   readonly home: string;
-  readonly onSent: (message: string) => void;
+  /* WHAT LEFT AND WHO GOT IT, because the confirmation names both. */
+  readonly onSent: (sent: { amount: string; currency: string; name: string }) => void;
 }) {
   const client = useXetral();
   const styles = useStyles();
@@ -1612,7 +1635,7 @@ function SendAmount({
             next();
             setAmount('');
             setPin('');
-            onSent(`Sent to ${to.display_name}.`);
+            onSent({ amount, currency: sendCurrency, name: to.display_name });
             return undefined;
           });
         }}
@@ -1723,6 +1746,101 @@ function railLabelOf(to: Recipient): string {
  * `surfaceRaised` is the token whose documented purpose is what floats, and
  * `lineStrong` draws the edge in both themes.
  */
+/**
+ * THE SENT CONFIRMATION, and it is a real `Modal` for the reason every picker
+ * on this platform already is: it is bounded by the screen and cannot be
+ * scrolled away from, which is exactly what a confirmation of money leaving
+ * has to be.
+ *
+ * The wording comes from `@xetral/client` so the phone and the web cannot
+ * drift on what a successful send says — the rule `formatReceipt` follows,
+ * because this is the sentence a customer screenshots.
+ */
+function SentDialog({
+  amount,
+  currency,
+  name,
+  onClose,
+}: {
+  readonly amount: string;
+  readonly currency: string;
+  readonly name: string;
+  readonly onClose: () => void;
+}) {
+  const c: Palette = useTheme();
+  const sf = useSf();
+  return (
+    <Modal transparent animationType="fade" visible onRequestClose={onClose}>
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: 'rgba(6,8,15,0.52)',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 24,
+        }}
+      >
+        <View
+          style={{
+            width: '100%',
+            maxWidth: 380,
+            alignItems: 'center',
+            paddingHorizontal: 24,
+            paddingTop: 28,
+            paddingBottom: 20,
+            borderRadius: 20,
+            backgroundColor: c.surfaceRaised,
+          }}
+        >
+          {/* THE EMOJI IS IN THE TITLE, and only there — it was drawn twice,
+              once large above the heading and once inside `SENT_TITLE`. It is
+              also the whole illustration: a tick in a green circle is the same
+              idea drawn worse and needs an asset per theme. */}
+          <Text
+            style={{
+              marginTop: 0,
+              color: sf.text,
+              fontFamily: font.sansSemi,
+              fontSize: 19,
+              textAlign: 'center',
+            }}
+          >
+            {SENT_TITLE}
+          </Text>
+          <Text
+            style={{
+              marginTop: 8,
+              marginBottom: 18,
+              color: sf.muted,
+              fontFamily: font.sans,
+              fontSize: 14.5,
+              lineHeight: 21,
+              textAlign: 'center',
+            }}
+          >
+            {sentMessage(amount, currency, name)}
+          </Text>
+          <Pressable
+            onPress={onClose}
+            accessibilityRole="button"
+            android_ripple={null}
+            style={{
+              width: '100%',
+              minHeight: 48,
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: 999,
+              backgroundColor: sf.accent,
+            }}
+          >
+            <Text style={{ color: sf.onAccent, fontFamily: font.sansSemi, fontSize: 15 }}>OK</Text>
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 function FlowBack({ onPress }: { readonly onPress: () => void }) {
   const c: Palette = useTheme();
   const sf = useSf();

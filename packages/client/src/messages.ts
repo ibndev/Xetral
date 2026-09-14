@@ -176,9 +176,27 @@ function sentenceFor(error: ApiError): string {
      */
     case 'account_issue_pending':
       return 'Your account is being opened. Check back in a moment.';
+    /*
+     * A REFUSAL IS NOT AN OUTAGE, and collapsing them told a customer to wait
+     * for something that will never happen on its own.
+     *
+     * `account_issue_refused` means the rail UNDERSTOOD and said no: dedicated
+     * accounts not enabled on the integration, a preferred bank the business
+     * is not approved for, a product that does not exist in this currency.
+     * None of those improve by trying again, and "we are on it — try again
+     * shortly" sends somebody back to the same button every few minutes. 037
+     * draws this line for provider health and the checkout draws it for a
+     * payer; this is the same line on the screen a customer opens in order to
+     * put money in.
+     *
+     * NEITHER CARRIES THE PROVIDER'S SENTENCE. That names our integration and
+     * stays in the log — 006's rule — so what crosses is a code and a true
+     * statement about what the customer should do next.
+     */
     case 'account_issue_refused':
+      return 'Your account number could not be opened. This one is on us to fix rather than something to retry — we have been told.';
     case 'account_issue_unavailable':
-      return 'We could not open your account number just now. We are on it — try again shortly.';
+      return 'We could not reach the bank just now. Try again in a few minutes.';
     /*
      * NOT "TRY AGAIN SHORTLY", because it will never work.
      *
