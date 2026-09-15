@@ -49,7 +49,48 @@ export interface FlutterwaveClientOptions {
   readonly secretKey: FlutterwaveCredential;
   readonly fetch?: FlutterwaveFetch;
   readonly timeoutMs?: number;
+  /**
+   * A TRACE OF WHAT WAS ACTUALLY SENT, and what came back.
+   *
+   * WHY IT IS ON THE CLIENT AND NOT IN EACH ADAPTER. Three of them build
+   * bodies for this rail — a checkout, a transfer, a name enquiry — and the
+   * question an operator asks is the same every time: what did we send, and
+   * what did they say about it. A hook per adapter would be three copies that
+   * drift, which is the argument the fulfilment port makes about three
+   * contract suites, and the one this file already makes about `/v3` living
+   * in two places.
+   *
+   * THE FAILURE IT EXISTS FOR: a Ghanaian checkout answered
+   * `checkout_unavailable` and a Nigerian one worked, and nothing anywhere
+   * could say whether the currency we sent was literally `GHS`, whether
+   * `payment_options` reached them at all, or whether Flutterwave had refused
+   * for a reason of their own. Three plausible causes, one message, and no
+   * way to tell them apart without a redeploy carrying a `console.log`.
+   *
+   * IT IS OPTIONAL AND THIS PACKAGE NEVER LOGS. A port that wrote to a logger
+   * would decide the format, the level and the redaction for every caller;
+   * the API passes one in, and that is where `redactPayload` runs — the
+   * payer's address and number are not what a diagnostic needs, and a log
+   * line is copied into tickets.
+   */
+  readonly onTrace?: FlutterwaveTrace;
 }
+
+/** What `onTrace` is handed. `body` is the object as serialised, not a
+ *  string, so the observer decides how to redact and render it. */
+export interface FlutterwaveTraceEvent {
+  readonly method: 'GET' | 'POST';
+  readonly path: string;
+  readonly body: unknown;
+  /** Absent until the call has answered. */
+  readonly httpStatus?: number;
+  /** Flutterwave's own `status`/`message` envelope, where one came back. */
+  readonly envelopeStatus?: string | undefined;
+  readonly message?: string | undefined;
+  readonly outcome: 'sent' | 'accepted' | 'refused' | 'unreachable';
+}
+
+export type FlutterwaveTrace = (event: FlutterwaveTraceEvent) => void;
 
 /**
  * Every Flutterwave path this platform touches.
@@ -106,12 +147,30 @@ export class FlutterwaveClient {
   readonly #secretKey: FlutterwaveCredential;
   readonly #fetch: FlutterwaveFetch;
   readonly #timeoutMs: number;
+  readonly #trace: FlutterwaveTrace;
 
   constructor(options: FlutterwaveClientOptions) {
     this.#baseUrl = options.baseUrl.replace(/\/+$/, '');
     this.#secretKey = options.secretKey;
     this.#fetch = options.fetch ?? ((url, init) => fetch(url, init));
     this.#timeoutMs = options.timeoutMs ?? 15_000;
+    /*
+     * A NO-OP RATHER THAN AN `undefined` CHECK AT FOUR CALL SITES, and it can
+     * never fail the call it describes — 037's rule about recording a
+     * provider's health, which is the same rule: a diagnostic that can take
+     * down the thing it observes is worse than no diagnostic.
+     */
+    const given = options.onTrace;
+    this.#trace =
+      given === undefined
+        ? () => {}
+        : (event) => {
+            try {
+              given(event);
+            } catch {
+              /* observing must never break the observed */
+            }
+          };
   }
 
   /**
@@ -154,6 +213,13 @@ export class FlutterwaveClient {
       );
     }
 
+    /*
+     * EMITTED BEFORE THE CALL, not after it. A request that times out or
+     * never connects produces no response to log beside, and that is exactly
+     * the case somebody is trying to diagnose.
+     */
+    this.#trace({ method, path, body, outcome: 'sent' });
+
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.#timeoutMs);
 
@@ -169,6 +235,7 @@ export class FlutterwaveClient {
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
     } catch (cause) {
+      this.#trace({ method, path, body, outcome: 'unreachable' });
       if (cause instanceof Error && cause.name === 'AbortError') {
         throw new ProviderTimeoutError(
           PROVIDER,
@@ -217,7 +284,25 @@ export class FlutterwaveClient {
      * `'success'` and everything else is a rejection.
      */
     const envelope = payload as { status?: unknown; message?: unknown };
+    const envelopeStatus = typeof envelope.status === 'string' ? envelope.status : undefined;
+    const message = typeof envelope.message === 'string' ? envelope.message : undefined;
+
     if (!response.ok || envelope.status !== 'success') {
+      /*
+       * THEIR SENTENCE, ALONGSIDE OUR REQUEST, in one line. Apart, an operator
+       * has a refusal in one place and no way to see what it was about; this
+       * is what turns "the Ghana link says try again later" into "they
+       * refused `account` because the account is not enabled for it".
+       */
+      this.#trace({
+        method,
+        path,
+        body,
+        httpStatus: response.status,
+        envelopeStatus,
+        message,
+        outcome: 'refused',
+      });
       throw new ProviderRejectedError(
         PROVIDER,
         typeof envelope.message === 'string'
@@ -227,6 +312,16 @@ export class FlutterwaveClient {
         text,
       );
     }
+
+    this.#trace({
+      method,
+      path,
+      body,
+      httpStatus: response.status,
+      envelopeStatus,
+      message,
+      outcome: 'accepted',
+    });
 
     return payload;
   }

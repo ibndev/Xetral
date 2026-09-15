@@ -178,6 +178,41 @@ export interface PayoutPort {
   readonly provider: string;
 
   /**
+   * WHETHER THIS RAIL SPENDS A BALANCE WE HAVE TO PUT THERE FIRST.
+   *
+   * Flutterwave does: it debits the balance matching the payout currency, so
+   * a cedi payout needs a cedi float and a deployment that has never
+   * collected a cedi has none. Paystack and Bitnob do not — they settle from
+   * accounts this platform keeps no float in.
+   *
+   * IT IS ON THE PORT BECAUSE IT IS A FACT ABOUT THE RAIL, and the
+   * alternative is a list of provider names in the service — which is the
+   * shape 046 already refused for `payout_method` and the fulfilment port
+   * refuses for VTpass's response codes. A rail added later declares its own
+   * nature rather than being remembered about.
+   *
+   * ABSENT MEANS NOT PREFUNDED, which is the permissive reading and is
+   * deliberate here even though this codebase usually defaults the strict
+   * way. What the flag switches on is a REFUSAL, so an adapter that forgot to
+   * declare it keeps working exactly as it did before the flag existed; the
+   * opposite default would have a new adapter refuse every payout until
+   * somebody found this line.
+   */
+  readonly prefunded?: boolean;
+
+  /**
+   * The same question asked of a DESTINATION rather than of an adapter.
+   *
+   * A single adapter can only answer for itself, so it implements
+   * `prefunded` and leaves this out. A SWITCH cannot: the rail is chosen by
+   * the destination's currency, so "are we prefunded?" is `true` for Accra
+   * and `false` for Lagos in the very same process, and a property could
+   * never say that. Two members rather than one because they are two
+   * different things — a fact about a rail, and a routing decision.
+   */
+  prefundedFor?(country: string): Promise<boolean>;
+
+  /**
    * Banks — or mobile money networks — a customer may send to in this country.
    *
    * ONE CALL FOR BOTH, because the question is the same one: what may the
@@ -221,6 +256,23 @@ export interface PayoutPort {
    */
   send<C extends Currency>(request: PayoutRequest<C>): Promise<PayoutReceipt>;
 
-  /** What the provider says became of a payout we sent. */
-  status(providerPayoutId: string): Promise<PayoutReceipt>;
+  /**
+   * What the provider says became of a payout we sent.
+   *
+   * `provider` NAMES THE RAIL THAT ISSUED THE ID, and it is on this signature
+   * because leaving it off was a real reversal waiting to happen. A payout id
+   * is opaque and only its issuer can resolve one, so a switching
+   * implementation asked without it falls back to whichever rail is
+   * CURRENTLY active — and a Ghanaian transfer asked about at Paystack comes
+   * back as "no such transfer", which every caller here reads as a definite
+   * refusal and reverses. That reverses a payment that may well have arrived,
+   * on the one flow where money cannot be recalled, and it happens only after
+   * an operator switches rails, which is precisely when nobody is looking for
+   * a new failure mode.
+   *
+   * `bank_payouts.provider` has carried the issuer since 046 for exactly this
+   * reason; this is the parameter that lets a caller pass it. A single
+   * adapter ignores it — it can only ever be itself.
+   */
+  status(providerPayoutId: string, provider?: string): Promise<PayoutReceipt>;
 }

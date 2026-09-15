@@ -329,6 +329,24 @@ export class RecipientBookService {
           found.destination,
           display,
           found.resolved_name,
+          /*
+           * THE TENTH VALUE, AND IT WAS MISSING — so EVERY save of a
+           * recipient answered 500 from the day 071 added this column.
+           *
+           * `$10` was written into the statement and the array kept nine
+           * entries. A SQL string is invisible to TypeScript, so the compiler,
+           * every unit suite and this file's own types were all satisfied;
+           * only a round trip catches it, and the address book is the FIRST
+           * screen of the Send flow — a customer tapping "save this
+           * recipient" got "something went wrong" every time.
+           *
+           * The same shape as 045, where a statement referenced `$9` against
+           * an array of eight and every card issue answered 500. 061's rule
+           * is why the placeholder is APPENDED rather than slotted in:
+           * renumbering the nine above to make room is how one comes to name
+           * the wrong value.
+           */
+          found.branch_code,
         ],
       );
       const row = inserted.rows[0];

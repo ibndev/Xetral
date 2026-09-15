@@ -5,6 +5,7 @@ import type { ApiConfig } from '../config.js';
 import { ProviderCredentialService } from '../settings/provider-credentials.service.js';
 import { flutterwaveWebhookHash } from '../app.module.js';
 import { PaymentLinkService } from '../pay/payment-link.service.js';
+import { PayoutService } from '../payouts/payout.service.js';
 
 /**
  * Money arriving through Flutterwave.
@@ -39,6 +40,7 @@ export class FlutterwaveWebhookService {
     @Inject(ProviderCredentialService)
     private readonly credentials: ProviderCredentialService,
     @Inject(PaymentLinkService) private readonly links: PaymentLinkService,
+    @Inject(PayoutService) private readonly payouts: PayoutService,
   ) {}
 
   async handle(rawBody: string, headers: Record<string, string | undefined>): Promise<void> {
@@ -72,6 +74,35 @@ export class FlutterwaveWebhookService {
     const event = parseFlutterwaveEvent(payload);
     if (event?.reference === undefined) {
       this.#logger.warn('a Flutterwave event carried no reference; nothing to settle');
+      return;
+    }
+
+    /*
+     * MONEY IN AND MONEY OUT ARRIVE ON ONE URL, and telling them apart was
+     * the whole of what was missing.
+     *
+     * Flutterwave posts `charge.completed` for a collection and
+     * `transfer.completed` for a payout to the same endpoint. Every event
+     * used to go to the payment-link settler, which knows about collections
+     * and quite correctly acknowledged a transfer event as a reference it had
+     * never heard of. So the FINAL STATUS OF EVERY GHANAIAN AND KENYAN
+     * PAYOUT was delivered to this platform and dropped: their API answers
+     * `NEW` when a transfer is accepted, this platform records that as `sent`
+     * rather than guessing, and the outcome only ever comes in the event.
+     * A failed transfer therefore stayed `sent`, the customer's money stayed
+     * in `customer_pending`, and nothing but a sweep that is off by default
+     * would ever ask.
+     *
+     * THE PREFIX IS WHAT IS MATCHED, not the exact name. Flutterwave has
+     * spelled these `transfer.completed` and `transfer.failed`, and the cost
+     * of being wrong in each direction is not symmetrical: an unrecognised
+     * transfer event handed to the link settler is silently dropped, while a
+     * charge event handed to the payout resolver finds no payout and answers
+     * `unknown`. The second is harmless, so the match is deliberately loose.
+     */
+    if (event.kind.startsWith('transfer')) {
+      const outcome = await this.payouts.resolveByReference(event.reference);
+      this.#logger.log(`flutterwave transfer ${event.reference}: ${outcome}`);
       return;
     }
 

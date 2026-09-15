@@ -40,6 +40,25 @@ const IDENTIFIER_KEY_PATTERNS: readonly (readonly [pattern: string, visible: num
   ['account_number', 4],
   ['bvn', 3],
   ['nin', 3],
+  /*
+   * A CONTACT DETAIL IS NOT A SECRET AND STILL DOES NOT BELONG IN A LOG.
+   *
+   * These arrived with the Flutterwave request trace, which prints the body of
+   * every outbound call so an operator can see the currency and the payment
+   * options a checkout was opened with. Those fields are exactly what a
+   * diagnostic needs; the payer's address and number are exactly what it does
+   * not, and a log is copied into a ticket, a screenshot and a chat thread.
+   *
+   * An email keeps NOTHING. A tail of a domain identifies nobody and reads as
+   * though something was preserved on purpose, which invites the next person
+   * to widen it — the lesson `cards.last4` records about "just the last four".
+   * A number keeps four, because recognising which of a customer's wallets a
+   * transfer named is the whole reason to read the line.
+   */
+  ['email', 0],
+  ['phone', 4],
+  ['mobile_number', 4],
+  ['msisdn', 4],
 ];
 
 function normalise(key: string): string {

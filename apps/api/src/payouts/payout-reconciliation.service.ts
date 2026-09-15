@@ -53,7 +53,6 @@ import { PayoutService, type PayoutRow } from './payout.service.js';
 
 interface HeldPayout extends PayoutRow {
   provider_quote_id: string | null;
-  provider: string;
 }
 
 export interface PayoutReconciliationReport {
@@ -230,7 +229,13 @@ export class PayoutReconciliationService implements OnApplicationShutdown {
 
     let receipt;
     try {
-      receipt = await this.port.status(row.provider_payout_id);
+      /*
+       * ASKED OF THE RAIL THAT ISSUED IT — `row.provider`, never the
+       * currently-configured one. See the port's own note: without it, a
+       * Flutterwave payout asked about at Paystack answers "no such transfer",
+       * which the branch below reads as a definite refusal and reverses.
+       */
+      receipt = await this.port.status(row.provider_payout_id, row.provider);
     } catch (error) {
       /*
        * A REJECTION IS AN ANSWER. "No such payout" from a provider that issued
@@ -275,7 +280,7 @@ export class PayoutReconciliationService implements OnApplicationShutdown {
               bank_code, bank_name, account_number, account_name, narration,
               currency, amount_minor::text, fee_minor::text, tax_minor::text,
               provider_quote_id, provider_payout_id, provider, failure_reason,
-              reserve_entry_id::text, created_at
+              reserve_entry_id::text, settle_entry_id::text, created_at
          FROM bank_payouts
         WHERE status IN ('reserved', 'sent')
           AND created_at < now() - make_interval(secs => $1)

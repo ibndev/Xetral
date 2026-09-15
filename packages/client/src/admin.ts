@@ -679,6 +679,33 @@ export interface AdminProviderHealth {
     readonly first_seen_at: string;
     readonly last_seen_at: string;
   }[];
+  /**
+   * WHAT THE PLATFORM ITSELF HOLDS, per currency.
+   *
+   * Beside provider health because it is the other way a corridor stops
+   * working: "is the rail answering?" and "can the rail pay?" are two
+   * questions, and an operator who has to know which one to look at in
+   * advance will look at neither.
+   *
+   * MINOR UNITS, AS STRINGS. They are BIGINT — a naira float is in kobo and a
+   * JSON number would be a float holding money. Rendered with `formatMinor`
+   * and never `formatAmount`, which takes MAJOR units and differs by a factor
+   * of a hundred at an identical-looking call site.
+   */
+  readonly float: readonly {
+    readonly currency: string;
+    /** Positive when a provider holds money for us; negative when we are
+     *  overdrawn with them. The NEGATIVE of the raw ledger balance, turned
+     *  the right way up once, in the view. */
+    readonly held_minor: string;
+    /** Reserved payouts that will draw on this and have not yet. */
+    readonly committed_minor: string;
+    readonly available_minor: string;
+    /** Committed exceeds held: a prefunded rail will refuse these, and since
+     *  073 the platform refuses them first. */
+    readonly short: boolean;
+    readonly last_movement_at: string | null;
+  }[];
 }
 
 export class AdminClient {

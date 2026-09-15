@@ -196,6 +196,22 @@ const API_ERROR_CODES = [
    */
   'payout_provider_unavailable',
   /*
+   * `insufficient_platform_liquidity` — OUR float, not the customer's balance.
+   *
+   * Flutterwave is a prefunded wallet: a cedi payout spends a cedi balance
+   * this platform has to put there, and a deployment that has never collected
+   * a cedi has none. Without its own code that refusal came back from
+   * Flutterwave as a message about funds, reached the app as an ordinary
+   * failed transfer, and was read by everybody — including us, for three
+   * rounds — as the customer's wallet number being wrong.
+   *
+   * IT IS DELIBERATELY NOT `insufficient_funds`. That one is a true statement
+   * about the customer and tells them to add money; this one is a true
+   * statement about US and telling them to add money would be a lie that
+   * costs them a trip to their bank. The two must never collapse.
+   */
+  'insufficient_platform_liquidity',
+  /*
    * `price_is_live` — 064 refuses to delete a rate that is still in force.
    *
    * Deleting one unprices the corridor, and an unpublished pair is REFUSED

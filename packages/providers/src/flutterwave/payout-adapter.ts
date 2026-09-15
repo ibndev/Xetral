@@ -308,6 +308,21 @@ const transferResponse = z.object({
  */
 export class FlutterwavePayoutAdapter implements PayoutPort {
   readonly provider = PROVIDER;
+
+  /**
+   * A PREFUNDED WALLET, and saying so here is what lets the platform refuse
+   * a payout it cannot fund BEFORE asking.
+   *
+   * Flutterwave debits the balance matching the payout currency — that is
+   * what `debit_currency` names and what leaving it out means. So a cedi
+   * payout out of a deployment that has never collected a cedi is refused by
+   * them for want of float, and their message is about funds, which arrives
+   * here as a failure on a transfer whose customer, amount and wallet number
+   * were all correct. That is indistinguishable from a bad account number
+   * from inside the app, and it is the third distinct way this corridor has
+   * produced "we cannot find the momo details".
+   */
+  readonly prefunded = true;
   readonly #client: FlutterwaveClient;
   /**
    * v4, FOR ONE READ. Optional because a deployment that has not pasted the

@@ -78,6 +78,7 @@ import {
 } from './funding/funding.controller.js';
 import { FundingService } from './funding/funding.service.js';
 import { MomoService } from './funding/momo.service.js';
+import { flutterwaveTrace } from './funding/flutterwave-trace.js';
 import { DepositWebhookService } from './funding/deposit-webhook.service.js';
 import { DepositReconciliationService } from './funding/deposit-reconciliation.service.js';
 import { BitnobCryptoAdapter, BitnobFundingAdapter, BitnobFxAdapter } from '@xetral/providers';
@@ -88,6 +89,7 @@ import {
 } from './crypto/crypto.controller.js';
 import { CryptoService } from './crypto/crypto.service.js';
 import { PayoutService } from './payouts/payout.service.js';
+import { PlatformFloatService } from './payouts/platform-float.service.js';
 import { RecipientBookService } from './recipients/recipient-book.service.js';
 import { PaystackWebhookService } from './funding/paystack-webhook.service.js';
 import { FlutterwaveWebhookService } from './funding/flutterwave-webhook.service.js';
@@ -577,6 +579,7 @@ export function createFundingPort(
       'flutterwave',
       new FlutterwaveFundingAdapter(
         new FlutterwaveClient({
+          onTrace: flutterwaveTrace,
           baseUrl: flutterwaveBaseUrl,
           secretKey: flutterwaveSecretKey(config, credentials),
         }),
@@ -707,6 +710,7 @@ export function createPayoutPort(
       'flutterwave',
       new FlutterwavePayoutAdapter(
         new FlutterwaveClient({
+          onTrace: flutterwaveTrace,
           baseUrl: flutterwaveBaseUrl,
           secretKey: flutterwaveSecretKey(config, credentials),
         }),
@@ -1462,6 +1466,7 @@ export class AppModule {
         FlutterwaveWebhookService,
         CryptoService,
         PayoutService,
+        PlatformFloatService,
         RecipientBookService,
         CryptoWebhookService,
         FxService,

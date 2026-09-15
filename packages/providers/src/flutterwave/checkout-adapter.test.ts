@@ -80,11 +80,48 @@ describe('starting a Flutterwave checkout', () => {
       currency: 'KES',
       reference: 'xetpay-3',
     });
-    // M-Pesa first: in Nairobi it is how money moves, and left to itself their
-    // page leads with card.
+    // `account` AND NOT `banktransfer`, and this assertion is the point of the
+    // test. Flutterwave's two bank options are not spellings of one thing:
+    // `banktransfer` is the Nigerian pay-with-transfer product, and offering
+    // it here does not produce an error — it produces a checkout with the
+    // method quietly missing, which is exactly the shape of "the Ghana link
+    // is broken and the Nigerian one is fine".
     expect((sent[0]?.body as { payment_options: string }).payment_options).toBe(
-      'mpesa,banktransfer',
+      'card,account,mpesa',
     );
+  });
+
+  it('offers Ghana a card, a bank account and the wallet', async () => {
+    const { client, sent } = stub([{ status: 'success', data: { link: 'https://x' } }]);
+    await new FlutterwaveCheckoutAdapter(client).begin({
+      payerEmail: 'payer@example.com',
+      amountMinor: 10_000n,
+      currency: 'GHS',
+      reference: 'xetpay-3b',
+    });
+    const body = sent[0]?.body as { payment_options: string; currency: string };
+    expect(body.payment_options).toBe('card,account,mobilemoneyghana');
+    /*
+     * AND THE CURRENCY IS THE LITERAL CODE. Asserted because it was one of
+     * four candidate explanations for a Ghanaian checkout refusing while the
+     * Nigerian one worked, and the only one a test could settle: a country
+     * code, a blank, or anything but `GHS` here is a refusal from Flutterwave
+     * that reaches the payer as "try again shortly".
+     */
+    expect(body.currency).toBe('GHS');
+  });
+
+  it('offers a dollar checkout a card and nothing else', async () => {
+    const { client, sent } = stub([{ status: 'success', data: { link: 'https://x' } }]);
+    await new FlutterwaveCheckoutAdapter(client).begin({
+      payerEmail: 'payer@example.com',
+      amountMinor: 10_000n,
+      currency: 'USD',
+      reference: 'xetpay-3c',
+    });
+    // A dollar belongs to no country and has no wallet rail, so naming one
+    // would offer a payer a method that cannot serve the currency.
+    expect((sent[0]?.body as { payment_options: string }).payment_options).toBe('card');
   });
 
   it('carries the payer note into their metadata without letting it touch the amount', async () => {

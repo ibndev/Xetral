@@ -36,6 +36,27 @@ if (DATABASE_URL === undefined || DATABASE_URL === '') {
   throw new Error('the funding e2e suite needs DATABASE_URL with the migrations applied');
 }
 
+/**
+ * A SECOND CONNECTION, AS THE ROLE THAT OWNS THE SCHEMA.
+ *
+ * One test here reproduces "the code rolled out and the migration did not" by
+ * actually DROPPING a column, because what it asserts is that a real Postgres
+ * 42703 reaches the handler and comes back as a named refusal rather than a
+ * 500 — mocking the error would test the mock.
+ *
+ * THE SUITE RUNS AS `xetral_app` DELIBERATELY. 099 takes DDL away from the
+ * application role precisely so that a query needing it cannot reach a
+ * deploy, and this test asked for `ALTER TABLE` and got `must be owner of
+ * table virtual_accounts`. That refusal is the least-privilege rule WORKING;
+ * the mistake was asking the product's role to do the harness's job.
+ *
+ * So the DDL gets its own connection and everything else keeps the restricted
+ * one. It FALLS BACK to `DATABASE_URL` rather than refusing, because a
+ * developer running this against a database they own should not have to set a
+ * second variable to get the same answer.
+ */
+const OWNER_DATABASE_URL = process.env['DATABASE_OWNER_URL'] ?? DATABASE_URL;
+
 const PASSWORD = 'a-long-enough-password';
 const WEBHOOK_SECRET = 'a-test-webhook-secret';
 
@@ -334,7 +355,12 @@ describe('getting an account number', () => {
      */
     const customer = await onboard(false);
 
-    await pool.query('ALTER TABLE virtual_accounts DROP COLUMN provider');
+    /*
+     * AS THE OWNER, not as the application. See `OWNER_DATABASE_URL`: this is
+     * harness work, and the app role being refused it is 099 doing its job.
+     */
+    const owner = new pg.Pool({ connectionString: OWNER_DATABASE_URL, max: 1 });
+    await owner.query('ALTER TABLE virtual_accounts DROP COLUMN provider');
     try {
       const res = await getAccount(customer);
       // A 503, not a 500: this deployment cannot serve the request right now
@@ -342,11 +368,12 @@ describe('getting an account number', () => {
       expect(res.status).toBe(503);
       expect(res.body.error).toBe('account_issue_unavailable');
     } finally {
-      await pool.query(
+      await owner.query(
         `ALTER TABLE virtual_accounts
            ADD COLUMN provider TEXT NOT NULL DEFAULT 'bitnob'
              CHECK (length(btrim(provider)) > 0)`,
       );
+      await owner.end();
     }
   });
 

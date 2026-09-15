@@ -17,6 +17,7 @@ import type { Currency, Money } from '@xetral/shared';
 import { DATABASE, LEDGER, PAYOUT_PORT } from '../tokens.js';
 import { internationalDigits } from '../phone.js';
 import { CountriesService } from '../countries/countries.service.js';
+import { PlatformFloatService } from './platform-float.service.js';
 import type { BranchesQuery, LookupQuery, PayoutBody } from './dto.js';
 import { AffordabilityService } from '../wallet/affordability.service.js';
 import { SettingsService } from '../settings/settings.service.js';
@@ -104,8 +105,21 @@ export interface PayoutRow {
   fee_minor: string;
   tax_minor: string;
   provider_payout_id: string | null;
+  /** WHICH RAIL SENT IT, immutable since 046. A payout id is opaque and only
+   *  its issuer can resolve one. */
+  provider: string;
   failure_reason: string | null;
   reserve_entry_id: string;
+  /**
+   * The entry that moved the hold out to the provider, or null while the
+   * payout is still merely reserved.
+   *
+   * IT IS WHAT DECIDES WHICH REVERSAL IS THE TRUE ONE — see `fail()`. Read
+   * off the row rather than inferred from `status`, because those two are
+   * written by different statements and the one that names an ENTRY is the
+   * one the postings have to agree with.
+   */
+  settle_entry_id: string | null;
   created_at: Date;
 }
 
@@ -141,6 +155,7 @@ export class PayoutService {
     @Inject(TaxService) private readonly tax: TaxService,
     @Inject(NotificationService) private readonly notifications: NotificationService,
     @Inject(CountriesService) private readonly countries: CountriesService,
+    @Inject(PlatformFloatService) private readonly float: PlatformFloatService,
   ) {}
 
   /** Banks — or Mobile Money networks — a customer may send to. */
@@ -729,7 +744,29 @@ export class PayoutService {
    */
   async applyReceipt(row: PayoutRow, receipt: PayoutReceipt): Promise<void> {
     if (receipt.state === 'failed') {
-      await this.fail(row, receipt.failureReason ?? 'the provider did not say');
+      const reason = receipt.failureReason ?? 'the provider did not say';
+      /*
+       * THE RAIL'S OWN SENTENCE, IN THE LOG, FOR EVERY FAILED PAYOUT.
+       *
+       * Flutterwave's is `complete_message` and it is the only thing that
+       * distinguishes "the wallet number does not exist" from "your balance
+       * with us will not cover this" from "this network is down" — three
+       * failures with three different remedies, one of which is ours and two
+       * of which are not. Without it every one of them reads as "the transfer
+       * did not go through", which is 006's rule mistaken for a reason to say
+       * nothing anywhere: that rule keeps the provider's sentence away from
+       * the CUSTOMER because it names our integration, and the place it
+       * belongs is exactly here.
+       *
+       * It reaches `bank_payouts.failure_reason` and the customer's reversal
+       * email as well — but a log line is what somebody has while the
+       * customer is still on the phone.
+       */
+      this.#logger.warn(
+        `payout ${row.reference} FAILED at ${row.bank_name} ` +
+          `(${row.amount_minor} ${row.currency}, ${row.status}): ${reason}`,
+      );
+      await this.fail(row, reason);
       return;
     }
 
@@ -744,6 +781,74 @@ export class PayoutService {
         [row.id],
       );
     }
+  }
+
+  /**
+   * WHAT A `transfer.*` WEBHOOK ACTUALLY DOES, and why it does so little.
+   *
+   * THE FAILURE THIS EXISTS FOR. `/v3/transfers` answers `NEW` or `PENDING`
+   * on almost every real transfer — Flutterwave settles a mobile money payout
+   * asynchronously — and this platform correctly records that as `sent`
+   * rather than guessing. The outcome arrives later, on `transfer.completed`.
+   * That event was parsed, its reference was read, and it was then handed to
+   * the PAYMENT LINK settler, which quite rightly knows nothing about a
+   * payout and acknowledged it. So the final status of every Ghanaian and
+   * Kenyan transfer was delivered to us and thrown away: a failed payout
+   * stayed `sent` for ever, the customer's money stayed with the provider,
+   * and nothing but `PAYOUT_RECONCILE_INTERVAL_SECONDS` — which is off by
+   * default — would ever ask.
+   *
+   * THE EVENT IS A DOORBELL, NOT A STATEMENT. Flutterwave does not sign the
+   * body: `verif-hash` returns verbatim a string an operator typed into their
+   * dashboard, so a valid header proves WHO rang and nothing about what they
+   * said. Reading `status` and `complete_message` off the payload and acting
+   * on them would let anybody holding that one shared secret mark a real
+   * payout failed and have the money credited back to a wallet. So the
+   * reference is the whole of what this trusts, and the outcome is re-read
+   * from Flutterwave by `status()` — which returns `complete_message` anyway,
+   * because it parses the same field from the same API.
+   *
+   * IT IS THE SAME `applyReceipt` THE SWEEP AND THE REQUEST PATH USE. Two
+   * copies of "how a payout resolves" would be two sets of assumptions about
+   * the ledger, and the copy that drifts is the one that only runs against a
+   * webhook nobody is watching — 006's finding 12.
+   */
+  async resolveByReference(reference: string): Promise<'resolved' | 'held' | 'unknown'> {
+    const rows = await this.pool.query<PayoutRow>(
+      `SELECT * FROM bank_payouts WHERE reference = $1`,
+      [reference],
+    );
+    const row = rows.rows[0];
+    // NOT OURS. Flutterwave fires events for everything on the integration,
+    // and refusing one would make them retry an event that will never become
+    // a payout of ours — the rule the deposit handler already follows.
+    if (row === undefined) return 'unknown';
+
+    // Already decided. A redelivery must not reopen it, and `applyReceipt`
+    // guards on `reserved` anyway — this just saves a provider call.
+    if (row.status !== 'reserved' && row.status !== 'sent') return 'resolved';
+
+    if (row.provider_payout_id === null) {
+      /*
+       * NOTHING TO ASK ABOUT. An event naming a reference we never got a
+       * payout id for cannot be resolved by asking, and it must not be
+       * reversed from here on the strength of an unsigned body. The sweep
+       * owns that case and reverses it on the ground that the call which
+       * moves money never returned an id.
+       */
+      this.#logger.warn(
+        `payout ${reference}: a transfer event arrived before we recorded a ` +
+          `provider payout id; leaving it for the reconciliation sweep`,
+      );
+      return 'held';
+    }
+
+    // The rail that ISSUED the id, off the row — never the active one. 046
+    // put `provider` on `bank_payouts` for exactly this.
+    const receipt = await this.port.status(row.provider_payout_id, row.provider);
+    if (receipt.state === 'sent') return 'held';
+    await this.applyReceipt(row, receipt);
+    return 'resolved';
   }
 
   /**
@@ -848,19 +953,78 @@ export class PayoutService {
    */
   async fail(row: PayoutRow, reason: string): Promise<void> {
     const currency = row.currency as Currency;
-    const total = money(BigInt(row.amount_minor) + BigInt(row.fee_minor), currency);
+    const amount = BigInt(row.amount_minor);
+    const feeGross = BigInt(row.fee_minor);
+    const taxMinor = BigInt(row.tax_minor);
+    const feeNet = feeGross - taxMinor;
+    const total = money(amount + feeGross, currency);
+
+    /*
+     * WHERE THE MONEY IS NOW DECIDES WHAT A REVERSAL LOOKS LIKE, and getting
+     * this wrong is a hole in the books rather than a wrong screen.
+     *
+     * A RESERVED payout still has the whole hold in `customer_pending`, so
+     * the reversal is the one this method always wrote: pending → wallet.
+     *
+     * A SENT one does not. `#settle` has already emptied pending — the payout
+     * to `provider_float`, the fee to `revenue_fees`, the tax to
+     * `liability_tax_payable` — so taking the total back out of pending posts
+     * against money that is no longer there, drives a customer's pending
+     * account negative and credits their wallet from nowhere. The entry
+     * balances, so the ledger accepts it and `ledger_drift` reports nothing.
+     *
+     * AND THIS PATH IS NOT HYPOTHETICAL. 043 permits `sent -> failed`
+     * deliberately, because a bank transfer really can be returned days
+     * later; the reconciliation sweep claims `status IN ('reserved','sent')`
+     * and calls this method on either; and a Flutterwave transfer is ASYNC —
+     * their first answer is `NEW`, which this platform records as `sent`, and
+     * the real outcome arrives later on `transfer.completed`. So the
+     * commonest failure on the newest rail lands exactly here.
+     *
+     * The inverse of the settlement is therefore posted instead: the payout
+     * comes back off the provider's float — which is what the platform holds
+     * with them, so a failed cedi transfer returns a cedi of OUR liquidity as
+     * well as the customer's money — and the fee and tax legs are unwound
+     * with it, because a payout that never happened earned no fee and owes no
+     * tax on one.
+     */
+    const settled = row.settle_entry_id !== null;
 
     await this.ledger.post({
       idempotencyKey: `bank-payout-reverse:${row.reference}`,
       kind: 'reversal',
-      reversesEntryId: row.reserve_entry_id,
+      /*
+       * THE ENTRY THIS ONE ACTS UPON — 023's words. For a settled payout that
+       * is the settlement, not the reserve: naming the reserve would describe
+       * an entry whose postings this one does not undo.
+       */
+      reversesEntryId: settled ? (row.settle_entry_id as string) : row.reserve_entry_id,
       occurredAt: new Date(),
       description: 'bank payout failed',
-      metadata: { reference: row.reference, reason },
-      postings: [
-        posting(pendingAccount(row.user_id, currency), money(-total.amount, currency)),
-        posting(walletAccount(row.user_id, currency), total),
-      ],
+      metadata: { reference: row.reference, reason, reversed: settled ? 'settle' : 'reserve' },
+      postings: settled
+        ? [
+            // Off the provider's float, which is where the settlement put it.
+            posting({ kind: 'provider_float', currency }, money(-amount, currency)),
+            // A payout that did not happen earned no fee...
+            ...(feeNet > 0n
+              ? [posting({ kind: 'revenue_fees', currency }, money(-feeNet, currency))]
+              : []),
+            // ...and owes no tax on a fee it did not earn.
+            ...(taxMinor > 0n
+              ? [
+                  posting(
+                    { kind: 'liability_tax_payable', currency },
+                    money(-taxMinor, currency),
+                  ),
+                ]
+              : []),
+            posting(walletAccount(row.user_id, currency), total),
+          ]
+        : [
+            posting(pendingAccount(row.user_id, currency), money(-total.amount, currency)),
+            posting(walletAccount(row.user_id, currency), total),
+          ],
     },
     {
       /*
@@ -931,12 +1095,57 @@ export class PayoutService {
        * been sent, and refusing it would be a statement about money already
        * gone.
        */
-      const precondition = await this.limits.precondition({
+      const limitCheck = await this.limits.precondition({
         userId,
         scope: 'transfer',
         amount: total,
         idempotencyKey: `bank-payout-reserve:${reference}`,
       });
+
+      /*
+       * AND CAN THE PLATFORM AFFORD IT? A second question, about a different
+       * pot of money, asked in the same place and for the same reason.
+       *
+       * The daily ceiling protects the CUSTOMER's balance and this protects
+       * OURS: Flutterwave is a prefunded wallet, so a cedi payout out of a
+       * deployment holding no cedis is refused by them — with a message about
+       * funds that reaches the app as a failure on a transfer whose customer,
+       * amount and wallet number were all correct.
+       *
+       * On the RESERVE, like the ceiling, because that is the last moment
+       * before the provider is asked. Whether the rail is prefunded is read
+       * from the rail serving this destination rather than from a list of
+       * provider names here — 046's rule that a fact about a rail is not a
+       * `switch` in a service.
+       */
+      const floatCheck = await this.float.precondition({
+        /* The SWITCH answers per country; a single adapter answers for
+         * itself. A port with neither is not prefunded, which is the reading
+         * the port's own note gives and the one that changes nothing for a
+         * rail that never had this flag. */
+        prefunded:
+          (await this.port.prefundedFor?.(destination.country)) ??
+          this.port.prefunded === true,
+        amount: total,
+      });
+
+      /*
+       * ONE HOOK, because `post()` takes one — and composing them here rather
+       * than teaching the ledger about a list keeps the ledger's contract the
+       * single thing it already is. Order matters in one direction only: the
+       * customer's own ceiling is checked FIRST, so a customer over their
+       * limit is told that rather than told about our treasury, which is not
+       * their business and not their problem.
+       */
+      const checks = [limitCheck, floatCheck].filter(
+        (check): check is (client: PoolClient) => Promise<void> => check !== undefined,
+      );
+      const precondition =
+        checks.length === 0
+          ? undefined
+          : async (client: PoolClient): Promise<void> => {
+              for (const check of checks) await check(client);
+            };
 
       const posted = await this.ledger.post(
         {

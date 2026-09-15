@@ -392,6 +392,15 @@ function sentenceFor(error: ApiError): string {
       return 'This spread priced a real trade, so it is part of that transaction\u2019s record and cannot be removed.';
     case 'price_is_live':
       return 'That rate is still in force. Retire it first — deleting a live rate would leave the corridor unpriced.';
+    case 'insufficient_platform_liquidity':
+      /*
+       * NOT "you do not have enough". The shortfall is ours, and a customer
+       * who reads this as their own balance goes to their bank to add money
+       * that was never the problem. It also carries NO figure — the
+       * platform's position at a provider is nobody's business outside the
+       * building, and 006's rule keeps it in the log.
+       */
+      return 'We cannot send to this destination right now \u2014 the problem is on our side, not with your account or the number you entered. Nothing has left your balance. Please try again shortly.';
     case 'payout_provider_unavailable':
       // Not the customer's number and not their account. Saying "we could not
       // find that account" for a rail that was never reachable sends somebody

@@ -1387,6 +1387,106 @@ and three different faults, each of which made the next one invisible.
   floor is per rail, and it is ONE definition read by the lookup and the
   button alike: two copies of that condition is what round one was.
 
+### The transfer nobody heard back about — non-obvious rules
+
+Schema: `packages/ledger/sql/073_platform_float.sql`. Service in
+`apps/api/src/payouts/platform-float.service.ts`, routing in
+`apps/api/src/funding/flutterwave-webhook.service.ts`.
+
+- **MONEY IN AND MONEY OUT ARRIVE ON ONE URL, AND NOTHING TOLD THEM APART.**
+  Flutterwave posts `charge.completed` for a collection and
+  `transfer.completed` for a payout to the same endpoint; every event went to
+  the payment-link settler, which knows about collections, correctly found no
+  such payment and acknowledged it. Their transfers API answers `NEW` on
+  almost every real transfer — it settles asynchronously — so the FINAL STATUS
+  OF EVERY GHANAIAN AND KENYAN PAYOUT was delivered to us and dropped. A
+  failed one stayed `sent`, the money stayed in `customer_pending`, and the
+  only thing that would ever ask is a sweep that is off by default.
+- **THE EVENT IS A DOORBELL, NOT A STATEMENT.** The body is unsigned —
+  `verif-hash` returns verbatim a string an operator typed into their
+  dashboard — so reading `status` and `complete_message` off the payload and
+  acting on them lets anybody holding that one shared secret mark a real
+  payout failed and have the money credited back. The reference is all this
+  trusts; the outcome is re-read from Flutterwave, which returns
+  `complete_message` anyway from the same field.
+- **THE PREFIX IS MATCHED, NOT THE EXACT NAME**, and the asymmetry is why: an
+  unrecognised transfer event handed to the link settler is silently dropped,
+  while a charge event handed to the payout resolver answers `unknown`.
+- **`fail()` ALWAYS REVERSED `customer_pending -> customer_wallet`, AND THAT
+  IS WRONG FOR A SENT PAYOUT.** `#settle` has already emptied pending — the
+  payout to `provider_float`, the fee to `revenue_fees`, the tax to
+  `liability_tax_payable`. The SYMPTOM IS NOT A WRONG FIGURE, IT IS A PAYOUT
+  THAT CANNOT FAIL: `customer_pending` is a customer account, so the overdraft
+  guard refused to drive it negative, `fail()` threw, and the row stayed
+  `sent` with the customer's money gone. 043 permits `sent -> failed`
+  deliberately and it is the commonest outcome on an asynchronous rail.
+- **A REVERSAL NAMES THE ENTRY IT UNDOES**, which for a settled payout is the
+  SETTLEMENT and not the reserve — 023's words — and the postings are its
+  exact inverse. A payout that did not happen earned no fee and owes no tax
+  on one.
+- **`status()` TAKES THE RAIL THAT ISSUED THE ID.** A payout id is opaque and
+  only its issuer can resolve one; the sweep called it without naming one, so
+  after an operator switched rails a Flutterwave payout would be asked about
+  at Paystack, answered "no such transfer", and REVERSED — a payment that may
+  well have arrived, on the flow where money cannot be recalled.
+  `bank_payouts.provider` has carried the issuer since 046.
+- **`complete_message` IS LOGGED FOR EVERY FAILED PAYOUT.** It is the only
+  thing separating "that wallet does not exist" from "your balance with us
+  will not cover this" from "this network is down" — three remedies, one of
+  them ours. 006's rule keeps the provider's sentence from the CUSTOMER; the
+  log is where it belongs.
+
+### What the platform itself holds — non-obvious rules
+
+- **THE LEDGER ALREADY KNEW AND NOTHING ASKED IT.** The platform's position in
+  a currency is the NEGATIVE of the `provider_float` balance — liabilities are
+  positive here, so an asset a provider holds for us is negative — maintained
+  by trigger since Phase 1. That inversion is exactly why nobody read it, and
+  `073_platform_float.test.sql` pins the sign by measuring a delta, because a
+  flipped one makes a healthy float read as a shortfall and NOTHING ELSE
+  notices: the entries balance either way.
+- **NO TABLE AND NO TRIGGER, TWO VIEWS AND A SETTING.** A second table
+  recording "what we hold" is a second copy of the truth that drifts the first
+  time a flow forgets it — the argument `entry_status` makes about a stored
+  status column.
+- **THE GUARD IS A PRECONDITION, NOT A PRE-CHECK.** Unlike
+  `AffordabilityService` — which is safe precisely because the overdraft guard
+  decides anyway — there is no second line of defence here: the guard exempts
+  `provider_float` by design. So it runs inside the reserve entry's own
+  transaction under a per-CURRENCY advisory lock, which is the OPPOSITE scope
+  from the daily ceiling and for the opposite reason: what is shared is one
+  float, so two different customers are the contention.
+- **IT COUNTS RESERVED AND NOT SENT.** A sent payout has already posted to the
+  float; counting it again subtracts it twice.
+- **NO ROW MEANS NO FLOAT, NEVER "UNKNOWN, SO ALLOW".** A currency with no
+  float account is the fresh deployment this exists for.
+- **THE RAIL DECLARES ITS OWN NATURE.** `PayoutPort.prefunded` on the adapter,
+  `prefundedFor(country)` on the switch — two members because they are two
+  things, a fact about a rail and a routing decision. An absent flag means NOT
+  prefunded, which is the permissive reading and is deliberate: what the flag
+  switches on is a REFUSAL, so a new adapter that forgot it keeps working
+  rather than refusing every payout until somebody finds the line.
+- **`insufficient_platform_liquidity` IS NOT `insufficient_funds`.** One is a
+  true statement about the customer and tells them to add money; the other is
+  a true statement about US, and telling them to add money would be a lie that
+  costs them a trip to their bank.
+- **IT SHIPS ON WITH AN OFF SWITCH**, because float can be wired to a provider
+  directly and that funding is recorded nowhere here — 009's argument that an
+  operational decision taken under pressure must not be a release. One switch
+  rather than a per-currency list, so it cannot be turned off everywhere one
+  corridor at a time.
+- **`banktransfer` AND `account` ARE NOT SPELLINGS OF ONE THING.** The first is
+  Flutterwave's Nigerian pay-with-transfer product. A payer offered an option
+  the account cannot serve sees no error — they see a checkout with the method
+  missing, which is the shape of "the Ghana link is broken and the Nigerian
+  one is fine".
+- **THE TRACE HOOK IS ON THE CLIENT, ONCE.** Three adapters build bodies for
+  this rail and a hook per adapter is three copies that drift — the argument
+  the fulfilment port makes about three contract suites. `redactPayload` masks
+  the payer's address and the wallet's digits; the currency, the payment
+  options, the amount and the reference print in full, which is everything a
+  diagnosis turns on. Recording can never fail the call it records.
+
 ### Which balance funds a payout — non-obvious rules
 
 - **FLUTTERWAVE IS A PREFUNDED WALLET AND NOTHING HERE EVER SAID SO.** It
@@ -3561,6 +3661,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/069_name_enquiry.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/070_payout_methods.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/071_flutterwave_v4_and_ghana_bank.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/072_activate_account_gh_ke.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/073_platform_float.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -3631,6 +3732,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/069_name_enquiry.test.s
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/070_payout_methods.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/071_flutterwave_v4_and_ghana_bank.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/072_activate_account_gh_ke.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/073_platform_float.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

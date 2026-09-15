@@ -94,6 +94,31 @@ export class AdminService {
     return rows.rows as Record<string, unknown>[];
   }
 
+  /**
+   * What the platform holds at its providers, per currency.
+   *
+   * MINOR UNITS AS TEXT, because they are BIGINT. A JSON number here would be
+   * a float holding money — the one thing this codebase does not do — and the
+   * figures are large: a naira float is in kobo.
+   *
+   * ORDERED SHORTFALL FIRST. A currency that cannot cover what is already
+   * committed is the row somebody has to act on, and a list sorted by
+   * currency code buries it under the healthy ones.
+   */
+  async platformFloat(): Promise<readonly Record<string, unknown>[]> {
+    const rows = await this.pool.query(
+      `SELECT currency,
+              held_minor::text,
+              committed_minor::text,
+              (held_minor - committed_minor)::text AS available_minor,
+              committed_minor > held_minor         AS short,
+              last_movement_at
+         FROM platform_float_positions
+        ORDER BY (committed_minor > held_minor) DESC, currency`,
+    );
+    return rows.rows as Record<string, unknown>[];
+  }
+
   /* -------------------------------- users ------------------------------ */
 
   async users(options: {

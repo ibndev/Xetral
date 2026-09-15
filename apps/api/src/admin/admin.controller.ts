@@ -1347,8 +1347,9 @@ export class AdminController {
     degraded: readonly unknown[];
     recent: readonly unknown[];
     nameEnquiry: readonly unknown[];
+    float: readonly unknown[];
   }> {
-    const [degraded, recent, nameEnquiry] = await Promise.all([
+    const [degraded, recent, nameEnquiry, float] = await Promise.all([
       this.providerHealth.degraded(),
       this.providerHealth.recent(),
       /* WHY A RECIPIENT COULD NOT BE NAMED. It rides on this screen rather
@@ -1356,8 +1357,22 @@ export class AdminController {
          — and 031's argument is that a check on its own interval is one more
          thing an operator can forget to look at. */
       this.providerHealth.nameEnquiryFailures(),
+      /*
+       * WHAT THE PLATFORM HOLDS AT ITS PROVIDERS, per currency — and it
+       * belongs on THIS screen for the same reason the name-enquiry failures
+       * do, which is that it answers the same question from the other side.
+       * "Is the rail answering?" and "can the rail pay?" are the two ways a
+       * corridor stops working, and an operator who has to know which one to
+       * look at in advance will look at neither.
+       *
+       * IT IS ALSO WHAT MAKES THE NEW REFUSAL LEGIBLE. `payout_float_guard_
+       * enabled` now refuses a payout we cannot fund, and a refusal whose
+       * cause is not visible anywhere is the opaque failure it replaced
+       * wearing different words.
+       */
+      this.admin.platformFloat(),
     ]);
-    return { degraded, recent, nameEnquiry };
+    return { degraded, recent, nameEnquiry, float };
   }
 
   @Get('settings')

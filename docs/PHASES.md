@@ -2130,3 +2130,129 @@ wrong got a dead end rather than a redirect.
 **Before this goes live, an operator must:** apply migration **068**, and
 decide `payout_debit_currencies` deliberately — leaving it empty means each
 currency is paid from its own float, which needs one to exist.
+
+---
+
+## Phase 20 — The transfer nobody heard back about, and the float nobody could see ✅
+
+Not a feature list. Three things that all produced the same customer-visible
+symptom on the Ghana and Kenya corridor, and one of them was a hole in the
+books that would have opened the first time a Flutterwave transfer failed.
+
+| File | What it is |
+|---|---|
+| `packages/ledger/sql/073_platform_float.sql` | what the platform holds per currency, and the guard that reads it |
+| `apps/api/src/payouts/platform-float.service.ts` | the precondition on the reserve entry's own transaction |
+| `apps/api/src/payouts/payout.service.ts` | `resolveByReference`, and a reversal that knows where the money is |
+| `apps/api/src/funding/flutterwave-webhook.service.ts` | money in and money out, told apart |
+| `apps/api/src/funding/flutterwave-trace.ts` | what we sent, and what they said about it |
+
+### The final answer was delivered and thrown away
+
+`/v3/transfers` answers `NEW` on almost every real transfer — Flutterwave
+settles a mobile money payout asynchronously — and this platform correctly
+recorded that as `sent` rather than guessing. The outcome arrives later, on
+`transfer.completed`.
+
+1. **EVERY EVENT WENT TO THE PAYMENT-LINK SETTLER.** Money in and money out
+   arrive on one URL, and nothing told them apart. The parser knew the event
+   name; the handler did not read it. So the settler — which knows about
+   collections — was handed a payout reference, quite correctly found nothing,
+   and acknowledged it. The final status of every Ghanaian and Kenyan payout
+   was delivered to us and dropped: a failed transfer stayed `sent`, the
+   money stayed in `customer_pending`, and the only thing that would ever ask
+   was a sweep that is off by default.
+2. **THE EVENT IS A DOORBELL, NOT A STATEMENT.** Flutterwave does not sign the
+   body, so `status` and `complete_message` off the payload are a claim by
+   whoever holds one shared secret. The reference is all this trusts; the
+   outcome is re-read from Flutterwave — which returns `complete_message`
+   anyway, from the same API and the same field.
+3. **`complete_message` IS LOGGED FOR EVERY FAILED PAYOUT.** It is the only
+   thing distinguishing "that wallet does not exist" from "your balance with
+   us will not cover this" from "this network is down" — three failures with
+   three different remedies, one of them ours. 006's rule keeps the
+   provider's sentence away from the CUSTOMER; the place it belongs is the
+   log and `bank_payouts.failure_reason`.
+
+### And a payout that failed after being sent could not fail
+
+4. **`fail()` ALWAYS REVERSED `customer_pending -> customer_wallet`.** Right
+   for a RESERVED payout. Wrong for a SENT one, where `#settle` has already
+   emptied pending — the payout to `provider_float`, the fee to
+   `revenue_fees`, the tax to `liability_tax_payable`.
+5. **THE SYMPTOM IS NOT A WRONG FIGURE, IT IS A PAYOUT THAT CANNOT FAIL.**
+   `customer_pending` is a customer account, so the overdraft guard refused to
+   drive it negative, `fail()` threw, and the row stayed `sent` for ever with
+   the customer's money gone. 043 permitted `sent -> failed` deliberately —
+   a bank transfer really can be returned days later — and this is the
+   commonest outcome on an asynchronous rail.
+6. **THE REVERSAL NOW NAMES THE ENTRY IT UNDOES.** For a settled payout that
+   is the SETTLEMENT and not the reserve, and the postings are its exact
+   inverse: off `provider_float`, unwinding the fee and the tax, back to the
+   wallet. A payout that did not happen earned no fee and owes no tax on one.
+7. **AND THE SWEEP WAS ASKING THE WRONG RAIL.** `status()` takes an opaque
+   provider-side id that only its issuer can resolve, and the sweep called it
+   without naming one — so after an operator switched rails, a Flutterwave
+   payout would be asked about at Paystack, answered "no such transfer", and
+   REVERSED. `bank_payouts.provider` has carried the issuer since 046; the
+   parameter that lets a caller pass it did not exist.
+
+### What the platform itself holds
+
+8. **FLUTTERWAVE IS A PREFUNDED WALLET AND NOTHING COULD SAY HOW MUCH WE
+   HELD.** A cedi payout spends a cedi balance we have to put there. Refused
+   for want of float, their message is about funds and arrives as a failure on
+   a transfer whose customer, amount and wallet number were all correct —
+   which from inside is indistinguishable from a bad account number, and is
+   the third distinct way this corridor produced "we cannot find the momo
+   details".
+9. **THE LEDGER ALREADY KNEW AND NOTHING ASKED IT.** The position is the
+   NEGATIVE of the `provider_float` balance, maintained by trigger since Phase
+   1 — and that inversion is why nobody read it. 073 adds no table and no
+   trigger: two views and a setting. A second table recording "what we hold"
+   would be a second copy of the truth.
+10. **THE GUARD IS A PRECONDITION, NOT A PRE-CHECK.** CLAUDE.md forbids
+    pre-checking a balance because of the race, and unlike `AffordabilityService`
+    there is no second line of defence here — the overdraft guard exempts
+    `provider_float` by design. So it runs inside the reserve entry's own
+    transaction under a per-CURRENCY advisory lock, which is the opposite
+    scope from the daily ceiling and for the opposite reason: what is shared
+    is one float, so two different customers are the contention.
+11. **IT COUNTS WHAT IS RESERVED AND NOT WHAT IS SENT.** A sent payout has
+    already posted to the float; counting it again would subtract it twice.
+12. **AND IT APPLIES ONLY TO A PREFUNDED RAIL**, which the ADAPTER declares
+    rather than a list of provider names in a service — 046's rule. Paystack
+    and Bitnob settle from accounts we keep no float in, so naira is untouched.
+13. **IT SHIPS ON WITH AN OFF SWITCH.** Float can be wired to a provider
+    directly and that funding is recorded nowhere here, so a platform
+    genuinely able to pay would be refusing every transfer with no remedy but
+    a release — 009's argument that an operational decision taken under
+    pressure must not be one.
+
+### And why a Ghanaian checkout failed while a Nigerian one did not
+
+14. **`payment_options` NAMED THE WRONG BANK PRODUCT.** Flutterwave's
+    `banktransfer` and `account` are not spellings of one thing; the first is
+    the Nigerian pay-with-transfer product. A payer offered an option the
+    account cannot serve sees no error — they see a checkout with the method
+    missing, or one that refuses when they pick it. Ghana is
+    `card,account,mobilemoneyghana` and Kenya `card,account,mpesa`, with
+    `card` restored to both: a link exists to be paid by people whose rails we
+    do not know in advance.
+15. **AND NOTHING COULD SAY WHAT WAS ON THE WIRE.** Four candidate
+    explanations, one message, and no way to tell them apart without a
+    redeploy carrying a `console.log`. The client now takes a trace hook —
+    once, at the client, because three adapters build bodies for this rail and
+    a hook per adapter is three copies that drift. `redactPayload` masks the
+    payer's address and the wallet's digits; the currency, the payment
+    options, the amount and the reference are printed in full, which is
+    everything a diagnosis turns on.
+
+**Before this goes live, an operator must:** apply migration **073**; give
+Flutterwave the `/v1/webhooks/flutterwave/deposits` URL for `transfer.completed`
+as well as `charge.completed` (it is the same URL and the same secret hash);
+fund the GHS and KES balances at Flutterwave, reading
+`/admin/providers` for what is held; and set
+`PAYOUT_RECONCILE_INTERVAL_SECONDS` on exactly one instance — the webhook is
+now the fast path and the sweep is still what covers a webhook that never
+arrives.

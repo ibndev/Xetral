@@ -122,6 +122,20 @@ export class SwitchingPayoutPort implements PayoutPort {
     return this.#fallback;
   }
 
+  /**
+   * Whether the rail serving THIS COUNTRY spends a balance we must fund.
+   *
+   * Asked per country for the reason every other question here is: the rail
+   * is chosen by the destination's currency, so "are we prefunded?" has a
+   * different answer in Accra and in Lagos and cannot be a property of this
+   * switch. An adapter this build does not have answers `false`, which is the
+   * same permissive reading the port's own note gives for an absent flag.
+   */
+  async prefundedFor(country: string): Promise<boolean> {
+    const chosen = await this.providerForCountry(country);
+    return this.#adapters.get(chosen)?.prefunded === true;
+  }
+
   /** Which rail sends the NEXT payout. */
   async activeProvider(): Promise<string> {
     const chosen = (await this.#settings.text('payout_provider', this.#fallback)).trim();

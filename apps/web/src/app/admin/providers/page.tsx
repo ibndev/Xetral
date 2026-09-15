@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { formatMinor } from '@xetral/client';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { AdminError } from '../access';
 
@@ -98,6 +99,70 @@ export default function Providers() {
             <p className="hint">
               A <strong>contract</strong> failure means they changed their API. It
               will not resolve on its own.
+            </p>
+          )}
+        </div>
+      )}
+
+      {health.data !== undefined && health.data.float.length > 0 && (
+        <div className="panel">
+          <h2>What we hold at our providers</h2>
+          <p className="lead">
+            Flutterwave is a prefunded wallet: a cedi payout spends a cedi
+            balance we have to put there first. A corridor with nothing in it
+            refuses every transfer, and until now that refusal reached the
+            customer as a message about their own account.
+          </p>
+          <table>
+            <thead>
+              <tr>
+                <th>Currency</th>
+                <th className="right">Held</th>
+                <th className="right">Committed</th>
+                <th className="right">Available</th>
+                <th>Last movement</th>
+              </tr>
+            </thead>
+            <tbody>
+              {health.data.float.map((row) => (
+                <tr key={row.currency} className={row.short ? undefined : 'muted'}>
+                  <td>
+                    {row.currency}{' '}
+                    {row.short && <span className="badge danger">short</span>}
+                  </td>
+                  {/*
+                    `formatMinor` and never `formatAmount`. The two look
+                    identical at a call site and differ by a factor of a
+                    hundred — `formatAmount` takes MAJOR units and every figure
+                    here is `*_minor`. That is exactly the error that had the
+                    compliance queue rendering ₦500,000,000 for a ₦5,000,000
+                    transfer.
+                  */}
+                  <td className="right amount">
+                    {formatMinor(row.held_minor, row.currency)}
+                  </td>
+                  <td className="right amount">
+                    {formatMinor(row.committed_minor, row.currency)}
+                  </td>
+                  <td className="right amount">
+                    {formatMinor(row.available_minor, row.currency)}
+                  </td>
+                  <td className="muted">
+                    {row.last_movement_at === null
+                      ? '—'
+                      : new Date(row.last_movement_at).toLocaleString()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {health.data.float.some((row) => row.short) && (
+            <p className="hint">
+              A currency marked <strong>short</strong> has payouts reserved
+              against it that it cannot cover. Send the provider more of that
+              currency — payouts on it are refused until you do, deliberately,
+              because the alternative is the provider refusing them afterwards
+              with a message that reads as the customer&rsquo;s fault.
             </p>
           )}
         </div>

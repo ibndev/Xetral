@@ -171,11 +171,32 @@ describe('paying a link in a currency Flutterwave collects', () => {
     await charge(slug, 'GHS').expect(200);
     await charge(slug, 'KES').expect(200);
 
-    const options = seen
+    const bodies = seen
       .filter((r) => r.url.startsWith('/v3/payments'))
-      .map((r) => (r.body as { payment_options?: string }).payment_options);
-    expect(options).toContain('mobilemoneyghana');
-    expect(options).toContain('mpesa,banktransfer');
+      .map((r) => r.body as { payment_options?: string; currency?: string });
+
+    /*
+     * `account` AND NOT `banktransfer`, which is the distinction a Ghanaian
+     * checkout failing while a Nigerian one worked turned on. Flutterwave's
+     * two bank options are different products: `banktransfer` is the Nigerian
+     * pay-with-transfer one. A payer offered a method the account cannot serve
+     * does not get an error — they get a page with that method missing.
+     *
+     * And `card` is on both, because a link exists to be paid by people whose
+     * rails we do not know in advance.
+     */
+    expect(bodies.map((b) => b.payment_options)).toEqual([
+      'card,account,mobilemoneyghana',
+      'card,account,mpesa',
+    ]);
+
+    /*
+     * AND THE CURRENCY IS THE LITERAL CODE, asserted here because it was one
+     * of four candidate explanations for the Ghanaian refusal and the only one
+     * a test could settle: a country code, a blank, or anything but `GHS`
+     * reaches Flutterwave as a refusal the payer reads as "try again shortly".
+     */
+    expect(bodies.map((b) => b.currency)).toEqual(['GHS', 'KES']);
   });
 
   it('writes the row BEFORE the payer leaves, naming the rail', async () => {

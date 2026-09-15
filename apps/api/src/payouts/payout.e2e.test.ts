@@ -16,7 +16,7 @@ import type {
   PayoutReceipt,
   PayoutRequest,
 } from '@xetral/providers';
-import { money } from '@xetral/shared';
+import { money, toMajor } from '@xetral/shared';
 import type { Currency } from '@xetral/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { PayoutReconciliationService } from './payout-reconciliation.service.js';
@@ -82,6 +82,14 @@ class FakePayoutPort implements PayoutPort {
   sendAnswer: PayoutReceipt | Error = { providerPayoutId: 'po_1', state: 'sent' };
   statusAnswer: PayoutReceipt | Error = { providerPayoutId: 'po_1', state: 'completed' };
 
+  /*
+   * WHETHER THIS RAIL SPENDS A BALANCE WE HAVE TO FUND. Mutable here, because
+   * the whole point of the flag is that one deployment answers differently
+   * per corridor: Flutterwave is prefunded and Paystack is not, and both are
+   * behind this same port in production.
+   */
+  prefunded = false;
+
   async banks(): Promise<readonly PayoutBank[]> {
     return [
       { code: '058', name: 'GTBank' },
@@ -110,6 +118,10 @@ class FakePayoutPort implements PayoutPort {
   async status(): Promise<PayoutReceipt> {
     if (this.statusAnswer instanceof Error) throw this.statusAnswer;
     return this.statusAnswer;
+  }
+
+  async prefundedFor(): Promise<boolean> {
+    return this.prefunded;
   }
 }
 
@@ -845,3 +857,301 @@ describe('what a customer reads about a payout afterwards', () => {
     expect(malformed.body).toEqual(unknown.body);
   });
 });
+
+describe('a payout that failed AFTER it had already been sent', () => {
+  /*
+   * THE BUG THIS SUITE EXISTS FOR, and it had been live since 043 permitted
+   * `sent -> failed`.
+   *
+   * `fail()` always reversed `customer_pending -> customer_wallet`. That is
+   * right for a RESERVED payout, where the hold is still in pending. It is
+   * wrong for a SENT one: `#settle` has already emptied pending — the payout
+   * to `provider_float`, the fee to `revenue_fees`, the tax to
+   * `liability_tax_payable` — so taking the total back out of pending posts
+   * against money that is no longer there.
+   *
+   * AND THE SYMPTOM IS NOT A WRONG NUMBER, IT IS A PAYOUT THAT CANNOT FAIL.
+   * `customer_pending` is a customer account, so the overdraft guard refuses
+   * to drive it negative; `fail()` therefore THREW, the sweep recorded "could
+   * not reconcile", and the row stayed `sent` for ever with the customer's
+   * money out of their wallet and recorded as paid to a provider that had
+   * refused it.
+   *
+   * IT IS THE COMMONEST FAILURE ON THE NEWEST RAIL. Flutterwave's transfers
+   * are asynchronous: their first answer is `NEW`, which this platform
+   * correctly records as `sent`, and the real outcome arrives later on
+   * `transfer.completed`. Every failed Ghanaian and Kenyan payout lands here.
+   */
+  it('GIVES THE MONEY BACK, from the float rather than from an empty hold', async () => {
+    const customer = await onboard();
+    await fund(customer.userId, 1_000_000n);
+
+    // Accepted by the provider, so the hold is settled out to their float.
+    port.sendAnswer = { providerPayoutId: 'po_late_fail', state: 'sent' };
+    await pay(customer).expect(200);
+
+    const afterSend = await nairaBalance(customer);
+    expect(afterSend.spendable).toBe('5000.00');
+    expect(afterSend.pending).toBe('0.00');
+
+    // ...and then it fails at the rail, days later, which a bank transfer
+    // really can do: a closed account, a name the bank rejects.
+    port.statusAnswer = {
+      providerPayoutId: 'po_late_fail',
+      state: 'failed',
+      failureReason: 'DESTINATION_BANK_REJECTED',
+    };
+    const report = await app.get(PayoutReconciliationService).sweep();
+    expect(report.reversed).toBeGreaterThanOrEqual(1);
+
+    const found = await pool.query<{ reference: string }>(
+      `SELECT reference FROM bank_payouts WHERE provider_payout_id = 'po_late_fail'`,
+    );
+    const reference = found.rows[0]?.reference;
+    expect(reference).toBeDefined();
+
+    // THE CUSTOMER IS WHOLE. Under the old shape this assertion could not be
+    // reached at all — the reversal threw and the row stayed `sent`.
+    const after = await nairaBalance(customer);
+    expect(after.spendable).toBe('10000.00');
+    expect(after.pending).toBe('0.00');
+
+    /*
+     * AND SO IS THE PLATFORM — asserted on the REVERSAL'S OWN POSTINGS rather
+     * than on the float balance.
+     *
+     * A sweep is global by design: it resolves whatever every other suite in
+     * this file left behind, so the float moves for reasons that have nothing
+     * to do with this payout. This file already records that lesson about the
+     * report COUNTS, and it applies to a balance for the same reason. What is
+     * being tested is the SHAPE of the entry, and that is what this reads.
+     */
+    const legs = await pool.query<{ kind: string; amount_minor: string }>(
+      `SELECT a.kind::text, p.amount_minor::text
+         FROM journal_entries e
+         JOIN postings p ON p.journal_entry_id = e.id
+         JOIN accounts a ON a.id = p.account_id
+        WHERE e.idempotency_key = $1`,
+      [`bank-payout-reverse:${reference}`],
+    );
+    const legFor = (kind: string) =>
+      legs.rows.filter((row) => row.kind === kind).map((row) => BigInt(row.amount_minor));
+
+    // Off the provider's float, which is where the settlement put it — and
+    // NOT off `customer_pending`, which the settlement emptied.
+    expect(legFor('provider_float')).toEqual([-500_000n]);
+    expect(legFor('customer_pending')).toEqual([]);
+    // Back to the customer, the whole total.
+    expect(legFor('customer_wallet')).toEqual([500_000n]);
+
+    // The rail's own sentence, on the row an operator reads — never the
+    // customer's screen. 006's rule.
+    const row = await pool.query<{ failure_reason: string | null }>(
+      `SELECT failure_reason FROM bank_payouts WHERE provider_payout_id = 'po_late_fail'`,
+    );
+    expect(row.rows[0]?.failure_reason).toContain('DESTINATION_BANK_REJECTED');
+  });
+});
+
+describe('a payout the PLATFORM cannot fund', () => {
+  /*
+   * THE OTHER POT OF MONEY, and the one nothing in this codebase had ever
+   * asked about. Every control before now protects the CUSTOMER's balance;
+   * Flutterwave is a prefunded wallet, so a cedi payout spends a cedi balance
+   * we have to put there, and a deployment that has never collected a cedi
+   * has none.
+   *
+   * WITHOUT THIS THE REFUSAL COMES FROM FLUTTERWAVE, as a message about funds,
+   * on a transfer whose customer, amount and wallet number were all correct —
+   * which from inside the app is indistinguishable from a bad account number,
+   * and is the third distinct way this one corridor has produced "we cannot
+   * find the momo details".
+   */
+  it('REFUSES IT HERE, before the rail is asked, and says whose problem it is', async () => {
+    const customer = await onboard();
+    await pool.query(`UPDATE users SET country = 'GH' WHERE id = $1::bigint`, [customer.userId]);
+
+    /*
+     * READ, NOT ASSUMED. These suites share one database in file order, so
+     * whatever GHS float earlier files left behind is the starting point —
+     * an absolute figure here would be an assertion about them.
+     */
+    const held = await floatHeld('GHS');
+
+    /*
+     * THE CUSTOMER IS FUNDED WITHOUT TOUCHING THE FLOAT, which is the whole
+     * point of the scenario: their wallet is real money we owe them, and the
+     * provider does not hold the cedis to pay it out with. Money attributed
+     * out of suspense is exactly that shape.
+     */
+    const amountMinor = held + 50_000n;
+    await ledger.post({
+      idempotencyKey: `test-po-nofloat:${randomUUID()}`,
+      kind: 'wallet_funding',
+      occurredAt: new Date(),
+      description: 'funded without a matching float',
+      metadata: {},
+      postings: [
+        posting(
+          { kind: 'customer_wallet', ownerId: customer.userId, currency: 'GHS' },
+          money(amountMinor + 10_000n, 'GHS'),
+        ),
+        posting({ kind: 'suspense', currency: 'GHS' }, money(-(amountMinor + 10_000n), 'GHS')),
+      ],
+    });
+
+    port.prefunded = true;
+    port.lookupAnswer = new ProviderRejectedError(
+      'flutterwave',
+      'a mobile money wallet has no name enquiry',
+      'name_unavailable',
+    );
+    try {
+      const res = await request(app.getHttpServer())
+        .post('/v1/payouts')
+        .set('Authorization', `Bearer ${customer.token}`)
+        .send({
+          country: 'GH',
+          bank_code: 'MTN',
+          account_number: '0501234567',
+          amount: toMajor(money(amountMinor, 'GHS')),
+          currency: 'GHS',
+          transaction_pin: PIN,
+          idempotency_key: randomUUID(),
+        })
+        .expect(503);
+
+      /*
+       * ITS OWN CODE, and deliberately not `insufficient_funds`. That one is a
+       * true statement about the CUSTOMER and tells them to add money; this is
+       * a true statement about US, and telling them to add money would be a
+       * lie that costs them a trip to their bank.
+       */
+      expect(res.body.error).toBe('insufficient_platform_liquidity');
+
+      // NOTHING WAS HELD and NOTHING WAS ASKED. The refusal runs as a
+      // precondition on the reserve entry's own transaction, so there is no
+      // posting to unwind — and the rail was never called.
+      const sendsAfter = port.sends.filter((call) => call.currency === 'GHS').length;
+      expect(sendsAfter).toBe(0);
+    } finally {
+      port.prefunded = false;
+    }
+  });
+
+  it('LETS IT THROUGH once the float covers it', async () => {
+    // The other half, and the one that matters as much: a guard that refused
+    // a payout the platform CAN fund would be an outage on the screen
+    // customers send money from.
+    const customer = await onboard();
+    await pool.query(`UPDATE users SET country = 'GH' WHERE id = $1::bigint`, [customer.userId]);
+    // `fundIn` moves the float as a real collection does, so the platform
+    // holds these cedis.
+    await fundIn(customer.userId, 'GHS', 100_00n);
+
+    port.prefunded = true;
+    port.sendAnswer = { providerPayoutId: 'po_funded', state: 'sent' };
+    port.lookupAnswer = new ProviderRejectedError(
+      'flutterwave',
+      'a mobile money wallet has no name enquiry',
+      'name_unavailable',
+    );
+    try {
+      await request(app.getHttpServer())
+        .post('/v1/payouts')
+        .set('Authorization', `Bearer ${customer.token}`)
+        .send({
+          country: 'GH',
+          bank_code: 'MTN',
+          account_number: '0501234567',
+          amount: '10.00',
+          currency: 'GHS',
+          transaction_pin: PIN,
+          idempotency_key: randomUUID(),
+        })
+        .expect(200);
+    } finally {
+      port.prefunded = false;
+    }
+  });
+
+  it('IS A ROW AN OPERATOR CAN TURN OFF, because float can be funded outside the ledger', async () => {
+    /*
+     * An operator can wire cedis to Flutterwave directly, and that funding is
+     * real and recorded nowhere here — so a platform genuinely able to pay
+     * would be refusing every transfer with no remedy but a release. 009's
+     * argument is that an operational decision taken under pressure must not
+     * be one.
+     */
+    const customer = await onboard();
+    await pool.query(`UPDATE users SET country = 'GH' WHERE id = $1::bigint`, [customer.userId]);
+    const held = await floatHeld('GHS');
+    const amountMinor = held + 50_000n;
+    await ledger.post({
+      idempotencyKey: `test-po-nofloat-off:${randomUUID()}`,
+      kind: 'wallet_funding',
+      occurredAt: new Date(),
+      description: 'funded without a matching float',
+      metadata: {},
+      postings: [
+        posting(
+          { kind: 'customer_wallet', ownerId: customer.userId, currency: 'GHS' },
+          money(amountMinor + 10_000n, 'GHS'),
+        ),
+        posting({ kind: 'suspense', currency: 'GHS' }, money(-(amountMinor + 10_000n), 'GHS')),
+      ],
+    });
+
+    port.prefunded = true;
+    port.sendAnswer = { providerPayoutId: 'po_guard_off', state: 'sent' };
+    port.lookupAnswer = new ProviderRejectedError(
+      'flutterwave',
+      'a mobile money wallet has no name enquiry',
+      'name_unavailable',
+    );
+    await pool.query(
+      `UPDATE platform_settings SET value = 'false' WHERE key = 'payout_float_guard_enabled'`,
+    );
+    await app.get(SettingsService).refresh();
+    try {
+      await request(app.getHttpServer())
+        .post('/v1/payouts')
+        .set('Authorization', `Bearer ${customer.token}`)
+        .send({
+          country: 'GH',
+          bank_code: 'MTN',
+          account_number: '0501234567',
+          amount: toMajor(money(amountMinor, 'GHS')),
+          currency: 'GHS',
+          transaction_pin: PIN,
+          idempotency_key: randomUUID(),
+        })
+        .expect(200);
+    } finally {
+      // PUT BACK, because these suites share one database and a suite that
+      // relaxes a control and walks away subjects every later file to it.
+      port.prefunded = false;
+      await pool.query(
+        `UPDATE platform_settings SET value = 'true' WHERE key = 'payout_float_guard_enabled'`,
+      );
+      await app.get(SettingsService).refresh();
+    }
+  });
+});
+
+/**
+ * What the platform holds at its providers in one currency, in minor units.
+ *
+ * THE NEGATIVE OF THE LEDGER BALANCE, turned the right way up by the view —
+ * liabilities are positive in this schema, so an asset a provider holds for
+ * us is negative. Read through `platform_float_positions` rather than
+ * recomputed here, so a test cannot agree with a broken view by making the
+ * same sign error twice.
+ */
+async function floatHeld(currency: string): Promise<bigint> {
+  const rows = await pool.query<{ held_minor: string }>(
+    `SELECT held_minor::text FROM platform_float_positions WHERE currency = $1`,
+    [currency],
+  );
+  return BigInt(rows.rows[0]?.held_minor ?? '0');
+}

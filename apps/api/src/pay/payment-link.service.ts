@@ -27,6 +27,7 @@ import type { ApiConfig } from '../config.js';
 import { ProviderCredentialService } from '../settings/provider-credentials.service.js';
 import { flutterwaveSecretKey, paystackSecretKey } from '../app.module.js';
 import { ProviderRouterService } from '../routing/provider-router.service.js';
+import { flutterwaveTrace } from '../funding/flutterwave-trace.js';
 
 /**
  * THE PAYMENT LINK, AND WHY IT IS A CHECKOUT RATHER THAN A SHORTCUT.
@@ -603,6 +604,7 @@ export class PaymentLinkService {
       if (baseUrl === undefined) throw this.#noRail(provider);
       return new FlutterwaveCheckoutAdapter(
         new FlutterwaveClient({
+          onTrace: flutterwaveTrace,
           baseUrl,
           secretKey: flutterwaveSecretKey(this.config, this.credentials),
         }),

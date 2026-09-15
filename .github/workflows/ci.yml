@@ -158,6 +158,7 @@ jobs:
             -f packages/ledger/sql/070_payout_methods.sql \
             -f packages/ledger/sql/071_flutterwave_v4_and_ghana_bank.sql \
             -f packages/ledger/sql/072_activate_account_gh_ke.sql \
+            -f packages/ledger/sql/073_platform_float.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       - name: Ledger and identity invariants
@@ -237,6 +238,7 @@ jobs:
                    packages/ledger/sql/070_payout_methods.test.sql \
                    packages/ledger/sql/071_flutterwave_v4_and_ghana_bank.test.sql \
                    packages/ledger/sql/072_activate_account_gh_ke.test.sql \
+                   packages/ledger/sql/073_platform_float.test.sql \
                    packages/ledger/sql/099_least_privilege.test.sql; do
             echo "== $f"
             psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
@@ -348,6 +350,7 @@ jobs:
             -f packages/ledger/sql/070_payout_methods.sql \
             -f packages/ledger/sql/071_flutterwave_v4_and_ghana_bank.sql \
             -f packages/ledger/sql/072_activate_account_gh_ke.sql \
+            -f packages/ledger/sql/073_platform_float.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       # ------------------------------------------------------------------
@@ -423,6 +426,16 @@ jobs:
         run: npm run test:e2e
         env:
           DATABASE_URL: postgres://xetral_app:ci-only@localhost:5432/xetral
+          # THE HARNESS'S OWN CONNECTION, and only the harness uses it.
+          #
+          # One funding test reproduces "the code rolled out and the migration
+          # did not" by really dropping a column, so that a genuine Postgres
+          # 42703 reaches the handler. 099 takes DDL away from `xetral_app`
+          # deliberately, and it refused — which is the rule working, not a
+          # gap. The product still runs on the restricted role for every other
+          # statement in the suite; this is the test-harness privilege, named
+          # separately so it cannot be reached by mistake.
+          DATABASE_OWNER_URL: postgres://xetral:xetral@localhost:5432/xetral
 
       - run: npm run build
 

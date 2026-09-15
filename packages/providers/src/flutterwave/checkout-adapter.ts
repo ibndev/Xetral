@@ -26,16 +26,30 @@ const PROVIDER = 'flutterwave';
  * yet, and a wrong guess there is an empty page rather than a loud refusal.
  */
 export const FLUTTERWAVE_PAYMENT_OPTIONS: Readonly<Record<string, string>> = {
-  /* Ghana: MTN, Vodafone/Telecel and AirtelTigo all sit behind this one
-   * option — Flutterwave renders the network picker itself, which is why
-   * this platform does not carry a Ghanaian network list of its own. */
-  /* BOTH, because Ghana can be paid on both since 071 and a customer whose
-     Send screen offers a bank transfer should be able to fund from one.
-     Flutterwave's own announcement — "Pay With Bank Transfer Is Now Available
-     In Ghana" — and Kenya has carried `banktransfer` here since 059. */
-  GHS: 'mobilemoneyghana,banktransfer',
-  /* Kenya: M-Pesa, plus a bank transfer for the payer who has no wallet. */
-  KES: 'mpesa,banktransfer',
+  /*
+   * Ghana: a card, a bank account, and the wallet rail.
+   *
+   * `mobilemoneyghana` covers MTN, Telecel and AirtelTigo behind one option —
+   * Flutterwave renders the network picker itself, which is why this platform
+   * carries no Ghanaian network list for the CHECKOUT (the payout side needs
+   * one, because there the network is a field on the transfer).
+   *
+   * `account` AND NOT `banktransfer`, and the difference cost a corridor.
+   * Flutterwave's two bank options are not spellings of one thing:
+   * `banktransfer` is the Nigerian pay-with-transfer product and `account` is
+   * the bank-account option Ghana is enabled for. A payer offered an option
+   * the account cannot serve does not see an error — they see a checkout with
+   * that method missing, or one that refuses when they pick it, which is the
+   * shape of "the Ghana link is broken and the Nigerian one is fine".
+   *
+   * AND `card` IS FIRST RATHER THAN ABSENT. It was left off on the reasoning
+   * that mobile money is how money moves in Accra, which is true of the payer
+   * who has a wallet and says nothing about the one paying from abroad — and
+   * a link exists to be paid by people whose rails we do not know in advance.
+   */
+  GHS: 'card,account,mobilemoneyghana',
+  /* Kenya: the same three, with M-PESA as the wallet. */
+  KES: 'card,account,mpesa',
   /* Dollars belong to no country and have no wallet rail, so a card is the
    * only thing a stranger can pay one with. */
   USD: 'card',
