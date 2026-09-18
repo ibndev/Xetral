@@ -2532,14 +2532,50 @@ Review in `apps/mobile/SECURITY.md`, cover in `src/screen-privacy.tsx`.
   carry an `id` and some later step must read that id's outcome. Proved by
   breaking the workflow three ways and watching each guard name the real
   problem.
-- **THE THREE ADVISORIES THEMSELVES ARE STILL OPEN**, and deliberately not
-  papered over. `multer` is pinned at EXACTLY `2.2.0` by
-  `@nestjs/platform-express`; `qs` and `sharp` are within ranges their parents
-  already allow and are only held back by a stale lockfile. npm 10.9.7 does not
-  honour root `overrides` for them — tried, and the tree came back marked
-  `invalid` with the old versions still on disk — so clearing them means moving
-  a dependency tree under a live ledger, which is a decision rather than a
-  tidy-up.
+- **THE THREE ADVISORIES ARE CLOSED NOW, and closing them is its own
+  section below.** The paragraph that used to sit here said npm would not
+  honour a root `overrides` for them. That was a true observation and the
+  wrong conclusion drawn from it — see "An override npm did not apply".
+
+### An override npm did not apply — non-obvious rules
+
+`package.json`'s one `overrides` entry, guarded by `overrides-applied.test.ts`.
+
+- **`@nestjs/platform-express` PINS `multer` AT EXACTLY `2.2.0`**, which is
+  the top of the affected range for four denial-of-service advisories. No
+  resolve reaches a fixed version on its own, so a root override is the only
+  instrument that moves it. `qs` and `sharp` were a different problem wearing
+  the same clothes: `express` wants `^6.14.0`, `body-parser` `^6.15.2` and
+  `next` `^0.35.3`, and the fixed versions satisfy all three. They were held
+  back by a STALE LOCKFILE and needed no override at all — so they have none,
+  because an override that pins nothing the tree does not already ask for is
+  one that silently wins against a parent that later needs something else.
+- **NPM 10.9.7 EVALUATES `overrides` ONLY WHEN BUILDING A LOCKFILE FROM
+  NOTHING, AND SAYS NOTHING WHEN IT DOES NOT.** `npm install` with a lockfile
+  present leaves the vulnerable version on disk with no warning; so does
+  `--package-lock-only`. Deleting just the offending entries to force a
+  re-resolve does not work either — npm PRUNES them rather than resolving
+  them again. The only thing that works is deleting the whole lockfile, and
+  `node_modules` with it.
+- **SO THE DECLARATION AND THE EFFECT ARE TWO FACTS AND ONLY ONE IS IN THE
+  DIFF.** `overrides-applied.test.ts` asserts the second: what the lockfile
+  RESOLVED must satisfy what the override ASKED FOR. It refuses a range it
+  cannot read rather than waving one through — 017's rule that forgetting
+  must never be the permissive direction — and it fails on an empty
+  `overrides`, so the day the last one is legitimately removed the file goes
+  with it rather than agreeing with everything.
+- **THE CHURN WAS MEASURED, NOT ACCEPTED.** Regenerating moved 373 lockfile
+  entries, which reads as moving a dependency tree under a live ledger. So
+  the same regeneration was run from pristine `HEAD` with NO overrides at
+  all: 367 of those 373 move on any fresh resolve. The lockfile was simply
+  stale, and all but six of the changes were owed whether or not anything was
+  being fixed. A blast radius nobody has separated into "mine" and "already
+  due" is a number that stops an obviously correct change.
+- **WHAT ACTUALLY MOVED ON A MONEY PATH IS A SHORT LIST**, and `pg`,
+  `ioredis` and `react` are not on it. `@noble/hashes` 2.3.0 → 2.4.0 is the
+  one worth naming: it is what computes Keccak-256 for EIP-55, and a wrong
+  address cannot be undone — so `address.test.ts`'s twenty checksum vectors
+  were run against it by name rather than inferred from a green summary line.
 
 ### Scanning the running app — non-obvious rules
 
