@@ -354,6 +354,20 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Say what was built and what to do with it
+        # ALWAYS, BECAUSE THE STEP ABOVE CAN FAIL ON A REPOSITORY SETTING.
+        #
+        # A failing step cancels every step after it, so a 403 from the release
+        # call — which is Settings → Actions → General, not this build — took
+        # out the one table that names what was produced. The run then showed a
+        # red X and SAID NOTHING AT ALL about the 48MB APK sitting on it as an
+        # artifact, while the error two lines up promised the APK was fine.
+        # Telling somebody their build survived and then withholding the name
+        # of the file is worse than either on its own.
+        #
+        # Guarded on the naming step's output rather than on `always()` alone:
+        # that output exists only once the APK is on disk, so a run that failed
+        # in Gradle does not add a second failure here about a missing file.
+        if: always() && steps.apk.outputs.name != ''
         env:
           VARIANT: ${{ inputs.variant }}
           API_URL: ${{ inputs.api_url }}
@@ -369,4 +383,7 @@ jobs:
             echo "| Variant | \`$VARIANT\` |"
             echo "| Talks to | $talks |"
             echo "| Commit | \`${GITHUB_SHA::7}\` |"
+            echo
+            echo "It is attached to this run as an artifact whatever the"
+            echo "release step did — download it from the Summary page."
           } >> "$GITHUB_STEP_SUMMARY"
