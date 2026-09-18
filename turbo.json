@@ -31,7 +31,9 @@
       "persistent": false,
       "passThroughEnv": [
         "DATABASE_URL",
-        "REDIS_URL"
+        "REDIS_URL",
+        "DATABASE_OWNER_URL",
+        "BITNOB_API_KEY"
       ]
     }
   }

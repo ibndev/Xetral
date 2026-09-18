@@ -2461,6 +2461,44 @@ Review in `apps/mobile/SECURITY.md`, cover in `src/screen-privacy.tsx`.
   here, and it is written down because the symptom — a development build
   vanishing when a preview is installed — otherwise reads as a broken build.
 
+### The variable turbo took away — non-obvious rules
+
+`turbo.json`'s `test:e2e` task, guarded by `e2e-env.test.ts`.
+
+- **TURBO STRIPS EVERY ENVIRONMENT VARIABLE THE TASK DOES NOT DECLARE**, and
+  `passThroughEnv` is that declaration. Phase 20 gave the funding suite a
+  second connection — the DDL in "NAMES THE MISSING MIGRATION" has to own the
+  table, because 099 takes DDL away from the application role precisely so a
+  query needing it cannot reach a deploy. `DATABASE_OWNER_URL` was added to the
+  test AND to `ci.yml`'s step env, and not to the one list that decides whether
+  the task can SEE it.
+- **SO THE COMMIT THAT FIXED IT REINTRODUCED IT, one file away.**
+  `OWNER_DATABASE_URL` fell back to `DATABASE_URL`, the ALTER went out on the
+  restricted role, and Postgres answered `must be owner of table
+  virtual_accounts` — the exact string that commit's own comment quotes as the
+  failure being fixed.
+- **THE FALLBACK IS THE TRAP, NOT THE BUG.** `?? DATABASE_URL` is right for a
+  developer running against a database they own. It is also what turns a
+  stripped variable into a confusing refusal rather than a missing-config
+  error — a default correct in one environment and silently wrong in another,
+  which is 017's rule that forgetting must never be the permissive direction.
+- **IT WAS INVISIBLE TWICE OVER, which is why it shipped.** A developer runs
+  `vitest` directly and never goes through turbo, so it passed locally every
+  time; CI runs `npm run test:e2e`, which is turbo, so it failed there — and
+  the dependency audit was cancelling every step after it, so the e2e suite
+  read `skipped` for five commits. One missing line under two layers of
+  masking.
+- **`npm run test:e2e` IS THREE WORKSPACES, not one.** `apps/api`,
+  `packages/ledger` and `packages/providers` each declare the task and share
+  one database. Verifying the API's suite alone is not verifying what CI runs,
+  and that is how this was missed on the way in as well as on the way out.
+- **THE GUARD READS THE SUITES, both directions.** Every `process.env` name in
+  an `.e2e.test.ts` must be declared, and every declared name must be read by
+  one — the shape `migrations-in-ci.test.ts` and `route-coverage.test.ts`
+  already use, because the hand-written half is the half that drifts. It found
+  `BITNOB_API_KEY` on its first run: read to decide WHICH assertion to make, so
+  stripping it left one branch permanently unexercised rather than failing.
+
 ### One red gate silencing the rest — non-obvious rules
 
 `.github/workflows/ci.yml`, guarded by `migrations-in-ci.test.ts`.
