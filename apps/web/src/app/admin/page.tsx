@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { formatAmount, formatMinor } from '@xetral/client';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { AdminError } from './access';
+import { ageSince } from './age';
 
 /**
  * The morning screen.
@@ -112,11 +113,16 @@ export default function Overview() {
                       <tr key={queue.queue} className={idle ? 'muted' : undefined}>
                         <td>{queue.queue.replace(/_/g, ' ')}</td>
                         <td className="right amount">{queue.waiting}</td>
-                        <td className="right muted">
-                          {queue.oldest === null
-                            ? '—'
-                            : new Date(queue.oldest).toLocaleString()}
-                        </td>
+                        {/*
+                          THE COLUMN IS HEADED "OLDEST", WHICH IS A QUESTION
+                          ABOUT AGE, and it rendered a locale timestamp —
+                          "9/18/2026, 12:31:06 PM" — leaving the reader to
+                          subtract against a clock they cannot see. 015's rule
+                          is that depth alone gets a queue wrong: three since
+                          Tuesday is nobody working, forty turning over hourly
+                          is a busy morning, and only the age tells them apart.
+                        */}
+                        <td className="right muted">{ageSince(queue.oldest)}</td>
                         <td className="right">
                           {href !== undefined && !idle && <Link href={href}>Open</Link>}
                         </td>
@@ -206,6 +212,7 @@ const QUEUE_SCREENS: Readonly<Record<string, string>> = {
   consent: '/admin/consents',
   data_requests: '/admin/data-requests',
   errors: '/admin/errors',
+  disputes: '/admin/disputes',
   prices_unattributed: '/admin/prices',
   staff_without_totp: '/admin/staff',
   provider_degraded: '/admin/providers',

@@ -80,4 +80,34 @@ describe('operations navigation coverage', () => {
   it('no destination is listed twice', () => {
     expect(linked).toEqual([...new Set(linked)]);
   });
+
+  /*
+   * AND EVERY OTHER LINK RESOLVES TOO, which is the half that was missing.
+   *
+   * The two tests above check the SIDEBAR against the filesystem. `linksIn`
+   * was already being read — but only as evidence that a page is reachable,
+   * never as a claim to be checked itself. So `/admin/errors`, written into
+   * the overview's `QUEUE_SCREENS`, counted as a way IN to a page that did not
+   * exist: the morning screen rendered "errors · 24 waiting · Open" and the
+   * link answered 404. A queue with a way in reads as a queue somebody could
+   * be working, so that was worse than offering no link at all.
+   *
+   * `/admin/disputes` was the same fault with the opposite symptom — no entry
+   * in that map at all, so seven disputes were counted on the overview with
+   * nothing to click, and the surface the API had exposed since Phase 13 was
+   * reachable only from psql.
+   *
+   * Both directions now, which is `route-coverage.test.ts`'s shape and the
+   * reason it exists.
+   */
+  it('every /admin link on any operations page resolves to a page', () => {
+    const dangling = [...new Set(linksIn(HERE))]
+      .filter((route) => !onDisk.includes(route))
+      .sort();
+    expect(
+      dangling,
+      'links from an operations page to an address with no page behind it — ' +
+        `each one is a 404 offered as a destination:\n${dangling.join('\n')}`,
+    ).toEqual([]);
+  });
 });

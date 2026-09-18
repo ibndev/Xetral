@@ -708,6 +708,54 @@ export interface AdminProviderHealth {
   }[];
 }
 
+/**
+ * A dispute waiting for a reviewer.
+ *
+ * THE SCREEN FOR THIS DID NOT EXIST. `GET /v1/admin/disputes` and its resolve
+ * endpoint have been declared since Phase 13, with their own `dispute_reviewer`
+ * role because a dispute is a different job from reviewing a gift card — and
+ * no method here reached them and no page rendered them. The overview counted
+ * the queue, so an operator could see "disputes: 7 waiting" and had no way in:
+ * a customer saying "I did not do this" reached a queue nothing could open,
+ * and the only path to one was psql.
+ */
+export interface AdminQueuedDispute {
+  readonly id: string;
+  readonly entry_id: string;
+  readonly reason: string;
+  readonly detail: string;
+  readonly status: string;
+  readonly raised_at: string;
+  /** The database's clock, and not movable — 018's rule. */
+  readonly due_at: string;
+  readonly resolved_at: string | null;
+  readonly resolution: string | null;
+  readonly email: string | null;
+  /** Past `due_at`. Computed by the view rather than by comparing clocks
+   *  here, so a browser with a wrong date cannot make one look answered. */
+  readonly overdue: boolean;
+  readonly entry_kind: string;
+}
+
+/**
+ * A fingerprint that is currently failing.
+ *
+ * `occurrences` is a STRING: it is a bigint in the database, and a count past
+ * 2^53 is no more acceptable to round here than an amount would be.
+ */
+export interface AdminOpenError {
+  readonly fingerprint: string;
+  readonly severity: string;
+  readonly message: string;
+  readonly route: string | null;
+  readonly status_code: number | null;
+  readonly occurrences: string;
+  readonly first_seen_at: string;
+  readonly last_seen_at: string;
+  readonly alerted_at: string | null;
+  readonly last_reference: string | null;
+}
+
 export class AdminClient {
   readonly #baseUrl: string;
   readonly #session: Session;
@@ -1514,6 +1562,74 @@ export class AdminClient {
       role,
       transaction_pin: pin,
     });
+  }
+
+  /* ------------------------------- disputes ---------------------------- */
+
+  /**
+   * The reviewer's queue.
+   *
+   * `dispute_reviewer`, not the gift card reviewer's role — a dispute is a
+   * different job with a different risk, and holding both should be a
+   * staffing decision rather than a consequence of one grant.
+   */
+  async disputes(): Promise<readonly AdminQueuedDispute[]> {
+    return this.#get<readonly AdminQueuedDispute[]>('/v1/admin/disputes');
+  }
+
+  /**
+   * Uphold or refuse one.
+   *
+   * ACCEPTING PAYS MONEY OUT OF OUR OWN ACCOUNT — there is no clawback from
+   * the recipient, deliberately (018) — so it carries an idempotency key that
+   * belongs to the ATTEMPT, not to this call: a reviewer whose click timed out
+   * and who clicks again must refund once. Rejecting posts nothing, so it
+   * needs none.
+   */
+  async resolveDispute(
+    id: string,
+    decision:
+      | {
+          readonly outcome: 'accepted';
+          readonly resolution: string;
+          readonly refund_amount: string;
+          readonly idempotency_key: string;
+        }
+      | { readonly outcome: 'rejected'; readonly resolution: string },
+    pin: string,
+  ): Promise<Record<string, unknown>> {
+    return this.#post<Record<string, unknown>>(`/v1/admin/disputes/${encodeURIComponent(id)}/resolve`, {
+      ...decision,
+      transaction_pin: pin,
+    });
+  }
+
+  /* -------------------------------- errors ----------------------------- */
+
+  /**
+   * What is currently failing.
+   *
+   * `clearFailures()` below has been able to CLEAR this list since it was
+   * written, while nothing could read it — so the one thing an operator could
+   * do with the platform's failures was dismiss them unseen.
+   */
+  async errors(): Promise<readonly AdminOpenError[]> {
+    const body = await this.#get<{ errors: readonly AdminOpenError[] }>('/v1/admin/errors');
+    return body.errors;
+  }
+
+  /**
+   * Acknowledge one fingerprint.
+   *
+   * Acknowledged, never deleted: `record_error` clears `resolved_at` on the
+   * next occurrence, so a fault somebody closed and which has come back
+   * reopens itself rather than staying hidden behind a fix that did not work.
+   */
+  async resolveError(fingerprint: string): Promise<{ readonly resolved: boolean }> {
+    return this.#post<{ readonly resolved: boolean }>(
+      `/v1/admin/errors/${encodeURIComponent(fingerprint)}/resolve`,
+      {},
+    );
   }
 
   /* -------------------------------- audit ------------------------------ */

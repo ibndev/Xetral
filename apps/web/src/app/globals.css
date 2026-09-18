@@ -1887,6 +1887,24 @@ td.right, th.right { text-align: right; padding-right: 0; }
 
 .admin-frame { min-height: 100vh; }
 
+/*
+ * THE SIDEBAR ITSELF NEVER SCROLLS; ITS NAV DOES.
+ *
+ * This was one `overflow-y: auto` column at `height: 100vh` holding the brand,
+ * every group and the footer — 1375px of content in a 900px laptop viewport.
+ * So "Settings" was clipped mid-glyph and Staff, Announcements, Audit,
+ * Readiness, Diagnostics and Your authenticator were invisible, with no
+ * scrollbar to say otherwise and the page's own scrollbar moving none of it.
+ * That is the failure `nav.tsx` records the sidebar as having REPLACED — a
+ * horizontal strip whose last entries scrolled out of sight — reintroduced
+ * vertically, and it hid the four an operator reaches for during an incident.
+ *
+ * Three parts now: the brand and the footer are fixed, and `admin-side-scroll`
+ * is the one region that scrolls, so Sign out and the wallet link stay put
+ * however long the list grows. `min-height: 0` is what actually permits it —
+ * a flex child's default `min-height: auto` refuses to shrink below its
+ * content, which is why a bare `overflow-y` on a flex column does nothing.
+ */
 .admin-side {
   position: fixed;
   z-index: 60;
@@ -1895,9 +1913,9 @@ td.right, th.right { text-align: right; padding-right: 0; }
   max-width: 84vw;
   display: flex;
   flex-direction: column;
-  gap: var(--s-4);
-  padding: 16px 12px 24px;
-  overflow-y: auto;
+  gap: var(--s-3);
+  padding: 16px 12px 16px;
+  overflow: hidden;
   overscroll-behavior: contain;
   background: var(--surface);
   border-right: 1px solid var(--line);
@@ -1909,11 +1927,80 @@ td.right, th.right { text-align: right; padding-right: 0; }
 }
 .drawer-open .admin-side { transform: translateX(0); }
 
-.admin-side .spacer { flex: 1; }
-.admin-side-brand { padding: 4px 10px 4px; }
+.admin-side-brand { flex: 0 0 auto; padding: 4px 10px 4px; }
+
+/* The only scroller. `min-height: 0` is load-bearing — see above. */
+.admin-side-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  /*
+   * A PERMANENTLY VISIBLE TRACK, and the reason is what the first version of
+   * this fix still looked like. Bounding the region stopped the list being
+   * clipped by the viewport — but the last entry was still cut in half at the
+   * region's own edge, with an OVERLAY scrollbar that appears only while
+   * scrolling. A row sliced through the middle of its glyphs reads as a broken
+   * layout, not as "there is more below", so nobody scrolls and the
+   * destinations under it stay just as unreachable as before.
+   *
+   * `::-webkit-scrollbar` opts out of overlay scrollbars, which is what makes
+   * the track permanent; `scrollbar-width` is the standard property for
+   * everything else. The rules are not alternatives and both are needed.
+   */
+  scrollbar-width: thin;
+  scrollbar-color: var(--edge-strong) transparent;
+  /* Room for the track, so the thumb never sits on top of a label. */
+  padding-right: 4px;
+}
+
+.admin-side-scroll::-webkit-scrollbar { width: 6px; }
+.admin-side-scroll::-webkit-scrollbar-track { background: transparent; }
+.admin-side-scroll::-webkit-scrollbar-thumb {
+  background: var(--edge-strong);
+  border-radius: 999px;
+}
+
+/*
+ * And the cut itself is FADED rather than sharp.
+ *
+ * The scrollbar says the region scrolls; this says where. A hard edge through
+ * a row of text is the thing that reads as broken — a fade reads as
+ * continuing, which is the true statement. It sits on the sidebar rather than
+ * on the scroller so it stays at the boundary instead of scrolling away, and
+ * it is `pointer-events: none` so it cannot swallow a click on the entry
+ * underneath it.
+ */
+.admin-side-foot::before {
+  content: '';
+  position: absolute;
+  left: 0; right: 0;
+  /* ANCHORED TO THE FOOTER'S OWN TOP EDGE, which is the boundary — rather
+     than to a hard-coded offset from the bottom of the sidebar, which is the
+     footer's height written down a second place and wrong the first time a
+     control is added to it. */
+  bottom: 100%;
+  height: 20px;
+  pointer-events: none;
+  background: linear-gradient(to top, var(--surface), transparent);
+}
+
+.admin-side-foot {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: var(--s-2);
+  border-top: 1px solid var(--line);
+  /* The fade above it is positioned against this edge. */
+  position: relative;
+}
 
 .admin-side-group { display: flex; flex-direction: column; gap: 2px; }
-.admin-side-group .eyebrow { padding: 0 12px var(--s-1); }
+.admin-side-group .eyebrow { padding: 0 12px 2px; }
 
 .admin-side a,
 .admin-side button {
@@ -1922,8 +2009,8 @@ td.right, th.right { text-align: right; padding-right: 0; }
   justify-content: flex-start;
   gap: 11px;
   width: 100%;
-  min-height: 42px;
-  padding: 9px 12px;
+  min-height: 36px;
+  padding: 7px 12px;
   border: 0;
   border-radius: var(--r-sm);
   background: transparent;
@@ -4562,3 +4649,30 @@ html, body { overflow-x: hidden; }
   font-weight: 600;
   cursor: pointer;
 }
+
+
+/* ═══════════════════════ operations: error list ═══════════════════════ */
+
+/*
+ * A MESSAGE MUST NOT BE ABLE TO PUSH THE REST OF THE ROW OFF THE SCREEN.
+ *
+ * An error message is the one string on the operations surface that nobody
+ * chose the shape of — it is whatever was thrown, and this list is full of
+ * real examples with no spaces in them at all (an address, a fingerprint, a
+ * stack fragment). Rendered in an unconstrained cell, one of those makes the
+ * first column wider than the viewport, and the columns after it — the route,
+ * the count, the age and the Acknowledge button — leave the screen. The table
+ * still "renders", so nothing fails; the operator simply cannot reach the
+ * control.
+ *
+ * `anywhere` rather than `break-word`: the latter refuses to break inside a
+ * word that could instead overflow, which is exactly the case here.
+ */
+.error-message {
+  max-width: 52ch;
+  overflow-wrap: anywhere;
+}
+
+/* Two right-aligned numeric columns sitting flush read as one: the headers
+   ran together as "SEEN LAST". The gap is what separates a count from an age. */
+.error-count { padding-right: var(--s-4); }

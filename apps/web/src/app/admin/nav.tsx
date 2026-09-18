@@ -50,6 +50,10 @@ export const GROUPS: readonly Group[] = [
       { href: '/admin/risk', label: 'Compliance', icon: 'alert' },
       { href: '/admin/consents', label: 'Consent', icon: 'check' },
       { href: '/admin/data-requests', label: 'Data requests', icon: 'file' },
+      // "I did not do this". Its own `dispute_reviewer` role, and beside the
+      // other queues about a PERSON rather than under Money: raising one
+      // posts nothing, so until a reviewer decides there is no money in it.
+      { href: '/admin/disputes', label: 'Disputes', icon: 'alert' },
     ],
   },
   {
@@ -97,6 +101,10 @@ export const GROUPS: readonly Group[] = [
       // value is SET, and every reason the naira rail refuses survives that
       // question. This one ASKS the provider.
       { href: '/admin/diagnostics', label: 'Diagnostics', icon: 'alert' },
+      // What is currently failing. The overview has linked here since
+      // `QUEUE_SCREENS` was written and the page did not exist, so the link
+      // answered 404 — which reads as a queue somebody could be working.
+      { href: '/admin/errors', label: 'Errors', icon: 'alert' },
     ],
   },
 ];
@@ -141,26 +149,35 @@ export function AdminShell({ children }: { readonly children: ReactNode }) {
           </Link>
         </div>
 
-        {GROUPS.map((group, index) => (
-          <div className="admin-side-group" key={group.title ?? index}>
-            {group.title !== undefined && <span className="eyebrow">{group.title}</span>}
-            {group.items.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={isActive(pathname, item.href) ? 'active' : undefined}
-                aria-current={isActive(pathname, item.href) ? 'page' : undefined}
-              >
-                <Icon name={item.icon} size={17} />
-                {item.label}
-              </Link>
-            ))}
-          </div>
-        ))}
+        {/*
+          THE GROUPS SCROLL AND NOTHING ELSE DOES. The brand above and the
+          footer below stay put, so Sign out is reachable without scrolling a
+          list of twenty-five destinations first — and, more to the point, the
+          list can no longer be silently CLIPPED. It was: the whole sidebar was
+          one scrolling column at viewport height, so on a laptop the last
+          seven entries simply were not there, with nothing on screen saying a
+          scroll would reveal them.
+        */}
+        <div className="admin-side-scroll">
+          {GROUPS.map((group, index) => (
+            <div className="admin-side-group" key={group.title ?? index}>
+              {group.title !== undefined && <span className="eyebrow">{group.title}</span>}
+              {group.items.map((item) => (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={isActive(pathname, item.href) ? 'active' : undefined}
+                  aria-current={isActive(pathname, item.href) ? 'page' : undefined}
+                >
+                  <Icon name={item.icon} size={17} />
+                  {item.label}
+                </Link>
+              ))}
+            </div>
+          ))}
+        </div>
 
-        <span className="spacer" />
-
-        <div className="admin-side-group">
+        <div className="admin-side-foot">
           <Link href="/wallet">
             <Icon name="wallet" size={17} />
             My wallet
