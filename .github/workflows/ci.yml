@@ -458,7 +458,11 @@ jobs:
           # separately so it cannot be reached by mistake.
           DATABASE_OWNER_URL: postgres://xetral:xetral@localhost:5432/xetral
 
-      - run: npm run build
+      # Named, because the two independent probes below run on `always()`
+      # and must not run when there is no bundle to probe.
+      - name: Run npm run build
+        id: build
+        run: npm run build
 
       # ------------------------------------------------------------------
       # Boot the artifact that was just built.
@@ -551,9 +555,24 @@ jobs:
           # nothing would send.
           check "password reset is mounted" 503 http://127.0.0.1:3100/v1/auth/password/forgot \
             -X POST -H 'content-type: application/json' -d '{"identifier":"probe@example.ng"}'
+          # AN IDENTIFIER AND A CODE, because 056 stopped this being a link.
+          #
+          # This probe sent `{"token": ...}` — the shape from before a reset
+          # became a six-digit code presented WITH the identifier — and got
+          # `400 invalid_request` naming the two fields it had not sent. The
+          # route was mounted the whole time; the probe had drifted from the
+          # product and was asserting a number the product stopped answering.
+          #
+          # 401 IS THE ONE WORTH ASSERTING and 400 is not, which is why this is
+          # a payload fix rather than a number change. A 404 means a
+          # locked-out customer cannot reach the one route that leads back to
+          # their money; 400 proves only that SOME handler parsed a body; 401
+          # proves the route is mounted, reached `consume_password_reset_code`
+          # and refused a code that was never issued. Relaxing the expectation
+          # to 400 would have kept the step green while testing less.
           check "reset consumption is mounted" 401 http://127.0.0.1:3100/v1/auth/password/reset \
             -X POST -H 'content-type: application/json' \
-            -d '{"token":"not-real","new_password":"a-long-enough-password"}'
+            -d '{"identifier":"probe@example.ng","code":"123456","new_password":"a-long-enough-password"}'
 
           # The staff second factor, and the errors surface. Guarded, so 401
           # proves each is both mounted and gated — the same claim, for the
@@ -672,6 +691,14 @@ jobs:
       # actually on the scripts.
       # ------------------------------------------------------------------
       - name: Smoke-test the built web app
+        # INDEPENDENT OF THE API PROBE, so it runs even when that one failed.
+        # Its own comment below says the API is not running by now and nothing
+        # here calls it — so letting an API failure cancel this step hid
+        # whether the page hydrates, which is a different fault class entirely
+        # and the one a customer sees as every button being inert. Same
+        # argument as the dependency audit: one red gate must not silence the
+        # others.
+        if: always() && steps.build.outcome == 'success'
         run: |
           # `npm start` in the workspace, so this runs whatever the app's own
           # start script is rather than a command that has to be kept in step
@@ -759,6 +786,10 @@ jobs:
       # produces a bundle for both platforms.
       # ------------------------------------------------------------------
       - name: Bundle the mobile app
+        # Also independent — the phone's bundle has nothing to do with whether
+        # the API answered a probe, and an expo export failure is invisible to
+        # both the compiler and the tests.
+        if: always() && steps.build.outcome == 'success'
         working-directory: apps/mobile
         run: |
           # Evaluates every config plugin, including `with-lan-cleartext`.
