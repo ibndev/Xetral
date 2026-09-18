@@ -340,6 +340,8 @@ export class FlutterwavePayoutAdapter implements PayoutPort {
    * keystroke of a phone number.
    */
   readonly #networks = new Map<string, Promise<readonly MobileNetworkRow[]>>();
+  /** Flutterwave's own institution list per country — see `#institutions`. */
+  readonly #institutionList = new Map<string, Promise<readonly PayoutBank[]>>();
 
   constructor(client: FlutterwaveClient, v4?: FlutterwaveV4Client) {
     this.#client = client;
@@ -380,24 +382,136 @@ export class FlutterwavePayoutAdapter implements PayoutPort {
     };
 
     const aliases = RESOLVE_TELCO_ALIASES[ourCode.toUpperCase()] ?? [];
-    try {
-      const body = await this.#client.request('GET', FLUTTERWAVE_ENDPOINTS.banks(iso));
-      const parsed = banksResponse.safeParse(body);
-      for (const bank of parsed.success ? (parsed.data.data ?? []) : []) {
-        const name = bank.name.toUpperCase();
-        /* Matched on the NAME rather than the code, because the whole question
-           is what their code for this network is. */
-        if (aliases.some((a) => name.includes(a)) || name.includes(ourCode.toUpperCase())) {
-          add(bank.code);
-        }
+    for (const bank of await this.#institutions(iso)) {
+      const name = bank.name.toUpperCase();
+      /* Matched on the NAME rather than the code, because the whole question
+         is what their code for this network is. */
+      if (aliases.some((a) => name.includes(a)) || name.includes(ourCode.toUpperCase())) {
+        add(bank.code);
       }
-    } catch {
-      /* Best effort, by design — see the doc comment above. */
     }
 
     for (const alias of aliases) add(alias);
     add(ourCode);
     return out;
+  }
+
+  /**
+   * FLUTTERWAVE'S OWN LIST FOR A COUNTRY, cached and best effort.
+   *
+   * SEPARATE FROM `banks()` DELIBERATELY. That one is customer-facing and
+   * THROWS on a shape it does not recognise, which is right: a bank picker
+   * that silently renders nothing is 046's fault. This one feeds internal
+   * reconciliation, where the fallback is the code we already hold and an
+   * unreadable list must never turn into a refused payout — 059's rule that a
+   * missing row falls through rather than becoming an outage.
+   *
+   * The PROMISE is cached rather than the result, so two sends racing make one
+   * call; a failed read is cached too, because the alternative is re-asking on
+   * every transfer for a list that is not coming.
+   */
+  async #institutions(iso: string): Promise<readonly PayoutBank[]> {
+    const cached = this.#institutionList.get(iso);
+    if (cached !== undefined) return cached;
+
+    const pending = (async (): Promise<readonly PayoutBank[]> => {
+      try {
+        const body = await this.#client.request('GET', FLUTTERWAVE_ENDPOINTS.banks(iso));
+        const parsed = banksResponse.safeParse(body);
+        if (!parsed.success) return [];
+        return (parsed.data.data ?? []).map((bank) => ({
+          code: bank.code,
+          name: bank.name,
+          ...(bank.id === undefined ? {} : { id: String(bank.id) }),
+        }));
+      } catch {
+        return [];
+      }
+    })();
+    this.#institutionList.set(iso, pending);
+    return pending;
+  }
+
+  /**
+   * WHAT `account_bank` AND `destination_branch_code` MUST ACTUALLY SAY, asked
+   * of Flutterwave rather than assumed — AND THIS IS THE FIX FOR THE CORRIDOR.
+   *
+   * THE FAULT. `FLUTTERWAVE_MOBILE_MONEY_NETWORKS` holds `MTN`, `VOD`, `ATL`
+   * and `MPS`. Those are UNSOURCED — no vendor document in this repo produces
+   * them — and they were sent VERBATIM as `account_bank` on the one call that
+   * moves money, while the READ path went to considerable trouble
+   * (`#telcoCandidates`) to reconcile the very same code against Flutterwave's
+   * live list because it was known not to be trustworthy. A codebase that does
+   * not trust a constant for a name lookup and does trust it for a transfer
+   * has the asymmetry exactly backwards: the lookup can be retried and the
+   * transfer cannot.
+   *
+   * AND GHANA WAS MISSING A REQUIRED FIELD ENTIRELY. This adapter's own header
+   * quotes Flutterwave: "When transferring to Ghanaian bank accounts AND
+   * MOBILE MONEY WALLETS, you need to pass the branch code of the institution
+   * or telco in your Initiate Transfer request as destination_branch_code."
+   * Nothing in this platform could produce one for a wallet — the recipient
+   * row stores `branch_code: null` for every momo destination, and the
+   * branches route searches the BANK list, where a telco code is never found.
+   * So every Ghanaian wallet transfer went out without it.
+   *
+   * SO BOTH ANSWERS COME FROM THEIR DATA. The institution is matched in their
+   * own list by name or code, and THEIR code is what goes on the wire; the
+   * branch is read from their branches endpoint for that institution.
+   *
+   * A BRANCH IS FILLED IN ONLY WHEN THERE IS NOTHING TO GET WRONG — a wallet,
+   * a corridor that requires one, no value from the caller, and EXACTLY ONE
+   * branch returned. A telco has one; a bank has many and the customer picks,
+   * which is why a bank's branch still travels on the request. Choosing one of
+   * several here would be this file inventing a destination, which is the
+   * mistake it has already made twice in the other direction.
+   *
+   * IT NEVER THROWS. Every failure falls back to exactly what was sent before
+   * this existed, so a deployment whose list cannot be read is no worse off.
+   */
+  async #transferRail(
+    iso: string,
+    ourCode: string,
+    isWallet: boolean,
+    supplied: string | undefined,
+  ): Promise<{ accountBank: string; branchCode?: string }> {
+    const wanted = ourCode.trim().toUpperCase();
+    const aliases = RESOLVE_TELCO_ALIASES[wanted] ?? [];
+
+    let match: PayoutBank | undefined;
+    try {
+      const listed = await this.#institutions(iso);
+      match =
+        listed.find((b) => b.code.toUpperCase() === wanted) ??
+        (isWallet
+          ? listed.find((b) => {
+              const name = b.name.toUpperCase();
+              return aliases.some((a) => name.includes(a)) || name.includes(wanted);
+            })
+          : undefined);
+    } catch {
+      /* Best effort, by design. */
+    }
+
+    /* THEIR SPELLING WHERE THEY HAVE ONE, ours where they do not. */
+    const accountBank = match?.code ?? ourCode;
+
+    if (supplied !== undefined && supplied !== '') return { accountBank, branchCode: supplied };
+    if (!isWallet || !REQUIRES_BRANCH_CODE.has(iso)) return { accountBank };
+
+    const bankId = match?.id;
+    if (bankId === undefined) return { accountBank };
+    try {
+      const body = await this.#client.request('GET', FLUTTERWAVE_ENDPOINTS.branches(bankId));
+      const parsed = branchesResponse.safeParse(body);
+      const rows = parsed.success ? (parsed.data.data ?? []) : [];
+      /* EXACTLY ONE, or nothing. See the doc comment: picking among several
+         would be inventing a destination. */
+      const only = rows.length === 1 ? rows[0] : undefined;
+      return only === undefined ? { accountBank } : { accountBank, branchCode: only.branch_code };
+    } catch {
+      return { accountBank };
+    }
   }
 
   async #networkValues(iso: string, ourCode: string): Promise<readonly string[]> {
@@ -728,8 +842,20 @@ export class FlutterwavePayoutAdapter implements PayoutPort {
   }
 
   async send<C extends Currency>(request: PayoutRequest<C>): Promise<PayoutReceipt> {
+    const iso = request.country.trim().toUpperCase();
+    const networks = FLUTTERWAVE_MOBILE_MONEY_NETWORKS[iso];
+    const isWallet = networks?.some((n) => n.code === request.bankCode) === true;
+
+    /*
+     * THE RAIL'S OWN CODE, AND ITS BRANCH — see `#transferRail`. Resolved
+     * BEFORE the call rather than retried after it, because a transfer is the
+     * one operation here that cannot be attempted twice: the lookup may try
+     * several spellings and a send gets exactly one.
+     */
+    const rail = await this.#transferRail(iso, request.bankCode, isWallet, request.branchCode);
+
     const body = await this.#client.request('POST', FLUTTERWAVE_ENDPOINTS.transfers, {
-      account_bank: request.bankCode,
+      account_bank: rail.accountBank,
       account_number: request.accountNumber,
       amount: majorText(request.amount.amount, request.amount.currency),
       currency: request.amount.currency,
@@ -764,9 +890,9 @@ export class FlutterwavePayoutAdapter implements PayoutPort {
        * code, and an empty string is a field their API has to decide what to
        * do with — the same reason `narration` is spread rather than defaulted.
        */
-      ...(request.branchCode === undefined || request.branchCode === ''
+      ...(rail.branchCode === undefined || rail.branchCode === ''
         ? {}
-        : { destination_branch_code: request.branchCode }),
+        : { destination_branch_code: rail.branchCode }),
       ...(request.narration === undefined ? {} : { narration: request.narration }),
       /* OURS, derived from the customer's key. Their side de-duplicates on
        * it, so a retry after a timeout is one payout at their end too — and
@@ -789,7 +915,7 @@ export class FlutterwavePayoutAdapter implements PayoutPort {
        * and would have had every momo payout refused for validation — which is
        * the opposite of the fault it was meant to fix.
        */
-      beneficiary_name: beneficiaryLabel(request),
+      beneficiary_name: beneficiaryLabel(request, rail.accountBank),
       /*
        * WHO SENT IT, where the corridor asks. Kenya's M-PESA payout is a
        * cross-border remittance and is refused without the originator named.
@@ -866,11 +992,17 @@ function receiptOf(data: {
  * sender's own typed text, because that is the value somebody would later be
  * tempted to render back on a confirmation screen.
  */
-function beneficiaryLabel<C extends Currency>(request: PayoutRequest<C>): string {
+function beneficiaryLabel<C extends Currency>(
+  request: PayoutRequest<C>,
+  /* THE RAIL'S OWN CODE, so the label in their beneficiary book reads the way
+     their dashboard names the network rather than the way this platform
+     abbreviates it internally. */
+  railCode: string,
+): string {
   const given = request.accountName?.trim();
   if (given !== undefined && given !== '') return given;
   const last4 = request.accountNumber.slice(-4);
-  return `${request.bankCode} ${last4}`.trim();
+  return `${railCode} ${last4}`.trim();
 }
 
 function majorText(amountMinor: bigint, currency: string): string {

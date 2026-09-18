@@ -2256,3 +2256,79 @@ fund the GHS and KES balances at Flutterwave, reading
 `PAYOUT_RECONCILE_INTERVAL_SECONDS` on exactly one instance — the webhook is
 now the fast path and the sweep is still what covers a webhook that never
 arrives.
+
+---
+
+## Phase 21 — The code the transfer actually sent ✅
+
+Not a feature. One audit of the Flutterwave payout path, driven by customers in
+Accra and Nairobi reporting that a withdrawal to a mobile money number does
+nothing — and the fault was on the single call that moves the money, in a
+constant this repo had already decided it could not trust.
+
+| File | What it is |
+|---|---|
+| `packages/providers/src/flutterwave/payout-adapter.ts` | `#transferRail`, and the transfer asking the same authority the lookup does |
+| `packages/providers/src/flutterwave/payout-adapter.test.ts` | a stub that routes by URL, and five tests pinning the wire payload |
+| `scripts/verify-flutterwave-sandbox.mjs` | the transfer contract, probed at last |
+
+### The method used to find it
+
+The payload was not reasoned about — it was PRINTED. The real adapter was
+driven over HTTP against a stub and the exact body of a Ghana MoMo transfer and
+a Kenya M-PESA transfer were read off the wire. Everything below was visible in
+those two objects in under a minute, after several rounds of reading code and
+guessing. This is the same move that found the checkout fault, and it should be
+the first move next time.
+
+### The transfer sent a code nothing sourced
+
+1. **`FLUTTERWAVE_MOBILE_MONEY_NETWORKS` HOLDS `MTN`, `VOD`, `ATL`, `MPS` AND
+   NO VENDOR DOCUMENT IN THIS REPO PRODUCES THEM.** They went verbatim into
+   `account_bank` on `/v3/transfers`.
+2. **THE READ PATH ALREADY KNEW THEY WERE UNTRUSTWORTHY.** `#telcoCandidates`
+   reads Flutterwave's own `GET /v3/banks/:country` and matches on NAME,
+   existing solely because our spelling might not be theirs — for a NAME
+   LOOKUP, which can be retried. The transfer, which cannot, trusted the same
+   string completely. A codebase that checks a constant before a retryable read
+   and not before an irreversible payout has the asymmetry exactly backwards.
+3. **SO THE TRANSFER NOW ASKS THE SAME AUTHORITY.** `#transferRail` resolves
+   the institution in their list and sends THEIR code, falling back to ours.
+   `VOD` leaves as `VODAFONE` where that is their name for it.
+
+### And Ghana was missing a field nothing could supply
+
+4. **THIS ADAPTER'S OWN HEADER QUOTES FLUTTERWAVE** requiring
+   `destination_branch_code` on a transfer to a Ghanaian bank account OR
+   MOBILE MONEY WALLET — and no path in the platform could produce one for a
+   wallet. `recipients.branch_code` is `null` for every momo row, and
+   `PayoutService.branches()` searches the BANK list, where a telco code is
+   never found. The constant naming the requirement was declared, read once,
+   and never reached the wire.
+5. **IT IS FILLED IN ONLY WHERE THERE IS NOTHING TO GET WRONG** — a wallet, a
+   corridor that requires one, no value from the caller, and EXACTLY ONE branch
+   returned. A telco has one; a bank has many and the customer picks. Choosing
+   among several would be inventing a destination.
+6. **EVERY PART IS BEST EFFORT**, with a test for it: a bank list that cannot
+   be read sends precisely what was sent before any of this existed.
+
+### What the tests could not have caught
+
+7. **THE v3 STUB WAS POSITIONAL**, so `send()` making one more call would have
+   handed the transfer's scripted body to the bank-list read and failed five
+   tests for reasons unrelated to them. `v4Stub` in the same file already
+   records that lesson; the v3 one had not learned it. It routes by URL now.
+8. **AND THE VERIFY SCRIPT ONLY EVER PROVED MONEY COULD COME IN.** It probed
+   the key, the checkout and a verify-by-reference, and nothing at all about
+   the direction that cannot be recalled. It now prints which entries in
+   Flutterwave's Ghana list are telcos, the `account_bank` each takes and how
+   many branches each has — the two facts a specification cannot settle. It
+   sends no money deliberately: a verification with a side effect is one
+   somebody has to reconcile afterwards.
+
+**Before Ghana or Kenya sends again, an operator must:** enable **Transfers via
+API** on Flutterwave's dashboard (they ship *Disable all transfers*, which
+refuses every `/v3/transfers` call before any of this code is reached), run
+`node scripts/verify-flutterwave-sandbox.mjs` against a TEST key and read the
+telco table it now prints, and fund the GHS and KES balances — `/admin/providers`
+shows what the platform holds.

@@ -1387,6 +1387,59 @@ and three different faults, each of which made the next one invisible.
   floor is per rail, and it is ONE definition read by the lookup and the
   button alike: two copies of that condition is what round one was.
 
+### The code the transfer actually sent — non-obvious rules
+
+`packages/providers/src/flutterwave/payout-adapter.ts`, pinned by
+`payout-adapter.test.ts`.
+
+- **THE READ DISTRUSTED A CONSTANT AND THE WRITE DID NOT, WHICH IS THE
+  ASYMMETRY BACKWARDS.** `FLUTTERWAVE_MOBILE_MONEY_NETWORKS` holds `MTN`,
+  `VOD`, `ATL` and `MPS` — codes NO vendor document in this repo produces. The
+  name lookup went to real trouble over them: `#telcoCandidates` reads
+  Flutterwave's own `GET /v3/banks/:country` and matches on NAME, precisely
+  because our spelling was known to be untrustworthy. Meanwhile `send()` put
+  the same unsourced string straight into `account_bank` on `/v3/transfers`. A
+  constant not trusted for a retryable read and trusted for an IRREVERSIBLE
+  payout is the wrong way round, and it is how a corridor fails with every
+  component behaving.
+- **SO THE TRANSFER NOW ASKS THE SAME AUTHORITY THE LOOKUP DOES.**
+  `#transferRail` matches the institution in THEIR list and sends THEIR code;
+  ours is the fallback. `VOD` goes out as `VODAFONE` where that is what they
+  call it, and as `VOD` where their list cannot be read.
+- **RESOLVED BEFORE THE CALL, NEVER RETRIED AFTER IT.** A lookup may try
+  several spellings; a transfer gets exactly one attempt, because the second
+  one is a second payment.
+- **GHANA WAS MISSING A REQUIRED FIELD AND NOTHING COULD HAVE SUPPLIED IT.**
+  This adapter's own header quotes Flutterwave: a transfer to a Ghanaian bank
+  account OR MOBILE MONEY WALLET needs `destination_branch_code`. The
+  recipient row stores `branch_code: null` for every momo destination, and
+  `PayoutService.branches()` searches the BANK list — where a telco code is
+  never found. So the field could not be produced for a wallet by any path,
+  and every Ghanaian wallet transfer went out without it.
+- **A BRANCH IS FILLED IN ONLY WHERE THERE IS NOTHING TO GET WRONG** — a
+  wallet, a corridor that requires one, no value from the caller, and EXACTLY
+  ONE branch returned. A telco has one; a bank has many and the customer
+  picks. Choosing among several would be this file inventing a destination,
+  which is the mistake it has already made twice in the other direction.
+- **EVERY PART OF IT IS BEST EFFORT.** A bank list that cannot be read sends
+  exactly what was sent before any of this existed — 059's rule that a missing
+  answer falls through rather than becoming an outage on the screen customers
+  send money from. There is a test for that case specifically.
+- **THE BENEFICIARY LABEL USES THE RAIL'S CODE**, so their beneficiary book
+  reads the way their dashboard names the network rather than the way this
+  platform abbreviates it internally.
+- **THE v3 TEST STUB NOW ROUTES BY URL**, because `send()` legitimately makes
+  one more call than it used to and a positional script hands the transfer's
+  body to the bank-list read. That is the fault `v4Stub` already records, one
+  client over: position is the wrong key the moment the code under test may
+  make an extra call.
+- **AND THE VERIFY SCRIPT PROBES THE TRANSFER CONTRACT NOW.** It only ever
+  proved money could come IN. It prints which entries in Flutterwave's Ghana
+  list are telcos, what `account_bank` each takes and how many branches each
+  has — the two things that cannot be settled from a specification. It
+  deliberately SENDS NO MONEY: a verification with a side effect is one
+  somebody has to reconcile.
+
 ### The transfer nobody heard back about — non-obvious rules
 
 Schema: `packages/ledger/sql/073_platform_float.sql`. Service in

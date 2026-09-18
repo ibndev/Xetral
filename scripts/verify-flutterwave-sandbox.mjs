@@ -105,16 +105,61 @@ if (unknownBody.status === 'success') {
   console.log(`ok (refused: ${String(unknownBody.message ?? unknown.status)})`);
 }
 
-console.log('');
-if (ghanaBanks !== undefined) {
-  console.log(`Ghana bank list: ${ghanaBanks.length} entries.`);
-  console.log(
-    'NOTE: this adapter does NOT offer that list in Ghana or Kenya. Money there ' +
-      'moves to a mobile money WALLET, whose account_bank is a NETWORK code ' +
-      '(MTN/VOD/ATL, MPS) that this list does not contain — see ' +
-      'FLUTTERWAVE_MOBILE_MONEY_NETWORKS. Confirm those codes with Flutterwave ' +
-      'support before the first payout.',
+/*
+ * 4. THE TRANSFER CONTRACT — the probe this script did not have, and the one
+ *    the Ghana and Kenya corridor turns on.
+ *
+ *    Everything above proves the key works and money can come IN. Nothing
+ *    proved anything about money going OUT, which is the direction that
+ *    cannot be recalled and the one customers reported broken. Two things
+ *    have to be settled against a real account and neither can be settled
+ *    from a specification:
+ *
+ *      - WHICH `account_bank` a wallet transfer takes. This repo held `MTN`,
+ *        `VOD`, `ATL` and `MPS` as constants no vendor document produces. The
+ *        adapter now reads them out of THEIR OWN Ghana list instead, and this
+ *        prints what that list actually says so an operator can see it.
+ *      - WHETHER a Ghanaian wallet needs `destination_branch_code`. Their
+ *        documentation says bank accounts and mobile money wallets both do;
+ *        this fetches the branches of each telco so the answer is visible
+ *        rather than assumed.
+ *
+ *    IT DOES NOT SEND MONEY. A transfer probe that moved a cedi would be a
+ *    verification script with a side effect somebody has to reconcile, so
+ *    this reads the two lists the transfer is BUILT from and leaves the
+ *    sending to a real customer.
+ */
+const NETWORK_HINTS = ['MTN', 'VODAFONE', 'TELECEL', 'AIRTELTIGO', 'TIGO', 'AIRTEL'];
+if (Array.isArray(ghanaBanks)) {
+  const telcos = ghanaBanks.filter((b) =>
+    NETWORK_HINTS.some((hint) => String(b?.name ?? '').toUpperCase().includes(hint)),
   );
+  console.log('');
+  console.log(`Ghana list: ${ghanaBanks.length} entries, ${telcos.length} look like a telco.`);
+  if (telcos.length === 0) {
+    console.log(
+      'FAIL — no mobile money network is in Flutterwave\'s Ghana list. The adapter ' +
+        'falls back to MTN/VOD/ATL, which nothing here sources from Flutterwave. ' +
+        'Ask their support for the account_bank values a GHS wallet transfer takes.',
+    );
+    failures += 1;
+  }
+  for (const telco of telcos) {
+    console.log(`  account_bank=${telco.code}  id=${telco.id}  ${telco.name}`);
+    if (telco?.id === undefined) continue;
+    const branches = await probe(
+      `  GET /v3/banks/${telco.id}/branches`,
+      'GET',
+      `/v3/banks/${telco.id}/branches`,
+    );
+    if (Array.isArray(branches)) {
+      console.log(
+        branches.length === 1
+          ? `    destination_branch_code=${branches[0]?.branch_code} (one branch — the adapter sends it)`
+          : `    ${branches.length} branches — the adapter sends NONE, because choosing would be inventing one`,
+      );
+    }
+  }
 }
 if (session !== undefined) {
   console.log(`Checkout link: ${session.link}`);

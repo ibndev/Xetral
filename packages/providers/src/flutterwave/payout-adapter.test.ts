@@ -5,7 +5,23 @@ import { FlutterwavePayoutAdapter } from './payout-adapter.js';
 import { FlutterwaveV4Client } from './v4-client.js';
 import { ProviderRejectedError } from '../ports/errors.js';
 
-function stub(responses: readonly unknown[]): {
+/**
+ * A v3 stand-in that can ROUTE BY URL as well as by position.
+ *
+ * `send()` now asks Flutterwave which code THEY use for a network before it
+ * transfers, so a purely positional stub hands the transfer's scripted body to
+ * the bank-list call and every send test fails for a reason unrelated to what
+ * it is testing. That is the fault this file's own `v4Stub` comment records,
+ * one client over — position is the wrong key the moment the code under test
+ * may legitimately make one more call.
+ *
+ * Named routes win where a test supplies them; everything else falls through
+ * to the positional script, so every test written before this reads the same.
+ */
+function stub(
+  responses: readonly unknown[],
+  routes: { banks?: unknown; branches?: unknown } = {},
+): {
   client: FlutterwaveClient;
   sent: { url: string; body: unknown }[];
 } {
@@ -19,13 +35,38 @@ function stub(responses: readonly unknown[]): {
         url,
         body: init.body === undefined ? undefined : JSON.parse(String(init.body)),
       });
-      return new Response(JSON.stringify(responses[i++] ?? { status: 'success', data: {} }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      });
+      const json = (body: unknown): Response =>
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      if (url.includes('/branches') && routes.branches !== undefined) return json(routes.branches);
+      if (url.includes('/v3/banks/') && !url.includes('/branches') && routes.banks !== undefined) {
+        return json(routes.banks);
+      }
+      return json(responses[i++] ?? { status: 'success', data: {} });
     },
   });
   return { client, sent };
+}
+
+/** Flutterwave's Ghana list, in the shape their API answers: the telcos are in
+ *  it, under THEIR codes, each with an id the branches path takes. */
+const GHANA_LIST = {
+  status: 'success',
+  data: [
+    { id: 1, code: 'MTN', name: 'MTN Mobile Money' },
+    { id: 2, code: 'VODAFONE', name: 'Vodafone (Telecel) Cash' },
+    { id: 3, code: 'AIRTELTIGO', name: 'AirtelTigo Money' },
+  ],
+};
+
+/** The transfer body out of a recorded exchange, found by URL rather than by
+ *  position — the same reason the stub routes that way. */
+function transferBody(sent: readonly { url: string; body: unknown }[]): Record<string, unknown> {
+  const found = sent.find((r) => r.url.endsWith('/v3/transfers'));
+  expect(found, 'no /v3/transfers call was made').toBeDefined();
+  return found?.body as Record<string, unknown>;
 }
 
 /** A v4 client whose token exchange and calls are both stubbed. */
@@ -327,9 +368,10 @@ describe('who holds the destination', () => {
 
 describe('sending', () => {
   it('sends MAJOR units and names what we are debited in', async () => {
-    const { client, sent } = stub([
-      { status: 'success', data: { id: 99, status: 'NEW' } },
-    ]);
+    const { client, sent } = stub([{ status: 'success', data: { id: 99, status: 'NEW' } }], {
+      banks: GHANA_LIST,
+      branches: { status: 'success', data: [{ branch_code: 'GH-MTN-1', branch_name: 'MTN' }] },
+    });
     const receipt = await new FlutterwavePayoutAdapter(client).send({
       country: 'GH',
       bankCode: 'MTN',
@@ -339,7 +381,7 @@ describe('sending', () => {
       reference: 'xetpay-out-1',
     });
 
-    const body = sent[0]?.body as Record<string, unknown>;
+    const body = transferBody(sent);
     expect(body['amount']).toBe('250.00');
     /*
      * `debit_currency` STATED, not inferred. Left out, Flutterwave picks a
@@ -376,14 +418,137 @@ describe('sending', () => {
     expect((await new FlutterwavePayoutAdapter(client).status('3')).state).toBe('sent');
   });
 
+  it('SENDS FLUTTERWAVE\'S OWN CODE, not the one this platform abbreviates with', async () => {
+    /*
+     * THE CORRIDOR'S BUG, AND IT WAS ON THE ONE CALL THAT MOVES MONEY.
+     *
+     * `FLUTTERWAVE_MOBILE_MONEY_NETWORKS` holds `VOD` and `ATL`. Nothing in
+     * this repo sources those from Flutterwave, and the READ path already
+     * distrusted them enough to reconcile against the live list before asking
+     * for a name — while the TRANSFER sent them verbatim. A constant good
+     * enough to be checked before a retryable lookup and not before an
+     * irreversible payout had the asymmetry exactly backwards.
+     */
+    const { client, sent } = stub([{ status: 'success', data: { id: 7, status: 'NEW' } }], {
+      banks: GHANA_LIST,
+      branches: { status: 'success', data: [{ branch_code: 'GH-VOD-1', branch_name: 'Telecel' }] },
+    });
+    await new FlutterwavePayoutAdapter(client).send({
+      country: 'GH',
+      bankCode: 'VOD',
+      accountNumber: '233551234567',
+      amount: ghs(25_00n),
+      reference: 'xetpay-out-vod',
+    });
+
+    const body = transferBody(sent);
+    expect(body['account_bank']).toBe('VODAFONE');
+    /* And the beneficiary LABEL reads the way their dashboard names the
+       network, not the way this platform abbreviates it. */
+    expect(body['beneficiary_name']).toBe('VODAFONE 4567');
+  });
+
+  it('CARRIES A GHANAIAN BRANCH CODE, which no wallet transfer could before', async () => {
+    /*
+     * Flutterwave, quoted in this adapter's own header: "When transferring to
+     * Ghanaian bank accounts AND MOBILE MONEY WALLETS, you need to pass the
+     * branch code of the institution or telco ... as destination_branch_code."
+     *
+     * Nothing in this platform could produce one for a wallet. The recipient
+     * row stores `branch_code: null` for every momo destination and the
+     * branches route searches the BANK list, where a telco code is never
+     * found — so every Ghanaian wallet transfer went out missing a field their
+     * own documentation calls required.
+     */
+    const { client, sent } = stub([{ status: 'success', data: { id: 8, status: 'NEW' } }], {
+      banks: GHANA_LIST,
+      branches: { status: 'success', data: [{ branch_code: 'GH-MTN-1', branch_name: 'MTN' }] },
+    });
+    await new FlutterwavePayoutAdapter(client).send({
+      country: 'GH',
+      bankCode: 'MTN',
+      accountNumber: '233241234567',
+      amount: ghs(25_00n),
+      reference: 'xetpay-out-mtn',
+    });
+    expect(transferBody(sent)['destination_branch_code']).toBe('GH-MTN-1');
+  });
+
+  it('WILL NOT CHOOSE among several branches, because that is inventing one', async () => {
+    // A telco has one branch and a bank has many; where the customer picks,
+    // this file must not. The caller's own value still wins — see below.
+    const { client, sent } = stub([{ status: 'success', data: { id: 9, status: 'NEW' } }], {
+      banks: GHANA_LIST,
+      branches: {
+        status: 'success',
+        data: [
+          { branch_code: 'A', branch_name: 'Accra' },
+          { branch_code: 'B', branch_name: 'Kumasi' },
+        ],
+      },
+    });
+    await new FlutterwavePayoutAdapter(client).send({
+      country: 'GH',
+      bankCode: 'MTN',
+      accountNumber: '233241234567',
+      amount: ghs(25_00n),
+      reference: 'xetpay-out-many',
+    });
+    expect(transferBody(sent)['destination_branch_code']).toBeUndefined();
+  });
+
+  it('KEEPS THE CALLER\'S BRANCH where one was chosen on a screen', async () => {
+    const { client, sent } = stub([{ status: 'success', data: { id: 10, status: 'NEW' } }], {
+      banks: GHANA_LIST,
+      branches: { status: 'success', data: [{ branch_code: 'GH-MTN-1', branch_name: 'MTN' }] },
+    });
+    await new FlutterwavePayoutAdapter(client).send({
+      country: 'GH',
+      bankCode: 'MTN',
+      accountNumber: '233241234567',
+      branchCode: 'CHOSEN-BY-CUSTOMER',
+      amount: ghs(25_00n),
+      reference: 'xetpay-out-chosen',
+    });
+    expect(transferBody(sent)['destination_branch_code']).toBe('CHOSEN-BY-CUSTOMER');
+  });
+
+  it('SENDS EXACTLY WHAT IT ALWAYS DID when their list cannot be read', async () => {
+    /*
+     * 059's rule: a missing row falls through rather than turning one absent
+     * answer into an outage on the screen customers send money from. A
+     * deployment whose bank list 500s must be no worse off than before any of
+     * this existed.
+     */
+    const { client, sent } = stub([{ status: 'success', data: { id: 11, status: 'NEW' } }], {
+      banks: { nonsense: true },
+    });
+    await new FlutterwavePayoutAdapter(client).send({
+      country: 'GH',
+      bankCode: 'VOD',
+      accountNumber: '233551234567',
+      amount: ghs(25_00n),
+      reference: 'xetpay-out-blind',
+    });
+    const body = transferBody(sent);
+    expect(body['account_bank']).toBe('VOD');
+    expect(body['destination_branch_code']).toBeUndefined();
+  });
+
   it('is generic over its currency, so a concrete amount compiles', async () => {
     // `Money` is invariant. A non-generic `send` compiles and then rejects
     // every caller holding `ngn(…)` or `kes(…)` — the trap Phase 10 and Phase
     // 14 both walked into. This test exists to fail at TYPECHECK, not at run.
-    const { client } = stub([
-      { status: 'success', data: { id: 4, status: 'NEW' } },
-      { status: 'success', data: { id: 5, status: 'NEW' } },
-    ]);
+    const { client } = stub(
+      [
+        { status: 'success', data: { id: 4, status: 'NEW' } },
+        { status: 'success', data: { id: 5, status: 'NEW' } },
+      ],
+      /* Their list carries neither of these, so the transfer falls back to the
+         code this platform holds — which is the behaviour every corridor had
+         before the rail was resolved from their data. */
+      { banks: { status: 'success', data: [] } },
+    );
     const adapter = new FlutterwavePayoutAdapter(client);
     const base = {
       country: 'KE',
