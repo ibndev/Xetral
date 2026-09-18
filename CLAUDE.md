@@ -2461,6 +2461,48 @@ Review in `apps/mobile/SECURITY.md`, cover in `src/screen-privacy.tsx`.
   here, and it is written down because the symptom — a development build
   vanishing when a preview is installed — otherwise reads as a broken build.
 
+### One red gate silencing the rest — non-obvious rules
+
+`.github/workflows/ci.yml`, guarded by `migrations-in-ci.test.ts`.
+
+- **A FAILING STEP CANCELS EVERY STEP AFTER IT, and that turned one advisory
+  into no information at all.** A transitive `multer` finding in the dependency
+  audit — step 9 of 18 — meant typecheck, the unit suites, the e2e suite, the
+  build and BOTH BOOT PROBES were reported `skipped` for several commits. The
+  badge was red for a reason nobody could act on that week while saying nothing
+  about the eight things it exists to say something about, and the probes are
+  the ones that hurt: they exist because EIGHT failures here have been
+  invisible to the compiler AND the tests and appeared only when something was
+  actually started.
+- **THE FIX IS NOT A WEAKER GATE, IT IS A LATER ONE.** The audit is
+  `continue-on-error` with an `id`, and the LAST step of the job asserts its
+  outcome. The build still fails, the deploy is still blocked, the annotation
+  still names the workspace — by which time the tests have run and said what
+  they know. Nothing was exempted.
+- **`outcome` IS THE STEP'S OWN VERDICT AND `conclusion` IS WHAT
+  `continue-on-error` REWROTE IT TO.** A collector reading `conclusion` can
+  never fire, which is a check that cannot fail the build — 013's lesson about
+  the reconciliation check that reported through a SELECT and exited zero.
+  There is a test for that spelling specifically.
+- **`if: always()`, so it also runs after a failure ABOVE it.** A build that
+  went red on the e2e suite AND has a vulnerable dependency has to say both, or
+  the second is discovered on the next push.
+- **THE PAIR IS ASSERTED IN BOTH DIRECTIONS**, because forgetting the collector
+  makes the gate silently stop being one — 017's rule that forgetting must
+  never be the permissive direction, and the argument `kill-switches.test.ts`
+  makes about a setting nothing reads. Every `continue-on-error` step must
+  carry an `id` and some later step must read that id's outcome. Proved by
+  breaking the workflow three ways and watching each guard name the real
+  problem.
+- **THE THREE ADVISORIES THEMSELVES ARE STILL OPEN**, and deliberately not
+  papered over. `multer` is pinned at EXACTLY `2.2.0` by
+  `@nestjs/platform-express`; `qs` and `sharp` are within ranges their parents
+  already allow and are only held back by a stale lockfile. npm 10.9.7 does not
+  honour root `overrides` for them — tried, and the tree came back marked
+  `invalid` with the old versions still on disk — so clearing them means moving
+  a dependency tree under a live ledger, which is a decision rather than a
+  tidy-up.
+
 ### Scanning the running app — non-obvious rules
 
 `ci.yml`'s boot probes, and the `dynamic` job in `scan.yml`.

@@ -377,7 +377,28 @@ jobs:
       # the day one of them is in a runtime library rather than the CLI it
       # belongs in this list.
       # ------------------------------------------------------------------
+      # IT REPORTS HERE AND FAILS THE BUILD AT THE END, and the split is the
+      # whole point of `continue-on-error` on a step that is otherwise a
+      # perfectly ordinary gate.
+      #
+      # A FAILING STEP CANCELS EVERY STEP AFTER IT, so for several commits a
+      # transitive advisory in `multer` meant typecheck, the unit suites, the
+      # e2e suite, the build and BOTH BOOT PROBES were reported as `skipped`.
+      # The badge was red for a reason nobody could act on that week, and it
+      # was simultaneously saying nothing at all about the eight things it
+      # exists to say something about — including the probes this repository
+      # added precisely because EIGHT failures here have been invisible to both
+      # the compiler and the tests and appeared only when something was
+      # actually started.
+      #
+      # ONE RED GATE MUST NOT SILENCE THE OTHERS. That is not the same as
+      # weakening this one: the outcome is remembered and asserted in the last
+      # step of the job, so the build still fails, the deploy is still blocked
+      # and the annotation still names the workspace. What changes is that by
+      # then the tests have run and said what they know.
       - name: Audit the customer-facing dependency tree
+        id: dependency-audit
+        continue-on-error: true
         run: |
           set -o pipefail
           failed=0
@@ -757,3 +778,22 @@ jobs:
             fi
             echo "ok: $platform bundle at $bundle"
           done
+
+      # ------------------------------------------------------------------
+      # The dependency gate, collected.
+      #
+      # `outcome` IS THE STEP'S OWN VERDICT AND `conclusion` IS WHAT
+      # `continue-on-error` TURNED IT INTO — so this reads `outcome`, which is
+      # still `failure`. Reading `conclusion` would be a gate that can never
+      # fire, which is the failure mode 013 records about a check that cannot
+      # fail the build.
+      #
+      # `if: always()` because this must run after a failure ABOVE it too: a
+      # build that went red on the e2e suite and had a vulnerable dependency
+      # should say both, or the second is discovered on the next push.
+      # ------------------------------------------------------------------
+      - name: Fail the build if a customer-facing dependency is vulnerable
+        if: always() && steps.dependency-audit.outcome == 'failure'
+        run: |
+          echo "::error::a customer-facing workspace has a vulnerable production dependency — see 'Audit the customer-facing dependency tree' above for which"
+          exit 1

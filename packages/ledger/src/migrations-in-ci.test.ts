@@ -95,3 +95,74 @@ describe('CI applies every migration to both of its databases', () => {
     expect(ghosts, `named in ci.yml and not on disk:\n${ghosts.join('\n')}`).toEqual([]);
   });
 });
+
+/**
+ * A STEP THAT IS ALLOWED TO FAIL MUST HAVE ITS FAILURE COLLECTED.
+ *
+ * WHAT THIS COSTS WHEN IT IS WRONG, IN BOTH DIRECTIONS.
+ *
+ * Without `continue-on-error`, a failing step CANCELS EVERY STEP AFTER IT. A
+ * transitive advisory in `multer` therefore reported typecheck, the unit
+ * suites, the e2e suite, the build and BOTH BOOT PROBES as `skipped` for
+ * several commits — a red badge for a reason nobody could act on that week,
+ * saying nothing at all about the eight things it exists to say something
+ * about. The probes are the ones that hurt: this repository added them because
+ * eight failures have been invisible to the compiler AND the tests and
+ * appeared only when something was actually started.
+ *
+ * WITH `continue-on-error` AND NO COLLECTOR, the gate silently stops being
+ * one. That is the direction that must be impossible rather than discouraged —
+ * 017's rule that forgetting must never be the permissive direction, and the
+ * same argument `kill-switches.test.ts` makes about a setting nothing reads.
+ *
+ * So the pair is asserted: every `continue-on-error` step carries an `id`, and
+ * some later step's `if` reads that id's OUTCOME. `outcome` and not
+ * `conclusion` — `conclusion` is what `continue-on-error` rewrote the result
+ * to, so a collector reading it can never fire, which is a check that cannot
+ * fail the build.
+ */
+describe('a CI step allowed to fail still fails the build', () => {
+  const yaml = readFileSync(CI, 'utf8');
+  /* Read as TEXT rather than parsed, for the reason the migration lists above
+     are: what is being asserted is what somebody will read in the diff. */
+  const lenientSteps = (): readonly string[] =>
+    yaml.split(/^ {6}- /m).slice(1).filter((s) => /^\s*continue-on-error:\s*true\s*$/m.test(s));
+  const lenientIds = (): readonly string[] =>
+    lenientSteps()
+      .map((s) => /^\s*id:\s*(\S+)/m.exec(s)?.[1])
+      .filter((v): v is string => v !== undefined);
+
+  it('gives every continue-on-error step an id', () => {
+    const nameless = lenientSteps()
+      .filter((s) => !/^\s*id:\s*\S+/m.test(s))
+      .map((s) => (/name:\s*(.+)/.exec(s)?.[1] ?? s.slice(0, 40)).trim());
+    expect(
+      nameless,
+      'these steps may fail without failing the build, and have no id for a ' +
+        `later step to collect:\n${nameless.join('\n')}`,
+    ).toEqual([]);
+  });
+
+  it('collects every one of those ids in a later step, by OUTCOME', () => {
+    const ids = lenientIds();
+
+    expect(ids.length, 'no lenient step found — this test would assert nothing').toBeGreaterThan(0);
+
+    const uncollected = ids.filter(
+      (id) => !new RegExp(`steps\\.${id}\\.outcome\\s*==\\s*'failure'`).test(yaml),
+    );
+    expect(
+      uncollected,
+      "these steps are allowed to fail and nothing later reads their outcome, so " +
+        `their gate does nothing at all:\n${uncollected.join('\n')}`,
+    ).toEqual([]);
+  });
+
+  it('never collects a lenient step by conclusion, which can never be failure', () => {
+    /* `conclusion` is what `continue-on-error` rewrote the outcome TO, so a
+       collector reading it is a check that cannot fail the build — 013's
+       lesson about a reconciliation check that reports through a SELECT. */
+    const wrong = lenientIds().filter((id) => new RegExp(`steps\\.${id}\\.conclusion`).test(yaml));
+    expect(wrong, `read by conclusion rather than outcome:\n${wrong.join('\n')}`).toEqual([]);
+  });
+});
