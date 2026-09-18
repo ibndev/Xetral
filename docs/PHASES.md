@@ -28,6 +28,9 @@ shipped, that is called out explicitly.
 | 17 — A link a stranger can pay | ✅ | Paystack credentials to go live |
 | 18 — A provider per currency | ✅ | Flutterwave credentials to go live |
 | 19 — One Send flow, and the refusal we invented | ✅ | |
+| 20 — The transfer nobody heard back about | ✅ | Flutterwave float to go live |
+| 21 — The code the transfer actually sent | ✅ | Transfers via API to be enabled |
+| 22 — The gate that was red by design | ✅ | |
 
 All eleven phases are built, a **pre-deployment audit** (Phase 12) closed what
 building them phase by phase had left between the phases, and **Phase 13** is
@@ -2345,3 +2348,70 @@ refuses every `/v3/transfers` call before any of this code is reached), run
 `node scripts/verify-flutterwave-sandbox.mjs` against a TEST key and read the
 telco table it now prints, and fund the GHS and KES balances — `/admin/providers`
 shows what the platform holds.
+
+---
+
+## Phase 22 — The gate that was red by design ✅
+
+Not a feature. The dependency audit blocks the deploy and had been failing on
+three advisories nobody could act on. A gate that is red by design is one
+people learn to skip — the argument this repo already makes about a generic
+ruleset and about an alert that fires on every declined card.
+
+| File | What it is |
+|---|---|
+| `package.json` | one `overrides` entry, and the reasoning for why only one |
+| `packages/ledger/src/overrides-applied.test.ts` | that npm actually applied it |
+
+### Only one of the three needed an override
+
+1. **`@nestjs/platform-express` PINS `multer` AT EXACTLY `2.2.0`**, which is
+   the top of the affected range for four denial-of-service advisories, so no
+   resolve reaches a fixed version on its own.
+2. **`qs` AND `sharp` WERE A DIFFERENT PROBLEM WEARING THE SAME CLOTHES.**
+   `express` wants `^6.14.0`, `body-parser` `^6.15.2` and `next` `^0.35.3`,
+   and the fixed versions satisfy all three — they were held back by a STALE
+   LOCKFILE. So they get no override: one that pins nothing the tree already
+   asks for is one that silently wins against a parent that later needs
+   something else.
+
+### What took three attempts, and the guard it produced
+
+3. **NPM 10.9.7 EVALUATES `overrides` ONLY WHEN BUILDING A LOCKFILE FROM
+   NOTHING, AND SAYS NOTHING WHEN IT DOES NOT.** `npm install` over an
+   existing lockfile leaves the vulnerable version on disk with no warning;
+   `--package-lock-only` does the same; and dropping the offending entries to
+   force a re-resolve makes npm PRUNE them rather than resolve them again.
+   Only deleting the whole lockfile, and `node_modules` with it, works.
+4. **SO THE DECLARATION AND THE EFFECT ARE TWO FACTS AND ONLY ONE IS IN THE
+   DIFF.** A reviewer reads `"multer": "^2.4.0"` in `package.json` and has no
+   way to see that the tree still holds `2.2.0`.
+   `overrides-applied.test.ts` asserts the second: what the lockfile RESOLVED
+   must satisfy what the override ASKED FOR. It refuses a range it cannot read
+   rather than waving one through, and fails on an empty `overrides` so it
+   cannot agree with everything. Proved by putting `2.2.0` back in the
+   lockfile and watching it name the line.
+
+### The churn was measured, not accepted
+
+5. **REGENERATING MOVED 373 LOCKFILE ENTRIES**, which reads as moving a
+   dependency tree under a live ledger and is the reason the previous round
+   stopped. So the same regeneration was run from pristine `HEAD` with NO
+   overrides at all: **367 of those 373 move on any fresh resolve.** The
+   lockfile was simply stale and all but six of the changes were already owed.
+   A blast radius nobody has separated into "mine" and "already due" is a
+   number that stops an obviously correct change.
+6. **`pg`, `ioredis` AND `react` DID NOT MOVE.** What did, on a money path, is
+   `@nestjs/*` 11.2.1 → 11.2.5, `next` 16.3.3 → 16.3.5, `zod` 4.4.3 → 4.6.5
+   and `@noble/hashes` 2.3.0 → 2.4.0. The last is the one worth naming: it
+   computes Keccak-256 for EIP-55 and a wrong address cannot be undone, so
+   `address.test.ts`'s twenty checksum vectors were run against it BY NAME
+   rather than inferred from a green summary line.
+7. **AND VERIFICATION WAS THE WHOLE CHAIN, NOT A SUBSET** — the mistake the
+   turbo finding records. The 7-workspace audit loop, typecheck, 947 unit
+   tests, the full THREE-workspace e2e suite through turbo against a freshly
+   migrated database, the build, both `ci.yml` boot probes run verbatim, and
+   both mobile bundles.
+
+**An operator need do nothing for this one.** It changes no schema, no
+setting and no provider.
