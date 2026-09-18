@@ -61,6 +61,14 @@ const GHANA_LIST = {
   ],
 };
 
+/** Flutterwave's Kenya list. M-PESA is Safaricom's and their catalogue names
+ *  it neither `MPS` nor anything containing those three letters, which is the
+ *  whole of why Kenya needed its own hints. */
+const KENYA_LIST = {
+  status: 'success',
+  data: [{ id: 41, code: 'MPESA', name: 'Safaricom M-PESA' }],
+};
+
 /** The transfer body out of a recorded exchange, found by URL rather than by
  *  position — the same reason the stub routes that way. */
 function transferBody(sent: readonly { url: string; body: unknown }[]): Record<string, unknown> {
@@ -446,6 +454,41 @@ describe('sending', () => {
     /* And the beneficiary LABEL reads the way their dashboard names the
        network, not the way this platform abbreviates it. */
     expect(body['beneficiary_name']).toBe('VODAFONE 4567');
+  });
+
+  it('DOES THE SAME FOR KENYA, which the first version of the fix silently did not', async () => {
+    /*
+     * THE HALF THAT WAS MISSING FROM THE FIX FOR THE HALF THAT WAS MISSING.
+     *
+     * `#transferRail` first read `RESOLVE_TELCO_ALIASES`, which is about what
+     * `/v3/accounts/resolve` ACCEPTS — a Ghana-only endpoint, so a Ghana-only
+     * table. Every Ghanaian network has an entry and Kenya has none, so Ghana
+     * was fixed and Kenya fell straight back through to the unsourced `MPS`
+     * with no test able to notice: the suite was all Ghanaian, the code path
+     * was shared, and the fallback is silent by construction.
+     *
+     * `MPS` does not appear in their name either, so a bare containment test
+     * finds nothing — which is what makes this a hints table rather than a
+     * substring of the code we hold.
+     */
+    const { client, sent } = stub([{ status: 'success', data: { id: 9, status: 'NEW' } }], {
+      banks: KENYA_LIST,
+    });
+    await new FlutterwavePayoutAdapter(client).send({
+      country: 'KE',
+      bankCode: 'MPS',
+      accountNumber: '254701234567',
+      amount: kes(500_00n),
+      reference: 'xetpay-out-mps',
+    });
+
+    const body = transferBody(sent);
+    expect(body['account_bank']).toBe('MPESA');
+    expect(body['beneficiary_name']).toBe('MPESA 4567');
+    /* Kenya is not in `REQUIRES_BRANCH_CODE`, so no branch is invented for it
+       and none is looked up. */
+    expect(body['destination_branch_code']).toBeUndefined();
+    expect(sent.some((r) => r.url.includes('/branches'))).toBe(false);
   });
 
   it('CARRIES A GHANAIAN BRANCH CODE, which no wallet transfer could before', async () => {

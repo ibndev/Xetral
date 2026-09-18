@@ -106,6 +106,45 @@ const RESOLVE_TELCO_ALIASES: Readonly<Record<string, readonly string[]>> = {
 };
 
 /**
+ * WHAT TO LOOK FOR IN FLUTTERWAVE'S OWN INSTITUTION LIST, per network.
+ *
+ * A SECOND TABLE RATHER THAN A SECOND READER OF `RESOLVE_TELCO_ALIASES`,
+ * BECAUSE THEY ANSWER DIFFERENT QUESTIONS and one table answering two is how
+ * the half nobody is looking at goes silently missing. That one holds the
+ * spellings `/v3/accounts/resolve` ACCEPTS as `account_bank` — a claim about
+ * what to SEND to one endpoint, documented for Ghana, which is the only place
+ * that endpoint names a wallet. This one holds search terms for finding a
+ * network in the list `GET /v3/banks/<country>` RETURNS — a claim about how
+ * to READ their catalogue, which applies wherever a transfer goes.
+ *
+ * AND THE FIRST VERSION OF `#transferRail` READ THE WRONG ONE, which is what
+ * makes the distinction worth a table. Sharing the resolver's aliases fixed
+ * Ghana — every Ghanaian network has an entry there — and left KENYA exactly
+ * as it was, falling through to the unsourced `MPS` with nothing failing and
+ * no test able to tell, because the resolver has no Kenyan entry and correctly
+ * never wanted one. A fix that covers one of the two countries it was written
+ * for, silently, is the shape this repository keeps rediscovering.
+ *
+ * NOTHING HERE EVER REACHES THE WIRE. A term matches a name in THEIR list and
+ * what is then sent is THEIR code from that same row, so a wrong or outdated
+ * term costs a match and can never invent a destination — the opposite
+ * direction from `FLUTTERWAVE_MOBILE_MONEY_NETWORKS`, whose values were being
+ * sent verbatim. That is why searching for several is safe here where
+ * guessing one would not be.
+ */
+const NETWORK_NAME_HINTS: Readonly<Record<string, readonly string[]>> = {
+  MTN: ['MTN'],
+  /* Vodafone Ghana is Telecel now, and their surfaces disagree about it. */
+  VOD: ['VODAFONE', 'TELECEL', 'VOD'],
+  /* AirtelTigo, from the Airtel and Tigo merger. */
+  ATL: ['AIRTELTIGO', 'TIGO', 'AIRTEL', 'ATL'],
+  /* M-PESA is Safaricom's, and their catalogue may name either. The hyphen is
+     not assumed: `MPESA` is matched as well, because a name is matched by
+     CONTAINMENT and "M-PESA" does not contain "MPESA". */
+  MPS: ['M-PESA', 'MPESA', 'SAFARICOM', 'MPS'],
+};
+
+/**
  * A COUNTRY'S DIALLING CODE, because the two calls want the number written
  * DIFFERENTLY and that difference is a documented source of "invalid
  * account".
@@ -476,7 +515,10 @@ export class FlutterwavePayoutAdapter implements PayoutPort {
     supplied: string | undefined,
   ): Promise<{ accountBank: string; branchCode?: string }> {
     const wanted = ourCode.trim().toUpperCase();
-    const aliases = RESOLVE_TELCO_ALIASES[wanted] ?? [];
+    /* THEIR CATALOGUE'S NAMES, not the resolver's accepted spellings — see
+       `NETWORK_NAME_HINTS`, which exists because reading the other table here
+       fixed Ghana and left Kenya untouched. */
+    const hints = NETWORK_NAME_HINTS[wanted] ?? [];
 
     let match: PayoutBank | undefined;
     try {
@@ -486,7 +528,7 @@ export class FlutterwavePayoutAdapter implements PayoutPort {
         (isWallet
           ? listed.find((b) => {
               const name = b.name.toUpperCase();
-              return aliases.some((a) => name.includes(a)) || name.includes(wanted);
+              return hints.some((h) => name.includes(h)) || name.includes(wanted);
             })
           : undefined);
     } catch {

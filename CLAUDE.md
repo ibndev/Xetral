@@ -1409,6 +1409,24 @@ and three different faults, each of which made the next one invisible.
 - **RESOLVED BEFORE THE CALL, NEVER RETRIED AFTER IT.** A lookup may try
   several spellings; a transfer gets exactly one attempt, because the second
   one is a second payment.
+- **AND THE FIRST VERSION OF THAT FIX COVERED GHANA AND SILENTLY MISSED
+  KENYA.** `#transferRail` reached for `RESOLVE_TELCO_ALIASES`, which is a
+  table about what `/v3/accounts/resolve` ACCEPTS — a Ghana-only endpoint, so
+  correctly a Ghana-only table. Every Ghanaian network has an entry, Kenya has
+  none, and the fallback is silent by construction: cedis started sending
+  `VODAFONE` and shillings went on sending the unsourced `MPS`, with the same
+  code path, a green suite, and nothing on any screen. **ONE TABLE ANSWERING
+  TWO QUESTIONS IS HOW THE HALF NOBODY IS LOOKING AT GOES MISSING** —
+  `NETWORK_NAME_HINTS` is the second question written down: how to READ their
+  catalogue, wherever a transfer goes. `MPS` is not a substring of
+  `Safaricom M-PESA`, and `M-PESA` is not a substring of `MPESA`, so both
+  spellings are searched for.
+- **A HINT NEVER REACHES THE WIRE.** It matches a NAME in their list and what
+  is then sent is THEIR code off that same row — so a stale hint costs a match
+  and can never invent a destination. That is the opposite direction from
+  `FLUTTERWAVE_MOBILE_MONEY_NETWORKS`, whose values were being sent verbatim,
+  and it is why searching for several spellings is safe here where guessing
+  one is not.
 - **GHANA WAS MISSING A REQUIRED FIELD AND NOTHING COULD HAVE SUPPLIED IT.**
   This adapter's own header quotes Flutterwave: a transfer to a Ghanaian bank
   account OR MOBILE MONEY WALLET needs `destination_branch_code`. The

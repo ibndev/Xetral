@@ -2295,30 +2295,43 @@ the first move next time.
 3. **SO THE TRANSFER NOW ASKS THE SAME AUTHORITY.** `#transferRail` resolves
    the institution in their list and sends THEIR code, falling back to ours.
    `VOD` leaves as `VODAFONE` where that is their name for it.
+4. **AND THE FIRST VERSION OF THAT FIX REPAIRED GHANA AND SILENTLY LEFT KENYA
+   EXACTLY AS IT WAS.** It reached for `RESOLVE_TELCO_ALIASES`, which describes
+   what `/v3/accounts/resolve` ACCEPTS — a Ghana-only endpoint, so a Ghana-only
+   table. Every Ghanaian network has an entry and Kenya has none, so shillings
+   went on sending the unsourced `MPS` through the same code path, with a green
+   suite and nothing on any screen, because the fallback is silent by
+   construction. ONE TABLE ANSWERING TWO QUESTIONS is how the half nobody is
+   looking at goes missing; `NETWORK_NAME_HINTS` is the second question written
+   down. A hint matches a NAME in their list and what is sent is THEIR code off
+   that row, so a stale hint costs a match and can never invent a destination —
+   which is what makes searching several spellings safe here where guessing one
+   is not. The verify script had the same Ghana-only shape and now walks both
+   corridors.
 
 ### And Ghana was missing a field nothing could supply
 
-4. **THIS ADAPTER'S OWN HEADER QUOTES FLUTTERWAVE** requiring
+5. **THIS ADAPTER'S OWN HEADER QUOTES FLUTTERWAVE** requiring
    `destination_branch_code` on a transfer to a Ghanaian bank account OR
    MOBILE MONEY WALLET — and no path in the platform could produce one for a
    wallet. `recipients.branch_code` is `null` for every momo row, and
    `PayoutService.branches()` searches the BANK list, where a telco code is
    never found. The constant naming the requirement was declared, read once,
    and never reached the wire.
-5. **IT IS FILLED IN ONLY WHERE THERE IS NOTHING TO GET WRONG** — a wallet, a
+6. **IT IS FILLED IN ONLY WHERE THERE IS NOTHING TO GET WRONG** — a wallet, a
    corridor that requires one, no value from the caller, and EXACTLY ONE branch
    returned. A telco has one; a bank has many and the customer picks. Choosing
    among several would be inventing a destination.
-6. **EVERY PART IS BEST EFFORT**, with a test for it: a bank list that cannot
+7. **EVERY PART IS BEST EFFORT**, with a test for it: a bank list that cannot
    be read sends precisely what was sent before any of this existed.
 
 ### What the tests could not have caught
 
-7. **THE v3 STUB WAS POSITIONAL**, so `send()` making one more call would have
+8. **THE v3 STUB WAS POSITIONAL**, so `send()` making one more call would have
    handed the transfer's scripted body to the bank-list read and failed five
    tests for reasons unrelated to them. `v4Stub` in the same file already
    records that lesson; the v3 one had not learned it. It routes by URL now.
-8. **AND THE VERIFY SCRIPT ONLY EVER PROVED MONEY COULD COME IN.** It probed
+9. **AND THE VERIFY SCRIPT ONLY EVER PROVED MONEY COULD COME IN.** It probed
    the key, the checkout and a verify-by-reference, and nothing at all about
    the direction that cannot be recalled. It now prints which entries in
    Flutterwave's Ghana list are telcos, the `account_bank` each takes and how

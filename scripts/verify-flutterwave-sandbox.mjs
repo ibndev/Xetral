@@ -129,24 +129,62 @@ if (unknownBody.status === 'success') {
  *    this reads the two lists the transfer is BUILT from and leaves the
  *    sending to a real customer.
  */
-const NETWORK_HINTS = ['MTN', 'VODAFONE', 'TELECEL', 'AIRTELTIGO', 'TIGO', 'AIRTEL'];
-if (Array.isArray(ghanaBanks)) {
-  const telcos = ghanaBanks.filter((b) =>
-    NETWORK_HINTS.some((hint) => String(b?.name ?? '').toUpperCase().includes(hint)),
+/*
+ * BOTH CORRIDORS, NOT JUST GHANA — and that is a correction to this script.
+ *
+ * It probed Ghana alone, which is the same shape as the bug it exists to
+ * catch: the first version of the adapter's fix read a Ghana-only table, so
+ * cedis were repaired and shillings went on sending an unsourced `MPS` with
+ * nothing failing. A verification script that checks one of the two countries
+ * it names in its own header would have reported everything fine.
+ *
+ * The hints mirror `NETWORK_NAME_HINTS` in the adapter. `MPESA` is listed
+ * beside `M-PESA` because a name is matched by CONTAINMENT and neither string
+ * contains the other.
+ */
+const CORRIDORS = [
+  {
+    iso: 'GH',
+    name: 'Ghana',
+    banks: ghanaBanks,
+    hints: ['MTN', 'VODAFONE', 'TELECEL', 'AIRTELTIGO', 'TIGO', 'AIRTEL'],
+    /* Their documentation says a Ghanaian wallet transfer carries one. */
+    branchCode: true,
+    ours: 'MTN/VOD/ATL',
+  },
+  {
+    iso: 'KE',
+    name: 'Kenya',
+    banks: undefined,
+    hints: ['M-PESA', 'MPESA', 'SAFARICOM'],
+    branchCode: false,
+    ours: 'MPS',
+  },
+];
+
+for (const corridor of CORRIDORS) {
+  const list =
+    corridor.banks ??
+    (await probe(`GET /v3/banks/${corridor.iso}`, 'GET', `/v3/banks/${corridor.iso}`));
+  if (!Array.isArray(list)) continue;
+
+  const telcos = list.filter((b) =>
+    corridor.hints.some((hint) => String(b?.name ?? '').toUpperCase().includes(hint)),
   );
   console.log('');
-  console.log(`Ghana list: ${ghanaBanks.length} entries, ${telcos.length} look like a telco.`);
+  console.log(`${corridor.name} list: ${list.length} entries, ${telcos.length} look like a telco.`);
   if (telcos.length === 0) {
     console.log(
-      'FAIL — no mobile money network is in Flutterwave\'s Ghana list. The adapter ' +
-        'falls back to MTN/VOD/ATL, which nothing here sources from Flutterwave. ' +
-        'Ask their support for the account_bank values a GHS wallet transfer takes.',
+      `FAIL — no mobile money network is in Flutterwave's ${corridor.name} list. The ` +
+        `adapter falls back to ${corridor.ours}, which nothing here sources from ` +
+        'Flutterwave. Ask their support for the account_bank values a wallet transfer ' +
+        `takes in ${corridor.name}.`,
     );
     failures += 1;
   }
   for (const telco of telcos) {
     console.log(`  account_bank=${telco.code}  id=${telco.id}  ${telco.name}`);
-    if (telco?.id === undefined) continue;
+    if (!corridor.branchCode || telco?.id === undefined) continue;
     const branches = await probe(
       `  GET /v3/banks/${telco.id}/branches`,
       'GET',
