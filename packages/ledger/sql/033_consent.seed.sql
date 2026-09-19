@@ -13,20 +13,27 @@
 -- ============================================================================
 
 INSERT INTO consent_documents (kind, version, body_sha256, summary) VALUES
-  ('terms', '2026-08-25',
-   '56e2b8389f74f0a0d5e53ef06fe403553d8d7628e13fb8c1a6af7573605030f3',
-   'The terms on which Xetral holds and moves your money, including what '
-   'happens when something goes wrong and how to complain.'),
+  -- Republished by 074 when the pages stopped naming `[registered company
+  -- name]` as the contracting party. THE SEED IS THE FRESH-DATABASE PATH ONLY:
+  -- an existing database cannot be moved by editing a row here, because both
+  -- versions would be live and `consent_one_current_per_kind` refuses that.
+  -- 074 retires and republishes, and is idempotent so this pair stays correct.
+  ('terms', '2026-09-19',
+   '866c9d5e52b5511048facae0eb2343709d4ae52d4c52984dbf10ad4a68ea72fb',
+   'The terms on which Xetral Ltd holds and moves your money, including who '
+   'may open an account, what cannot be undone, and how to complain.'),
 
-  -- Republished when the rights section stopped describing a form to write
-  -- to and started describing a screen that works. Retiring the August 25
-  -- version puts every existing customer on `consent_outstanding`, which is
-  -- the mechanism doing its job rather than a nuisance: a change nobody was
-  -- asked about is a change nobody agreed to.
-  ('privacy', '2026-08-28',
-   '7d1f89e9da0b2dbd16d30befbebd40fb9b9580ed14f2dc4139f89d5b25599cb0',
-   'What personal data we hold, why, how long we keep it, and the rights you '
-   'have over it under the NDPA.'),
+  -- Republished by 074. The list of companies that receive personal data was
+  -- wrong in BOTH directions — it named Resend, which is not in this codebase,
+  -- and omitted Paystack, the default funding rail — so the correction is one
+  -- every customer has to be asked about. Retiring a version puts them all on
+  -- `consent_outstanding`, which is the mechanism doing its job rather than a
+  -- nuisance: a change nobody was asked about is a change nobody agreed to.
+  ('privacy', '2026-09-19',
+   '6c83b172c42a68b354c16949d1bcfc33f70c01dc22a3d78bd9299664a8c95f78',
+   'What personal data Xetral Ltd holds, why, exactly which companies receive '
+   'it and what reaches them, how long it is kept, and how to get a copy or '
+   'have it erased.'),
 
   ('marketing_email', '2026-08-25',
    -- Not a page: this is the exact wording of the opt-in, hashed so the

@@ -1467,10 +1467,13 @@ Findings from building it:
     finishes in milliseconds — the lock is now genuinely held by another
     connection while the sweep is asked to run.
 
-**Before publishing, an operator must:** replace the bracketed company name,
-registered address, DPO address and NDPC reference in `apps/web/src/app/legal/`,
-have the terms reviewed by a Nigerian lawyer, grant `dispute_reviewer` to real
-people, and set `RETENTION_INTERVAL_SECONDS` on exactly one instance.
+**Before publishing, an operator must:** have the terms reviewed by a Nigerian
+lawyer, register with the NDPC and add the reference to the privacy notice,
+grant `dispute_reviewer` to real people, and set `RETENTION_INTERVAL_SECONDS`
+on exactly one instance. The company name, registered address and contact
+address are no longer bracketed placeholders — they live in
+`apps/web/src/lib/company.ts` and `legal-content.test.ts` fails the build on a
+`[bracketed]` value returning to either page.
 
 ---
 

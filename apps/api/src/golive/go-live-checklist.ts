@@ -1757,16 +1757,18 @@ export const ACTIONS: readonly Item[] = [
       'suite fails on one, because unmonitored has to be a visible state.',
   },
   {
-    name: 'replace the bracketed fields in the legal pages',
+    name: 'register with the NDPC, and add the reference to the privacy notice',
     kind: 'action',
     failure: 'wrong-by-default',
     ifMissed:
-      'SIX placeholders across `terms/page.tsx` and `privacy/page.tsx` — the ' +
-      'registered company name (twice), the registered address, the DPO ' +
-      'address (twice) and the NDPC registration reference. A privacy notice ' +
-      'promising rights in the name of `[registered company name]` is a ' +
-      'commitment already being broken, in writing, on the page a regulator ' +
-      'reads first.',
+      'THE PAGE DELIBERATELY CLAIMS NO REGISTRATION. It used to — one of six ' +
+      'bracketed placeholders, since replaced by `lib/company.ts` and guarded ' +
+      'by `legal-content.test.ts`, which fails the build on a `[bracketed]` ' +
+      'value and on a reintroduced registration claim. Registration is a real ' +
+      'obligation for a controller of major importance and a claim a ' +
+      'regulator can check in an afternoon, so the notice states the rights ' +
+      'and the contact and says nothing about a reference until there is one. ' +
+      'Saying nothing is not a breach; saying something untrue is.',
   },
   {
     name: 'have the terms reviewed by a Nigerian lawyer',

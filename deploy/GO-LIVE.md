@@ -104,11 +104,14 @@ being a list.
    what the NFIU currently requires; the seeded figure is a starting point, and
    a programme running on a number somebody copied from a migration is a
    finding. Neither it nor `vat_basis_points` is tax or legal advice.
-9. **Replace the bracketed fields** in `apps/web/src/app/legal/` — company
-   name, registered address, DPO address, NDPC reference — and have the terms
-   read by a Nigerian lawyer. A privacy notice promising rights in the name of
-   `[COMPANY]` is a commitment already being broken, in writing, on the page a
-   regulator reads first.
+9. **Register with the NDPC** and add the reference to the privacy notice,
+   and have the terms read by a Nigerian lawyer. The company name, registered
+   address and contact address are no longer bracketed — they are in
+   `apps/web/src/lib/company.ts`, and `legal-content.test.ts` fails the build
+   on a `[bracketed]` value returning to either page, on a company named there
+   with no adapter, and on a provider adapter neither list has decided about.
+   The page deliberately claims no NDPC registration until there is one:
+   saying nothing is not a breach, and saying something untrue is.
 10. **Rehearse a restore.** `deploy/standby/restore-drill.sh`. An untested
     backup is a hope with a cron entry, and a truncated copy starts perfectly.
 11. **Rotate every credential used during testing.** A sandbox key pasted into

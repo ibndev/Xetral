@@ -338,6 +338,73 @@ queue at `/admin/consents`.
   correct resting state, not a task; listing it would turn "declined" into a
   queue somebody works through.
 
+### What the legal pages say, and who actually gets your data — non-obvious rules
+
+`apps/web/src/lib/company.ts`, `apps/web/src/lib/processors.ts`, guarded by
+`legal-content.test.ts`. Republished by `packages/ledger/sql/074_consent_republish.sql`.
+
+- **SIX BRACKETED PLACEHOLDERS WERE LIVE ON THE PAGE A REGULATOR READS FIRST.**
+  `[registered company name]`, `[registered address]`, `[dpo@ address]` and
+  `[NDPC registration reference]` — so the document customers were agreeing to
+  named a BRACKET as the contracting party. The go-live checklist listed them,
+  which is the weaker instrument: a checklist is read once by whoever deploys,
+  and a build failure is read by whoever reintroduces one.
+- **THE PROCESSOR LIST WAS WRONG IN BOTH DIRECTIONS, WHICH IS WORSE THAN A
+  VAGUE ONE.** It named `Resend`, which has never been in this codebase —
+  Brevo has been the notification adapter since 048. It named Airalo and
+  Twilio, which receive a product code and an opaque reference of ours:
+  `{ package_id, quantity, description: "xetral:<ref>" }` and
+  `{ PhoneNumber, FriendlyName: "xetral:<ref>" }`. And it OMITTED **Paystack**,
+  the default funding rail since 044 and therefore the company almost every
+  Nigerian customer's name, email and phone number actually reaches. The
+  recipient most customers had was the one the notice did not mention.
+- **SO IT IS DERIVED FROM THE SEND PATH, NOT FROM THE PROVIDER LIST.** A
+  provider this platform integrates with is not automatically a recipient of
+  personal data. `legal-content.test.ts` checks both directions: every company
+  named must have an adapter directory, and every adapter must be accounted
+  for as receiving something or receiving nothing. The second is the half that
+  goes stale silently — adding a provider is a visible change, remembering the
+  privacy notice is not.
+- **NO BVN, DATE OF BIRTH OR ADDRESS REACHES ANY PROVIDER, and that is
+  structural rather than a policy.** `kyc.service.ts` mints
+  `provider_customers.provider_customer_id` as `xetral-<uuid>` — a string we
+  invent — and makes NO provider call at all. Paystack's
+  `/customer/:code/identification`, the endpoint a BVN would go to, is declared
+  in the endpoint table and called from nowhere.
+- **THERE IS NO DOCUMENT UPLOAD.** `kyc_submissions` holds typed fields and has
+  no column for a file; nothing in the app opens a camera or a picker. The
+  notice said "the identity document you upload" for months about a feature
+  that does not exist — a false claim in the flattering direction, which is
+  still false.
+- **THE PAGE DELIBERATELY CLAIMS NO NDPC REGISTRATION.** It used to. A
+  registration is a claim a regulator can check in an afternoon, so the notice
+  states the rights and the contact and says nothing until there is a reference
+  to state. Saying nothing is not a breach; saying something untrue is. The
+  guard fails the build if the claim returns.
+- **EDITING EITHER PAGE IS A RED BUILD, and the fix is 033's own rule applied
+  to itself.** `consent-documents.test.ts` recomputes the hash from the page,
+  so a change to the words needs a new version — and a new version needs a
+  MIGRATION, not a seed edit. The seed is the fresh-database path only: on a
+  live database both versions would be live at once and
+  `consent_one_current_per_kind` refuses that, so an edited seed RAISES rather
+  than updating, and `ON CONFLICT (kind, version)` does not catch it because
+  the collision is on the index. 074 retires then publishes, and is idempotent.
+- **A SQL SUITE MUST NOT HARDCODE A VERSION IT DOES NOT OWN.**
+  `033_consent.test.sql` asserted `'2026-08-25'` — the seeded terms — and went
+  red the day 074 legitimately moved it. It reads the live version through
+  `set_config` now. For the same reason 074's own suite asserts PROPERTIES
+  rather than "the live version is 2026-09-19": 033's test runs first on the
+  shared invariant database and publishes its own `2026-09-01` to prove
+  supersession works.
+- **THE RETENTION TABLE WAS 2,900px OF BLANK ON A PHONE.** `.legal-table` was
+  `min-width: 520px` in an `overflow-x` box inside a 390px viewport, so every
+  answer sat off-screen behind a scroll nobody can see was there, and on a
+  laptop the squeezed middle column wrapped a four-word period onto seven
+  lines. It is a grid with ARIA table roles now — three columns on a laptop,
+  stacked cards on a phone, no horizontal scroll at 320px — and the rows break
+  out of the 68ch prose measure, because that measure is a rule about
+  SENTENCES.
+
 ### Data rights — non-obvious rules
 
 Schema: `packages/ledger/sql/034_data_rights.sql`. Service in
@@ -3890,6 +3957,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/070_payout_methods.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/071_flutterwave_v4_and_ghana_bank.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/072_activate_account_gh_ke.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/073_platform_float.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/074_consent_republish.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -3961,6 +4029,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/070_payout_methods.test
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/071_flutterwave_v4_and_ghana_bank.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/072_activate_account_gh_ke.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/073_platform_float.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/074_consent_republish.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

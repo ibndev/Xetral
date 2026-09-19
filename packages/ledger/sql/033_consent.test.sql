@@ -167,6 +167,15 @@ BEGIN
         RAISE EXCEPTION 'TEST FAILED: a customer who agreed is listed as outstanding';
     END IF;
 
+    -- THE VERSION SHE AGREED TO IS WHATEVER THE SEED PUBLISHED, and reading
+    -- it rather than naming it is what stops this suite breaking every time
+    -- the terms are legitimately republished. It hardcoded '2026-08-25' and
+    -- went red the day 074 moved the seed to '2026-09-19' — a test asserting
+    -- a fact about a document it does not own.
+    PERFORM set_config('xetral.agreed_terms_version',
+                       (SELECT version FROM consent_documents
+                         WHERE kind = 'terms' AND retired_at IS NULL), false);
+
     UPDATE consent_documents SET retired_at = now()
      WHERE kind = 'terms' AND retired_at IS NULL;
     INSERT INTO consent_documents (kind, version, body_sha256, summary)
@@ -194,7 +203,7 @@ BEGIN
     IF v_covers THEN
         RAISE EXCEPTION 'TEST FAILED: a superseded consent reads as current';
     END IF;
-    IF v_version <> '2026-08-25' THEN
+    IF v_version <> current_setting('xetral.agreed_terms_version') THEN
         RAISE EXCEPTION 'TEST FAILED: the record names % rather than what they read', v_version;
     END IF;
     RAISE NOTICE 'PASS: the record says which words, not just yes';
@@ -204,7 +213,8 @@ END $$;
 DO $$
 BEGIN
     UPDATE consent_documents SET retired_at = NULL
-     WHERE kind = 'terms' AND version = '2026-08-25';
+     WHERE kind = 'terms'
+       AND version = current_setting('xetral.agreed_terms_version');
     RAISE EXCEPTION 'TEST FAILED: a superseded document was made current again';
 EXCEPTION WHEN restrict_violation THEN
     RAISE NOTICE 'PASS: retirement is final';
