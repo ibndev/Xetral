@@ -13,6 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../app.module.js';
 import { systemClock } from '../tokens.js';
 import { testApiConfig } from '../test-support/api-config.js';
+import { pinListener } from '../test-support/listener.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { SpendingLimitService } from './spending-limits.service.js';
 
@@ -178,6 +179,10 @@ beforeAll(async () => {
   }).compile();
   app = mod.createNestApplication(new ExpressAdapter());
   await app.init();
+  // This suite fires ten SIMULTANEOUS transfers to prove the daily-ceiling
+  // advisory lock holds. That needs real concurrency, and real concurrency is
+  // exactly what makes supertest's per-request listen/close unsafe.
+  await pinListener(app);
   settings = app.get(SettingsService);
 
   const current = await pool.query<{ key: string; value: string }>(

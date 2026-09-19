@@ -26,6 +26,7 @@ import { systemClock } from '../tokens.js';
 import { testApiConfig } from '../test-support/api-config.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { approveKyc } from '../test-support/kyc-fixture.js';
+import { pinListener } from '../test-support/listener.js';
 
 /**
  * Sending money to a bank, end to end.
@@ -258,6 +259,9 @@ beforeAll(async () => {
   ledger = new LedgerService(pool);
   port = new FakePayoutPort();
   app = await boot(makeConfig());
+  // Bind once for the file. Without this, two requests started in the same
+  // tick each bind and each close the same server — see `pinListener`.
+  await pinListener(app);
 
   for (const [key, value] of Object.entries(PINNED)) {
     await pool.query(`UPDATE platform_settings SET value = $2 WHERE key = $1`, [key, value]);
