@@ -104,14 +104,23 @@ being a list.
    what the NFIU currently requires; the seeded figure is a starting point, and
    a programme running on a number somebody copied from a migration is a
    finding. Neither it nor `vat_basis_points` is tax or legal advice.
-9. **Register with the NDPC** and add the reference to the privacy notice,
-   and have the terms read by a Nigerian lawyer. The company name, registered
-   address and contact address are no longer bracketed — they are in
-   `apps/web/src/lib/company.ts`, and `legal-content.test.ts` fails the build
-   on a `[bracketed]` value returning to either page, on a company named there
-   with no adapter, and on a provider adapter neither list has decided about.
-   The page deliberately claims no NDPC registration until there is one:
-   saying nothing is not a breach, and saying something untrue is.
+9. **Read the legal pages against the system.** The terms have been reviewed,
+   and the company name, registered address and contact address are no longer
+   bracketed — they are in `apps/web/src/lib/company.ts`. `legal-content.test.ts`
+   fails the build on a `[bracketed]` value returning to either page, on a
+   company named as called by our code with no adapter, on a provider adapter
+   neither list has decided about, and on a reintroduced NDPC registration
+   claim — the page deliberately claims none until the filing is made, because
+   saying nothing is not a breach and saying something untrue is.
+
+   **The half no guard can derive is a recipient our code never calls.** Dojah
+   receives a name, a date of birth and a BVN because a reviewer types them
+   into Dojah's own dashboard; there is no adapter, so no amount of reading the
+   send path finds it. It is `via: 'operator'` in `lib/processors.ts` with the
+   reason attached, and the guard holds it to the opposite requirement — the
+   day a `packages/providers/src/dojah` appears, that check goes red and the
+   notice has to be rewritten from the request body. Anything else a person
+   sends by hand belongs there too, and only a person can put it there.
 10. **Rehearse a restore.** `deploy/standby/restore-drill.sh`. An untested
     backup is a hope with a cron entry, and a truncated copy starts perfectly.
 11. **Rotate every credential used during testing.** A sandbox key pasted into

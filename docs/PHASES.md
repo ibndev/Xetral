@@ -1467,10 +1467,11 @@ Findings from building it:
     finishes in milliseconds — the lock is now genuinely held by another
     connection while the sweep is asked to run.
 
-**Before publishing, an operator must:** have the terms reviewed by a Nigerian
-lawyer, register with the NDPC and add the reference to the privacy notice,
-grant `dispute_reviewer` to real people, and set `RETENTION_INTERVAL_SECONDS`
-on exactly one instance. The company name, registered address and contact
+**Before publishing, an operator must:** grant `dispute_reviewer` to real
+people, and set `RETENTION_INTERVAL_SECONDS` on exactly one instance. The
+terms have since been reviewed, and NDPC registration is deferred until the
+filing is made — the notice claims none, and `legal-content.test.ts` fails the
+build on a claim returning. The company name, registered address and contact
 address are no longer bracketed placeholders — they live in
 `apps/web/src/lib/company.ts` and `legal-content.test.ts` fails the build on a
 `[bracketed]` value returning to either page.

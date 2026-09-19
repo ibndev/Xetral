@@ -31,7 +31,7 @@ export const metadata: Metadata = {
  */
 export default function Privacy() {
   return (
-    <LegalPage title="Privacy notice" updated="19 September 2026">
+    <LegalPage title="Privacy notice" updated="20 September 2026">
       <p className="legal-lede">
         This notice explains what {COMPANY.tradingName} collects about you, why,
         who else sees it, how long it is kept and what you can ask us to do with
@@ -63,7 +63,10 @@ export default function Privacy() {
           these before you can hold money, receive an account number or be
           issued a card, and we cannot offer those services without them. You
           type them in: there is no document upload and the app never opens
-          your camera.
+          your camera. Your name, date of birth and Bank Verification Number
+          are checked with <strong>Dojah Inc.</strong>, an identity
+          verification company licensed in Nigeria — that is the only place any
+          of them goes.
         </dd>
 
         <dt>What you do with your money</dt>
@@ -207,11 +210,13 @@ export default function Privacy() {
 
       <p>
         <strong>
-          Your date of birth, your address and your Bank Verification Number
-          are not sent to any of them.
+          Only Dojah is given your date of birth or your Bank Verification
+          Number, and only to check them.
         </strong>{' '}
-        Verification happens here, against details encrypted here and reviewed
-        by our own staff. No provider is given them.
+        Your address is checked by our own reviewers and goes to nobody at all.
+        The companies that move your money are told the amount, the currency
+        and where it is going — never the details you gave us to prove who you
+        are.
       </p>
 
       <p>

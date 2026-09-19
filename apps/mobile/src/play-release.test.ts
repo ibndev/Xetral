@@ -73,6 +73,42 @@ describe('both workflows check the manifest the same way', () => {
     }
   });
 
+  it('both also check the manifest that becomes the artifact', () => {
+    /*
+     * THE SOURCE MANIFEST IS SEVEN PERMISSIONS AND THE APK SHIPS THIRTEEN.
+     * The other nine are merged in from the native modules' own manifests at
+     * build time, so the run before the build is structurally incapable of
+     * seeing them — which is how READ_MEDIA_IMAGES came to be on the install
+     * screen of an app that opens no picker and no camera.
+     *
+     * The same shape as the AAB signing check: interrogate what the build
+     * produced, not the configuration that produced it. Asserted here because
+     * the pre-build run passes on its own and looks like the whole check.
+     */
+    for (const [name, workflow] of [
+      ['mobile-apk.yml', APK_WORKFLOW],
+      ['mobile-aab.yml', AAB_WORKFLOW],
+    ] as const) {
+      expect(
+        workflow,
+        `${name} checks the source manifest and never the merged one`,
+      ).toContain(`${PERMISSION_SCRIPT} --merged`);
+    }
+  });
+
+  it('the merged run refuses to pass when it cannot find its input', () => {
+    // A check that does nothing when its input is missing is the
+    // reconciliation check that reported through a SELECT and exited zero.
+    // The AGP output path moves between plugin versions, so this is the
+    // failure that will actually happen one day.
+    const script = readFileSync(
+      new URL('../scripts/assert-permissions.sh', import.meta.url),
+      'utf8',
+    );
+    expect(script).toContain('--merged');
+    expect(script).toContain('no merged manifest under');
+  });
+
   it('the script refuses a permission that would ship AND one that is blocked', () => {
     // BOTH DIRECTIONS, because the failing one is not the obvious one: a typo
     // in `blockedPermissions` marks something the app NEEDS for removal, the
@@ -90,6 +126,10 @@ describe('both workflows check the manifest the same way', () => {
       'SYSTEM_ALERT_WINDOW',
       'READ_EXTERNAL_STORAGE',
       'WRITE_EXTERNAL_STORAGE',
+      // Blocked on the strength of a decision rather than of the template:
+      // expo-notifications wants it for a picture in a notification and this
+      // app sends none.
+      'READ_MEDIA_IMAGES',
       'INTERNET',
       'USE_BIOMETRIC',
     ]) {

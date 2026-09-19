@@ -23,14 +23,25 @@ INSERT INTO consent_documents (kind, version, body_sha256, summary) VALUES
    'The terms on which Xetral Ltd holds and moves your money, including who '
    'may open an account, what cannot be undone, and how to complain.'),
 
-  -- Republished by 074. The list of companies that receive personal data was
-  -- wrong in BOTH directions — it named Resend, which is not in this codebase,
-  -- and omitted Paystack, the default funding rail — so the correction is one
-  -- every customer has to be asked about. Retiring a version puts them all on
-  -- `consent_outstanding`, which is the mechanism doing its job rather than a
-  -- nuisance: a change nobody was asked about is a change nobody agreed to.
-  ('privacy', '2026-09-19',
-   '6c83b172c42a68b354c16949d1bcfc33f70c01dc22a3d78bd9299664a8c95f78',
+  -- Republished by 074, then again by 075.
+  --
+  -- 074's correction was the list of companies that receive personal data,
+  -- which was wrong in BOTH directions: it named Resend, which is not in this
+  -- codebase, and omitted Paystack, the default funding rail.
+  --
+  -- 075's is the one that list could never have found. The notice said, in
+  -- bold, that a date of birth and a BVN are "not sent to any of them" — a
+  -- true reading of a send path that makes no identity call, and false the
+  -- moment a reviewer opens Dojah's dashboard and types one in. A recipient
+  -- our code does not call is outside everything the code can be read for.
+  --
+  -- Retiring a version puts every customer on `consent_outstanding`, which is
+  -- the mechanism doing its job rather than a nuisance: a change nobody was
+  -- asked about is a change nobody agreed to. THE TERMS ARE UNTOUCHED, and
+  -- deliberately — republishing them for a document that did not change would
+  -- ask every customer to agree again to the same words.
+  ('privacy', '2026-09-20',
+   'eb6c32bfbc357c5a8dd85bc3bbe04d3c9f23da7d7bdaf0be6ad3202a3baf6ece',
    'What personal data Xetral Ltd holds, why, exactly which companies receive '
    'it and what reaches them, how long it is kept, and how to get a copy or '
    'have it erased.'),

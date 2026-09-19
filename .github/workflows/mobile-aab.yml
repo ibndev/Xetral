@@ -269,6 +269,15 @@ jobs:
           chmod +x gradlew
           ./gradlew bundleRelease --no-daemon
 
+      - name: And nothing it does not use survived the merge
+        # THE SAME SCRIPT, AGAINST THE FILE THAT BECOMES THE ARTIFACT. The run
+        # above reads the app's own manifest — seven permissions. The merger
+        # adds nine more from the native modules' manifests, and nothing here
+        # had ever seen one of them: READ_MEDIA_IMAGES came in with
+        # expo-notifications, so an app that opens no picker and no camera was
+        # asking a customer for their photos on the install screen.
+        run: ./apps/mobile/scripts/assert-permissions.sh --merged
+
       - name: Prove it is signed with the upload key and not the debug one
         env:
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}

@@ -19,13 +19,47 @@
 # The same argument the fulfilment port makes about three hand-written contract
 # suites, and the two rate-limit backends about two: copies drift into testing
 # different things while both look green. This is the one place the rule lives.
+#
+# AND IT WAS READING THE WRONG FILE, WHICH IS THE LARGER HALF.
+# `android/app/src/main/AndroidManifest.xml` is the app's OWN manifest — seven
+# permissions. The APK ships THIRTEEN. The other nine are merged in from the
+# manifests of the native modules, at build time, and this script could not see
+# one of them: `READ_MEDIA_IMAGES` arrived with `expo-notifications`, and a
+# banking app that can read your photos is the first line a Play reviewer and a
+# customer both read on the install screen.
+#
+# So it runs TWICE: once on the source manifest, where a blocked permission is
+# still a line marked `tools:node="remove"`, and once on the MERGED manifest
+# after the build, where the merger has stripped those lines and added
+# everybody else's. That is the AAB signing check's own rule — interrogate the
+# artifact, not the configuration that produced it — applied to the thing a
+# customer is actually shown.
 set -euo pipefail
 
-manifest=${1:-apps/mobile/android/app/src/main/AndroidManifest.xml}
+# `--merged` rather than a path, because WHERE the merger writes its output
+# moves with the Android Gradle plugin, and two workflows each carrying their
+# own `find` is the second copy this script exists to be instead of.
+if [ "${1:-}" = '--merged' ]; then
+  manifest=$(find apps/mobile/android/app/build/intermediates/merged_manifests \
+             -name AndroidManifest.xml 2>/dev/null | head -1)
+  if [ -z "$manifest" ]; then
+    # NOT A PASS. A check that silently does nothing when it cannot find its
+    # input is the reconciliation check that reported through a SELECT and
+    # exited zero — and this is the run where the permission list is decided.
+    echo "::error::no merged manifest under android/app/build/intermediates."
+    echo "          It is written by the build, so this step must run AFTER"
+    echo "          gradle. If the AGP output path moved, fix it here once."
+    exit 1
+  fi
+else
+  manifest=${1:-apps/mobile/android/app/src/main/AndroidManifest.xml}
+fi
+
 if [ ! -f "$manifest" ]; then
   echo "::error::no manifest at $manifest — did prebuild run?"
   exit 1
 fi
+echo "reading $manifest"
 
 fail=0
 
@@ -33,7 +67,13 @@ fail=0
 # for any of them — so no diff ever showed them. "Display over other apps" on a
 # banking app is a permission a customer can see and reasonably refuse to
 # install over.
-for perm in SYSTEM_ALERT_WINDOW READ_EXTERNAL_STORAGE WRITE_EXTERNAL_STORAGE; do
+#
+# READ_MEDIA_IMAGES is the fourth and it arrived differently: not from the
+# template but from `expo-notifications`, which wants it to put a picture in a
+# notification. This app sends none. Blocking it costs nothing this app uses
+# and removes a line that reads, correctly, as "this app can see my photos".
+for perm in SYSTEM_ALERT_WINDOW READ_EXTERNAL_STORAGE WRITE_EXTERNAL_STORAGE \
+            READ_MEDIA_IMAGES; do
   line=$(grep "permission.$perm" "$manifest" || true)
   if [ -z "$line" ]; then
     echo "ok: $perm is absent"
@@ -74,8 +114,30 @@ done
 # So every permission is compared against a list, and one that is not on it
 # fails the build. The fix when that happens is to decide — add it here with a
 # reason, or block it in `app.json` — which is the point.
+#
+# The second group is what the MERGED manifest adds, and every one of them
+# shipped in an APK before anything here had an opinion about it:
+#
+#   ACCESS_NETWORK_STATE     react-native, to tell an offline failure from a
+#                            server one rather than retrying into nothing
+#   POST_NOTIFICATIONS       expo-notifications; Android 13+ asks the customer
+#   RECEIVE_BOOT_COMPLETED   expo-notifications, to survive a restart
+#   WAKE_LOCK                expo-notifications, to wake the screen for one
+#   BIND_JOB_SERVICE         the scheduler expo-notifications uses
+#   READ_APP_BADGE           the unread count on the launcher icon
+#   DETECT_SCREEN_CAPTURE    expo-screen-capture — the module that stops the
+#                            app switcher photographing a balance
+#   DUMP                     react-native's debug tooling. Signature-level, so
+#                            Android never grants it to an app like this one
+#
+# Listed rather than tolerated: a module added later that pulls in something
+# else fails the build, and the fix is to decide — a reason here, or a line in
+# `app.json`. That is 036's argument about `admin_work_queue`, in a manifest.
 known="INTERNET USE_BIOMETRIC USE_FINGERPRINT VIBRATE \
-       SYSTEM_ALERT_WINDOW READ_EXTERNAL_STORAGE WRITE_EXTERNAL_STORAGE"
+       SYSTEM_ALERT_WINDOW READ_EXTERNAL_STORAGE WRITE_EXTERNAL_STORAGE \
+       READ_MEDIA_IMAGES \
+       ACCESS_NETWORK_STATE POST_NOTIFICATIONS RECEIVE_BOOT_COMPLETED \
+       WAKE_LOCK BIND_JOB_SERVICE READ_APP_BADGE DETECT_SCREEN_CAPTURE DUMP"
 
 for perm in $(grep -o 'android:name="android.permission.[A-Z_]*"' "$manifest" \
               | sed 's/.*permission\.//; s/"//' | sort -u); do

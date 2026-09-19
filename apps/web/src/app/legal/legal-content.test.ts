@@ -89,21 +89,39 @@ describe('the legal pages carry no placeholder', () => {
 
 describe('the notice names exactly the companies that receive something', () => {
   const named = [...PROCESSORS, ...NON_PROCESSORS];
+  const byAdapter = named.filter(
+    (p): p is Extract<typeof p, { via: 'adapter' }> => p.via === 'adapter',
+  );
+  const byOperator = named.filter(
+    (p): p is Extract<typeof p, { via: 'operator' }> => p.via === 'operator',
+  );
 
-  it('every company named has an adapter in this repository', () => {
-    const onDisk = readdirSync(PROVIDERS_SRC, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
+  /** Every directory under `packages/providers/src` that is a company. */
+  function adapterDirectories(): readonly string[] {
+    /*
+     * `ports`, `crypto` and `fx` are not providers: `ports` holds the
+     * interfaces, and the other two are shared arithmetic and address
+     * validation with no company behind them.
+     */
+    const notCompanies = new Set(['ports', 'crypto', 'fx']);
+    return readdirSync(PROVIDERS_SRC, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && !notCompanies.has(entry.name))
       .map((entry) => entry.name);
+  }
+
+  it('every company said to be called has an adapter in this repository', () => {
+    const onDisk = adapterDirectories();
 
     // `Resend` was named for months and has never existed here.
-    const missing = named
+    const missing = byAdapter
       .filter((p) => !onDisk.includes(p.adapter))
       .map((p) => `${p.name} (expected packages/providers/src/${p.adapter})`);
 
     expect(
       missing,
-      'the notice names a company with no adapter — it cannot be receiving ' +
-        'anything, and saying it does is a false statement',
+      'the notice says this company is called by our code and there is no ' +
+        'adapter — either it receives nothing, or it receives it some other ' +
+        'way and belongs under via: "operator"',
     ).toEqual([]);
   });
 
@@ -114,24 +132,49 @@ describe('the notice names exactly the companies that receive something', () => 
      * is not. An adapter absent from both lists is a company nobody decided
      * about — which for Paystack meant the default funding rail went
      * undeclared.
-     *
-     * `ports`, `crypto` and `fx` are not providers: `ports` holds the
-     * interfaces, and the other two are shared arithmetic and address
-     * validation with no company behind them.
      */
-    const notCompanies = new Set(['ports', 'crypto', 'fx']);
-    const onDisk = readdirSync(PROVIDERS_SRC, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && !notCompanies.has(entry.name))
-      .map((entry) => entry.name);
-
-    const accounted = new Set(named.map((p) => p.adapter));
-    const undecided = onDisk.filter((dir) => !accounted.has(dir));
+    const accounted = new Set(byAdapter.map((p) => p.adapter));
+    const undecided = adapterDirectories().filter((dir) => !accounted.has(dir));
 
     expect(
       undecided,
       'a provider adapter nobody has decided about: add it to PROCESSORS if ' +
         'it receives anything identifying, or to NON_PROCESSORS if it does not',
     ).toEqual([]);
+  });
+
+  it('a company we say a PERSON sends to has no adapter', () => {
+    /*
+     * THE OPPOSITE REQUIREMENT, and it is what stops the notice describing a
+     * route that has been replaced. Dojah receives a name, a date of birth and
+     * a BVN today because a reviewer types them into Dojah's own dashboard —
+     * there is no code path, which is exactly why deriving the notice from the
+     * send path could never have found it.
+     *
+     * The day an adapter lands, how the data gets there changes, what is sent
+     * changes with it, and this goes red rather than the notice quietly
+     * describing the old arrangement. A guard that only ever fires on an
+     * omission cannot see an entry that has become out of date.
+     */
+    const onDisk = adapterDirectories();
+    const nowIntegrated = byOperator
+      .filter((p) => onDisk.includes(p.watchFor))
+      .map((p) => `${p.name} (packages/providers/src/${p.watchFor} now exists)`);
+
+    expect(
+      nowIntegrated,
+      'this company now has an adapter, so our code sends to it: move it to ' +
+        'via: "adapter" and rewrite `receives` from the request body',
+    ).toEqual([]);
+  });
+
+  it('a company with no adapter says why there is none', () => {
+    // Without this, `via: "operator"` is a way to name anybody at all. The
+    // reason has to be checkable against the tree by whoever reads it.
+    for (const p of byOperator) {
+      expect(p.why.length, `${p.name} does not say why it has no adapter`)
+        .toBeGreaterThan(40);
+    }
   });
 
   it('says what each one receives, in words a customer can check', () => {
@@ -154,6 +197,25 @@ describe('the notice names exactly the companies that receive something', () => 
       expect(source, `${name} claims an NDPC registration reference`).not.toMatch(
         /registered with the Nigeria Data Protection Commission under/i,
       );
+    }
+  });
+
+  it('does not claim nobody receives an identity detail', () => {
+    /*
+     * IT DID, AND IT WAS TRUE WHEN IT WAS WRITTEN. "Your date of birth, your
+     * address and your Bank Verification Number are not sent to any of them"
+     * was derived correctly from a send path that makes no identity call —
+     * and it was false the moment a reviewer opened Dojah, because the route
+     * a person takes is not in the code the sentence was derived from.
+     *
+     * An absolute denial is the one shape that cannot survive that, so the
+     * absolute is what is banned. The page says what IS sent and to whom.
+     */
+    for (const [name, source] of PAGES) {
+      expect(
+        source,
+        `${name} denies sending an identity detail to anybody at all`,
+      ).not.toMatch(/not sent to any of them|No provider is given them/i);
     }
   });
 });

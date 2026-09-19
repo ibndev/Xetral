@@ -341,7 +341,8 @@ queue at `/admin/consents`.
 ### What the legal pages say, and who actually gets your data — non-obvious rules
 
 `apps/web/src/lib/company.ts`, `apps/web/src/lib/processors.ts`, guarded by
-`legal-content.test.ts`. Republished by `packages/ledger/sql/074_consent_republish.sql`.
+`legal-content.test.ts`. Republished by `packages/ledger/sql/074_consent_republish.sql`
+and `075_privacy_republish.sql`.
 
 - **SIX BRACKETED PLACEHOLDERS WERE LIVE ON THE PAGE A REGULATOR READS FIRST.**
   `[registered company name]`, `[registered address]`, `[dpo@ address]` and
@@ -396,6 +397,43 @@ queue at `/admin/consents`.
   rather than "the live version is 2026-09-19": 033's test runs first on the
   shared invariant database and publishes its own `2026-09-01` to prove
   supersession works.
+- **AND THEN THE DERIVATION ITSELF WAS THE THING THAT WAS WRONG.** The notice
+  said, in bold, that a date of birth and a BVN are "not sent to any of them",
+  and every reading of the send path agrees: `kyc.service.ts` makes no provider
+  call, Paystack's identification endpoint is called from nowhere, and the
+  guard checked the processor list against the adapters on disk in both
+  directions and was green throughout. **IDENTITY IS VERIFIED WITH DOJAH, AND
+  THERE IS NO DOJAH ADAPTER** — 026's three slots are `in_use = FALSE` and
+  nothing in the tree calls them, so a reviewer puts the details to Dojah's own
+  dashboard. A NOTICE DERIVED FROM THE SEND PATH IS EXACTLY AS COMPLETE AS THE
+  SEND PATH, and what a person does by hand is outside it. Ask a person which
+  third parties receive customer data; do not infer it from the repository.
+- **SO A RECIPIENT IS `via: 'adapter'` OR `via: 'operator'`, NEVER A NULLABLE
+  DIRECTORY.** A null reads as an omission somebody forgot to fill in; the
+  discriminator is a decision with a reason attached, and the guard holds the
+  second kind to the OPPOSITE requirement — an operator-backed entry must have
+  NO adapter directory, so the day `packages/providers/src/dojah` appears the
+  build goes red and the notice is rewritten from the request body. A guard
+  that only ever fires on an omission cannot see an entry that has gone stale.
+- **AN ABSOLUTE DENIAL IS THE ONE SHAPE THAT CANNOT SURVIVE BEING WRONG
+  ONCE**, so `legal-content.test.ts` now fails the build on one returning. The
+  page says what IS sent and to whom.
+- **074 WOULD HAVE LEFT EVERY FRESH DEPLOYMENT WITH NO LIVE PRIVACY NOTICE,
+  and 075 is what found it.** It retired `version <> '2026-09-19'` — anything
+  that was not its own — and the seed publishes the CURRENT document, which
+  after 075 is NEWER. So on a fresh database 074 retired 2026-09-20, published
+  2026-09-19 over it, and 075 could not put it back: retirement is final by
+  trigger, so `ON CONFLICT DO NOTHING` found the row there and retired. Proved
+  by running it, not by reading it — `live_privacy` came back **0**. A
+  republish must say "move it forward to here if it is behind", never "make it
+  exactly this", so both the retire (`version <`) and the INSERT (`NOT EXISTS`
+  something newer) are guarded. Nothing would have reported it either:
+  `consent_outstanding` joins to a current document, so with none it lists
+  nobody, which looks exactly like a queue with nothing in it.
+- **A REPUBLISH MOVES ONLY WHAT CHANGED.** 075 leaves the terms alone. Retiring
+  a version puts every customer on `consent_outstanding`, and asking somebody
+  to agree again to words that did not change is how that queue stops meaning
+  anything — 074's own argument about the marketing opt-in, applied to a page.
 - **THE RETENTION TABLE WAS 2,900px OF BLANK ON A PHONE.** `.legal-table` was
   `min-width: 520px` in an `overflow-x` box inside a 390px viewport, so every
   answer sat off-screen behind a scroll nobody can see was there, and on a
@@ -3958,6 +3996,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/071_flutterwave_v4_and_
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/072_activate_account_gh_ke.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/073_platform_float.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/074_consent_republish.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/075_privacy_republish.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -4030,6 +4069,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/071_flutterwave_v4_and_
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/072_activate_account_gh_ke.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/073_platform_float.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/074_consent_republish.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/075_privacy_republish.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

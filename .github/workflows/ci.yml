@@ -160,6 +160,7 @@ jobs:
             -f packages/ledger/sql/072_activate_account_gh_ke.sql \
             -f packages/ledger/sql/073_platform_float.sql \
             -f packages/ledger/sql/074_consent_republish.sql \
+            -f packages/ledger/sql/075_privacy_republish.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       - name: Ledger and identity invariants
@@ -241,6 +242,7 @@ jobs:
                    packages/ledger/sql/072_activate_account_gh_ke.test.sql \
                    packages/ledger/sql/073_platform_float.test.sql \
                    packages/ledger/sql/074_consent_republish.test.sql \
+                   packages/ledger/sql/075_privacy_republish.test.sql \
                    packages/ledger/sql/099_least_privilege.test.sql; do
             echo "== $f"
             psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
@@ -354,6 +356,7 @@ jobs:
             -f packages/ledger/sql/072_activate_account_gh_ke.sql \
             -f packages/ledger/sql/073_platform_float.sql \
             -f packages/ledger/sql/074_consent_republish.sql \
+            -f packages/ledger/sql/075_privacy_republish.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       # ------------------------------------------------------------------

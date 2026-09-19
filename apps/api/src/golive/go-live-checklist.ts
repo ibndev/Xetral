@@ -1757,24 +1757,19 @@ export const ACTIONS: readonly Item[] = [
       'suite fails on one, because unmonitored has to be a visible state.',
   },
   {
-    name: 'register with the NDPC, and add the reference to the privacy notice',
+    name: 'check the legal pages still describe the system',
     kind: 'action',
     failure: 'wrong-by-default',
     ifMissed:
-      'THE PAGE DELIBERATELY CLAIMS NO REGISTRATION. It used to — one of six ' +
-      'bracketed placeholders, since replaced by `lib/company.ts` and guarded ' +
-      'by `legal-content.test.ts`, which fails the build on a `[bracketed]` ' +
-      'value and on a reintroduced registration claim. Registration is a real ' +
-      'obligation for a controller of major importance and a claim a ' +
-      'regulator can check in an afternoon, so the notice states the rights ' +
-      'and the contact and says nothing about a reference until there is one. ' +
-      'Saying nothing is not a breach; saying something untrue is.',
-  },
-  {
-    name: 'have the terms reviewed by a Nigerian lawyer',
-    kind: 'action',
-    failure: 'wrong-by-default',
-    ifMissed: 'nothing here is legal advice, and the pages say so.',
+      'TWO ENTRIES USED TO SIT HERE — register with the NDPC, and have the ' +
+      'terms read by a Nigerian lawyer — and both are settled: the review is ' +
+      'done, and registration is deferred until the filing is made, which is ' +
+      'why the page claims none and `legal-content.test.ts` fails the build ' +
+      'on a reintroduced claim. What is NOT settled is that the pages are ' +
+      'generated from the system: the retention periods from the settings the ' +
+      'deletion job reads, and the recipients from the adapters. A recipient ' +
+      'no adapter can show — a company a PERSON sends to, as Dojah is today — ' +
+      'is the half no guard can derive, so it is the half to read.',
   },
   {
     name: 'run a restore drill',

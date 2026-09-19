@@ -21,32 +21,101 @@
  *
  * SO THIS IS DERIVED FROM THE SEND PATH, NOT FROM THE PROVIDER LIST. A
  * provider this platform integrates with is not automatically a recipient of
- * personal data, and `legal-processors.test.ts` checks the claim in both
- * directions: every name here must have an adapter directory, and every
- * adapter that is not listed here must be listed as sending nothing.
+ * personal data, and `legal-content.test.ts` checks the claim in both
+ * directions: every adapter-backed name here must have an adapter directory,
+ * and every adapter directory must appear in one of these lists.
  *
- * WHAT NOBODY RECEIVES IS THE PART WORTH READING. No identity document, date
- * of birth or BVN reaches any provider. `kyc.service.ts` mints
- * `provider_customers.provider_customer_id` as `xetral-<uuid>` — a string we
- * invent — and makes no provider call at all; Paystack's
- * `/customer/:code/identification`, which is where a BVN would go, is declared
- * in the endpoint table and CALLED FROM NOWHERE. Verification happens here,
- * against documents sealed here, reviewed by people here.
+ * AND THEN A RECIPIENT TURNED UP THAT THE CODE CANNOT SEE AT ALL.
+ *
+ * DOJAH IS USED FOR IDENTITY VERIFICATION AND NOTHING IN THIS REPOSITORY
+ * CALLS IT. `026_provider_credentials.seed.sql` holds three Dojah slots, every
+ * one `in_use = FALSE`; there is no adapter directory, no client and no call
+ * site. So verification happens the only way it can today — a reviewer reading
+ * the submitted details and checking them at Dojah's own dashboard — and that
+ * is a disclosure of a name, a date of birth and a BVN that NO AMOUNT OF
+ * READING THE SEND PATH WOULD EVER HAVE FOUND. A notice derived only from code
+ * is exactly as complete as the code, and a person typing a BVN into somebody
+ * else's web page is outside it.
+ *
+ * THAT IS WHY `via` EXISTS RATHER THAN A NULLABLE `adapter`. A null would read
+ * as an omission somebody forgot to fill in; `via: 'operator'` is a decision
+ * with a reason attached, and the guard holds it to the OPPOSITE requirement —
+ * an operator-backed entry must have NO adapter directory. The day a Dojah
+ * adapter lands, that check goes red and the entry has to be reclassified,
+ * which is the moment the notice would otherwise quietly stop describing how
+ * the data gets there.
+ *
+ * WHAT NOBODY ELSE RECEIVES IS STILL THE PART WORTH READING. Outside
+ * verification, no date of birth, address or BVN reaches any provider.
+ * `kyc.service.ts` mints `provider_customers.provider_customer_id` as
+ * `xetral-<uuid>` — a string we invent — and makes no provider call at all;
+ * Paystack's `/customer/:code/identification`, which is where a BVN would go,
+ * is declared in the endpoint table and CALLED FROM NOWHERE.
  */
-export interface Processor {
+
+/** What a company does for a customer, and what of theirs reaches it. */
+interface Disclosure {
   /** The company, as it trades. */
   readonly name: string;
-  /** The adapter directory under `packages/providers/src/`, for the guard. */
-  readonly adapter: string;
   /** What they do for a customer, in the customer's terms. */
   readonly purpose: string;
   /** Exactly what is sent. Written from the request body, not from memory. */
   readonly receives: string;
 }
 
+/**
+ * A company this platform's own code sends to.
+ *
+ * `adapter` is the directory under `packages/providers/src/`, and the guard
+ * requires it to exist — `Resend` was named here for months and has never been
+ * in this repository.
+ */
+export interface AdapterDisclosure extends Disclosure {
+  readonly via: 'adapter';
+  readonly adapter: string;
+}
+
+/**
+ * A company a PERSON sends to, through that company's own dashboard.
+ *
+ * There is no code path, so there is nothing for the send-path derivation to
+ * find — which is precisely why it has to be written down by hand, with the
+ * reason, rather than left out because a grep came back empty.
+ */
+export interface OperatorDisclosure extends Disclosure {
+  readonly via: 'operator';
+  /**
+   * The adapter directory that WOULD exist if this were integrated.
+   *
+   * Named rather than derived from `name`, so the guard watching for it is
+   * reading a decision instead of guessing at a string. It is what turns "no
+   * adapter" from an absence into an assertion the build can check.
+   */
+  readonly watchFor: string;
+  /** Why no adapter, in a sentence a reviewer can check against the tree. */
+  readonly why: string;
+}
+
+export type Processor = AdapterDisclosure | OperatorDisclosure;
+
 /** Providers that receive something identifying about a customer. */
 export const PROCESSORS: readonly Processor[] = [
   {
+    via: 'operator',
+    name: 'Dojah Inc.',
+    purpose: 'Checking that you are who you say you are',
+    receives:
+      'Your name, date of birth and Bank Verification Number, so that they ' +
+      'can be checked against the records they hold. Nothing about your ' +
+      'balance, your transactions or anybody you pay.',
+    watchFor: 'dojah',
+    why:
+      'No adapter: identity checks are run by our own reviewers at Dojah’s ' +
+      'dashboard, so nothing in this codebase calls them. The credential ' +
+      'slots in 026 are `in_use = FALSE` for that reason.',
+  },
+  {
+    via: 'adapter',
     name: 'Paystack',
     adapter: 'paystack',
     purpose:
@@ -57,6 +126,7 @@ export const PROCESSORS: readonly Processor[] = [
       'and the name the receiving bank returns for it.',
   },
   {
+    via: 'adapter',
     name: 'Flutterwave',
     adapter: 'flutterwave',
     purpose: 'Mobile money in Ghana and Kenya — money in and money out',
@@ -67,6 +137,7 @@ export const PROCESSORS: readonly Processor[] = [
       'somebody pays you through a payment link, their own email address.',
   },
   {
+    via: 'adapter',
     name: 'Bitnob',
     adapter: 'bitnob',
     purpose: 'Virtual dollar cards, crypto, stablecoins and currency conversion',
@@ -77,6 +148,7 @@ export const PROCESSORS: readonly Processor[] = [
       'to them by us and not stored by us.',
   },
   {
+    via: 'adapter',
     name: 'VTpass',
     adapter: 'vtpass',
     purpose: 'Airtime, data, electricity and TV subscriptions',
@@ -86,6 +158,7 @@ export const PROCESSORS: readonly Processor[] = [
       'or somebody else’s — it is not otherwise linked to your account.',
   },
   {
+    via: 'adapter',
     name: 'Brevo',
     adapter: 'brevo',
     purpose: 'The emails we send you',
@@ -94,6 +167,7 @@ export const PROCESSORS: readonly Processor[] = [
       'alert or a password reset code.',
   },
   {
+    via: 'adapter',
     name: 'Expo',
     adapter: 'expo',
     purpose: 'Push notifications to your phone',
@@ -115,6 +189,7 @@ export const PROCESSORS: readonly Processor[] = [
  */
 export const NON_PROCESSORS: readonly Processor[] = [
   {
+    via: 'adapter',
     name: 'Airalo',
     adapter: 'airalo',
     purpose: 'eSIM data packages',
@@ -123,6 +198,7 @@ export const NON_PROCESSORS: readonly Processor[] = [
       'phone number.',
   },
   {
+    via: 'adapter',
     name: 'Twilio',
     adapter: 'twilio',
     purpose: 'Virtual phone numbers',
@@ -131,6 +207,7 @@ export const NON_PROCESSORS: readonly Processor[] = [
       'own number, and nothing that names you.',
   },
   {
+    via: 'adapter',
     name: 'ExchangeRate-API',
     adapter: 'exchangerate',
     purpose: 'Reference exchange rates',

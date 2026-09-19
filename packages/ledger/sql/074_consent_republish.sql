@@ -39,41 +39,74 @@
 --  moment this applies, and that is the mechanism working rather than a
 --  nuisance.
 --
---  IDEMPOTENT, AND THE `WHERE version <>` IS WHAT MAKES IT SO. On a fresh
---  database the seed has already published these versions, so there is nothing
---  to retire and the insert conflicts to nothing. On an existing database the
---  old row is retired and the new one published. Applying it twice does
---  nothing the second time.
+--  IDEMPOTENT, AND `WHERE version <` IS WHAT MAKES IT SO. On an existing
+--  database the old row is retired and the new one published; applying it
+--  twice does nothing the second time. On a fresh database the seed has
+--  already published the CURRENT document — which since 075 is NEWER than
+--  this one — so both halves here must decline to act rather than drag it
+--  backwards. See the comment on the statements: as first written this file
+--  would have left a fresh deployment with no live privacy notice at all.
 -- ============================================================================
 
--- Retire whatever is live and is NOT what we are about to publish. Scoped by
--- kind, so `marketing_email` — unchanged, and the sentence somebody actually
--- ticked — is left exactly where it is.
+-- Retire whatever is live and OLDER than what we are about to publish.
+--
+-- Scoped by kind, so `marketing_email` — unchanged, and the sentence somebody
+-- actually ticked — is left exactly where it is.
+--
+-- `version <` RATHER THAN `version <>`, AND THAT IS A CORRECTION. As `<>` this
+-- migration retired anything that was not its own version, INCLUDING SOMETHING
+-- NEWER — and the newer thing is exactly what a fresh database has, because
+-- `033_consent.seed.sql` publishes the CURRENT document and every republish
+-- since is then a no-op. 075 moved the privacy notice to 2026-09-20, so on a
+-- fresh database this file would have retired it, published 2026-09-19 over
+-- the top, and left 075 unable to put it back: retirement is FINAL by trigger,
+-- so the `ON CONFLICT DO NOTHING` below would have found the 2026-09-20 row
+-- retired and left it that way. A privacy notice with no live version at all,
+-- on every new deployment, from a chain where each file is individually right.
+--
+-- ON EVERY DATABASE THIS FILE WAS WRITTEN FOR, THE TWO SPELLINGS ARE THE SAME
+-- STATEMENT: what was live was 2026-08-25 and 2026-08-28, and both are older.
+-- The change only removes an action that was never wanted.
 UPDATE consent_documents
    SET retired_at = now()
  WHERE kind = 'terms'
    AND retired_at IS NULL
-   AND version <> '2026-09-19';
+   AND version < '2026-09-19';
 
 UPDATE consent_documents
    SET retired_at = now()
  WHERE kind = 'privacy'
    AND retired_at IS NULL
-   AND version <> '2026-09-19';
+   AND version < '2026-09-19';
 
 -- The hashes are of the PAGES THEMSELVES, and `consent-documents.test.ts`
 -- recomputes them from `apps/web/src/app/legal/*/page.tsx` on every build. A
 -- version whose hash has drifted from its words is worse than no version,
 -- because it looks like evidence.
-INSERT INTO consent_documents (kind, version, body_sha256, summary) VALUES
-  ('terms', '2026-09-19',
-   '866c9d5e52b5511048facae0eb2343709d4ae52d4c52984dbf10ad4a68ea72fb',
-   'The terms on which Xetral Ltd holds and moves your money, including who '
-   'may open an account, what cannot be undone, and how to complain.'),
+--
+-- AND THE INSERT IS GUARDED THE SAME WAY THE RETIRE IS. Publishing an older
+-- version beside a live newer one is refused by `consent_one_current_per_kind`
+-- — so without the guard this is not a silent wrong answer but a failed
+-- deployment, which is better and is still not the right one. `NOT EXISTS`
+-- makes running an earlier republish after a later one a no-op, which is the
+-- only sensible meaning it can have.
+INSERT INTO consent_documents (kind, version, body_sha256, summary)
+SELECT 'terms', '2026-09-19',
+       '866c9d5e52b5511048facae0eb2343709d4ae52d4c52984dbf10ad4a68ea72fb',
+       'The terms on which Xetral Ltd holds and moves your money, including who '
+       'may open an account, what cannot be undone, and how to complain.'
+ WHERE NOT EXISTS (
+       SELECT 1 FROM consent_documents
+        WHERE kind = 'terms' AND retired_at IS NULL AND version > '2026-09-19')
+ON CONFLICT (kind, version) DO NOTHING;
 
-  ('privacy', '2026-09-19',
-   '6c83b172c42a68b354c16949d1bcfc33f70c01dc22a3d78bd9299664a8c95f78',
-   'What personal data Xetral Ltd holds, why, exactly which companies receive '
-   'it and what reaches them, how long it is kept, and how to get a copy or '
-   'have it erased.')
+INSERT INTO consent_documents (kind, version, body_sha256, summary)
+SELECT 'privacy', '2026-09-19',
+       '6c83b172c42a68b354c16949d1bcfc33f70c01dc22a3d78bd9299664a8c95f78',
+       'What personal data Xetral Ltd holds, why, exactly which companies receive '
+       'it and what reaches them, how long it is kept, and how to get a copy or '
+       'have it erased.'
+ WHERE NOT EXISTS (
+       SELECT 1 FROM consent_documents
+        WHERE kind = 'privacy' AND retired_at IS NULL AND version > '2026-09-19')
 ON CONFLICT (kind, version) DO NOTHING;

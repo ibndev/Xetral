@@ -21,16 +21,29 @@
 -- ---------------------------------------------------------------------------
 DO $$
 DECLARE
-    published  INT;
+    terms_row  INT;
+    priv_rows  INT;
     stale_live INT;
     duplicates INT;
 BEGIN
-    SELECT count(*) INTO published
-      FROM consent_documents
-     WHERE (kind, version) IN (('terms', '2026-09-19'), ('privacy', '2026-09-19'));
+    SELECT count(*) INTO terms_row
+      FROM consent_documents WHERE kind = 'terms' AND version = '2026-09-19';
 
-    IF published <> 2 THEN
-        RAISE EXCEPTION 'TEST FAILED: 074 published % of 2 documents', published;
+    IF terms_row <> 1 THEN
+        RAISE EXCEPTION 'TEST FAILED: 074 did not publish the terms';
+    END IF;
+
+    -- PRIVACY IS ASSERTED AS ">= 074's", NOT AS "074's", and the difference is
+    -- the guard 075 required. 074 publishes only if nothing NEWER is live, so
+    -- on a fresh database — where the seed already carries 075's 2026-09-20 —
+    -- it correctly declines and its own row never exists. Demanding it would
+    -- be demanding that this migration drag a later one backwards, which is
+    -- the bug the guard exists to prevent.
+    SELECT count(*) INTO priv_rows
+      FROM consent_documents WHERE kind = 'privacy' AND version >= '2026-09-19';
+
+    IF priv_rows < 1 THEN
+        RAISE EXCEPTION 'TEST FAILED: no privacy notice at 2026-09-19 or later';
     END IF;
 
     -- THE VERSIONS 074 RETIRES, NAMED, rather than "anything older than the
@@ -122,16 +135,29 @@ BEGIN
 
     SELECT count(*) INTO before_rows FROM consent_documents;
 
+    -- THE GUARDED FORM, because a replica of the old statements would be
+    -- testing a migration that no longer exists — and the half it would stop
+    -- exercising is the `NOT EXISTS`, which is the only thing standing
+    -- between a fresh deployment and no live privacy notice.
     UPDATE consent_documents SET retired_at = now()
-     WHERE kind = 'terms' AND retired_at IS NULL AND version <> '2026-09-19';
+     WHERE kind = 'terms' AND retired_at IS NULL AND version < '2026-09-19';
     UPDATE consent_documents SET retired_at = now()
-     WHERE kind = 'privacy' AND retired_at IS NULL AND version <> '2026-09-19';
+     WHERE kind = 'privacy' AND retired_at IS NULL AND version < '2026-09-19';
 
-    INSERT INTO consent_documents (kind, version, body_sha256, summary) VALUES
-      ('terms', '2026-09-19',
-       '866c9d5e52b5511048facae0eb2343709d4ae52d4c52984dbf10ad4a68ea72fb', 'x'),
-      ('privacy', '2026-09-19',
-       '6c83b172c42a68b354c16949d1bcfc33f70c01dc22a3d78bd9299664a8c95f78', 'x')
+    INSERT INTO consent_documents (kind, version, body_sha256, summary)
+    SELECT 'terms', '2026-09-19',
+           '866c9d5e52b5511048facae0eb2343709d4ae52d4c52984dbf10ad4a68ea72fb', 'x'
+     WHERE NOT EXISTS (SELECT 1 FROM consent_documents
+                        WHERE kind = 'terms' AND retired_at IS NULL
+                          AND version > '2026-09-19')
+    ON CONFLICT (kind, version) DO NOTHING;
+
+    INSERT INTO consent_documents (kind, version, body_sha256, summary)
+    SELECT 'privacy', '2026-09-19',
+           '6c83b172c42a68b354c16949d1bcfc33f70c01dc22a3d78bd9299664a8c95f78', 'x'
+     WHERE NOT EXISTS (SELECT 1 FROM consent_documents
+                        WHERE kind = 'privacy' AND retired_at IS NULL
+                          AND version > '2026-09-19')
     ON CONFLICT (kind, version) DO NOTHING;
 
     SELECT count(*) INTO after_rows FROM consent_documents;
