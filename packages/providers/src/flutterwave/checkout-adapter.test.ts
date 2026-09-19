@@ -37,6 +37,110 @@ function stub(responses: readonly unknown[]): {
   return { client, sent };
 }
 
+/**
+ * A stub that REFUSES THE WAY FLUTTERWAVE REFUSES, rather than always
+ * answering 200.
+ *
+ * `POST /v3/payments` requires `redirect_url` and answers
+ * `400 "One or more required parameters missing"` without it — a message that
+ * names no parameter. Verified against a real test key on 19 September 2026:
+ * the same body with a redirect URL answers 200 and a checkout link.
+ *
+ * The stub above cannot see that, because it returns success whatever it is
+ * given — which is how an adapter comes to be missing a required field with
+ * every one of its tests green. This one enforces the contract.
+ */
+function contractStub(): { client: FlutterwaveClient; sent: { body: unknown }[] } {
+  const sent: { body: unknown }[] = [];
+  const client = new FlutterwaveClient({
+    baseUrl: 'https://api.flutterwave.com',
+    secretKey: 'FLWSECK_TEST-xxx',
+    fetch: async (_url, init) => {
+      const body = init.body === undefined ? {} : JSON.parse(String(init.body));
+      sent.push({ body });
+      if (typeof body.redirect_url !== 'string' || body.redirect_url === '') {
+        return new Response(
+          JSON.stringify({ status: 'error', message: 'One or more required parameters missing' }),
+          { status: 400, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          status: 'success',
+          data: { link: 'https://checkout.flutterwave.com/v3/hosted/pay/abc' },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    },
+  });
+  return { client, sent };
+}
+
+describe('the field Flutterwave will not do without', () => {
+  it('REFUSES, nameably, when the caller supplies no callback', async () => {
+    /*
+     * THE ONE THAT BROKE THREE CORRIDORS SILENTLY. `callbackUrl` comes from
+     * `APP_BASE_URL`, which `config.ts` types as `string | undefined` — so on
+     * a deployment that has never set it, this field was spread away and
+     * EVERY Ghanaian, Kenyan and dollar checkout answered
+     * `checkout_unavailable`, which reads as "try again shortly" about
+     * something that would never work until somebody set a variable.
+     *
+     * Paystack does not care: its `callback_url` is optional and it falls
+     * back to the dashboard setting. That difference one directory away is
+     * exactly the shape this adapter's own header warns about for the amount.
+     *
+     * It refuses rather than inventing a URL, because that value is where the
+     * payer LANDS after paying and a wrong one strands whoever actually pays.
+     */
+    const { client, sent } = contractStub();
+
+    await expect(
+      new FlutterwaveCheckoutAdapter(client).begin({
+        payerEmail: 'payer@example.com',
+        amountMinor: 50_000n,
+        currency: 'GHS',
+        reference: 'xetpay-no-callback',
+      }),
+    ).rejects.toThrow(ProviderRejectedError);
+
+    // REFUSED BEFORE THE CALL, so no half-started checkout exists at their
+    // end for a reference this platform would then have to reconcile.
+    expect(sent).toHaveLength(0);
+  });
+
+  it('names the setting an operator has to change', async () => {
+    // A refusal nobody can act on is the `checkout_unavailable` this replaces.
+    const { client } = contractStub();
+    await expect(
+      new FlutterwaveCheckoutAdapter(client).begin({
+        payerEmail: 'payer@example.com',
+        amountMinor: 50_000n,
+        currency: 'GHS',
+        reference: 'xetpay-3',
+      }),
+    ).rejects.toThrow(/APP_BASE_URL/);
+  });
+
+  it('prefers the caller\u2019s callback when there is one', async () => {
+    // The fallback must never win over a real one: that URL is where the
+    // payer lands, and the link page reads `?paid=<reference>` off it.
+    const { client, sent } = contractStub();
+
+    await new FlutterwaveCheckoutAdapter(client).begin({
+      payerEmail: 'payer@example.com',
+      amountMinor: 50_000n,
+      currency: 'GHS',
+      reference: 'xetpay-2',
+      callbackUrl: 'https://app.xetral.com/pay/abc?paid=xetpay-2',
+    });
+
+    expect((sent[0]?.body as { redirect_url: string }).redirect_url).toBe(
+      'https://app.xetral.com/pay/abc?paid=xetpay-2',
+    );
+  });
+});
+
 describe('starting a Flutterwave checkout', () => {
   it('sends the amount in MAJOR units, not minor', async () => {
     const { client, sent } = stub([
@@ -49,6 +153,8 @@ describe('starting a Flutterwave checkout', () => {
       amountMinor: 50_000n,
       currency: 'GHS',
       reference: 'xetpay-1',
+      // Every real call carries one: Flutterwave requires redirect_url.
+      callbackUrl: 'https://app.xetral.com/pay/abc',
     });
 
     expect(sent[0]?.url).toBe('https://api.flutterwave.com/v3/payments');
@@ -68,6 +174,8 @@ describe('starting a Flutterwave checkout', () => {
       amountMinor: 1_500_000n,
       currency: 'USDT',
       reference: 'xetpay-2',
+      // Every real call carries one: Flutterwave requires redirect_url.
+      callbackUrl: 'https://app.xetral.com/pay/abc',
     });
     expect((sent[0]?.body as { amount: string }).amount).toBe('1.500000');
   });
@@ -79,6 +187,8 @@ describe('starting a Flutterwave checkout', () => {
       amountMinor: 10_000n,
       currency: 'KES',
       reference: 'xetpay-3',
+      // Every real call carries one: Flutterwave requires redirect_url.
+      callbackUrl: 'https://app.xetral.com/pay/abc',
     });
     // `account` AND NOT `banktransfer`, and this assertion is the point of the
     // test. Flutterwave's two bank options are not spellings of one thing:
@@ -98,6 +208,8 @@ describe('starting a Flutterwave checkout', () => {
       amountMinor: 10_000n,
       currency: 'GHS',
       reference: 'xetpay-3b',
+      // Every real call carries one: Flutterwave requires redirect_url.
+      callbackUrl: 'https://app.xetral.com/pay/abc',
     });
     const body = sent[0]?.body as { payment_options: string; currency: string };
     expect(body.payment_options).toBe('card,account,mobilemoneyghana');
@@ -118,6 +230,8 @@ describe('starting a Flutterwave checkout', () => {
       amountMinor: 10_000n,
       currency: 'USD',
       reference: 'xetpay-3c',
+      // Every real call carries one: Flutterwave requires redirect_url.
+      callbackUrl: 'https://app.xetral.com/pay/abc',
     });
     // A dollar belongs to no country and has no wallet rail, so naming one
     // would offer a payer a method that cannot serve the currency.
@@ -131,6 +245,8 @@ describe('starting a Flutterwave checkout', () => {
       amountMinor: 10_000n,
       currency: 'GHS',
       reference: 'xetpay-4',
+      // Every real call carries one: Flutterwave requires redirect_url.
+      callbackUrl: 'https://app.xetral.com/pay/abc',
       note: 'Rent for March',
       payeeName: 'Ama Mensah',
     });
@@ -231,6 +347,8 @@ describe('their envelope', () => {
         amountMinor: 100n,
         currency: 'GHS',
         reference: 'xetpay-8',
+      // Every real call carries one: Flutterwave requires redirect_url.
+      callbackUrl: 'https://app.xetral.com/pay/abc',
       }),
     ).rejects.toBeInstanceOf(ProviderRejectedError);
   });

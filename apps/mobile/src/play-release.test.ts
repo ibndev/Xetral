@@ -138,6 +138,67 @@ describe('both workflows check the manifest the same way', () => {
   });
 });
 
+describe('what happens to the bundle after it is built', () => {
+  const EAS = JSON.parse(readFileSync(new URL('../eas.json', import.meta.url), 'utf8')) as {
+    submit?: Record<string, { android?: { track?: string; serviceAccountKeyPath?: string } }>;
+  };
+
+  it('submits to the INTERNAL track, never straight to production', () => {
+    /*
+     * `internal` is testers-only and has no review wait, which is what makes
+     * automatic upload safe to do on every build. `production` would publish
+     * a banking app to the public from a workflow_dispatch — an irreversible
+     * outward-facing action taken by a build, which is the one thing a
+     * pipeline must never be able to do on its own.
+     */
+    const android = EAS.submit?.['production']?.android;
+    expect(android, 'eas.json has no submit profile').toBeDefined();
+    expect(android?.track).toBe('internal');
+  });
+
+  it('reads its Play key from a path nothing can commit', () => {
+    // It publishes releases of this listing. `.gitignore` covers both the
+    // repo-root and apps/mobile spellings, and this fails if the profile is
+    // pointed somewhere that is not covered.
+    const path = EAS.submit?.['production']?.android?.serviceAccountKeyPath;
+    expect(path).toBe('./play-service-account.json');
+
+    const ignored = readFileSync(new URL('../../../.gitignore', import.meta.url), 'utf8');
+    expect(ignored).toContain('apps/mobile/play-service-account.json');
+  });
+
+  it('the AAB workflow submits the artifact IT built', () => {
+    /*
+     * `--auto-submit` is an `eas build` flag and this bundle is built by
+     * GRADLE on the runner — which is what lets the signing key, the
+     * permissions and the version code be interrogated here rather than
+     * trusted to a remote builder. `eas submit --path` is the same upload
+     * against that exact file.
+     *
+     * `--path` is the load-bearing part: without it EAS resolves one of its
+     * own builds and would submit a bundle none of these checks has seen.
+     */
+    expect(AAB_WORKFLOW).toContain('eas-cli');
+    expect(AAB_WORKFLOW).toContain('submit');
+    expect(AAB_WORKFLOW, 'submits an EAS build rather than the one built here').toContain(
+      '--path',
+    );
+    expect(AAB_WORKFLOW).toContain('--profile production');
+  });
+
+  it('SKIPS rather than failing when the credentials are absent', () => {
+    /*
+     * A missing secret must not turn a working build pipeline red — 059's
+     * rule that a missing answer falls through rather than becoming an
+     * outage. The other half is that it has to SAY so: the failure that
+     * matters here is somebody believing a bundle was submitted when it was
+     * not, which is why the skip writes a warning and a summary line.
+     */
+    expect(AAB_WORKFLOW).toContain('NOT SUBMITTED');
+    expect(AAB_WORKFLOW).toContain('Not submitted to Play');
+  });
+});
+
 describe('the app config is one Play will take', () => {
   it('has a versionCode, and it is a whole number', () => {
     /*

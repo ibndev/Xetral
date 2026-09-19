@@ -46,3 +46,13 @@ out/
 # prebuild by hand.
 apps/mobile/android/
 apps/mobile/ios/
+
+# THE PLAY SERVICE ACCOUNT KEY — a credential that can publish to the listing.
+#
+# `eas.json`'s submit profile names `./play-service-account.json`, so anybody
+# following the instructions writes one into the working tree. It uploads
+# releases of a banking app; committing it is handing that to whoever can read
+# the repository. In CI it is written from a secret to a path OUTSIDE the tree
+# for the same reason the upload keystore is.
+apps/mobile/play-service-account.json
+play-service-account.json

@@ -329,6 +329,65 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
+      - name: Upload it to Play, on the internal track
+        # WHAT `--auto-submit` MEANS FOR A BUNDLE EAS DID NOT BUILD.
+        #
+        # That flag belongs to `eas build`, and this workflow does not use it:
+        # the AAB above comes out of Gradle on this runner, which is what lets
+        # the signing key, the permissions and the version code be interrogated
+        # HERE rather than trusted to a remote builder. `eas submit --path`
+        # performs the same upload on a file that already exists, so the
+        # automation is identical and the artifact is still the one these
+        # checks just passed.
+        #
+        # IT SKIPS RATHER THAN FAILING WHEN THE CREDENTIALS ARE ABSENT, and
+        # that direction is deliberate: a missing secret must not turn a
+        # working build pipeline red — 059's rule that a missing answer falls
+        # through rather than becoming an outage. It is LOUD about skipping,
+        # because the failure that matters here is somebody believing a bundle
+        # was submitted when it was not.
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          NAME: ${{ steps.bundle.outputs.name }}
+        # `eas submit` reads eas.json from the APP directory, so it runs there
+        # — which is also what makes `./play-service-account.json` in that file
+        # resolve to the key written below.
+        working-directory: apps/mobile
+        run: |
+          if [ -z "$EXPO_TOKEN" ] || [ -z "$PLAY_SERVICE_ACCOUNT_JSON" ]; then
+            echo "::warning::NOT SUBMITTED. Set the EXPO_TOKEN and PLAY_SERVICE_ACCOUNT_JSON secrets to upload automatically; the .aab is attached to this run either way."
+            echo "- **Not submitted to Play** — EXPO_TOKEN or PLAY_SERVICE_ACCOUNT_JSON is unset." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # THE PATH `eas.json` NAMES, rather than a command-line flag for it.
+          # `serviceAccountKeyPath` is the mechanism this repo can be sure of;
+          # inventing a flag name is the guess that has cost this codebase a
+          # corridor twice. It is gitignored, written after the artifact was
+          # uploaded so nothing archives it, and removed on the way out — and
+          # the runner is destroyed regardless.
+          key=play-service-account.json
+          printf '%s' "$PLAY_SERVICE_ACCOUNT_JSON" > "$key"
+          trap 'rm -f play-service-account.json' EXIT
+
+          if ! node -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$key"; then
+            echo "::error::PLAY_SERVICE_ACCOUNT_JSON is not valid JSON. It is the whole service-account key FILE from Google Cloud, pasted as-is."
+            exit 1
+          fi
+
+          # `--path` names the artifact THIS job built and checked. Letting EAS
+          # resolve a build instead would submit a bundle nothing here has seen.
+          if ! npx --yes eas-cli@latest submit \
+              --platform android \
+              --profile production \
+              --path "$GITHUB_WORKSPACE/$NAME" \
+              --non-interactive; then
+            echo "::error::eas submit failed. Note that the FIRST release of a listing cannot be created through Google's API — upload one .aab by hand in the Play Console once, then every build after it submits automatically."
+            exit 1
+          fi
+          echo "- **Submitted to Play**, internal track." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Say what to do with it
         env:
           NAME: ${{ steps.bundle.outputs.name }}

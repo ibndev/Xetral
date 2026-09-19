@@ -102,6 +102,22 @@ const verifyResponse = z.object({
  * The read converts back the same way, from the DECIMAL TEXT rather than
  * from the JSON number.
  */
+/**
+ * The redirect Flutterwave will not start a checkout without.
+ *
+ * Separate from the body so the refusal is one statement rather than a
+ * conditional spread somebody later "tidies" back into an optional field.
+ */
+function redirectUrl(callbackUrl: string | undefined): string {
+  if (callbackUrl !== undefined && callbackUrl !== '') return callbackUrl;
+  throw new ProviderRejectedError(
+    PROVIDER,
+    'Flutterwave requires a redirect_url on every checkout and this deployment ' +
+      'has no public address: set APP_BASE_URL.',
+    'checkout_misconfigured',
+  );
+}
+
 export class FlutterwaveCheckoutAdapter implements CheckoutPort {
   readonly provider = PROVIDER;
   readonly #client: FlutterwaveClient;
@@ -120,7 +136,34 @@ export class FlutterwaveCheckoutAdapter implements CheckoutPort {
       tx_ref: request.reference,
       amount: majorText(request.amountMinor, request.currency),
       currency: request.currency,
-      ...(request.callbackUrl === undefined ? {} : { redirect_url: request.callbackUrl }),
+      /*
+       * REQUIRED, AND IT WAS CONDITIONAL — which broke three corridors on any
+       * deployment that had not set one thing.
+       *
+       * `callbackUrl` comes from `APP_BASE_URL`, which `config.ts` types as
+       * `string | undefined`, so this field was spread away whenever that was
+       * unset. Flutterwave then answers `400 "One or more required parameters
+       * missing"` — a message naming no parameter — and the payer reads
+       * `checkout_unavailable`, which says "try again shortly" about
+       * something that would never work. Verified against a real test key on
+       * 19 September 2026: the identical body with a redirect URL answers 200
+       * and a hosted link.
+       *
+       * PAYSTACK DOES NOT CARE, one directory away: its `callback_url` is
+       * optional and it falls back to the dashboard setting. That is the same
+       * shape of difference this file's header warns about for the amount,
+       * and the reason the refusal is raised HERE rather than in the service
+       * — the requirement belongs to Flutterwave, so it is stated where it is
+       * true, the way `FundingPort` moved Bitnob's BVN rule into Bitnob's own
+       * adapter.
+       *
+       * IT REFUSES RATHER THAN INVENTING A URL. That value is where the payer
+       * lands after paying, and an adapter is the last place that should be
+       * guessing a deployment's public address: a wrong one strands whoever
+       * actually pays. `checkout_misconfigured` is a code an operator can act
+       * on, and `checkout_refusals` is where it becomes answerable.
+       */
+      redirect_url: redirectUrl(request.callbackUrl),
       ...(options === undefined ? {} : { payment_options: options }),
       customer: {
         email: request.payerEmail,

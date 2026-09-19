@@ -25,5 +25,14 @@
       "autoIncrement": true
     }
   },
-  "submit": { "production": {} }
+  "submit": {
+    "production": {
+      "android": {
+        "track": "internal",
+        "releaseStatus": "completed",
+        "changesNotSentForReview": false,
+        "serviceAccountKeyPath": "./play-service-account.json"
+      }
+    }
+  }
 }
