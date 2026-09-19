@@ -9,13 +9,13 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "ng.xetral.app",
+      "bundleIdentifier": "com.xetral.app",
       "infoPlist": {
         "NSFaceIDUsageDescription": "Xetral uses Face ID to unlock your transaction PIN."
       }
     },
     "android": {
-      "package": "ng.xetral.app",
+      "package": "com.xetral.app",
       "blockedPermissions": [
         "android.permission.SYSTEM_ALERT_WINDOW",
         "android.permission.READ_EXTERNAL_STORAGE",

@@ -891,6 +891,16 @@ guarded by `play-release.test.ts`.
 - **AN AAB IS AN ARTIFACT, NEVER A RELEASE ASSET.** It cannot be installed by
   tapping it, so putting one on a page beside installable APKs invites somebody
   to try.
+- **THE APPLICATION ID IS THE LISTING, and it is free to change exactly
+  once — before the first upload.** It was `ng.xetral.app` and is
+  `com.xetral.app`. Play identifies an app by that string for the life of the
+  listing and cannot rename one, so after an upload the same change is not a
+  rename but a SECOND app: a new review, no upgrade path for anybody already
+  installed, and the old listing left sitting there. On a handset the two ids
+  are two apps side by side, so a preview APK built after this does not
+  replace one built before it. `play-release.test.ts` asserts the SHAPE and
+  deliberately not the value — pinning the string would turn a decision that
+  is legitimately made once into a test somebody edits to match.
 - **A `versionCode` ONLY GOES UP**, and it defaults to the workflow run number
   — the one figure here that cannot go backwards. A hand-typed repeat is
   refused by Play and wastes an upload.
