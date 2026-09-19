@@ -2461,6 +2461,37 @@ Review in `apps/mobile/SECURITY.md`, cover in `src/screen-privacy.tsx`.
   here, and it is written down because the symptom — a development build
   vanishing when a preview is installed — otherwise reads as a broken build.
 
+### The listener two requests both owned — non-obvious rules
+
+`apps/api/src/test-support/listener.ts`, called by the two e2e suites that
+issue concurrent requests.
+
+- **SUPERTEST MANAGES THE LISTENER PER REQUEST, AND THAT IS ONLY SAFE FOR ONE
+  AT A TIME.** `serverAddress()` is `if (!addr) this._server = app.listen(0)`
+  and `end()` is `if (server && server._handle) server.close(...)`. Two
+  requests started in the same tick both see no address, both bind, and the
+  first to finish closes the socket the other is still reading. The second dies
+  with `ECONNRESET`, on an assertion with nothing to do with sockets.
+- **IT FAILED IN CI AND NOT LOCALLY, WHICH IS WHY IT WAS CALLED A FLAKE
+  TWICE.** Three of four CI runs red on the same file against five consecutive
+  clean local runs. A shared runner loses the race more often; it is the same
+  race either way. "Intermittent" is a statement about how often, never about
+  whether.
+- **`Promise.all([onboard(), onboard()])` IS THE ONLY CONCURRENT CALL SITE IN
+  THE API SUITE**, which is why `payout.e2e.test.ts` was the file that failed.
+  `spending-limits` fires TEN simultaneous transfers — proving the daily
+  ceiling's advisory lock holds needs real concurrency — and was exposed to
+  exactly the same hazard while passing. A suite that happens to win the race
+  is not a suite that is safe.
+- **PINNING IS THE FIX RATHER THAN SERIALISING THE REQUESTS.** Making the
+  transfers sequential would have made the red go away by deleting the thing
+  under test: the lock is only observable under contention.
+- **`server.address() !== null` IS THE WHOLE GUARD.** Bound once, supertest's
+  `if (!addr)` never fires, so it never takes ownership and never closes
+  anything. Calling `listen` on a bound server throws
+  `ERR_SERVER_ALREADY_LISTEN`, so the check is load-bearing rather than
+  defensive. Teardown is unchanged: `app.close()`.
+
 ### The variable turbo took away — non-obvious rules
 
 `turbo.json`'s `test:e2e` task, guarded by `e2e-env.test.ts`.
