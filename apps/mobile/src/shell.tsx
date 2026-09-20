@@ -6,7 +6,7 @@ import { Link, router, usePathname } from 'expo-router';
 import { Icon } from '@/icon';
 import type { IconName } from '@/icon';
 import { Logo } from '@/logo';
-import { space, useStyles, useTheme, useThemeChoice, useResolvedScheme } from '@/theme';
+import { font, space, useStyles, useTheme, useThemeChoice, useResolvedScheme } from '@/theme';
 
 /**
  * ONE NAVIGATION, THE SAME AS THE WEB'S.
@@ -71,6 +71,22 @@ export function ThemeToggle() {
 }
 
 /**
+ * Up to two initials from a display name.
+ *
+ * `undefined` rather than a placeholder letter when there is nothing to work
+ * with — the same function and the same rule as the web's `Shell`.
+ */
+function initialsOf(name: string | null | undefined): string | undefined {
+  if (name === undefined || name === null) return undefined;
+  const parts = name.trim().split(/\s+/).filter((w) => w.length > 0);
+  if (parts.length === 0) return undefined;
+  const first = parts[0]?.[0] ?? '';
+  const last = parts.length > 1 ? (parts[parts.length - 1]?.[0] ?? '') : '';
+  const out = `${first}${last}`.toUpperCase();
+  return out === '' ? undefined : out;
+}
+
+/**
  * The frame every signed-in screen sits in.
  *
  * `back` swaps the mark for a chevron, exactly as the web's `Shell` does, so a
@@ -80,6 +96,7 @@ export function Shell({
   children,
   title,
   back,
+  greeting,
   scroll = true,
   overlay,
 }: {
@@ -87,6 +104,19 @@ export function Shell({
   readonly title?: string;
   /** Show a back chevron instead of the mark — for a screen one level down. */
   readonly back?: string;
+  /**
+   * THE HOME SCREEN'S HEADER IS A GREETING, NOT A MARK — and it lives here
+   * rather than on the screen for the reason the keyboard handling and the
+   * tab bar do: the header is the shell's, and a screen drawing its own is a
+   * second header that drifts from this one the first time either changes.
+   *
+   * A customer who has opened the app knows which app they opened. What the
+   * mark was doing at the top of the one screen they see most was taking the
+   * width that now says who they are signed in as, which is the thing worth
+   * confirming at a glance on a screen showing money. The web's `Shell` takes
+   * the same prop and renders the same two lines.
+   */
+  readonly greeting?: { readonly name: string | null | undefined };
   /** Off for a screen that scrolls its own list. */
   readonly scroll?: boolean;
   /**
@@ -168,7 +198,47 @@ export function Shell({
           paddingHorizontal: space.md,
         }}
       >
-        {back === undefined ? (
+        {back === undefined && greeting !== undefined ? (
+          <>
+            {/* The initials are DERIVED, never stored — `initialsOf` returns
+                nothing rather than a placeholder letter, because an avatar
+                reading "T" for "there" is a made-up initial on the screen
+                that says who you are signed in as. */}
+            <View
+              style={{
+                width: 40, height: 40, borderRadius: 999,
+                alignItems: 'center', justifyContent: 'center',
+                backgroundColor: colors.avatar,
+                borderWidth: 1, borderColor: colors.irisEdge,
+              }}
+            >
+              {initialsOf(greeting.name) === undefined ? (
+                <Logo size={17} />
+              ) : (
+                <Text style={{ color: colors.avatarText, fontFamily: font.sansBold, fontSize: 14 }}>
+                  {initialsOf(greeting.name)}
+                </Text>
+              )}
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text
+                numberOfLines={1}
+                style={{ color: colors.text3, fontFamily: font.sansMedium, fontSize: 12.5 }}
+              >
+                Welcome back
+              </Text>
+              <Text
+                numberOfLines={1}
+                style={{
+                  color: colors.text, fontFamily: font.sansBold,
+                  fontSize: 16, letterSpacing: -0.2,
+                }}
+              >
+                {greeting.name ?? 'there'}
+              </Text>
+            </View>
+          </>
+        ) : back === undefined ? (
           <Logo size={22} />
         ) : (
           <>
