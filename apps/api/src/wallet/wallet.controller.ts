@@ -13,6 +13,16 @@ export class WalletController {
     return { balances: await this.wallets.balances(claimsOf(request).sub) };
   }
 
+  /**
+   * Declared BEFORE `transactions/:id` for the reason `/v1/cards/activity`
+   * is: Nest matches in declaration order, so a `:id` route above a literal
+   * swallows it and answers a not-found for a word that is not an id.
+   */
+  @Get('fee')
+  async fee(): Promise<{ basis_points: number }> {
+    return this.wallets.transferFee();
+  }
+
   @Get('transactions')
   async transactions(
     @Req() request: AuthenticatedRequest,

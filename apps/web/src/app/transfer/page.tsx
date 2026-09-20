@@ -1227,6 +1227,97 @@ function RecipientDetails({
 /* ------------------------------------------------------------------ step 4 */
 
 /**
+ * The keypad, in the comp's own order: three columns, `000` then `0` then
+ * delete on the last row.
+ */
+const PAD = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '000', '0', '<'] as const;
+
+/**
+ * What a key press does to the amount.
+ *
+ * THE AMOUNT IS A STRING AND STAYS ONE. No `Number`, no `parseFloat` — this
+ * is money, and the whole client is built on the rule that an amount never
+ * becomes a float. So a leading zero is stripped textually and a decimal
+ * point is refused a second time by looking for one, not by parsing.
+ *
+ * `000` IS ONE KEY AND APPENDS THREE ZEROES, which is what it is for on a
+ * naira keypad — and it is refused on an empty box, because `000` alone is
+ * not an amount.
+ */
+function pressKey(was: string, key: string): string {
+  if (key === '<') return was.slice(0, -1);
+  if (key === '000' && was === '') return was;
+  const next = was + key;
+  // Twelve digits is a trillion naira. The cap is on DIGITS rather than on
+  // length so a decimal point does not eat one.
+  if (next.replace(/[^0-9]/g, '').length > 12) return was;
+  return next.replace(/^0+(?=\d)/, '');
+}
+
+/**
+ * The typed amount, grouped for display only.
+ *
+ * `₦5000` was on screen where the comp shows `₦50,000`. A figure at 46px is
+ * the thing being agreed to, and an ungrouped one is read digit by digit —
+ * which is exactly the mistake that puts an extra zero on a transfer.
+ *
+ * ONLY THE INTEGER PART, and the decimals are left exactly as typed.
+ * `formatAmount` would be wrong here: it forces the currency's own decimal
+ * places, so "5" becomes "5.00" mid-keystroke and the box fights the person
+ * using it. And it is a STRING throughout — no `Number`, no `toLocaleString`,
+ * because this is money.
+ */
+function groupTyped(amount: string): string {
+  const [whole = '', rest] = amount.split('.');
+  const grouped = (whole.match(/\d+/) ?? [''])[0]
+    .split('')
+    .reverse()
+    .reduce((out, d, i) => (i > 0 && i % 3 === 0 ? `${d},${out}` : d + out), '');
+  return rest === undefined ? grouped : `${grouped}.${rest}`;
+}
+
+/**
+ * The fee on an amount, as a major-unit string, computed WITHOUT a float.
+ *
+ * Basis points are integers and the amount is a decimal string, so the whole
+ * calculation is done in minor units as a `bigint` and formatted back. A
+ * `Number(amount) * bp / 10000` would be a float holding money on the screen
+ * that tells a customer what they are about to be charged — which the local
+ * Semgrep rule refuses, and rightly.
+ *
+ * ROUNDED UP, so the figure shown is never less than the figure charged. A
+ * customer surprised by a fee one kobo larger than the screen said is a
+ * complaint; one pleasantly surprised by a kobo is not.
+ */
+function feeOn(amount: string, basisPoints: number, currency: string): string {
+  /*
+   * THE SCALE IS THE CURRENCY'S, NOT THE TYPED STRING'S, and that was the
+   * difference between `₦0.00` and `₦0`.
+   *
+   * `formatAmount` renders whatever fraction it is given — it does not impose
+   * the currency's own, and it is right not to. So scaling by the number of
+   * digits somebody happened to type meant a fee on "5000" came out as a
+   * whole number and a fee on "5000.50" came out with two places: the same
+   * fee written two ways depending on the keystroke before it.
+   *
+   * `exponentFor` is the client's own table, and it is PER CURRENCY — two for
+   * naira, zero for yen, six for USDT. A hardcoded 2 here would be the
+   * mistake the money primitives exist to prevent.
+   */
+  const scale = exponentFor(currency);
+  const [whole = '0', frac = ''] = amount.split('.');
+  const typed = BigInt((whole === '' ? '0' : whole) + frac.padEnd(scale, '0').slice(0, scale));
+  if (amount === '' || basisPoints <= 0 || typed === 0n) {
+    return scale === 0 ? '0' : `0.${'0'.repeat(scale)}`;
+  }
+  const numerator = typed * BigInt(Math.trunc(basisPoints));
+  // ROUNDED UP, so the figure shown is never less than the figure charged.
+  const rounded = numerator / 10000n + (numerator % 10000n === 0n ? 0n : 1n);
+  const text = rounded.toString().padStart(scale + 1, '0');
+  return scale === 0 ? text : `${text.slice(0, -scale)}.${text.slice(-scale)}`;
+}
+
+/**
  * What leaves, what lands, and what it costs.
  *
  * TWO CARDS RATHER THAN ONE FIELD, because a cross-border payment has two
@@ -1256,6 +1347,14 @@ function SendAmount({
   const client = useXetral();
   const { busy, error, code, done, run } = useSubmit();
   const { key, next } = useIdempotencyKey();
+  /*
+   * READ ONCE WHEN THE SCREEN OPENS. A fee is a proportion, so the POLICY is
+   * fetched and applied to whatever is typed — asking the server again on
+   * every keystroke would be a round trip per digit. It is allowed to fail
+   * silently: the fee row is a courtesy on a screen whose job is moving
+   * money, and the authoritative charge is the ledger's either way.
+   */
+  const feePolicy = useLoad(() => client.transferFee().catch(() => undefined), [client]);
 
   /*
    * A PAYOUT CARRIES ONE CURRENCY, AND THIS SCREEN USED TO SEND IT TWO.
@@ -1429,34 +1528,45 @@ function SendAmount({
         </span>
       </header>
 
-      {/* ONE STRAIGHT FIELD PER AMOUNT: the figure on the left, the currency on
-          the right, and what it means in small text under it. */}
       {/*
-        ONE GRID CHILD PER AMOUNT — the label, the box and the note together.
-        `.send-step` has a 16px gap between children, so as three siblings the
-        label sat 22px above its own box with the margins added on top. The
-        label belongs TO the box; the gap belongs BETWEEN the two amounts.
+        THE AMOUNT IS ONE CENTRED FIGURE WITH A KEYPAD UNDER IT, which is what
+        the comp draws — and it was two stacked boxes with typed inputs, one
+        for what leaves and one for what lands.
+
+        Two boxes made the screen a FORM. The comp makes it a til: the figure
+        is the biggest thing on it, what the recipient gets is one quiet line
+        beneath, and the digits are a 3×4 grid under the thumb. On a handset
+        that is the difference between reaching for a keyboard that covers
+        half the screen and tapping four keys.
+
+        THE INPUT IS STILL A REAL `<input>`, positioned over the figure and
+        transparent. A laptop has a keyboard and an accessibility tool needs
+        something focusable with a label; the keypad writes into the same
+        state. Rendering only a `<div>` would make this screen typable by
+        exactly one kind of visitor.
       */}
-      <div className="sf-amount-block">
-        <span className="sf-label">You send</span>
-        <div className={enough || amount === '' ? 'sf-amount' : 'sf-amount invalid'}>
+      <div className="sf-enter">
+        <span className="sf-enter-label">You send</span>
+        <div className={enough || amount === '' ? 'sf-enter-figure' : 'sf-enter-figure bad'}>
+          <span aria-hidden="true">
+            {symbolFor(sendCurrency)}
+            {amount === '' ? '0' : groupTyped(amount)}
+          </span>
           <input
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
             inputMode="decimal"
-            placeholder="0"
-            aria-label="Amount to send"
+            aria-label={`Amount to send in ${sendCurrency}`}
           />
-          {/* STATED, NOT OFFERED, where the rail decides it. A picker whose
-              only valid answer is the one already shown is a control that can
-              only be got wrong — and getting it wrong here sent two different
-              sums of money in one request. */}
-          {currencyIsFixed ? (
-            <span className="sf-ccy">
-              <CurrencyMark currency={sendCurrency} size={18} />
-              {sendCurrency}
-            </span>
-          ) : (
+        </div>
+
+        {/* WHICH CURRENCY, where the rail has not already decided it. Stated
+            rather than offered where it has — a picker whose only valid
+            answer is the one already shown is a control that can only be got
+            wrong, and getting it wrong here sent two different sums of money
+            in one request. */}
+        {!currencyIsFixed && (
+          <div className="sf-enter-ccy">
             <Select
               value={sendCurrency}
               onChange={setSendCurrency}
@@ -1464,79 +1574,112 @@ function SendAmount({
               renderMark={(value) => <CurrencyMark currency={value} size={18} />}
               compact
             />
-          )}
-        </div>
+          </div>
+        )}
+
         {/*
-          THREE THINGS CAN GO UNDER THE BOX, AND ONLY ONE AT A TIME.
-
-          THE MINIMUM IS SHOWN ONLY ONCE A CUSTOMER HAS TYPED LESS THAN IT,
-          which is the whole of why it is here rather than in the placeholder.
-          A corridor's floor printed on an empty field is noise on every send;
-          printed the moment somebody asks for 2 cedis it is the one sentence
-          that gets them to a working amount. Before this the refusal reached
-          the screen as nothing at all — the quote failed, the "receives" line
-          fell back to a generic hint, and the customer was left to guess
-          upward.
-
-          GREEN for the balance, because it is what the customer HAS — the only
-          figure on this screen that is neither leaving nor landing.
-        */}
-        <span
-          className={
-            (amount !== '' && !enough) || belowMinimum
-              ? 'sf-amount-note bad'
-              : 'sf-amount-note good'
-          }
-        >
-          {amount !== '' && !enough
-            ? `Enter an amount in ${sendCurrency}.`
-            : belowMinimum
-              ? quote.error
-              : `Balance: ${formatAmount(balance, sendCurrency)}`}
-        </span>
-      </div>
-
-      <div className="sf-amount-block">
-        <span className="sf-label">{firstNameOf(to.display_name)} receives</span>
-        <div className="sf-amount">
-          {/*
-           * A FIGURE, NEVER A DASH AND NEVER A STALE ZERO.
-           *
-           * The conversion is automatic: type 100 naira and the cedi figure
-           * follows as soon as the quote lands. What it must not do is sit at
-           * zero in the gap — a zero beside a typed amount reads as "this
-           * corridor pays nothing", which is a sentence about the product. So
-           * while the rate is in flight the field says so, and only an EMPTY
-           * amount box renders a zero.
-           *
-           * The currency's own SYMBOL comes from `formatAmount` — ₵ for a cedi,
-           * KSh for a shilling — because a screen quoting "1,250.00 GHS" beside
-           * "₦100,000.00" is showing money in one currency and a database field
-           * in the other.
-           */}
-          {converting ? (
-            <span className="sf-amount-value waiting">Converting…</span>
-          ) : (
-            <span className="sf-amount-value">
-              {sameCurrency
+         * A FIGURE, NEVER A DASH AND NEVER A STALE ZERO.
+         *
+         * The conversion is automatic: type 100 naira and the cedi figure
+         * follows as soon as the quote lands. What it must not do is sit at
+         * zero in the gap — a zero beside a typed amount reads as "this
+         * corridor pays nothing", which is a sentence about the product. So
+         * while the rate is in flight the line says so, and only an EMPTY
+         * amount box renders a zero.
+         */}
+        <p className="sf-enter-recv">
+          {firstNameOf(to.display_name)} receives{' '}
+          <strong>
+            {converting
+              ? '…'
+              : sameCurrency
                 ? formatAmount(amount === '' ? '0' : amount, lands_in)
                 : formatAmount(lands?.receives ?? '0', lands_in)}
-            </span>
-          )}
-          <span className="sf-ccy">
-            <CurrencyMark currency={lands_in} size={18} />
-            {lands_in}
+          </strong>
+        </p>
+
+        {/*
+          ONE SENTENCE AT A TIME, and only when there is one to say.
+
+          THE MINIMUM APPEARS ONLY ONCE A CUSTOMER HAS TYPED LESS THAN IT. A
+          corridor's floor printed on an empty field is noise on every send;
+          printed the moment somebody asks for 2 cedis it is the one sentence
+          that gets them to a working amount. Before this the refusal reached
+          the screen as nothing at all — the quote failed, the receives line
+          fell back to a generic hint, and the customer was left to guess
+          upward.
+        */}
+        {amount !== '' && !enough ? (
+          <span className="sf-enter-chip bad">
+            Exceeds your {formatAmount(balance, sendCurrency)} balance
           </span>
+        ) : belowMinimum ? (
+          <span className="sf-enter-chip bad">{quote.error}</span>
+        ) : quote.code === 'pair_not_supported' ? (
+          <span className="sf-enter-chip bad">
+            We cannot convert {sendCurrency} to {lands_in} yet
+          </span>
+        ) : !sameCurrency && lands !== undefined ? (
+          <span className="sf-enter-chip">
+            1 {sendCurrency} = {formatAmount(lands.rate, lands_in)}
+          </span>
+        ) : (
+          <span className="sf-enter-chip">
+            {to.kind === 'xetral' ? 'Arrives instantly' : 'Usually arrives within minutes'}
+          </span>
+        )}
+      </div>
+
+      {/*
+        THE FEE IS READ FROM THE SERVER AND NEVER ASSUMED.
+
+        It is a POLICY in basis points — `GET /v1/wallets/fee` — applied to
+        what is in the box, because a fee is a proportion and asking again on
+        every keystroke would be a round trip per digit. The authoritative
+        charge is still the ledger's, computed on the entry; this is so a
+        customer is not surprised by it.
+
+        THE ROW IS ABSENT UNTIL THE ANSWER ARRIVES, rather than showing a zero
+        while it is in flight. "Fee ₦0.00" that becomes "Fee ₦25.00" a moment
+        later is worse than a row that was not there yet.
+      */}
+      {feePolicy.data !== undefined && (
+        <div className="sf-fee">
+          <span>Fee</span>
+          <span>{formatAmount(feeOn(amount, feePolicy.data.basis_points, sendCurrency), sendCurrency)}</span>
         </div>
-        <span className={quote.code === 'pair_not_supported' ? 'sf-amount-note bad' : 'sf-amount-note'}>
-          {!sameCurrency && lands !== undefined
-            ? `1 ${sendCurrency} = ${formatAmount(lands.rate, lands_in)}`
-            : !sameCurrency && quote.code === 'pair_not_supported'
-              ? `We cannot convert ${sendCurrency} to ${lands_in} yet`
-              : to.kind === 'xetral'
-                ? 'Arrives instantly'
-                : 'Usually arrives within minutes'}
-        </span>
+      )}
+
+      {/* THE KEYPAD. `type="button"` on every key, because a bare <button>
+          inside a <form> submits it — which here would send money on a
+          digit. */}
+      <div className="sf-pad" role="group" aria-label="Amount keypad">
+        {PAD.map((key) => (
+          <button
+            key={key}
+            type="button"
+            className="sf-key"
+            onClick={() => setAmount((was) => pressKey(was, key))}
+            aria-label={key === '<' ? 'Delete' : key}
+          >
+            {/*
+              DRAWN, NOT A GLYPH AND NOT A BORROWED ICON.
+
+              `⌫` (U+232B) is absent from Manrope and from every fallback in
+              the stack, so it rendered as a box with a cross in it. Reaching
+              for `chevronLeft` instead was worse in a quieter way: that is
+              the product's BACK arrow, and a back arrow on a keypad says
+              "previous screen" on the one key that means "delete a digit".
+            */}
+            {key === '<' ? (
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M9 5h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9L2.5 12 9 5Z" />
+                <path d="M18 9.5 13 14.5M13 9.5l5 5" />
+              </svg>
+            ) : key}
+          </button>
+        ))}
       </div>
 
       <label className="field">

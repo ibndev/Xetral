@@ -1555,6 +1555,19 @@ export class XetralClient {
    * screen carrying its own copy is a screen that shows the old price the
    * moment one does. It is a major-unit STRING, like every other amount here.
    */
+  /**
+   * WHAT A TRANSFER COSTS, as basis points.
+   *
+   * Read once when the Send screen opens and applied to whatever the customer
+   * types — a fee is a proportion, and asking the server again on every
+   * keystroke would be a round trip per digit. The authoritative charge is
+   * still computed by the ledger on the entry itself; this exists so the
+   * screen can say what it will be before somebody presses Send.
+   */
+  async transferFee(): Promise<{ readonly basis_points: number }> {
+    return this.#get('/v1/wallets/fee');
+  }
+
   async cardList(): Promise<{ readonly cards: readonly Card[]; readonly issuance_fee: string }> {
     const body = await this.#get<{ cards: Card[]; issuance_fee?: string }>('/v1/cards');
     return { cards: body.cards, issuance_fee: body.issuance_fee ?? '0.00' };

@@ -205,6 +205,8 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       .authenticated('POST', '/v1/auth/password', { pin: true })
 
       .authenticated('GET', '/v1/wallets', { pin: false })
+      // The fee POLICY, not a quote — see WalletService.transferFee.
+      .authenticated('GET', '/v1/wallets/fee', { pin: false })
       .authenticated('GET', '/v1/wallets/transactions', { pin: false })
       // ONE transaction, in full — what a customer gets when they tap a row.
       // No PIN: it is their own history, and the list above already shows the

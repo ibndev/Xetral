@@ -360,6 +360,29 @@ export class WalletService {
 
   #localCache: { codes: ReadonlySet<string>; until: number } | undefined;
 
+  /**
+   * WHAT A TRANSFER COSTS, so the Send screen can say so before it happens.
+   *
+   * THE FEE WAS ONLY ON THE ADMIN CLIENT, behind a staff route — so the one
+   * figure a customer is charged was readable by an operator and by nobody
+   * else, and the amount screen could not name it. `docs/mockups/app.html`
+   * draws a fee line above the keypad; without this it would have to be
+   * invented, which is the one thing a screen showing somebody's money must
+   * not do.
+   *
+   * BASIS POINTS, NOT AN AMOUNT, because the amount depends on what the
+   * customer is about to type and this is read once when the screen opens.
+   * The screen applies it to the figure in the box — which is also what makes
+   * a zero fee render as a zero rather than as a missing row.
+   *
+   * It is a POLICY and not a quote: the authoritative charge is computed by
+   * the ledger on the entry itself, as it always was. This exists so a
+   * customer is not surprised by it.
+   */
+  async transferFee(): Promise<{ readonly basis_points: number }> {
+    return { basis_points: await this.settings.transferFeeBasisPoints() };
+  }
+
   async history(
     userUuid: string,
     currency: Currency,

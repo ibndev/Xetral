@@ -81,7 +81,11 @@ export const light: Palette = {
   brand: '#0D1B3E',
   brand700: '#16295A',
   accent: '#F5A623',
-  link: '#4B7BF5',
+  // A LINK IS IRIS, and it was blue — a hue the commissioned design does not
+  // contain. The comp sets every inline link in it. `info` keeps the blue and
+  // is unchanged: that is a SEMANTIC colour for a notice, and a notice should
+  // not be the accent.
+  link: '#6D5AE6',
 
   /*
    * THE GROUND IS PURE WHITE AND EVERY CONTAINER ON IT IS RECESSED INTO IT,
@@ -139,7 +143,7 @@ export const dark: Palette = {
   brand: '#FFFFFF',
   brand700: '#E8EDF7',
   accent: '#F5A623',
-  link: '#6E9BFF',
+  link: '#7B6CF6',
 
   bg: '#000000',
   surface: '#0C0D10',

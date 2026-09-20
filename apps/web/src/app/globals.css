@@ -44,8 +44,19 @@
      white-on-white the moment --brand inverts for the dark theme. */
   --logo-ink:     #000000;
   --accent-600:   #E8941E;
-  --link:         #4B7BF5;   /* blue — links and selected states */
-  --link-600:     #3866E0;
+  /*
+   * A LINK IS IRIS, AND IT WAS BLUE — a hue the commissioned design does not
+   * contain. `docs/mockups/app.html` sets every inline link in `var(--iris)`:
+   * "All services", "Change", "See all". This token was #4B7BF5, so the one
+   * saturated colour a customer sees MOST — every link on every screen — was
+   * a different accent from the buttons beside it.
+   *
+   * `--info` keeps the blue and is unchanged: that is a SEMANTIC colour, for
+   * a notice that is neither good nor bad, and a notice should not be the
+   * accent.
+   */
+  --link:         var(--iris);
+  --link-600:     var(--iris-text);
 
   /* ─────────────────────── IRIS — the 2a design's accent ───────────────────
    *
@@ -350,8 +361,8 @@
   --brand-500:    #C7D2E8;
   --accent:       #F5A623;
   --accent-600:   #FFB93E;
-  --link:         #6E9BFF;
-  --link-600:     #8FB2FF;
+  --link:         var(--iris);
+  --link-600:     var(--iris-text);
 
   /* IRIS, DARK. Lighter than the light theme's so it holds against black,
      and `--on-iris` is a near-black rather than white because #7B6CF6 is
@@ -5464,3 +5475,130 @@ html, body { overflow-x: hidden; }
 .card-activity .tx-main .tx-name { font-size: 14.5px; }
 .card-activity .tx-main .tx-sub { font-size: 12px; }
 .card-activity .tx-side .tx-amt { font-size: 14px; }
+
+/* ── the amount step ────────────────────────────────────────────────────────
+ *
+ * ONE CENTRED FIGURE AND A KEYPAD, off `docs/mockups/app.html`. It was two
+ * stacked boxes with typed inputs, which made the screen a FORM; the comp
+ * makes it a til — the figure is the biggest thing on it, what the recipient
+ * gets is one quiet line beneath, and the digits are a 3×4 grid under the
+ * thumb.
+ */
+.sf-enter { text-align: center; padding: 4px 0 2px; }
+.sf-enter-label {
+  display: block;
+  font-size: 12px; font-weight: 600;
+  letter-spacing: .1em; text-transform: uppercase;
+  color: var(--text-3);
+}
+
+/*
+ * THE INPUT IS REAL AND SITS ON TOP OF THE FIGURE, transparent.
+ *
+ * A laptop has a keyboard and an accessibility tool needs something
+ * focusable with a label, so this cannot be a `<div>` the keypad writes into.
+ * The `<span>` under it is what is SEEN — it can carry the currency symbol
+ * and a colour the input cannot — and is `aria-hidden` so a screen reader
+ * gets the field rather than the picture of it.
+ */
+.sf-enter-figure {
+  position: relative;
+  margin-top: 6px;
+  font-family: var(--font-num);
+  font-size: 46px;
+  font-weight: 800;
+  letter-spacing: -0.045em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+  color: var(--text);
+  /* A figure that outgrows the screen SHRINKS rather than wrapping: a wrapped
+     amount is two numbers, and this one is the thing being agreed to. */
+  overflow: hidden;
+}
+.sf-enter-figure.bad { color: var(--danger); }
+.sf-enter-figure input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  /* Stated rather than omitted: the bare `input` rule sets a fill, a border,
+     a radius and a padding, and a property this rule does not mention is one
+     the bare rule wins — the fault `.ccy-card` shipped. */
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--iris);
+  font: inherit;
+  text-align: center;
+}
+.sf-enter-figure input:focus { outline: none; }
+/* The ring goes on the FIGURE, because the input is invisible and a focus
+   ring on nothing is a focus ring nobody can see. */
+.sf-enter-figure:focus-within {
+  outline: 2px solid var(--iris);
+  outline-offset: 6px;
+  border-radius: 12px;
+}
+.sf-enter-ccy { display: flex; justify-content: center; margin-top: 10px; }
+.sf-enter-recv { margin: 8px 0 0; font-size: 13px; font-weight: 500; color: var(--text-3); }
+.sf-enter-recv strong {
+  font-family: var(--font-num);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+/* ONE CHIP, SAYING THE ONE THING THERE IS TO SAY — a rate, a floor, an
+   arrival time or a refusal. They were three separate notes that could all be
+   absent at once, leaving the space under the figure empty. */
+.sf-enter-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-top: 10px;
+  padding: 6px 12px;
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  font-size: 12px; font-weight: 600;
+  color: var(--text-2);
+}
+.sf-enter-chip.bad { background: var(--danger-bg); color: var(--danger); }
+
+.sf-fee {
+  display: flex; justify-content: space-between;
+  padding: 12px 4px;
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+  font-size: 13px; font-weight: 500;
+  color: var(--text-3);
+}
+.sf-fee > :last-child {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+
+.sf-pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 6px 0 14px; }
+.sf-key {
+  /* Every property the bare `button` rule sets, restated. */
+  display: grid;
+  place-items: center;
+  gap: 0;
+  min-height: 0;
+  padding: 12px 0;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: 0;
+  white-space: nowrap;
+  cursor: pointer;
+}
+/* `:focus-visible`, NOT `:focus`. A tap focuses a key and the focus stays,
+   so the last digit pressed kept a filled background — which reads as a
+   selected key on a pad where nothing is selectable. Keyboard users still get
+   the state. */
+.sf-key:hover, .sf-key:focus-visible { background: var(--surface); }
+.sf-key:active { background: var(--surface-2); transform: none; }
