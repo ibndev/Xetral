@@ -65,6 +65,7 @@ export function Shell({
   children,
   back,
   onBack,
+  bare,
   greeting,
 }: {
   readonly title?: string;
@@ -80,6 +81,16 @@ export function Shell({
   readonly back?: string;
   /** For a step inside a flow. Takes precedence over `back`. */
   readonly onBack?: () => void;
+  /**
+   * NO HEADER AT ALL — for a screen with nothing above it and nowhere back.
+   *
+   * The Send flow's confirmation is the case: the money has gone, there is no
+   * previous question to return to, and the brand, the theme toggle and the
+   * bell are three controls competing with the one thing the screen exists to
+   * say. It is not the same as `back === undefined`, which means "a top-level
+   * screen" and correctly gets the bar.
+   */
+  readonly bare?: boolean;
   /**
    * THE HOME SCREEN'S HEADER IS A GREETING, NOT A LOGO, and it lives here
    * rather than on the page for the reason the sign-in gate and the tab bar
@@ -219,7 +230,7 @@ export function Shell({
           Rendered HERE rather than by each screen, so a screen cannot pick —
           the same argument as the sign-in gate and the keyboard handling.
         */}
-        {back === undefined && onBack === undefined && (
+        {back === undefined && onBack === undefined && bare !== true && (
         <header className={scrolled ? 'appbar scrolled' : 'appbar'}>
           {greeting !== undefined ? (
             <>
@@ -268,7 +279,7 @@ export function Shell({
           without the key React reuses the element and the entrance plays once
           per session.
         */}
-        <main className="shell screen-in" key={pathname}>
+        <main className={bare === true ? 'shell bare screen-in' : 'shell screen-in'} key={pathname}>
           {(back !== undefined || onBack !== undefined) && (
             <div className="page-head">
               {onBack !== undefined ? (
@@ -287,6 +298,16 @@ export function Shell({
         </main>
       </div>
 
+      {/*
+        AND NO TAB BAR EITHER, for the same reason there is no header.
+
+        `bare` means the screen owns the viewport. On the confirmation the
+        four destinations sit under a Done button that goes to exactly one of
+        them, so they are four ways to leave a flow half-dismissed — and the
+        comp draws the two buttons at the FOOT of the screen, which a fixed
+        bar would sit on top of.
+      */}
+      {bare !== true && (
       <nav className="tabbar" aria-label="Primary">
         {TABS.map((d) => (
           <Link
@@ -300,6 +321,7 @@ export function Shell({
           </Link>
         ))}
       </nav>
+      )}
     </div>
   );
 }

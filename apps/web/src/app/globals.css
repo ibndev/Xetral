@@ -564,6 +564,10 @@ h3 { font-size: 16px; }
   padding: 16px 20px calc(var(--tabbar-h) + 28px);
 }
 .shell.wide { max-width: 1240px; }
+/* NOTHING IS RESERVED FOR A BAR THAT IS NOT THERE. `--tabbar-h + 28px` is
+   the room the fixed tab bar needs to not cover the last row; on a `bare`
+   screen it is 84px of empty page under the button the screen exists for. */
+.shell.bare { padding-bottom: 28px; }
 
 @media (min-width: 720px) {
   .shell { max-width: 720px; padding: 24px 24px 64px; }
@@ -1477,7 +1481,19 @@ h3 { font-size: 16px; }
   min-height: 48px;
   padding: 12px 20px;
   border: 1px solid transparent;
-  border-radius: var(--r-pill);
+  /*
+   * A ROUNDED RECTANGLE, NOT A PILL — and the comps are unanimous about it.
+   * Not one `<button>` in either file carries `border-radius:999px`: the
+   * customer app's full-width actions are 16px, its keypad keys 14px, and
+   * every 999px in the markup is a CHIP, a segment, a status or an avatar.
+   *
+   * The distinction is what the shape SAYS. A pill is a label — a status, a
+   * filter, something read; a rounded rectangle is a surface you press.
+   * Making every button a pill spent the product's one "this is a tag" shape
+   * on the one element that is never a tag, and then a filled action and a
+   * status chip were the same object in two colours.
+   */
+  border-radius: 16px;
   /*
    * IRIS, NOT NAVY — the commissioned design's one change with the widest
    * reach. Navy was both the brand and the TEXT colour, so a filled button
@@ -2156,6 +2172,20 @@ th.right { font-family: var(--font-sans); }
    small screens is how an entry ends up in one and not the other. */
 
 .admin-frame { min-height: 100vh; }
+/*
+ * THE OPERATIONS SURFACE ROUNDS TIGHTER, and that is the admin comp's own
+ * number rather than a smaller version of the customer app's. Both button
+ * classes there — `.btnp` filled and `.btng` outlined — are 10px, beside
+ * 16px panels and 10px icon squares. A dashboard puts several buttons in a
+ * row inside a panel, and a 16px radius on a 32px-tall control eats most of
+ * its own edge; the customer app's buttons are full width and 48px tall,
+ * where 16px reads as a considered corner rather than a lozenge.
+ */
+.admin-frame .btn, .admin-frame button { border-radius: 10px; }
+/* Restated rather than left to declaration order: these carry their own
+   radius above and a shape is not a thing to resolve by source position. */
+.admin-frame .badge, .admin-frame .pill, .admin-frame .segmented,
+.admin-frame .segmented button { border-radius: var(--r-pill); }
 
 /*
  * THE SIDEBAR ITSELF NEVER SCROLLS; ITS NAV DOES.
@@ -5602,3 +5632,106 @@ html, body { overflow-x: hidden; }
    the state. */
 .sf-key:hover, .sf-key:focus-visible { background: var(--surface); }
 .sf-key:active { background: var(--surface-2); transform: none; }
+
+/* ---------------------------------------------------------------------------
+ * The confirmation.
+ *
+ * The comp gives this screen the whole phone: no app bar, no tab bar, the
+ * mark and the sentence centred in what is left, and the two buttons at the
+ * foot. `Shell`'s `bare` is what produces that, and `.shell.bare` above is
+ * what stops the page still reserving room for a tab bar that is not there.
+ * ------------------------------------------------------------------------- */
+.sent {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  /* Tall enough that the two buttons sit at the bottom of a handset rather
+     than under the card, with the mark and the figure centred in what is
+     left. `svh` rather than `vh`: the mobile URL bar makes `vh` taller than
+     the screen, which pushes Done below the fold on the one screen where the
+     only thing left to do is dismiss it. 44px is this screen's own padding —
+     there is no chrome above or below it to subtract. */
+  min-height: calc(100svh - 44px);
+}
+.sent-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+/* TWO CIRCLES — outer tinted, inner solid. That is what makes the mark read
+   as a stamp rather than as an icon on a coloured disc. */
+.sent-mark {
+  display: grid; place-items: center;
+  width: 88px; height: 88px;
+  border-radius: 50%;
+  background: var(--ok-bg);
+  margin-bottom: 22px;
+  animation: sent-pop var(--t) var(--ease) both;
+}
+.sent-mark-in {
+  display: grid; place-items: center;
+  width: 60px; height: 60px;
+  border-radius: 50%;
+  background: var(--ok);
+  color: var(--bg);
+}
+@keyframes sent-pop { from { transform: scale(.85); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .sent-mark { animation: none; } }
+
+.sent-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 26px; font-weight: 800;
+  letter-spacing: -0.023em;
+}
+.sent-lede {
+  margin: 8px 0 0;
+  max-width: 280px;
+  font-size: 14.5px; font-weight: 500;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+.sent-lede b { color: var(--text); font-weight: 700; }
+
+.sent-card {
+  width: 100%;
+  max-width: 320px;
+  margin-top: 26px;
+  padding: 6px 16px;
+  border-radius: 18px;
+  background: var(--surface);
+  border: 1px solid var(--edge);
+  text-align: left;
+}
+.sent-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+.sent-row:last-child { border-bottom: 0; }
+.sent-row > :first-child { font-weight: 500; color: var(--text-3); flex: none; }
+.sent-row > :last-child {
+  font-weight: 600; color: var(--text);
+  min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.sent > button { width: 100%; margin-top: 24px; }
+/* QUIET, AND IT IS NOT A SECOND PRIMARY. Done goes back to the wallet; this
+   starts another send. Two filled buttons would make the customer choose
+   between two equally weighted things at the moment they are least attentive. */
+.sent > .sent-again {
+  min-height: 48px;
+  margin-top: 6px;
+  background: none;
+  color: var(--text-2);
+  font-size: 14.5px; font-weight: 600;
+}
+.sent > .sent-again:hover, .sent > .sent-again:focus, .sent > .sent-again:active {
+  background: none;
+  color: var(--text);
+}

@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   currencyName,
   exponentFor,
@@ -68,7 +68,7 @@ export default function TransferPage() {
   );
 }
 
-type Step = 'who' | 'currency' | 'method' | 'details' | 'amount';
+type Step = 'who' | 'currency' | 'method' | 'details' | 'amount' | 'success';
 
 /**
  * HOW THE MONEY REACHES THEM, asked as its own step.
@@ -107,11 +107,21 @@ function Transfer() {
   const arrivedWith = params.get('to') ?? '';
   const [step, setStep] = useState<Step>(arrivedWith === '' ? 'who' : 'details');
 
+  const router = useRouter();
+
   /* WHAT WAS JUST SENT, held until the customer dismisses it. Cleared by the
      dialog's own button rather than by a timer: a confirmation that money
      left should not disappear because somebody looked away. */
   const [sent, setSent] = useState<
-    { amount: string; currency: string; name: string } | undefined
+    {
+      amount: string;
+      currency: string;
+      name: string;
+      destination: string;
+      /** Absent for a wallet transfer, which returns none — see `onSent`. */
+      reference?: string;
+      instant: boolean;
+    } | undefined
   >(undefined);
 
   /** The recipient being paid — chosen from the list, or built by the flow. */
@@ -150,12 +160,20 @@ function Transfer() {
     method: 'How does it arrive?',
     details: 'Recipient details',
     amount: 'Enter amount',
+    /* NO TITLE AND NO BACK ON SUCCESS. The money has gone; there is nothing
+       to return to and no question left to answer. The screen's own heading
+       is the confirmation. */
+    success: '',
   };
 
   return (
     <Shell
       title={TITLES[step]}
-      {...(step === 'who' ? { back: '/wallet' } : { onBack: back })}
+      {...(step === 'who'
+        ? { back: '/wallet' }
+        : step === 'success'
+          ? { bare: true }
+          : { onBack: back })}
     >
 
       {step === 'who' && (
@@ -249,82 +267,124 @@ function Transfer() {
             setSent(result);
             saved.reload();
             wallets.reload();
-            setStep('who');
+            setStep('success');
           }}
         />
       )}
 
       {/*
-        MONEY LEAVING DESERVES A DIALOG, not a toast that fades.
+        MONEY LEAVING DESERVES A SCREEN, not a dialog and not a toast that
+        fades.
 
-        A strip at the bottom saying "Sent to Olawale" names no amount and
-        removes itself after a few seconds, so a customer who looked away has
-        no confirmation at all of the one action in this product that cannot
-        be undone. This one states the figure and the name and waits to be
-        dismissed.
+        It was a dialog, which was already the right call against a strip at
+        the bottom saying "Sent to Olawale" — that names no amount and removes
+        itself after a few seconds, so a customer who looked away has no
+        confirmation at all of the one action in this product that cannot be
+        undone. The comp goes one further and gives it the whole screen, which
+        is what lets it carry the DESTINATION and the REFERENCE as well as the
+        figure: the three things somebody quotes when they ring up to ask
+        where their money is.
       */}
-      {sent !== undefined && (
-        <SentDialog
-          amount={sent.amount}
-          currency={sent.currency}
-          name={sent.name}
-          onClose={() => setSent(undefined)}
+      {step === 'success' && sent !== undefined && (
+        <Sent
+          sent={sent}
+          onDone={() => {
+            setSent(undefined);
+            setChosen(undefined);
+            setDraft(undefined);
+            setStep('who');
+            router.push('/wallet');
+          }}
+          onAgain={() => {
+            setSent(undefined);
+            setChosen(undefined);
+            setDraft(undefined);
+            setStep('who');
+          }}
         />
       )}
+
     </Shell>
   );
 }
 
 /**
- * The confirmation, portalled for the reason the Back pill is: `.screen-in`
- * carries an animation, an animation creates a containing block, and a
- * `position: fixed` child of one is laid out against the CONTENT rather than
- * the viewport.
+ * THE CONFIRMATION, AS A WHOLE SCREEN.
+ *
+ * It was a portalled dialog — portalled because `.screen-in` animates
+ * `<main>`, an animation creates a containing block, and a `position: fixed`
+ * child of one is positioned against it rather than against the viewport.
+ * A step needs none of that: it IS the screen.
+ *
+ * WHAT THE EXTRA ROOM BUYS is the three things somebody quotes when they ring
+ * up to ask where their money went — who it went to, which account, and the
+ * reference. A dialog had room for a figure and a name.
+ *
+ * THE REFERENCE ROW IS ABSENT WHERE THERE IS NO REFERENCE. A bank payout and
+ * a conversion both come back with an id; `POST /v1/wallets/transfers`
+ * answers an amount, a fee and a currency and nothing to quote. Showing an
+ * empty row, or inventing one, would be worse than the row not being there —
+ * the same call as the fee row on the step before this.
  */
-function SentDialog({
-  amount,
-  currency,
-  name,
-  onClose,
+function Sent({
+  sent,
+  onDone,
+  onAgain,
 }: {
-  amount: string;
-  currency: string;
-  name: string;
-  onClose: () => void;
+  readonly sent: {
+    readonly amount: string;
+    readonly currency: string;
+    readonly name: string;
+    readonly destination: string;
+    readonly reference?: string;
+    readonly instant: boolean;
+  };
+  readonly onDone: () => void;
+  readonly onAgain: () => void;
 }) {
-  const [ready, setReady] = useState(false);
-  useEffect(() => setReady(true), []);
-  if (!ready) return null;
+  return (
+    <section className="sent">
+      <div className="sent-body">
+        {/* TWO CIRCLES, the outer tinted and the inner solid — the comp's
+            shape, and it is what makes the mark read as a stamp rather than
+            as an icon on a coloured disc. */}
+        <span className="sent-mark" aria-hidden="true">
+          <span className="sent-mark-in">
+            <Icon name="check" size={30} />
+          </span>
+        </span>
 
-  return createPortal(
-    <div
-      className="xsheet-backdrop is-dialog"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="sent-title"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <div className="xdialog">
-        {/* THE EMOJI IS IN THE TITLE, and only there. It was drawn twice —
-            once large above the heading and once inside `SENT_TITLE` — which
-            renders as two party poppers stacked on one another. Rendered and
-            looked at, which is the only way that shows up. */}
-        <h2 className="xdialog-title" id="sent-title">
-          {SENT_TITLE}
-        </h2>
-        <p className="xdialog-body">{sentMessage(amount, currency, name)}</p>
-        <button type="button" className="xdialog-ok" onClick={onClose} autoFocus>
-          OK
-        </button>
+        <h2 className="sent-title">Money sent</h2>
+        <p className="sent-lede">
+          You sent <b>{formatAmount(sent.amount, sent.currency)}</b> to {sent.name}.{' '}
+          {sent.instant ? 'It has arrived.' : 'It usually arrives within minutes.'}
+        </p>
+
+        <div className="sent-card">
+          <div className="sent-row">
+            <span>To</span>
+            <span>{sent.name}</span>
+          </div>
+          <div className="sent-row">
+            <span>Account</span>
+            <span className="mono">{sent.destination}</span>
+          </div>
+          {sent.reference !== undefined && (
+            <div className="sent-row">
+              <span>Reference</span>
+              <span className="mono">{sent.reference}</span>
+            </div>
+          )}
+        </div>
       </div>
-    </div>,
-    document.body,
+
+      <button type="button" onClick={onDone}>Done</button>
+      <button type="button" className="sent-again" onClick={onAgain}>
+        Send to someone else
+      </button>
+    </section>
   );
 }
-
-/* ------------------------------------------------------------------ step 1 */
 
 /**
  * The people already paid.
@@ -1255,7 +1315,15 @@ function SendAmount({
   /* WHAT LEFT AND WHO GOT IT, because the confirmation names both. A
      callback taking nothing meant the parent had to re-derive an amount the
      step it just finished already knew. */
-  onSent: (sent: { amount: string; currency: string; name: string }) => void;
+  onSent: (sent: {
+    amount: string;
+    currency: string;
+    name: string;
+    destination: string;
+    /** Absent for a wallet transfer, which returns none. */
+    reference?: string;
+    instant: boolean;
+  }) => void;
 }) {
   const client = useXetral();
   const { busy, error, code, done, run } = useSubmit();
@@ -1376,16 +1444,39 @@ function SendAmount({
            * screen made this a tab; here it follows from the recipient and
            * the currency, which is the whole of the unification.
            */
+          /*
+           * THE RESULT IS CAPTURED, because the confirmation screen names a
+           * reference — and only two of the three paths have one.
+           *
+           * `POST /v1/wallets/transfers` answers an amount, a fee and a
+           * currency: there is nothing on it a customer could quote. A bank
+           * payout and a conversion both come back with an id. The screen
+           * omits the row rather than inventing a string, which is the same
+           * call the fee row makes one step earlier.
+           */
+          let reference: string | undefined;
+          /*
+           * AND THE AMOUNT THE CONFIRMATION SHOWS IS THE SERVER'S, NOT THE
+           * ONE THAT WAS TYPED.
+           *
+           * `formatAmount` renders whatever fraction it is given, so the typed
+           * "1200" came out as `₦1,200` on the screen that RECORDS what left
+           * the account — where the canonical `₦1,200.00` belongs. Every one
+           * of these calls answers with the figure the ledger posted, which
+           * is both correctly scaled and, for a conversion, the amount
+           * actually filled rather than the one quoted.
+           */
+          let recorded = amount;
           if (to.kind === 'xetral' && sameCurrency) {
-            await client.transfer({
+            recorded = (await client.transfer({
               recipient: to.destination,
               amount,
               currency: sendCurrency,
               pin,
               idempotencyKey: key,
-            });
+            })).amount;
           } else if (to.kind === 'xetral') {
-            await client.remit({
+            const trade = await client.remit({
               from: sendCurrency,
               to: lands_in,
               amount,
@@ -1393,8 +1484,10 @@ function SendAmount({
               pin,
               idempotencyKey: key,
             });
+            reference = trade.id;
+            recorded = trade.amount;
           } else {
-            await client.payToBank({
+            const payout = await client.payToBank({
               country: to.country,
               bankCode: to.rail_code ?? '',
               accountNumber: to.destination,
@@ -1416,11 +1509,20 @@ function SendAmount({
               pin,
               idempotencyKey: key,
             });
+            reference = payout.id;
+            recorded = payout.amount;
           }
           next();
           setAmount('');
           setPin('');
-          onSent({ amount, currency: sendCurrency, name: to.display_name });
+          onSent({
+            amount: recorded,
+            currency: sendCurrency,
+            name: to.display_name,
+            destination: to.destination,
+            ...(reference === undefined ? {} : { reference }),
+            instant: to.kind === 'xetral',
+          });
           return `Sent to ${to.display_name}.`;
         });
       }}
