@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
@@ -129,12 +129,30 @@ function Transfer() {
     else if (step === 'currency') setStep('who');
   };
 
+  /*
+   * EACH STEP CARRIES THE COMP'S OWN TITLE, and the header is the shared one.
+   *
+   * The way back used to be a floating control at the BOTTOM RIGHT, on the
+   * reasoning that a chevron above a heading costs a band of empty space and
+   * sits where a thumb cannot reach. The first half was true of a chevron on
+   * its OWN line; the comp puts the button and the title on one line, so the
+   * band is the title's and costs nothing extra — and the whole product now
+   * uses that header, so a flow with its own back control would be the one
+   * screen where the way out is somewhere else.
+   */
+  const TITLES: Readonly<Record<Step, string>> = {
+    who: 'Send money',
+    currency: 'What are you sending?',
+    method: 'How does it arrive?',
+    details: 'Recipient details',
+    amount: 'Enter amount',
+  };
+
   return (
-    <Shell title="Send">
-      {/* THE WAY BACK IS AT THE BOTTOM RIGHT, not the top left. A chevron above
-          the heading cost a band of empty space on a handset and sat at the one
-          corner a thumb holding the phone cannot reach. */}
-      {step !== 'who' && <FlowBack onClick={back} />}
+    <Shell
+      title={TITLES[step]}
+      {...(step === 'who' ? { back: '/wallet' } : { onBack: back })}
+    >
 
       {step === 'who' && (
         <ChooseRecipient
@@ -326,35 +344,9 @@ function ChooseRecipient({
   onNew: () => void;
 }) {
   const [query, setQuery] = useState('');
-  const [filter, setFilter] = useState('');
   const [menu, setMenu] = useState<string | undefined>(undefined);
-  /* THE RAIL STAYS ON ONE LINE. Five chips do not fit a 360px handset, so
-     three are shown and the rest sit behind "More" — which wraps them onto a
-     second line rather than scrolling them out of reach. */
-  const [allChips, setAllChips] = useState(false);
-  const CHIP_LIMIT = 3;
-
-  /*
-   * THE CHIPS ARE WHAT THIS PLATFORM CAN SEND — NGN, USD, GHS, KES and the
-   * stablecoins — not only the currencies already in the address book.
-   *
-   * Deriving them from saved recipients meant a customer with one Ghanaian
-   * payee saw one chip, and a customer with none saw no rail at all: a filter
-   * that appears once you no longer need it. `sendableFor` is the platform's
-   * own answer, and the currencies actually used are ordered first so the
-   * common ones stay in front of "More".
-   */
-  const currencies = useMemo(() => {
-    const used = new Set(recipients.map((r) => r.currency));
-    const offered = sendableFor(home);
-    return [...offered].sort((a, b) => {
-      const byUse = Number(used.has(b)) - Number(used.has(a));
-      return byUse !== 0 ? byUse : offered.indexOf(a) - offered.indexOf(b);
-    });
-  }, [recipients, home]);
 
   const shown = recipients.filter((r) => {
-    if (filter !== '' && r.currency !== filter) return false;
     if (query.trim() === '') return true;
     const needle = query.trim().toLowerCase();
     return (
@@ -366,8 +358,6 @@ function ChooseRecipient({
 
   return (
     <section className="sf">
-      <h1 className="sf-title">Send money to who?</h1>
-
       <div className="sf-search">
         <Icon name="search" size={18} />
         <input
@@ -378,47 +368,37 @@ function ChooseRecipient({
         />
       </div>
 
-      {currencies.length > 0 && (
-        <div
-          className={allChips ? 'sf-chips wrap' : 'sf-chips'}
-          role="group"
-          aria-label="Filter by currency"
-        >
-          <button
-            type="button"
-            className={filter === '' ? 'sf-chip on' : 'sf-chip'}
-            onClick={() => setFilter('')}
-          >
-            {/* The 2×2 grid mark the mockup gives the All chip. */}
-            <svg width="14" height="14" viewBox="0 0 14 14" fill={filter === '' ? '#3B6FE8' : '#2A2E3E'} aria-hidden="true">
-              <rect x="0" y="0" width="5.5" height="5.5" rx="1.2" />
-              <rect x="8.5" y="0" width="5.5" height="5.5" rx="1.2" />
-              <rect x="0" y="8.5" width="5.5" height="5.5" rx="1.2" />
-              <rect x="8.5" y="8.5" width="5.5" height="5.5" rx="1.2" />
-            </svg>
-            All
-          </button>
-          {(allChips ? currencies : currencies.slice(0, CHIP_LIMIT)).map((currency) => (
-            <button
-              key={currency}
-              type="button"
-              className={filter === currency ? 'sf-chip on' : 'sf-chip'}
-              onClick={() => setFilter(currency)}
-            >
-              <span className="sf-chip-flag">
-                <CurrencyMark currency={currency} size={18} />
-              </span>
-              {currency}
-            </button>
-          ))}
-          {!allChips && currencies.length > CHIP_LIMIT && (
-            <button type="button" className="sf-chip" onClick={() => setAllChips(true)}>
-              More
-            </button>
-          )}
-        </div>
-      )}
+      {/*
+        NEW RECIPIENT IS A ROW UNDER THE SEARCH, which is where the comp puts
+        it — and it used to be a pill FIXED over the bottom of the screen,
+        rendered through a portal to escape an ancestor's transform.
 
+        That portal existed because `position: fixed` is contained by any
+        transformed ancestor and `screen-in` animates `<main>`, so the pill
+        laid out against a 900px main and sat 275px below the viewport:
+        fixed, correct and invisible. An ordinary row in the flow has no
+        ancestor to escape, so the whole mechanism goes with it — and the
+        control is now beside the list it adds to rather than floating over
+        the list it is not part of.
+      */}
+      <button type="button" className="sf-new" onClick={onNew}>
+        <span className="sf-new-ico">
+          <Icon name="plus" size={20} />
+        </span>
+        New recipient
+      </button>
+
+      {/*
+        THERE IS NO CURRENCY FILTER HERE, and removing it is the correction.
+
+        A row of chips — All, NGN, USD, USDT, More — sat between the search
+        and the list. `docs/mockups/app.html` has none: its recipients step is
+        the search, New recipient, an "ALL RECIPIENTS" eyebrow and the rows.
+        The chips were this app's addition, they carried the old blue accent
+        that made the flow look like a different product, and the search box
+        immediately above them already filters on name AND account details —
+        which is a superset of what a currency chip could do.
+      */}
       {recipients.length === 0 ? (
         <p className="sf-empty">
           Nobody here yet. Add the first person you want to pay and they stay on
@@ -479,8 +459,6 @@ function ChooseRecipient({
           {shown.length === 0 && <p className="sf-empty">Nobody on this list matches that.</p>}
         </>
       )}
-
-      <NewRecipientPill onClick={onNew} />
     </section>
   );
 }
@@ -554,7 +532,6 @@ function ChooseCurrency({
 
   return (
     <section className="sf">
-      <h1 className="sf-title">What currency are you sending?</h1>
 
       <div className="sf-search">
         <Icon name="search" size={18} />
@@ -566,7 +543,7 @@ function ChooseCurrency({
         />
       </div>
 
-      <CurrencyGroup heading="Favorites" codes={favourites} onPick={onPick} />
+      <CurrencyGroup heading="Favourites" codes={favourites} onPick={onPick} />
       <CurrencyGroup heading="Stablecoins" codes={stablecoins} onPick={onPick} />
       {[...letters.entries()].map(([letter, codes]) => (
         <CurrencyGroup key={letter} heading={letter} codes={codes} onPick={onPick} />
@@ -721,7 +698,6 @@ function ChooseMethod({
 
   return (
     <section className="sf">
-      <h1 className="sf-title">How do you want to send {receive}?</h1>
 
       <div className="sf-methods">
         {methods.map((method) => (
@@ -1012,7 +988,6 @@ function RecipientDetails({
           });
         }}
       >
-        <h1 className="sf-title">Who are you sending to?</h1>
         <p className="sf-sub">
           {method === 'xetral'
             ? 'Their Xetral phone number — the money arrives instantly'
@@ -1627,52 +1602,7 @@ function toRecipient(found: RecipientResolution): Recipient {
  * "AirtelTigo Money" — provider strings, not names. A picker is read at a
  * glance, so it reads MTN, VODAFONE, AIRTELTIGO, and XETRAL sits among them.
  */
-/**
- * The New-recipient pill, JUST ABOVE THE TAB BAR — and portalled to the body.
- *
- * `position: fixed` is contained by any ancestor with a transform, and the
- * Shell's `<main>` carries `screen-in`, whose animation does exactly that. So
- * the pill was laid out against a 900px-tall main and sat 275px BELOW the
- * screen: fixed, correct, and invisible. A portal puts it outside every
- * animated ancestor, which is the only version of this that cannot regress.
- */
-function NewRecipientPill({ onClick }: { onClick: () => void }) {
-  const [ready, setReady] = useState(false);
-  useEffect(() => setReady(true), []);
-  if (!ready) return null;
-  return createPortal(
-    <button type="button" className="sf-newbtn" onClick={onClick}>
-      <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
-        <line x1="9" y1="2" x2="9" y2="16" />
-        <line x1="2" y1="9" x2="16" y2="9" />
-      </svg>
-      New recipient
-    </button>,
-    document.body,
-  );
-}
 
-/**
- * THE WAY BACK, at the bottom right of every step but the first.
- *
- * PORTALLED FOR THE SAME REASON THE PILL IS. `position: fixed` is contained
- * by any ancestor carrying a transform, and the Shell's `<main>` has
- * `screen-in`, whose animation creates exactly that — so a fixed child is laid
- * out against a 900px-tall main and lands below the fold. Measured, not
- * reasoned about, the first time it happened.
- */
-function FlowBack({ onClick }: { onClick: () => void }) {
-  const [ready, setReady] = useState(false);
-  useEffect(() => setReady(true), []);
-  if (!ready) return null;
-  return createPortal(
-    <button type="button" className="sf-flow-back" onClick={onClick}>
-      <Icon name="chevronLeft" size={16} />
-      Back
-    </button>,
-    document.body,
-  );
-}
 
 /** The rail as it should READ on a row: "MTN", not "MTN Mobile Money". */
 function railLabelOf(to: Recipient): string {

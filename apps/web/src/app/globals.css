@@ -285,37 +285,59 @@
   --tabbar-h: 68px;
   --header-h: 60px;
 
-  /* The Send flow's own palette — the uploaded mockups' exact values.
-     Tokenised so the same rules serve dark, where the step must be a full
-     page on the app's ground rather than a white box floating in it. */
-  --sf-bg: #FFFFFF;
-  --sf-text: #111111;
-  --sf-muted: #9AA5B4;
-  --sf-section: #7B8FA1;
-  --sf-divider: #E8EAED;
-  --sf-rowline: #F0F2F5;
-  --sf-search-border: #DADDE3;
-  --sf-placeholder: #B2BCC8;
-  --sf-accent: #3B6FE8;
-  --sf-on-accent: #FFFFFF;
-  --sf-chip-bg: #FFFFFF;
-  --sf-chip-border: #D8DCE4;
-  --sf-chip-text: #2A2E3E;
-  --sf-avatar-bg: #ECEEF3;
-  --sf-avatar-text: #8E939F;
-  --sf-dots: #B0B8C4;
-  --sf-field: #E8E8E8;
-  --sf-field-text: #333333;
-  /* THE DIAL PREFIX'S HAIRLINE. `--sf-divider` is #E8EAED, which against a
-     #E8E8E8 field is the same colour — the rule was there and invisible, so
-     the prefix and the number read as one run of text. */
-  --sf-dial-line: #CFD3D9;
-  --sf-label: #888888;
-  --sf-sub: #999999;
-  --sf-sheet: #FFFFFF;
-  --sf-sheet-line: #F0F0F0;
-  --sf-handle: #DDDDDD;
-  --sf-radio: #CCCCCC;
+  /*
+   * THE SEND FLOW HAS NO PALETTE OF ITS OWN ANY MORE, and it had one for a
+   * whole design generation.
+   *
+   * These were sixteen hardcoded hex values described as "the uploaded
+   * mockups' exact values" — from the mockups BEFORE the commissioned design,
+   * whose accent was BLUE (#3B6FE8 light, #5B8CFF dark). So the one flow this
+   * product exists for was drawn in a hue that appears nowhere else in it:
+   * the New recipient tile, the currency chips, the Continue button and the
+   * Change link were all blue on a screen whose Send button, two steps
+   * earlier, is iris.
+   *
+   * `docs/mockups/app.html` uses `var(--iris)` for every one of those. So
+   * each token now names the product's own, in BOTH themes — the dark block
+   * already did exactly this, which is why the fault was invisible to anyone
+   * building in dark.
+   *
+   * The names stay rather than being inlined at the call sites: they say
+   * "this is the send flow's reading of the system", which is what makes a
+   * deliberate divergence visible if one is ever wanted again.
+   */
+  --sf-bg: var(--bg);
+  --sf-text: var(--text);
+  --sf-muted: var(--text-3);
+  --sf-section: var(--text-2);
+  --sf-divider: var(--line);
+  --sf-rowline: var(--line);
+  --sf-search-border: var(--line-strong);
+  --sf-placeholder: var(--text-3);
+  --sf-accent: var(--iris);
+  --sf-on-accent: var(--on-iris);
+  --sf-chip-bg: transparent;
+  --sf-chip-border: var(--line-strong);
+  --sf-chip-text: var(--text);
+  --sf-avatar-bg: var(--avatar);
+  --sf-avatar-text: var(--avatar-text);
+  --sf-dots: var(--text-3);
+  --sf-field: var(--field);
+  --sf-field-text: var(--text);
+  /* THE DIAL PREFIX'S HAIRLINE, and it needs its OWN token rather than
+     `--sf-divider`: the divider and the field it sits on were both near the
+     same grey, so the rule was there and invisible and the prefix read as one
+     run of text with the number. `--line-strong` is a step darker and is the
+     product's own. */
+  --sf-dial-line: var(--line-strong);
+  --sf-label: var(--text-2);
+  --sf-sub: var(--text-2);
+  /* A SHEET FLOATS, so it is the raised surface rather than the recessed one
+     — the same argument `.xselect-list` makes about a dropdown. */
+  --sf-sheet: var(--surface-raised);
+  --sf-sheet-line: var(--line);
+  --sf-handle: var(--line-strong);
+  --sf-radio: var(--line-strong);
 }
 
 [data-theme='dark'] {
@@ -396,13 +418,13 @@
   --sf-rowline: var(--line);
   --sf-search-border: var(--line-strong);
   --sf-placeholder: var(--text-3);
-  --sf-accent: #5B8CFF;
-  --sf-on-accent: #0B1020;
+  --sf-accent: var(--iris);
+  --sf-on-accent: var(--on-iris);
   --sf-chip-bg: transparent;
   --sf-chip-border: var(--line-strong);
   --sf-chip-text: var(--text);
-  --sf-avatar-bg: var(--surface-2);
-  --sf-avatar-text: var(--text-2);
+  --sf-avatar-bg: var(--avatar);
+  --sf-avatar-text: var(--avatar-text);
   --sf-dots: var(--text-3);
   --sf-field: var(--field);
   --sf-field-text: var(--text);
@@ -4153,10 +4175,20 @@ body:has(.sf) { background: var(--sf-bg); }
 
 /* --- currency select --- */
 .sf-section { margin-bottom: 22px; }
+/*
+ * THE COMP'S EYEBROW, and it is the same one the activity list uses:
+ * `700 11px` uppercase at `.1em` in `--text-3`. It was 13px at weight 500 in
+ * sentence case, which reads as a HEADING — so "Favourites" and "All
+ * recipients" competed with the screen's own title instead of labelling the
+ * group under them. A small uppercase label is a signpost; a 13px sentence is
+ * a sentence.
+ */
 .sf-section-label {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--sf-section);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--text-3);
   margin-bottom: 8px;
 }
 .sf-divider { height: 1px; background: var(--sf-divider); margin-bottom: 6px; }
@@ -4238,10 +4270,14 @@ body:has(.sf) { background: var(--sf-bg); }
   display: flex; align-items: center; justify-content: center;
 }
 
+/* THE SAME EYEBROW. This one was in the ACCENT — a heading the colour of the
+   primary action, above a list that is not one. */
 .sf-list-label {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--sf-accent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--text-3);
   margin-bottom: 8px;
 }
 
@@ -4312,32 +4348,55 @@ body:has(.sf) { background: var(--sf-bg); }
 
 .sf-empty { color: var(--sf-muted); font-size: 14px; padding: 22px 0; }
 
-/* THE NEW-RECIPIENT PILL IS FIXED, BOTTOM RIGHT, ALWAYS — the mockup's
-   position. It clears the tab bar and the home indicator. `.sf-newbtn-row` is
-   the spacer that stops it covering the last row of a long list. */
-.sf-newbtn-row { height: 0; }
-.sf-newbtn {
-  position: fixed;
-  right: 20px;
-  bottom: calc(var(--tabbar-h) + 10px + env(safe-area-inset-bottom, 0px));
-  z-index: 45;
-  display: inline-flex;
+/*
+ * NEW RECIPIENT IS A ROW, NOT A FLOATING PILL.
+ *
+ * It was `position: fixed` at the bottom right — and fixed is contained by
+ * any transformed ancestor, so `screen-in` on `<main>` laid it out against a
+ * 900px box and put it 275px below the viewport. The fix was a portal to
+ * escape the transform; the comp's answer is simpler and better: an ordinary
+ * row under the search, beside the list it adds to rather than floating over
+ * the list it is not part of. No portal, no fixed positioning, nothing to
+ * escape.
+ *
+ * The 46px tile is the one IRIS thing on this step, because adding somebody
+ * is the action a customer takes when the list has not got who they want.
+ */
+.sf-new {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
+  gap: 13px;
+  width: 100%;
+  /* Stated because `.btn, button` sets each of them and a property omitted is
+     a property the bare rule wins — the fault `button-specificity.test.ts`
+     refuses. */
+  justify-content: flex-start;
   min-height: 0;
-  padding: 14px 22px;
+  padding: 16px 0 14px;
   border: 0;
-  border-radius: 50px;
-  background: var(--sf-accent);
-  color: var(--sf-on-accent);
+  border-radius: 0;
+  background: none;
+  color: var(--text);
   font-family: var(--font-sans);
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-align: left;
   cursor: pointer;
-  box-shadow: 0 6px 20px rgb(59 111 232 / 40%);
 }
-.sf-newbtn:hover:where(:not(:disabled)) { background: var(--sf-accent); color: var(--sf-on-accent); }
+.sf-new, .sf-new:hover, .sf-new:active, .sf-new:focus { background: none; }
+.sf-new .sf-new-ico {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  background: var(--iris);
+  color: var(--on-iris);
+  transition: transform var(--t-fast) var(--ease);
+}
+.sf-new:active .sf-new-ico { transform: scale(.94); }
 
 /* --- momo network form --- */
 .sf-group { margin-bottom: 12px; }
@@ -4675,60 +4734,6 @@ body:has(.sf) { background: var(--sf-bg); }
 }
 .sf-amount-note.bad { color: var(--danger); }
 
-/*
- * THE WAY BACK IS A PILL AT THE BOTTOM RIGHT, on every step.
- *
- * It was a chevron at the TOP LEFT, which cost a band of empty space above
- * the heading on a handset screen and sat at the one corner a thumb holding
- * the phone cannot reach. This is the same fixed-and-portalled construction
- * the New-recipient pill is, for the same reason: `.screen-in` carries an
- * animation, an animation creates a containing block, and a `position: fixed`
- * child of one is laid out against the CONTENT rather than the viewport.
- *
- * It is QUIET — not the accent — because it is the way out of a step rather
- * than the way through it, and the primary button is the one thing on the
- * screen that may be blue.
- *
- * BUT QUIET IS NOT THE SAME AS INVISIBLE, and the first version was the
- * second. It was `--sf-field` (#E8E8E8) on a near-white ground with a 12%
- * shadow — and on a SHORT step like "How do you want to send GHS?" there is
- * no content anywhere near it, so a pale pill floating in a field of white
- * read as nothing being there at all. Measured in a browser at 390px: the
- * button was present, on top, fully opaque, and reported as missing.
- *
- * A CONTROL THAT FLOATS NEEDS AN EDGE, because it has no container to belong
- * to. `--surface-raised` is the token whose whole documented purpose is
- * "only what floats", `--line-strong` draws the edge in both themes, and the
- * shadow is firm enough to separate it from the ground rather than to
- * decorate it.
- */
-.sf-flow-back {
-  position: fixed;
-  right: 20px;
-  bottom: calc(var(--tabbar-h) + 10px + env(safe-area-inset-bottom, 0px));
-  z-index: 45;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-height: 0;
-  padding: 11px 18px;
-  border: 1px solid var(--line-strong);
-  border-radius: 50px;
-  background: var(--surface-raised);
-  color: var(--text);
-  font-family: var(--font-sans);
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  box-shadow: 0 6px 20px rgb(0 0 0 / 16%);
-}
-/* Restated out loud, and NOT inside a hover query: `.sf-flow-back` is a
-   `<button>`, so the base `button:hover` fill applies to it unless this says
-   otherwise — the cascade collision `button-specificity.test.ts` exists
-   because of, which turned the network picker into a solid white pill. */
-.sf-flow-back:hover:where(:not(:disabled)) { background: var(--surface-raised); color: var(--text); }
-.sf-flow-back:active { transform: none; }
 
 /*
  * THE DIALLING CODE IS DRAWN IN FRONT OF THE NUMBER, never typed into it.

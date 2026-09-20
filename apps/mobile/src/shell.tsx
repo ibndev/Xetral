@@ -96,14 +96,24 @@ export function Shell({
   children,
   title,
   back,
+  onBack,
   greeting,
   scroll = true,
   overlay,
 }: {
   readonly children: ReactNode;
   readonly title?: string;
-  /** Show a back chevron instead of the mark — for a screen one level down. */
+  /**
+   * Show the sub-screen header instead of the bar — an href to go to.
+   *
+   * A STEP INSIDE A FLOW PASSES `onBack` INSTEAD, because going back there is
+   * a state transition rather than a navigation: the Send flow's second step
+   * has no route of its own, so an href would leave the flow rather than
+   * return to the question before it.
+   */
   readonly back?: string;
+  /** For a step inside a flow. Takes precedence over `back`. */
+  readonly onBack?: () => void;
   /**
    * THE HOME SCREEN'S HEADER IS A GREETING, NOT A MARK — and it lives here
    * rather than on the screen for the reason the keyboard handling and the
@@ -188,7 +198,7 @@ export function Shell({
         comp's 40pt rounded square on `surface2` and a 20pt title. Rendered
         here so a screen cannot forget it or draw a second one.
       */}
-      {back !== undefined && (
+      {(back !== undefined || onBack !== undefined) && (
         <View
           style={{
             flexDirection: 'row', alignItems: 'center', gap: 12,
@@ -207,9 +217,11 @@ export function Shell({
              * screen the customer came from. The href stays as the fallback
              * for a cold start straight into a deep link.
              */
-            onPress={() =>
-              router.canGoBack() ? router.back() : router.replace(back as never)
-            }
+            onPress={() => {
+              if (onBack !== undefined) { onBack(); return; }
+              if (router.canGoBack()) router.back();
+              else router.replace(back as never);
+            }}
             accessibilityRole="button"
             accessibilityLabel="Back"
             hitSlop={8}
@@ -256,7 +268,7 @@ export function Shell({
         The web's `Shell` makes the same change in the same place, so the two
         apps cannot disagree about what a sub-screen looks like.
       */}
-      {back === undefined && (
+      {back === undefined && onBack === undefined && (
       <View
         style={{
           flexDirection: 'row',

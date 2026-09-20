@@ -27,7 +27,7 @@ import { Select } from '@/select';
 import { Icon } from '@/icon';
 import { CurrencyMark } from '@/currency-mark';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/hooks';
-import { font, radius, space, useResolvedScheme, useStyles, useTheme } from '@/theme';
+import { font, radius, space, useStyles, useTheme } from '@/theme';
 import type { Palette } from '@/theme';
 
 /**
@@ -56,6 +56,15 @@ import type { Palette } from '@/theme';
  * The two apps are held to the same route list by `parity.test.ts` and to the
  * same answer about whether a payout is reviewable by `momo-send.test.ts`.
  */
+/** The comp's own heading for each step, to the word. */
+const STEP_TITLES: Readonly<Record<Step, string>> = {
+  who: 'Send money',
+  currency: 'What are you sending?',
+  method: 'How does it arrive?',
+  details: 'Recipient details',
+  amount: 'Enter amount',
+};
+
 type Step = 'who' | 'currency' | 'method' | 'details' | 'amount';
 
 /**
@@ -123,13 +132,14 @@ export default function Transfer() {
 
   return (
     <Shell
-      title="Send"
-      /* The chevron is the Shell's on the FIRST step, where back means leaving
-         the flow — every step after it has its own, because back there means
-         one step, not the wallet. Spread rather than `undefined`, which
+      /* EACH STEP CARRIES THE COMP'S OWN TITLE, and the header is the shared
+         one. On the FIRST step back means leaving the flow, so it is an href;
+         every step after it goes back ONE QUESTION, which is a state change
+         and not a route. Spread rather than `undefined`, which
          `exactOptionalPropertyTypes` refuses for an optional prop: an absent
          property and one holding `undefined` are different things here. */
-      {...(step === 'who' ? { back: '/wallet' } : {})}
+      title={STEP_TITLES[step]}
+      {...(step === 'who' ? { back: '/wallet' } : { onBack: back })}
       overlay={
         <>
           {/*
@@ -148,13 +158,16 @@ export default function Transfer() {
               onClose={() => setSent(undefined)}
             />
           )}
-          {/* BOTTOM RIGHT, ALWAYS — over the screen rather than at the end of
-              the list, so it does not scroll away or cover the last row.
-              THE WAY BACK SITS THERE TOO, on every step after the first: a
-              chevron above the heading cost a band of empty space on a handset
-              and sat at the one corner a thumb holding the phone cannot
-              reach. */}
-          {step === 'who' ? <NewRecipientPill onPress={startNew} /> : <FlowBack onPress={back} />}
+          {/*
+            NEITHER FLOATING CONTROL IS HERE ANY MORE.
+
+            New recipient is a ROW under the search, where the comp puts it,
+            and the way back is the Shell's own header — a 40pt square and the
+            step's title on one line. The argument for the bottom right was
+            that a chevron ABOVE a heading costs a band of empty space; the
+            comp pairs them on one line, so the band is the title's and costs
+            nothing extra.
+          */}
         </>
       }
     >
@@ -283,13 +296,8 @@ function ChooseRecipient({
   const styles = useStyles();
   const sf = useSf();
   const [query, setQuery] = useState('');
-  const [filter, setFilter] = useState('');
   const [menu, setMenu] = useState<string | undefined>(undefined);
-  /* THE RAIL STAYS ON ONE LINE. Five chips do not fit a 360px handset, so
-     three are shown and the rest sit behind "More". */
-  const [allChips, setAllChips] = useState(false);
-  const CHIP_LIMIT = 3;
-
+  
   /*
    * THE CHIPS ARE THE CURRENCIES THIS CUSTOMER ACTUALLY PAYS, not every
    * currency the platform offers. A filter for a currency nobody in the list
@@ -309,7 +317,6 @@ function ChooseRecipient({
   }, [recipients, home]);
 
   const shown = recipients.filter((r) => {
-    if (filter !== '' && r.currency !== filter) return false;
     if (query.trim() === '') return true;
     const needle = query.trim().toLowerCase();
     return (
@@ -327,33 +334,44 @@ function ChooseRecipient({
         placeholder="Search by name or account details"
       />
 
-      {currencies.length > 0 && (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          /*
-           * THE RAIL SCROLLS INSIDE ITSELF, for the reason the activity
-           * filters do: a row of chips that does not fit makes the whole
-           * screen scroll sideways, and wrapping moves them under the thumb as
-           * the selection changes width.
-           */
-          contentContainerStyle={{ gap: 8, paddingVertical: space.sm }}
+      {/*
+        NEW RECIPIENT IS A ROW UNDER THE SEARCH, where the comp puts it. It
+        was a pill floating over the bottom right of the screen; a row sits
+        beside the list it adds to rather than over the list it is not part
+        of, and the 46pt tile is the one IRIS thing on this step because
+        adding somebody is what a customer does when the list has not got who
+        they want.
+      */}
+      <Pressable
+        onPress={onNew}
+        android_ripple={null}
+        accessibilityRole="button"
+        style={{
+          flexDirection: 'row', alignItems: 'center', gap: 13,
+          paddingTop: 16, paddingBottom: 14,
+        }}
+      >
+        <View
+          style={{
+            width: 46, height: 46, borderRadius: 14,
+            alignItems: 'center', justifyContent: 'center',
+            backgroundColor: sf.accent,
+          }}
         >
-          <Chip label="All" grid on={filter === ''} onPress={() => setFilter('')} />
-          {(allChips ? currencies : currencies.slice(0, CHIP_LIMIT)).map((currency) => (
-            <Chip
-              key={currency}
-              label={currency}
-              currency={currency}
-              on={filter === currency}
-              onPress={() => setFilter(currency)}
-            />
-          ))}
-          {!allChips && currencies.length > CHIP_LIMIT && (
-            <Chip label="More" on={false} onPress={() => setAllChips(true)} />
-          )}
-        </ScrollView>
-      )}
+          <Icon name="plus" size={20} color={sf.onAccent} />
+        </View>
+        <Text style={{ color: sf.text, fontFamily: font.sansBold, fontSize: 15 }}>
+          New recipient
+        </Text>
+      </Pressable>
+
+      {/*
+        THERE IS NO CURRENCY FILTER HERE, and removing it is the correction.
+        The comp's recipients step is the search, New recipient, an eyebrow
+        and the rows — the chips were this app's addition, they carried the
+        old blue accent, and the search above them already filters on name AND
+        account details, which is a superset of what a currency chip can do.
+      */}
 
       {loading && recipients.length === 0 ? (
         <Loading />
@@ -1690,31 +1708,48 @@ type SfPalette = {
   readonly label: string; readonly placeholder: string; readonly field: string;
   readonly dialLine: string;
 };
+/*
+ * THE SEND FLOW HAS NO PALETTE OF ITS OWN ANY MORE.
+ *
+ * Every light value here was a hardcoded hex from the mockups BEFORE the
+ * commissioned design, whose accent was BLUE — #3B6FE8. So the one flow this
+ * product exists for was drawn in a hue that appears nowhere else in it,
+ * while the DARK branch already named the product's own tokens. That is why
+ * nobody saw it: on the theme most of this was built in, the flow looked
+ * right.
+ *
+ * `docs/mockups/app.html` uses iris for the New recipient tile, the Continue
+ * button and the Change link. The web's `--sf-*` custom properties were
+ * collapsed onto the product's tokens in the same commit as this, and
+ * `one-palette.test.ts` refuses a literal there.
+ *
+ * The SHAPE stays — a named palette for this flow — so a deliberate
+ * divergence would still be visible if one were ever wanted.
+ */
 function useSf(): SfPalette {
   const c: Palette = useTheme();
-  const light = useResolvedScheme() === 'light';
   return {
-    text: light ? '#111111' : c.text,
-    muted: light ? '#9AA5B4' : c.text3,
-    section: light ? '#7B8FA1' : c.text2,
-    divider: light ? '#E8EAED' : c.line,
-    rowline: light ? '#F0F2F5' : c.line,
-    accent: light ? '#3B6FE8' : '#5B8CFF',
-    onAccent: light ? '#FFFFFF' : '#0B1020',
-    chipBg: light ? '#FFFFFF' : 'transparent',
-    chipBorder: light ? '#D8DCE4' : c.lineStrong,
-    chipText: light ? '#2A2E3E' : c.text,
-    avatarBg: light ? '#ECEEF3' : c.surface2,
-    avatarText: light ? '#8E939F' : c.text2,
-    dots: light ? '#B0B8C4' : c.text3,
-    bg: light ? '#FFFFFF' : c.bg,
-    label: light ? '#888888' : c.text2,
-    placeholder: light ? '#B2BCC8' : c.text3,
-    field: light ? '#E8E8E8' : c.field,
-    /* THE DIAL PREFIX'S HAIRLINE. The divider grey is the same colour as the
-       field, so the rule was there and invisible and the prefix read as one
-       run of text with the number. */
-    dialLine: light ? '#CFD3D9' : c.lineStrong,
+    text: c.text,
+    muted: c.text3,
+    section: c.text2,
+    divider: c.line,
+    rowline: c.line,
+    accent: c.iris,
+    onAccent: c.onIris,
+    chipBg: 'transparent',
+    chipBorder: c.lineStrong,
+    chipText: c.text,
+    avatarBg: c.avatar,
+    avatarText: c.avatarText,
+    dots: c.text3,
+    bg: c.bg,
+    label: c.text2,
+    placeholder: c.text3,
+    field: c.field,
+    /* THE DIAL PREFIX'S HAIRLINE needs a value a step darker than the
+       divider: the two were near enough the same grey that the rule was there
+       and invisible, and the prefix read as one run of text with the number. */
+    dialLine: c.lineStrong,
   };
 }
 
@@ -1838,80 +1873,6 @@ function SentDialog({
         </View>
       </View>
     </Modal>
-  );
-}
-
-function FlowBack({ onPress }: { readonly onPress: () => void }) {
-  const c: Palette = useTheme();
-  const sf = useSf();
-  const insets = useSafeAreaInsets();
-  return (
-    <Pressable
-      onPress={onPress}
-      android_ripple={null}
-      accessibilityRole="button"
-      accessibilityLabel="Back"
-      style={{
-        position: 'absolute',
-        right: 20,
-        bottom: 58 + 12 + insets.bottom,
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-        backgroundColor: c.surfaceRaised,
-        borderWidth: 1,
-        borderColor: c.lineStrong,
-        borderRadius: 50,
-        paddingVertical: 11,
-        paddingHorizontal: 18,
-        shadowColor: '#000000',
-        shadowOpacity: 0.16,
-        shadowRadius: 20,
-        shadowOffset: { width: 0, height: 6 },
-        elevation: 6,
-      }}
-    >
-      <Icon name="chevronLeft" size={16} color={sf.text} />
-      <Text style={{ color: sf.text, fontFamily: font.sansSemi, fontSize: 14 }}>Back</Text>
-    </Pressable>
-  );
-}
-
-function NewRecipientPill({ onPress }: { readonly onPress: () => void }) {
-  const sf = useSf();
-  /* JUST ABOVE THE TAB BAR. The overlay is a sibling of the bar inside the
-     Shell's root, so `bottom: 24` sat ON it — the bar is ~58px plus the home
-     indicator. */
-  const insets = useSafeAreaInsets();
-  return (
-    <Pressable
-      onPress={onPress}
-      android_ripple={null}
-      accessibilityRole="button"
-      accessibilityLabel="New recipient"
-      style={{
-        position: 'absolute',
-        right: 20,
-        bottom: 58 + 12 + insets.bottom,
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
-        backgroundColor: sf.accent,
-        borderRadius: 50,
-        paddingVertical: 14,
-        paddingHorizontal: 22,
-        shadowColor: '#3B6FE8',
-        shadowOpacity: 0.4,
-        shadowRadius: 20,
-        shadowOffset: { width: 0, height: 6 },
-        elevation: 6,
-      }}
-    >
-      <Icon name="plus" size={18} color={sf.onAccent} />
-      <Text style={{ color: sf.onAccent, fontFamily: font.sansSemi, fontSize: 15 }}>
-        New recipient
-      </Text>
-    </Pressable>
   );
 }
 

@@ -64,12 +64,22 @@ export function Shell({
   title,
   children,
   back,
+  onBack,
   greeting,
 }: {
   readonly title?: string;
   readonly children: ReactNode;
-  /** Show a back chevron instead of the logo — for a screen one level down. */
+  /**
+   * Show the sub-screen header instead of the app bar — an href to go to.
+   *
+   * A STEP INSIDE A FLOW PASSES `onBack` INSTEAD, because going back there is
+   * a state transition rather than a navigation: the Send flow's second step
+   * has no URL of its own, so an href would leave the flow rather than
+   * return to the question before it.
+   */
   readonly back?: string;
+  /** For a step inside a flow. Takes precedence over `back`. */
+  readonly onBack?: () => void;
   /**
    * THE HOME SCREEN'S HEADER IS A GREETING, NOT A LOGO, and it lives here
    * rather than on the page for the reason the sign-in gate and the tab bar
@@ -209,7 +219,7 @@ export function Shell({
           Rendered HERE rather than by each screen, so a screen cannot pick —
           the same argument as the sign-in gate and the keyboard handling.
         */}
-        {back === undefined && (
+        {back === undefined && onBack === undefined && (
         <header className={scrolled ? 'appbar scrolled' : 'appbar'}>
           {greeting !== undefined ? (
             <>
@@ -259,11 +269,17 @@ export function Shell({
           per session.
         */}
         <main className="shell screen-in" key={pathname}>
-          {back !== undefined && (
+          {(back !== undefined || onBack !== undefined) && (
             <div className="page-head">
-              <Link href={back} className="back" aria-label="Back">
-                <Icon name="chevronLeft" size={21} />
-              </Link>
+              {onBack !== undefined ? (
+                <button type="button" className="back" onClick={onBack} aria-label="Back">
+                  <Icon name="chevronLeft" size={21} />
+                </button>
+              ) : (
+                <Link href={back as string} className="back" aria-label="Back">
+                  <Icon name="chevronLeft" size={21} />
+                </Link>
+              )}
               {title !== undefined && <h1>{title}</h1>}
             </div>
           )}

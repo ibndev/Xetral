@@ -46,20 +46,8 @@ const CSS = readFileSync(
  * the rule; drawing them without an edge would leave the sheet's top or its
  * whole box unbounded against whatever it covers.
  */
-const FLOATS = ['.xselect-list', '.xselect-search', '.xselect-empty', '.sf-flow-back'];
+const FLOATS = ['.xselect-list', '.xselect-search', '.xselect-empty'];
 
-/*
- * `.sf-flow-back` IS THE SAME ARGUMENT AS THE DROPDOWN, and it was reported
- * as a missing control before it was understood as a missing edge.
- *
- * The Send flow's way back is FIXED over the page: it belongs to no container
- * and sits on whatever happens to be under it, so the recess cue every other
- * light-theme surface leans on is not available to it. Drawn in `--sf-field`
- * with a soft shadow it was measurably present, on top and fully opaque — and
- * on a short step like "How do you want to send GHS?" there is no content
- * anywhere near it, so a pale pill in a field of white read as nothing being
- * there at all.
- */
 
 /** Rule blocks, as `{ selector, body }`, with comments stripped first. */
 function rules(): readonly { selector: string; body: string }[] {
