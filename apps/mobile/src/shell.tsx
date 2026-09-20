@@ -183,12 +183,80 @@ export function Shell({
         ],
       }}
     >
+      {/*
+        THE WAY BACK AND THE TITLE, in the page rather than in a bar — the
+        comp's 40pt rounded square on `surface2` and a 20pt title. Rendered
+        here so a screen cannot forget it or draw a second one.
+      */}
+      {back !== undefined && (
+        <View
+          style={{
+            flexDirection: 'row', alignItems: 'center', gap: 12,
+            paddingTop: 8, paddingBottom: 14,
+          }}
+        >
+          <Pressable
+            // No ripple: a 40pt rounded square around a 21pt glyph lights up
+            // as a disc, which is the report `.icon-btn` already carries.
+            android_ripple={null}
+            /*
+             * BACK IF THERE IS A BACK, otherwise the href. `router.replace`
+             * unconditionally was wrong on the platform this app is mostly
+             * used on: replace does not push, so Android's gesture and
+             * hardware back would leave the app rather than return to the
+             * screen the customer came from. The href stays as the fallback
+             * for a cold start straight into a deep link.
+             */
+            onPress={() =>
+              router.canGoBack() ? router.back() : router.replace(back as never)
+            }
+            accessibilityRole="button"
+            accessibilityLabel="Back"
+            hitSlop={8}
+            style={{
+              width: 40, height: 40, borderRadius: 12,
+              alignItems: 'center', justifyContent: 'center',
+              backgroundColor: colors.surface2,
+              borderWidth: 1, borderColor: colors.edge,
+            }}
+          >
+            <Icon name="chevronLeft" size={21} color={colors.text} />
+          </Pressable>
+          {title !== undefined && (
+            <Text
+              numberOfLines={1}
+              style={{
+                flex: 1, minWidth: 0,
+                color: colors.text, fontFamily: font.sansBold,
+                fontSize: 20, letterSpacing: -0.4,
+              }}
+            >
+              {title}
+            </Text>
+          )}
+        </View>
+      )}
       {children}
     </Animated.View>
   );
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg, paddingTop: insets.top }}>
+      {/*
+        NO HEADER BAR ON A SCREEN ONE LEVEL DOWN.
+
+        The comp opens such a screen directly on a 40px rounded-square back
+        button and a 20px title INSIDE the page — no mark, no theme toggle,
+        because those belong to the screen a customer opens the app on rather
+        than the one they stepped into. The bar was taking 56pt of a handset
+        permanently to show a chevron and a word; the comp spends that on the
+        thing the screen is for and puts the way back in the content, where it
+        scrolls with everything else.
+
+        The web's `Shell` makes the same change in the same place, so the two
+        apps cannot disagree about what a sub-screen looks like.
+      */}
+      {back === undefined && (
       <View
         style={{
           flexDirection: 'row',
@@ -198,7 +266,7 @@ export function Shell({
           paddingHorizontal: space.md,
         }}
       >
-        {back === undefined && greeting !== undefined ? (
+        {greeting !== undefined ? (
           <>
             {/* The initials are DERIVED, never stored — `initialsOf` returns
                 nothing rather than a placeholder letter, because an avatar
@@ -238,43 +306,13 @@ export function Shell({
               </Text>
             </View>
           </>
-        ) : back === undefined ? (
-          <Logo size={22} />
         ) : (
-          <>
-            <Pressable
-              // No ripple: the same circular flash the balance toggle was
-              // reported for, on the same 44pt icon target.
-              android_ripple={null}
-              /*
-               * BACK IF THERE IS A BACK, otherwise the href.
-               *
-               * `router.replace(back)` unconditionally was wrong on the
-               * platform this app is mostly used on: replace does not push,
-               * so Android's gesture and hardware back would leave the app
-               * rather than return to the screen the customer came from —
-               * and a customer who taps Cards from the More list and swipes
-               * back expects the More list, not the launcher.
-               *
-               * The href stays as the fallback for a cold start straight into
-               * a deep link, where there is no history to go back through.
-               */
-              onPress={() =>
-                router.canGoBack() ? router.back() : router.replace(back as never)
-              }
-              accessibilityRole="button"
-              accessibilityLabel="Back"
-              hitSlop={8}
-              style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
-            >
-              <Icon name="chevronLeft" size={22} color={colors.text2} />
-            </Pressable>
-            <Text style={[styles.h2, { fontSize: 17 }]}>{title}</Text>
-          </>
+          <Logo size={22} />
         )}
         <View style={{ flex: 1 }} />
         <ThemeToggle />
       </View>
+      )}
 
       {/*
         THE KEYBOARD MUST NOT COVER THE FIELD BEING TYPED IN.
