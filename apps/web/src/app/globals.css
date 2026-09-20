@@ -47,6 +47,43 @@
   --link:         #4B7BF5;   /* blue — links and selected states */
   --link-600:     #3866E0;
 
+  /* ─────────────────────── IRIS — the 2a design's accent ───────────────────
+   *
+   * THE PRIMARY ACTION IS IRIS NOW, NOT NAVY. Navy was the brand colour and
+   * it was also the text colour, so a filled navy button and a heading were
+   * the same ink and the page had no single thing the eye went to first. The
+   * commissioned design separates them: text stays navy, ACTION is iris, and
+   * every screen has exactly one iris thing on it.
+   *
+   * It is a real second hue rather than a tint of the navy, which is why the
+   * tinted set is spelled out rather than produced with `color-mix`: a chip,
+   * its border and its text each need a value that holds its contrast in BOTH
+   * themes, and three mixes of one colour do not.
+   *
+   * `--on-iris` is NOT white in dark. On #7B6CF6 a near-black reads better
+   * than white does, and the mockup says so.
+   */
+  --iris:         #6D5AE6;   /* the one filled action on a screen */
+  --iris-tint:    #EFEBFF;   /* a chip, a selected row, an icon well */
+  --iris-edge:    #D9D1FF;   /* that chip's hairline */
+  --iris-text:    #4B3FB0;   /* text ON the tint */
+  --on-iris:      #FFFFFF;   /* text ON the fill */
+  --iris-glow:    rgba(109, 90, 230, .14);
+
+  /* The radial wash behind a balance. Large, soft, and never on a surface
+     that already carries text — it is a light source, not a fill. */
+  --glow:         rgba(109, 90, 230, .14);
+
+  /* The live currency card's gradient. Two stops, not one, because a flat
+     tint at this size reads as a disabled state. */
+  --card-grad-1:  #EFEBFF;
+  --card-grad-2:  #F5F4FF;
+
+  /* An initials avatar. Its own pair, because it sits on --surface and a
+     tint that works on the page ground washes out on a card. */
+  --avatar:       #EFEBFF;
+  --avatar-text:  #5B4BD6;
+
   /* Surfaces.
 
      THE PAGE IS PURE WHITE AND EVERY CONTAINER ON IT IS RECESSED INTO IT.
@@ -186,11 +223,34 @@
    * fix — the fix is a subset with the glyph in it, and until then this at
    * least renders the same symbol for everyone.
    */
-  /* ONE FAMILY for headings, titles, labels and body — see `layout.tsx`. The
-     two names are kept because the SCALE still distinguishes them: `display`
-     is set tighter and heavier, `sans` is set for reading. */
-  --font-display: var(--font-inter), 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif;
-  --font-sans:    var(--font-inter), 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif;
+  /*
+   * MANROPE CARRIES THE PRODUCT AND SPACE GROTESK CARRIES THE FIGURES.
+   *
+   * The commissioned design is built on Manrope at 700 and 800 — a rounder,
+   * higher-contrast grotesque than Inter, which is what gives a balance and a
+   * screen title their weight without going larger. `display` and `sans` are
+   * the same family and differ by SCALE, as they did before.
+   *
+   * `--font-num` is new and is the point of the pairing: every amount, every
+   * KPI and every column of figures is Space Grotesk with tabular numerals,
+   * so a table of money lines up on the decimal. It is a proportional face
+   * used for numerals, not a monospace — `--font-mono` stays Spline for
+   * anything that is genuinely code, such as a reference or a key hint.
+   *
+   * INTER IS STILL LOADED AND IS STILL CORRECT FOR PROSE. The legal pages are
+   * paragraphs somebody reads, and Inter is the better face at 15px for that;
+   * a privacy notice does not need to look like a dashboard. `--font-read`
+   * names that, so the choice is a token rather than a page remembering.
+   *
+   * The fallback chain is not boilerplate: none of the brand faces contains ₦
+   * (U+20A6), measured rather than assumed, so every naira figure in the
+   * product renders its symbol from a fallback. Naming them makes the
+   * substitution OURS rather than whatever the OS picks first.
+   */
+  --font-display: var(--font-manrope), 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-sans:    var(--font-manrope), 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-read:    var(--font-inter), 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-num:     var(--font-grotesk), var(--font-manrope), 'Noto Sans', ui-sans-serif, system-ui, sans-serif;
   --font-mono:    var(--font-spline), 'Noto Sans Mono', 'DejaVu Sans Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* Motion — one curve and three durations, so nothing in the product moves
@@ -250,6 +310,21 @@
   --accent-600:   #FFB93E;
   --link:         #6E9BFF;
   --link-600:     #8FB2FF;
+
+  /* IRIS, DARK. Lighter than the light theme's so it holds against black,
+     and `--on-iris` is a near-black rather than white because #7B6CF6 is
+     bright enough that white text on it vibrates. */
+  --iris:         #7B6CF6;
+  --iris-tint:    #171526;
+  --iris-edge:    #2E2952;
+  --iris-text:    #C9C0FF;
+  --on-iris:      #160A24;
+  --iris-glow:    rgba(123, 108, 246, .12);
+  --glow:         rgba(123, 108, 246, .26);
+  --card-grad-1:  #1B1733;
+  --card-grad-2:  #100E1A;
+  --avatar:       #171526;
+  --avatar-text:  #C9C0FF;
 
   /* True black, not near-black navy.
 
@@ -648,7 +723,7 @@ h3 { font-size: 16px; }
   transition: color var(--t-fast) var(--ease);
   -webkit-tap-highlight-color: transparent;
 }
-.tabbar a.active { color: var(--brand); font-weight: 600; }
+.tabbar a.active { color: var(--iris); font-weight: 700; }
 .tabbar a:active { transform: scale(.95); }
 .tabbar a svg { transition: transform var(--t) var(--ease-out); }
 .tabbar a.active svg { transform: translateY(-1px); }
@@ -737,14 +812,24 @@ h3 { font-size: 16px; }
 }
 .balance-label { font-size: 13.5px; color: var(--text-2); font-weight: 500; }
 .balance-value {
-  font-family: var(--font-display);
-  font-weight: 800;
-  font-size: 34px;
-  letter-spacing: -0.03em;
+  /*
+   * SPACE GROTESK, 800, AND TIGHT. The design sets the balance at 40px with
+   * -1.6px of tracking — which at this size is what makes a seven-figure
+   * naira balance read as one object rather than as a row of digits.
+   * Tabular numerals so it does not reflow as the last digit changes.
+   */
+  font-family: var(--font-num);
+  font-weight: 700;
+  font-size: 40px;
+  letter-spacing: -0.04em;
   font-variant-numeric: tabular-nums;
   margin: 8px 0 2px;
-  line-height: 1.1;
+  line-height: 1.05;
 }
+/* THE KOBO IS QUIETER THAN THE NAIRA. A customer reads the whole number and
+   glances at the decimals; setting both at full contrast makes the figure
+   harder to take in at a glance, which is the one thing this line is for. */
+.balance-value .minor { color: var(--text-3); }
 @media (min-width: 720px) { .balance-value { font-size: 40px; } }
 .balance-sub { font-size: 13px; color: var(--text-3); margin-top: var(--s-1); }
 
@@ -855,7 +940,8 @@ h3 { font-size: 16px; }
 .tile.t-amber .tile-icon { background: var(--warn-bg);  color: var(--warn); }
 .tile.t-green .tile-icon { background: var(--ok-bg);    color: var(--ok); }
 .tile.t-blue  .tile-icon { background: var(--info-bg);  color: var(--info); }
-.tile.t-navy  .tile-icon { background: color-mix(in srgb, var(--brand) 10%, transparent); color: var(--brand); }
+.tile.t-navy  .tile-icon,
+.tile.t-iris  .tile-icon { background: var(--iris-tint); color: var(--iris-text); }
 
 /* ═══════════════════════ the virtual card ═══════════════════════
 
@@ -1244,11 +1330,18 @@ h3 { font-size: 16px; }
   padding: 12px 20px;
   border: 1px solid transparent;
   border-radius: var(--r-pill);
-  background: var(--brand);
-  color: var(--on-brand);
+  /*
+   * IRIS, NOT NAVY — the commissioned design's one change with the widest
+   * reach. Navy was both the brand and the TEXT colour, so a filled button
+   * and a heading were the same ink and no screen had a single thing the eye
+   * went to first. Iris is a second hue, so the primary action is now the
+   * only saturated thing on a page.
+   */
+  background: var(--iris);
+  color: var(--on-iris);
   font-family: var(--font-sans);
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: -0.01em;
   white-space: nowrap;
   cursor: pointer;
@@ -1272,7 +1365,11 @@ h3 { font-size: 16px; }
  * CLASS. Every variant below is written the same way for the same reason.
  */
 .btn:hover:where(:not(:disabled)),
-button:hover:where(:not(:disabled)) { background: var(--brand-700); }
+button:hover:where(:not(:disabled)) {
+  /* Darken in light, lighten in dark — one declaration, because `--iris` is
+     already the theme's own value and `color-mix` moves it the right way. */
+  background: color-mix(in srgb, var(--iris) 86%, var(--text));
+}
 .btn:active:where(:not(:disabled)),
 button:active:where(:not(:disabled)) { transform: scale(.97); }
 .btn:disabled, button:disabled { opacity: .5; cursor: not-allowed; }
@@ -4771,3 +4868,204 @@ html, body { overflow-x: hidden; }
 /* Two right-aligned numeric columns sitting flush read as one: the headers
    ran together as "SEEN LAST". The gap is what separates a count from an age. */
 .error-count { padding-right: var(--s-4); }
+
+/* ═════════════════ the commissioned design's home components ═════════════════
+ *
+ * WHAT THIS SECTION IS. The 2a design rebuilds the home screen out of seven
+ * pieces, and they are classes here rather than styles on the page because
+ * the phone app draws the SAME seven from `theme.ts`. A screen assembled from
+ * named parts can be checked against the mockup part by part; a screen built
+ * out of one-off rules can only be checked by looking at it, which is how the
+ * two apps drifted the last time.
+ *
+ * Every measurement below is the mockup's own, not a rounding of it.
+ */
+
+/* THE WASH BEHIND THE BALANCE. A light source, not a fill: it sits BEHIND the
+   header and the figure, is never on a surface that carries its own text, and
+   is `pointer-events:none` so it cannot eat a tap. */
+.glow-wrap { position: relative; }
+.glow-wrap > .glow {
+  position: absolute;
+  top: -30px; left: 24px;
+  width: 280px; height: 250px;
+  background: radial-gradient(circle, var(--glow), transparent 68%);
+  pointer-events: none;
+  z-index: 0;
+}
+.glow-wrap > *:not(.glow) { position: relative; z-index: 1; }
+
+/* The greeting row: who you are, and the two things you can do from here. */
+.home-head { display: flex; align-items: center; gap: 12px; padding: 12px 0 4px; }
+.avatar {
+  flex: none;
+  display: grid; place-items: center;
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  background: var(--avatar);
+  border: 1.5px solid var(--iris);
+  color: var(--avatar-text);
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+}
+/* Inside a list row the ring comes off — forty of them down a page reads as
+   forty selected items. The fill alone is enough to group them. */
+.tx-row .avatar { border-color: transparent; background: var(--surface-2); color: var(--text-2); }
+.home-hello { flex: 1; min-width: 0; }
+.home-hello .lead { display: block; font-size: 12.5px; font-weight: 500; color: var(--text-3); }
+.home-hello .name { display: block; font-size: 16px; font-weight: 700; letter-spacing: -0.012em; }
+
+/* THE MOVEMENT CHIP. Tinted rather than filled, because it is information
+   rather than an action and there is already one filled thing on the screen. */
+.delta-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 10px;
+  border-radius: var(--r-pill);
+  background: var(--iris-tint);
+  border: 1px solid var(--iris-edge);
+  color: var(--iris-text);
+  font-size: 12px; font-weight: 600;
+}
+
+/* ── the currency rail ──────────────────────────────────────────────────────
+ *
+ * IT SCROLLS INSIDE ITSELF. Three 212px cards do not fit across a 320px
+ * handset, and a row that does not fit makes the BODY scroll sideways — the
+ * fault the activity rail already records. The negative margins let the cards
+ * bleed to the screen edge while the page keeps its gutter, so the third card
+ * is visibly cut off, which is what tells somebody there is more.
+ */
+.ccy-rail {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  padding: 16px 20px 2px;
+  margin: 0 -20px;
+  scrollbar-width: none;
+}
+.ccy-rail::-webkit-scrollbar { display: none; }
+.ccy-card {
+  flex: none;
+  width: 212px;
+  scroll-snap-align: start;
+  border-radius: 22px;
+  padding: 17px;
+  background: var(--surface);
+  border: 1px solid var(--edge);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+/* THE ONE BEING SHOWN. A gradient and an iris ring rather than a check mark:
+   the card IS the selection, so it should not also need a badge saying so. */
+.ccy-card.on {
+  background: linear-gradient(150deg, var(--card-grad-1), var(--card-grad-2));
+  border-color: var(--iris);
+  box-shadow: 0 0 0 3px var(--iris-glow);
+}
+.ccy-card .ccy-top { display: flex; align-items: center; gap: 9px; }
+.ccy-card .ccy-code { display: block; font-size: 14px; font-weight: 700; }
+.ccy-card .ccy-name { display: block; font-size: 11px; font-weight: 500; color: var(--text-3); }
+.ccy-card .ccy-amt {
+  font-family: var(--font-num);
+  font-size: 22px; font-weight: 700;
+  letter-spacing: -0.027em;
+  font-variant-numeric: tabular-nums;
+  margin-top: 16px;
+}
+.ccy-card .ccy-sub { font-size: 11.5px; font-weight: 500; color: var(--text-3); margin-top: 3px; }
+
+/* ── the four actions ───────────────────────────────────────────────────────
+ *
+ * ONE IS FILLED AND THREE ARE NOT, which is the whole hierarchy of the screen.
+ * Send is what this app is for; the other three are near it because they are
+ * near it in somebody's head, not because they are equal to it.
+ */
+.act-row { display: flex; justify-content: space-between; padding: 22px 10px 8px; }
+.act {
+  display: flex; flex-direction: column; align-items: center; gap: 9px;
+  background: none; border: none; padding: 0;
+  min-height: 0;
+  color: var(--text-2);
+  font-size: 12px; font-weight: 600;
+  cursor: pointer;
+}
+.act .act-ico {
+  display: grid; place-items: center;
+  width: 54px; height: 54px;
+  border-radius: 18px;
+  background: var(--surface-2);
+  border: 1px solid var(--edge);
+  color: var(--text);
+  transition: transform var(--t-fast) var(--ease);
+}
+.act.primary { color: var(--text); }
+.act.primary .act-ico { background: var(--iris); border-color: var(--iris); color: var(--on-iris); }
+.act:active .act-ico { transform: scale(.94); }
+/* The row is a set of buttons, so the base `button` fill must be neutralised
+   out loud rather than left to specificity — `button-specificity.test.ts`
+   fails the build on a state rule that does not restate it. */
+.act, .act:hover, .act:active, .act:focus { background: none; }
+
+/* ── section heads, day heads, and an activity row ──────────────────────── */
+.sec-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 24px 0 6px;
+}
+.sec-head h2 { font-size: 17px; font-weight: 700; letter-spacing: -0.012em; margin: 0; }
+.sec-head .more { font-size: 13px; font-weight: 600; color: var(--iris); }
+.day-head {
+  font-size: 11px; font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase;
+  color: var(--text-3);
+  padding: 8px 0 4px;
+}
+.tx-row {
+  display: flex; align-items: center; gap: 13px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+  width: 100%;
+  background: none; border-left: 0; border-right: 0; border-top: 0;
+  text-align: left;
+  min-height: 0;
+  color: inherit;
+  cursor: pointer;
+}
+.tx-row:last-child { border-bottom: none; }
+.tx-row, .tx-row:hover, .tx-row:active, .tx-row:focus { background: none; }
+.tx-mark { position: relative; width: 44px; height: 44px; flex: none; }
+/* The flag sits on the avatar rather than beside it, so a row is two columns
+   and not three — and the currency is read at a glance without a label. */
+.tx-mark .tx-flag {
+  position: absolute; bottom: -2px; left: -2px;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 2px solid var(--bg);
+}
+.tx-main { flex: 1; min-width: 0; }
+.tx-main .tx-name {
+  display: block; font-size: 15px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tx-main .tx-sub { font-size: 12.5px; font-weight: 500; color: var(--text-3); }
+.tx-side { text-align: right; flex: none; }
+.tx-side .tx-amt {
+  display: block;
+  font-family: var(--font-num);
+  font-size: 14.5px; font-weight: 700;
+  letter-spacing: -0.014em;
+  font-variant-numeric: tabular-nums;
+}
+/* MONEY LEAVING IS RED AND MONEY ARRIVING IS GREEN. It was red for neither,
+   so the only thing separating "you were paid" from "you paid" at a glance
+   was a minus sign. */
+.tx-side .tx-amt.in  { color: var(--ok); }
+.tx-side .tx-amt.out { color: var(--danger); }
+.tx-side .tx-time { font-size: 11.5px; font-weight: 500; color: var(--text-3); }
+
+/* THE PROSE FACE, for the pages that are paragraphs rather than product.
+   Manrope is right for a balance and wrong for four hundred words. */
+.legal-prose, .legal-lede, .legal-defs dd { font-family: var(--font-read); }

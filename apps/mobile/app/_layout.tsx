@@ -61,6 +61,21 @@ export default function Layout() {
     // ONE FAMILY, A FILE PER WEIGHT. React Native matches a custom family by
     // NAME and ignores `fontWeight`, so a weight is a separate registration
     // rather than a style — the rule `fonts.test.ts` enforces.
+    /*
+     * MANROPE CARRIES THE PRODUCT, as it does on the web — the commissioned
+     * design is built on it at 700 and 800. Inter stays registered because
+     * long-form prose is still set in it, and a face that is loaded and
+     * unused costs a file rather than a mistake.
+     */
+    'Manrope-Regular': require('../assets/fonts/Manrope-Regular.ttf'),
+    'Manrope-Medium': require('../assets/fonts/Manrope-Medium.ttf'),
+    'Manrope-SemiBold': require('../assets/fonts/Manrope-SemiBold.ttf'),
+    'Manrope-Bold': require('../assets/fonts/Manrope-Bold.ttf'),
+    'Manrope-ExtraBold': require('../assets/fonts/Manrope-ExtraBold.ttf'),
+    /* Figures, so a column of amounts lines up on the decimal. */
+    'SpaceGrotesk-Regular': require('../assets/fonts/SpaceGrotesk-Regular.ttf'),
+    'SpaceGrotesk-SemiBold': require('../assets/fonts/SpaceGrotesk-SemiBold.ttf'),
+    'SpaceGrotesk-Bold': require('../assets/fonts/SpaceGrotesk-Bold.ttf'),
     'Inter-Regular': require('../assets/fonts/Inter-Regular.ttf'),
     'Inter-Medium': require('../assets/fonts/Inter-Medium.ttf'),
     'Inter-SemiBold': require('../assets/fonts/Inter-SemiBold.ttf'),

@@ -53,6 +53,20 @@ const TOKENS: Record<string, string> = {
   dangerBg: '--danger-bg',
   info: '--info',
   infoBg: '--info-bg',
+  /*
+   * THE IRIS FAMILY, and the guard is why it is complete on both platforms.
+   *
+   * It caught all seven the moment the phone gained them and the map did not:
+   * an accent that is one hex on the web and another on the phone is two
+   * products, and the difference is invisible until somebody opens both.
+   */
+  iris: '--iris',
+  irisTint: '--iris-tint',
+  irisEdge: '--iris-edge',
+  irisText: '--iris-text',
+  onIris: '--on-iris',
+  avatar: '--avatar',
+  avatarText: '--avatar-text',
 };
 
 function withoutComments(path: string): string {

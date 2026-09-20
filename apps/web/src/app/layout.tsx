@@ -49,6 +49,36 @@ const spline = localFont({
   weight: '300 700',
 });
 
+/**
+ * MANROPE CARRIES THE PRODUCT NOW, and Space Grotesk carries the figures.
+ *
+ * The design the product owner commissioned is built on them: Manrope at 700
+ * and 800 for every heading, balance and label, and Space Grotesk wherever a
+ * number has to line up in a column. Inter stays loaded because the legal
+ * pages and long-form prose are set in it — it is the better reading face at
+ * small sizes and there is no reason to make a privacy notice look like a
+ * dashboard.
+ *
+ * SELF-HOSTED, like the other two, rather than linked from Google. The
+ * mockup's `<link>` to fonts.googleapis.com would mean widening
+ * `middleware.ts`'s style-src and font-src to a third party on every page a
+ * customer's balance renders on, and a request to Google from the browser of
+ * somebody checking their money. One variable file each, latin subset.
+ */
+const manrope = localFont({
+  src: './fonts/Manrope.woff2',
+  variable: '--font-manrope',
+  display: 'swap',
+  weight: '200 800',
+});
+
+const grotesk = localFont({
+  src: './fonts/SpaceGrotesk.woff2',
+  variable: '--font-grotesk',
+  display: 'swap',
+  weight: '300 700',
+});
+
 export const metadata: Metadata = {
   title: 'Xetral',
   description: 'Multi-currency wallet — naira, dollars, and everything between',
@@ -122,7 +152,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
     <html
       lang="en"
       data-theme="light"
-      className={`${inter.variable} ${spline.variable}`}
+      className={`${manrope.variable} ${grotesk.variable} ${inter.variable} ${spline.variable}`}
       suppressHydrationWarning
     >
       <head>

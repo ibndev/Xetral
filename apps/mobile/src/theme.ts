@@ -48,6 +48,27 @@ export interface Palette {
    *  light-blue rim on dark, matching the web's `.btn.accent`. */
   readonly accentButton: string; readonly accentButtonEdge: string;
   readonly accentButtonText: string;
+  /**
+   * IRIS — the commissioned design's accent, and the reason it is a family
+   * rather than one value.
+   *
+   * Navy was the brand AND the text colour, so a filled button and a heading
+   * were the same ink and no screen had a single thing the eye went to first.
+   * Iris is a second hue: the primary action is now the only saturated thing
+   * on a screen.
+   *
+   * A chip, its hairline and its text each need their own value that holds
+   * contrast in BOTH themes — three mixes of one colour do not. `onIris` is
+   * deliberately near-black in dark, because white on #7B6CF6 vibrates.
+   */
+  readonly iris: string; readonly irisTint: string; readonly irisEdge: string;
+  readonly irisText: string; readonly onIris: string; readonly irisGlow: string;
+  /** The radial wash behind a balance. A light source, never a fill. */
+  readonly glow: string;
+  /** The live currency card's two gradient stops. */
+  readonly cardGrad1: string; readonly cardGrad2: string;
+  /** An initials avatar, which sits on a card and needs its own pair. */
+  readonly avatar: string; readonly avatarText: string;
   readonly text: string; readonly text2: string; readonly text3: string;
   readonly onBrand: string;
   readonly ok: string; readonly okBg: string;
@@ -87,6 +108,17 @@ export const light: Palette = {
   accentButton: '#0D1B3E',
   accentButtonEdge: 'transparent',
   accentButtonText: '#FFFFFF',
+  iris: '#6D5AE6',
+  irisTint: '#EFEBFF',
+  irisEdge: '#D9D1FF',
+  irisText: '#4B3FB0',
+  onIris: '#FFFFFF',
+  irisGlow: 'rgba(109, 90, 230, .14)',
+  glow: 'rgba(109, 90, 230, .14)',
+  cardGrad1: '#EFEBFF',
+  cardGrad2: '#F5F4FF',
+  avatar: '#EFEBFF',
+  avatarText: '#5B4BD6',
 
   text: '#0D1B3E',
   text2: '#4A5878',
@@ -124,6 +156,17 @@ export const dark: Palette = {
   // primary button owns.
   accentButton: '#16295A',
   accentButtonEdge: '#6E9BFF',
+  iris: '#7B6CF6',
+  irisTint: '#171526',
+  irisEdge: '#2E2952',
+  irisText: '#C9C0FF',
+  onIris: '#160A24',
+  irisGlow: 'rgba(123, 108, 246, .12)',
+  glow: 'rgba(123, 108, 246, .26)',
+  cardGrad1: '#1B1733',
+  cardGrad2: '#100E1A',
+  avatar: '#171526',
+  avatarText: '#C9C0FF',
   accentButtonText: '#FFFFFF',
 
   text: '#EEF2FA',
@@ -286,15 +329,32 @@ export const space = { xs: 6, sm: 10, md: 14, lg: 18, xl: 24, xxl: 32 } as const
  */
 export const font = {
   /** Display — headings and the balance. */
-  display: 'Inter-SemiBold',
-  displaySemi: 'Inter-Bold',
-  displayBold: 'Inter-ExtraBold',
+  display: 'Manrope-SemiBold',
+  displaySemi: 'Manrope-Bold',
+  displayBold: 'Manrope-ExtraBold',
 
   /** Body, labels, buttons. */
-  sans: 'Inter-Regular',
-  sansMedium: 'Inter-Medium',
-  sansSemi: 'Inter-SemiBold',
-  sansBold: 'Inter-Bold',
+  sans: 'Manrope-Regular',
+  sansMedium: 'Manrope-Medium',
+  sansSemi: 'Manrope-SemiBold',
+  sansBold: 'Manrope-Bold',
+
+  /**
+   * FIGURES, and this is a different face from `mono`.
+   *
+   * Space Grotesk is proportional with tabular numerals, which is what the
+   * design sets a balance and a table of amounts in. `mono` stays Spline for
+   * what is genuinely monospaced — a reference, a key hint, an address — so
+   * the two are not interchangeable and neither is a fallback for the other.
+   */
+  num: 'SpaceGrotesk-Regular',
+  numSemi: 'SpaceGrotesk-SemiBold',
+  numBold: 'SpaceGrotesk-Bold',
+
+  /** Long-form prose. Inter is the better reading face at 15px, and a privacy
+   *  notice does not need to look like a dashboard. */
+  read: 'Inter-Regular',
+  readSemi: 'Inter-SemiBold',
 
   /** Figures. */
   mono: 'SplineSansMono-Regular',
