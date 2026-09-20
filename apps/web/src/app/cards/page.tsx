@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { formatAmount } from '@xetral/client';
+import { entryKindLabel, formatAmount } from '@xetral/client';
 import type { Card, CardActivity, CardSecrets } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { FormError } from '@/ui/form-error';
@@ -171,62 +171,44 @@ function CardActivityList() {
   const entries = activity.data?.entries ?? [];
   if (activity.loading || entries.length === 0) return null;
 
-  let seen: string | undefined;
   return (
-    <section>
-      <div className="sec-head">
-        <h2>Card activity</h2>
-      </div>
+    <section className="card-activity">
+      <div className="day-head" style={{ padding: '20px 0 4px' }}>Card activity</div>
+      {/*
+        NO DAY HEADINGS HERE, unlike the wallet list, because the comp draws
+        none — an eyebrow and then the rows. A card's activity is short and
+        arrives in a burst; cutting eight rows into four one-row days is more
+        structure than the content has.
+      */}
       <div>
         {entries.slice(0, 8).map((t) => {
           const outgoing = t.amount.trim().startsWith('-');
           const when = new Date(t.occurred_at);
-          const day = dayOf(when);
-          const heading = day === seen ? undefined : day;
-          seen = day;
           return (
-            <div key={t.id}>
-              {heading !== undefined && <div className="day-head">{heading}</div>}
-              <div className="tx-row">
-                <span className="tx-mark">
-                  <span className="avatar">
-                    <Icon name={outgoing ? 'arrowUpRight' : 'download'} size={19} />
-                  </span>
+            <div className="tx-row" key={t.id}>
+              <span className="tx-mark">
+                <span className="avatar">
+                  <Icon name={outgoing ? 'card' : 'download'} size={19} />
                 </span>
-                <span className="tx-main">
-                  <span className="tx-name">{t.description}</span>
-                  <span className="tx-sub">
-                    {when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
-                  </span>
+              </span>
+              <span className="tx-main">
+                <span className="tx-name">{t.description}</span>
+                <span className="tx-sub">{entryKindLabel(t.kind)}</span>
+              </span>
+              <span className="tx-side">
+                <span className={outgoing ? 'tx-amt out' : 'tx-amt in'}>
+                  {formatAmount(t.amount, t.currency)}
                 </span>
-                <span className="tx-side">
-                  <span className={outgoing ? 'tx-amt out' : 'tx-amt in'}>
-                    {formatAmount(t.amount, t.currency)}
-                  </span>
+                <span className="tx-time">
+                  {when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
                 </span>
-              </div>
+              </span>
             </div>
           );
         })}
       </div>
     </section>
   );
-}
-
-/**
- * The day a transaction happened, as somebody would say it out loud.
- *
- * COMPARED ON THE LOCAL CALENDAR DAY, never on elapsed hours — the home
- * screen's own function, because two screens disagreeing about what
- * "yesterday" means is the kind of thing nobody reports and everybody
- * notices.
- */
-function dayOf(when: Date): string {
-  const midnight = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const days = Math.round((midnight(new Date()) - midnight(when)) / 86_400_000);
-  if (days === 0) return 'Today';
-  if (days === 1) return 'Yesterday';
-  return when.toLocaleDateString(undefined, { day: 'numeric', month: 'long' });
 }
 
 /**
@@ -527,6 +509,23 @@ function CardRow({
         vocabulary for an action, and reusing it here rather than inventing a
         second is most of what makes two screens look like one product.
 
+        FOUR TILES WHERE THE COMP DRAWS THREE, and that is the one place this
+        screen deliberately differs. The comp's three are Freeze, Details and
+        Settings; ours are Freeze, Add money, Details and Rename. Add money is
+        how a card gets funded — a Bitnob card holds its OWN balance and
+        spends nothing until money is moved onto it — so a card screen
+        without it is a card nobody can use, which is the state Phase 13
+        found this product in for a different reason. The geometry is the
+        comp's to the pixel: 50px wells at radius 16 on `--surface-2`, 8px to
+        a 12px label, laid out with `space-around`.
+
+        THE COMP'S TWO TOGGLE ROWS — "Online payments" and "ATM withdrawals" —
+        ARE DELIBERATELY ABSENT. Nothing in `CardPort` can switch a spending
+        channel: the provider surface is issue, fund, freeze, unfreeze,
+        reveal, terminate. A switch that moves nothing is the `crypto_enabled`
+        lesson with a thumb on it — worse than no switch, because it is
+        trusted exactly when somebody is trying to stop a card being used.
+
         NOTHING ABOUT WHAT THEY DO CHANGED. Freezing still asks for nothing —
         the server does not require a PIN either, and the reason is the same
         on both sides: a customer watching fraudulent charges land should not
@@ -565,7 +564,7 @@ function CardRow({
             </button>
           )}
 
-          <button type="button" className="card-act on" onClick={() => setPending('fund')}>
+          <button type="button" className="card-act" onClick={() => setPending('fund')}>
             <span className="card-act-ico"><Icon name="plus" size={21} /></span>
             Add money
           </button>

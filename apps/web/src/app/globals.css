@@ -5297,20 +5297,20 @@ html, body { overflow-x: hidden; }
  */
 .card-acts {
   display: flex;
-  gap: 10px;
-  padding-top: 4px;
+  justify-content: space-around;
+  padding: 18px 0 6px;
 }
 /* A 50px TILE AND A LABEL UNDER IT, which is the home screen's action row at
    a smaller size — one vocabulary for "a thing you can do here", rather than
    a second one invented for this page. */
 .card-act {
-  flex: 1 1 0;
+  flex: 0 0 auto;
   min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
-  gap: 7px;
+  gap: 8px;
   /* Every one of these is stated because `.btn, button` sets it and a
      property this rule omits is a property the bare rule wins — the fault
      `.ccy-card` shipped and `button-specificity.test.ts` now refuses. */
@@ -5322,7 +5322,7 @@ html, body { overflow-x: hidden; }
   border-radius: 0;
   color: var(--text-2);
   font-family: var(--font-sans);
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0;
   cursor: pointer;
@@ -5334,15 +5334,19 @@ html, body { overflow-x: hidden; }
   width: 50px;
   height: 50px;
   border-radius: 16px;
-  background: var(--surface);
+  background: var(--surface-2);
   border: 1px solid var(--edge);
   color: var(--text);
   transition: transform var(--t-fast) var(--ease);
 }
+/* NO FILLED TILE IN THIS ROW, which the comp is explicit about: all three of
+   its tiles are identical wells. Filling one makes it the heaviest thing on
+   a screen whose subject is the card above it, and there is no single action
+   here that deserves that the way Send does on the home screen. */
 .card-act.on .card-act-ico {
-  background: var(--iris);
-  border-color: var(--iris);
-  color: var(--on-iris);
+  background: var(--surface-2);
+  border-color: var(--edge);
+  color: var(--text);
 }
 /* A FROZEN CARD'S UNFREEZE TILE IS THE WARM ONE, so the state is visible in
    the control that changes it rather than only in a badge above. */
@@ -5355,7 +5359,7 @@ html, body { overflow-x: hidden; }
    `:hover` a tap leaves behind would paint the generic button fill. */
 .card-act:hover, .card-act:focus, .card-act:active, .card-act:disabled { background: none; }
 .card-act:hover .card-act-ico { background: var(--surface-2); }
-.card-act.on:hover .card-act-ico { background: var(--iris); }
+.card-act.on:hover .card-act-ico { background: var(--surface); }
 
 /* The two figures under the card: what is on it, and what it is called. */
 .card-stats { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
@@ -5383,3 +5387,17 @@ html, body { overflow-x: hidden; }
   border: 2px solid var(--bg);
   pointer-events: none;
 }
+
+/* THE CARD ACTIVITY MARK IS A ROUNDED SQUARE, not the circle a wallet row
+   uses. The comp draws it at 42px and radius 12 with a service glyph in it —
+   a card payment is to a MERCHANT, and a circle is this product's shape for a
+   person. It also carries no currency flag: every one of these is in the
+   card's own currency, so a badge repeating that on every row says nothing. */
+.card-activity .tx-mark,
+.card-activity .avatar {
+  width: 42px; height: 42px;
+  border-radius: 12px;
+}
+.card-activity .tx-main .tx-name { font-size: 14.5px; }
+.card-activity .tx-main .tx-sub { font-size: 12px; }
+.card-activity .tx-side .tx-amt { font-size: 14px; }

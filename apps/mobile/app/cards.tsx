@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
-import { formatAmount } from '@xetral/client';
+import { entryKindLabel, formatAmount } from '@xetral/client';
 import type { Card, CardActivity, CardSecrets } from '@xetral/client';
 import { Logo } from '@/logo';
 import { Shell } from '@/shell';
@@ -530,7 +530,7 @@ function CardRow({
         not looking.
       */}
       {card.status !== 'terminated' && pending === undefined && (
-        <View style={{ flexDirection: 'row', gap: 10, paddingTop: 4 }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-around', paddingTop: 18, paddingBottom: 6 }}>
           {card.status === 'active' ? (
             <CardAction
               icon="lock"
@@ -548,7 +548,7 @@ function CardRow({
             <CardAction icon="lock" label="Unfreeze" warm onPress={() => setPending('unfreeze')} />
           )}
 
-          <CardAction icon="plus" label="Add money" primary onPress={() => setPending('fund')} />
+          <CardAction icon="plus" label="Add money" onPress={() => setPending('fund')} />
           <CardAction icon="eye" label="Details" onPress={() => setPending('reveal')} />
           <CardAction
             icon="settings"
@@ -888,20 +888,22 @@ function Benefit({
  * the control that changes it rather than only in a badge on the face.
  */
 function CardAction({
-  icon, label, onPress, primary, warm, disabled,
+  icon, label, onPress, warm, disabled,
 }: {
   readonly icon: IconName;
   readonly label: string;
   readonly onPress: () => void;
-  readonly primary?: boolean;
   readonly warm?: boolean;
   readonly disabled?: boolean;
 }) {
   const colors = useTheme();
-  const fill =
-    primary === true ? colors.iris : warm === true ? colors.warnBg : colors.surface;
-  const ink =
-    primary === true ? colors.onIris : warm === true ? colors.warn : colors.text;
+  /* NO FILLED TILE IN THIS ROW, which the comp is explicit about: its three
+     tiles are identical wells on `surface2`. Filling one makes it the
+     heaviest thing on a screen whose subject is the card above it. `warm`
+     survives for a frozen card's Unfreeze, so the state is visible in the
+     control that changes it. */
+  const fill = warm === true ? colors.warnBg : colors.surface2;
+  const ink = warm === true ? colors.warn : colors.text;
   return (
     <Pressable
       onPress={onPress}
@@ -912,7 +914,7 @@ function CardAction({
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ disabled: disabled === true }}
-      style={{ flex: 1, alignItems: 'center', gap: 7, opacity: disabled === true ? 0.5 : 1 }}
+      style={{ alignItems: 'center', gap: 8, opacity: disabled === true ? 0.5 : 1 }}
     >
       <View
         style={{
@@ -920,14 +922,14 @@ function CardAction({
           alignItems: 'center', justifyContent: 'center',
           backgroundColor: fill,
           borderWidth: 1,
-          borderColor: primary === true ? colors.iris : warm === true ? colors.warnBg : colors.edge,
+          borderColor: warm === true ? colors.warnBg : colors.edge,
         }}
       >
         <Icon name={icon} size={21} color={ink} />
       </View>
       <Text
         numberOfLines={1}
-        style={{ fontSize: 11.5, fontFamily: font.sansSemi, color: colors.text2 }}
+        style={{ fontSize: 12, fontFamily: font.sansSemi, color: colors.text2 }}
       >
         {label}
       </Text>
@@ -967,69 +969,73 @@ function CardActivityList() {
   let seen: string | undefined;
   return (
     <View style={{ marginTop: space.xl }}>
-      <Text style={[styles.h2, { marginBottom: space.sm }]}>Card activity</Text>
-      {entries.slice(0, 8).map((t) => {
+      {/* AN EYEBROW, NOT A HEADING, and NO DAY GROUPING — the comp draws a
+          small uppercase label and then the rows. A card's activity is short
+          and arrives in a burst; cutting eight rows into four one-row days is
+          more structure than the content has. */}
+      <Text
+        style={{
+          color: colors.text3, fontFamily: font.sansBold,
+          fontSize: 11, letterSpacing: 1.1, textTransform: 'uppercase',
+          paddingTop: 20, paddingBottom: 4,
+        }}
+      >
+        Card activity
+      </Text>
+      {entries.slice(0, 8).map((t, i) => {
         const outgoing = t.amount.trim().startsWith('-');
         const when = new Date(t.occurred_at);
-        const day = dayOf(when);
-        const heading = day === seen ? undefined : day;
-        seen = day;
+        const last = i === Math.min(entries.length, 8) - 1;
         return (
-          <View key={t.id}>
-            {heading !== undefined && (
-              <Text
-                style={{
-                  color: colors.text3, fontFamily: font.sansBold,
-                  fontSize: 11, letterSpacing: 1.1, textTransform: 'uppercase',
-                  paddingTop: 8, paddingBottom: 4,
-                }}
-              >
-                {heading}
-              </Text>
-            )}
+          <View
+            key={t.id}
+            style={{
+              flexDirection: 'row', alignItems: 'center', gap: 13,
+              paddingVertical: 12,
+              borderBottomWidth: last ? 0 : 1,
+              borderBottomColor: colors.line,
+            }}
+          >
+            {/* A ROUNDED SQUARE, not the circle a wallet row uses: a card
+                payment is to a MERCHANT, and a circle is this product's shape
+                for a person. */}
             <View
               style={{
-                flexDirection: 'row', alignItems: 'center', gap: 13,
-                paddingVertical: 12,
-                borderTopWidth: 1, borderTopColor: colors.line,
+                width: 42, height: 42, borderRadius: 12,
+                alignItems: 'center', justifyContent: 'center',
+                backgroundColor: colors.surface2,
               }}
             >
-              <View
-                style={{
-                  width: 42, height: 42, borderRadius: 999,
-                  alignItems: 'center', justifyContent: 'center',
-                  backgroundColor: colors.surface2,
-                }}
+              <Icon name={outgoing ? 'card' : 'download'} size={19} color={colors.text2} />
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text
+                numberOfLines={1}
+                style={{ color: colors.text, fontFamily: font.sansSemi, fontSize: 14.5 }}
               >
-                <Icon
-                  name={outgoing ? 'arrowUpRight' : 'download'}
-                  size={19}
-                  color={colors.text2}
-                />
-              </View>
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text
-                  numberOfLines={1}
-                  style={{ color: colors.text, fontFamily: font.sansSemi, fontSize: 14.5 }}
-                >
-                  {t.description}
-                </Text>
-                <Text
-                  style={{ color: colors.text3, fontFamily: font.sansMedium, fontSize: 12.5, marginTop: 2 }}
-                >
-                  {when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
-                </Text>
-              </View>
-              {/* MONEY LEAVING IS RED AND MONEY ARRIVING IS GREEN — the home
-                  screen's rule, because a minus sign is not enough to tell
-                  "you were charged" from "you topped up" at a glance. */}
+                {t.description}
+              </Text>
+              <Text
+                numberOfLines={1}
+                style={{ color: colors.text3, fontFamily: font.sansMedium, fontSize: 12, marginTop: 2 }}
+              >
+                {entryKindLabel(t.kind)}
+              </Text>
+            </View>
+            <View style={{ alignItems: 'flex-end' }}>
               <Text
                 style={{
-                  fontFamily: font.numSemi, fontSize: 14.5, letterSpacing: -0.3,
+                  fontFamily: font.numSemi, fontSize: 14,
+                  fontVariant: ['tabular-nums'] as ('tabular-nums')[],
                   color: outgoing ? colors.danger : colors.ok,
                 }}
               >
                 {formatAmount(t.amount, t.currency)}
+              </Text>
+              <Text
+                style={{ color: colors.text3, fontFamily: font.sansMedium, fontSize: 11.5, marginTop: 2 }}
+              >
+                {when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
               </Text>
             </View>
           </View>
@@ -1039,18 +1045,3 @@ function CardActivityList() {
   );
 }
 
-/**
- * The day a transaction happened, as somebody would say it out loud.
- *
- * COMPARED ON THE LOCAL CALENDAR DAY, never on elapsed hours — the home
- * screen's own function, because two screens disagreeing about what
- * "yesterday" means is the kind of thing nobody reports and everybody
- * notices.
- */
-function dayOf(when: Date): string {
-  const midnight = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const days = Math.round((midnight(new Date()) - midnight(when)) / 86_400_000);
-  if (days === 0) return 'Today';
-  if (days === 1) return 'Yesterday';
-  return when.toLocaleDateString(undefined, { day: 'numeric', month: 'long' });
-}
