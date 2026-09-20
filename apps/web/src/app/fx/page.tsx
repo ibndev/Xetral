@@ -45,7 +45,7 @@ export default function Fx() {
   const trades = useLoad(() => client.fxTrades(), [client]);
 
   return (
-    <Shell>
+    <Shell back="/wallet" title="Convert">
 
       {/*
         EDGE TO EDGE, LIKE SEND. Convert IS a remittance with the recipient
@@ -94,7 +94,6 @@ export default function Fx() {
           });
         }}
       >
-        <h1>Convert</h1>
         <p className="lead">Between your own balances, or straight to someone else.</p>
 
         {/* WHAT LEAVES. The currency lives in the amount row as a compact

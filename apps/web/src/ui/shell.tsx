@@ -194,15 +194,24 @@ export function Shell({
       </nav>
 
       <div>
+        {/*
+          NO APP BAR ON A SCREEN ONE LEVEL DOWN.
+
+          The comp opens such a screen directly on a 40px back button and a
+          20px title INSIDE the page — no brand, no theme toggle, no bell,
+          because those belong to the screen a customer opens the app on
+          rather than the one they stepped into. The bar is sticky and
+          blurred, so on a sub-screen it was taking 56px of a handset
+          permanently to show a chevron and a word; the comp spends that on
+          the thing the screen is for and puts the way back in the content,
+          where it scrolls away like everything else.
+
+          Rendered HERE rather than by each screen, so a screen cannot pick —
+          the same argument as the sign-in gate and the keyboard handling.
+        */}
+        {back === undefined && (
         <header className={scrolled ? 'appbar scrolled' : 'appbar'}>
-          {back !== undefined ? (
-            <>
-              <Link href={back} className="icon-btn" aria-label="Back">
-                <Icon name="chevronLeft" size={22} />
-              </Link>
-              <span className="appbar-title">{title}</span>
-            </>
-          ) : greeting !== undefined ? (
+          {greeting !== undefined ? (
             <>
               {/* The initials are DERIVED, never stored — see `initialsOf`. A
                   customer with no name yet gets the mark rather than a blank
@@ -239,6 +248,7 @@ export function Shell({
             {greeting !== undefined && <span className="dot" aria-hidden="true" />}
           </Link>
         </header>
+        )}
 
         {/*
           EVERY SCREEN ARRIVES, not just the five that remembered the class.
@@ -249,6 +259,14 @@ export function Shell({
           per session.
         */}
         <main className="shell screen-in" key={pathname}>
+          {back !== undefined && (
+            <div className="page-head">
+              <Link href={back} className="back" aria-label="Back">
+                <Icon name="chevronLeft" size={21} />
+              </Link>
+              {title !== undefined && <h1>{title}</h1>}
+            </div>
+          )}
           {children}
         </main>
       </div>

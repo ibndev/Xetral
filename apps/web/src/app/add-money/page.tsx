@@ -168,9 +168,8 @@ export default function AddMoney() {
   }
 
   return (
-    <Shell>
+    <Shell back="/wallet" title="Add money">
       <div className="card">
-        <h1>Add Money</h1>
 
         {account.loading && <p className="hint">Checking your account…</p>}
 

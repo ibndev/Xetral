@@ -590,6 +590,64 @@ h3 { font-size: 16px; }
   letter-spacing: -0.02em;
 }
 
+/* ── the sub-screen header ──────────────────────────────────────────────────
+ *
+ * A SCREEN ONE LEVEL DOWN HAS NO APP BAR IN THE COMP. It opens directly on a
+ * 40px rounded-square back button and a 20px title, both INSIDE the page, and
+ * the brand, the theme toggle and the bell are absent — they belong to the
+ * screen a customer opens the app on, not to the one they stepped into.
+ *
+ * WHY THAT MATTERS RATHER THAN BEING A DETAIL: the app bar is sticky and
+ * blurred, so on a sub-screen it took 56px of a handset permanently to show
+ * a chevron and a word. The comp spends that on the thing the screen is for
+ * — the recipient list, the amount, the card — and puts the way back in the
+ * content, where it scrolls away like everything else.
+ *
+ * `Shell` renders THIS when it is given `back`, and the app bar only on the
+ * screens that have no `back`. One place, so a screen cannot pick.
+ */
+.page-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0 14px;
+}
+.page-head .back {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  /* Every one of these is stated because `.btn, button` and `a` set them and
+     a property omitted is a property the bare rule wins — the fault
+     `.ccy-card` shipped and `button-specificity.test.ts` refuses. */
+  min-height: 0;
+  padding: 0;
+  background: var(--surface-2);
+  border: 1px solid var(--edge);
+  color: var(--text);
+  cursor: pointer;
+  transition: transform var(--t-fast) var(--ease);
+}
+.page-head .back:hover { background: var(--surface); }
+.page-head .back:active { transform: scale(.94); }
+.page-head h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+/* The sentence under the title, in the comp's own size and colour. It is the
+   one line telling somebody what this screen wants from them. */
+.page-lede {
+  margin: 0 0 14px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+
 /* The operations header: the mark, then a quiet qualifier.
 
    "operations" is set in the BODY face at normal weight, deliberately unlike

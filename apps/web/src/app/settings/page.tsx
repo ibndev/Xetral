@@ -24,10 +24,8 @@ export default function Settings() {
   const kyc = useLoad(() => client.kyc(), [client]);
 
   return (
-    <Shell>
-
+    <Shell back="/more" title="Your account">
       <div className="card">
-        <h1>Your account</h1>
         <h2>Session and verification</h2>
 
         <div className="row">

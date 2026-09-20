@@ -33,7 +33,7 @@ export default function Bills() {
   const history = useLoad(() => client.purchases(), [client]);
 
   return (
-    <Shell>
+    <Shell back="/more" title="Bills and airtime">
 
       <div className="tabs">
         {SERVICES.map((s) => (

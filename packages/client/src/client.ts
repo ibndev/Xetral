@@ -165,11 +165,53 @@ export function nationalPhone(phone: string | null | undefined, dialCode?: strin
   const digits = phone.replace(/[^0-9]/g, '');
   const code = (dialCode ?? '').replace(/[^0-9]/g, '');
   const national = code !== '' && digits.startsWith(code) ? digits.slice(code.length) : digits;
-  // Grouped in threes from the left, which is how a mobile number is written
-  // across all three of this platform's countries. Not `Intl`: that formats
-  // NUMBERS, and a phone number is a string of digits that happens to look
-  // like one.
-  return (national.match(/.{1,3}/g) ?? []).join(' ');
+  return groupNational(national);
+}
+
+/**
+ * A national number, grouped so the LAST FOUR stay together.
+ *
+ * THREES FROM THE LEFT LEFT AN ORPHAN DIGIT, and the comment that used to sit
+ * here claimed threes was "how a mobile number is written across all three of
+ * this platform's countries". It is not. A Nigerian mobile is `0803 123
+ * 4567`; grouping `8031234567` in threes from the left produces
+ * `803 123 456 7` — a trailing single digit on the Request payment screen,
+ * which is the one string a customer reads ALOUD to somebody who is about to
+ * pay them. Every 10-digit number in the product rendered that way.
+ *
+ * The last four are a block because that is the part people read as a unit in
+ * all three countries, and the rest goes in threes from the RIGHT so the
+ * short group lands at the front where a country's own spelling puts it. A
+ * leading single digit is merged forward, because one digit alone is the
+ * defect this exists to remove and moving it does not create another.
+ *
+ * Not `Intl`: that formats NUMBERS, and a phone number is a string of digits
+ * that happens to look like one.
+ */
+function groupNational(national: string): string {
+  if (national.length <= 4) return national;
+  const tail = national.slice(-4);
+  const head = national.slice(0, -4);
+  const groups: string[] = [];
+  let rest = head;
+  while (rest.length > 3) {
+    groups.unshift(rest.slice(-3));
+    rest = rest.slice(0, -3);
+  }
+  if (rest !== '') {
+    // A LONE LEADING DIGIT IS MERGED FORWARD, into the next group or, when
+    // there is none, into the tail itself. Found by asserting no group is
+    // ever one character at every length from five to fourteen rather than
+    // by checking the three lengths this platform uses — a five-digit
+    // number produced `1 2345`, which is the same orphan at the other end.
+    if (rest.length === 1) {
+      if (groups.length > 0) groups[0] = rest + (groups[0] ?? '');
+      else return rest + tail;
+    } else {
+      groups.unshift(rest);
+    }
+  }
+  return [...groups, tail].join(' ');
 }
 
 /**
@@ -181,21 +223,34 @@ export function nationalPhone(phone: string | null | undefined, dialCode?: strin
  * country, and a national number has no country in it. So Request payment
  * shows the whole thing, grouped so it can be read back over a phone call.
  */
-export function displayPhone(phone: string | null | undefined): string {
+export function displayPhone(
+  phone: string | null | undefined,
+  dialCode?: string,
+): string {
   if (phone === null || phone === undefined || phone === '') return '';
   const digits = phone.replace(/[^0-9]/g, '');
   if (digits === '') return '';
-  // Grouped from the RIGHT, so the country code is whatever is left over at
-  // the front — `+234 803 123 4567`, `+1 416 555 0132`. Grouping from the
-  // left would split a three-digit country code away from nothing and put
-  // `+2348 031 23…` on screen.
-  const groups: string[] = [];
-  let rest = digits;
-  while (rest.length > 3) {
-    groups.unshift(rest.slice(-3));
-    rest = rest.slice(0, -3);
+  /*
+   * THE COUNTRY CODE COMES OFF FIRST, AND THE COMMENT HERE USED TO CLAIM
+   * OTHERWISE.
+   *
+   * It grouped the WHOLE string in threes from the right and asserted that
+   * left the country code at the front — `+234 803 123 4567`. It does not:
+   * thirteen digits in threes from the right leaves ONE at the front, so
+   * `+2348031234567` came out as `+2 348 031 234 567`. Nothing reported it
+   * because nothing calls this function; the test written alongside the
+   * `nationalPhone` fix is what found it.
+   *
+   * A country code cannot be derived from a number — +1, +44 and +234 are
+   * one, two and three digits — so it is passed in, the way `nationalPhone`
+   * already takes it. Without one, the digits are grouped as a national
+   * number and the plus is still shown, which is honest about what is known.
+   */
+  const code = (dialCode ?? '').replace(/[^0-9]/g, '');
+  if (code !== '' && digits.startsWith(code)) {
+    return `+${code} ${groupNational(digits.slice(code.length))}`;
   }
-  return `+${[rest, ...groups].join(' ')}`;
+  return `+${groupNational(digits)}`;
 }
 
 /**
