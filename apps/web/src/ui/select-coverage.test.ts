@@ -32,10 +32,29 @@ function screens(dir: string): readonly string[] {
   return found;
 }
 
+/** Block and line comments removed, so the guard reads CODE. */
+function withoutComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ');
+}
+
 describe('the dropdowns this app draws', () => {
   it('has replaced every native select', () => {
+    /*
+     * COMMENTS ARE STRIPPED FIRST, and that is a correction rather than a
+     * loosening.
+     *
+     * This read the raw file, so a comment EXPLAINING why a native dropdown
+     * is wrong reported the file as containing one — the guard firing on the
+     * prose that documents it. A rule that fires on correct code is worse
+     * than no rule, because the fix is an ignore comment and the next real
+     * finding gets the same treatment.
+     *
+     * It is also strictly more accurate: a `<select>` inside a block comment
+     * renders nothing, and one outside a comment still matches.
+     * `palette-parity.test.ts` already reads its inputs this way.
+     */
     const offenders = screens(APP)
-      .filter((file) => /<select[\s>]/.test(readFileSync(file, 'utf8')))
+      .filter((file) => /<select[\s>]/.test(withoutComments(readFileSync(file, 'utf8'))))
       .map((file) => file.slice(APP.length + 1));
 
     expect(

@@ -6,7 +6,6 @@ import { formatAmount, symbolFor } from '@xetral/client';
 import type { Balance, Transaction } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { Icon } from '@/ui/icon';
-import { Select } from '@/ui/select';
 import { CurrencyMark } from '@/ui/currency-mark';
 import type { IconName } from '@/ui/icon';
 import { useLoad, useRemembered, useXetral } from '@/lib/hooks';
@@ -32,6 +31,69 @@ const PRODUCTS: readonly {
   { href: '/bills',  label: 'eSIM',      icon: 'sim',     tone: 't-blue' },
   { href: '/cards',  label: 'USD Card',  icon: 'card',    tone: 't-navy' },
 ];
+
+/**
+ * The balance, with the minor units set quieter than the major.
+ *
+ * A customer reads the whole number and GLANCES at the kobo; setting both at
+ * full contrast makes a seven-figure figure harder to take in, which is the
+ * one thing this line exists to be good at. It splits on the LAST separator
+ * rather than a dot, because `formatAmount` writes what the currency writes
+ * and the eight decimals of a BTC balance are still the minor part.
+ */
+function Figure({ amount, currency }: { readonly amount: string; readonly currency: string }) {
+  const text = formatAmount(amount, currency);
+  const at = text.lastIndexOf('.');
+  if (at === -1) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, at)}
+      <span className="minor">{text.slice(at)}</span>
+    </>
+  );
+}
+
+/**
+ * What a currency is called, for the line under its code on a rail card.
+ *
+ * NAMED HERE AND NOT INVENTED FROM THE CODE. A three-letter code is not a
+ * name, and a card reading "NGN / NGN" says nothing twice. Anything this does
+ * not know falls back to the code alone rather than to a guess — the rail is
+ * built from whatever `/v1/wallets` offers, so a currency added tomorrow must
+ * render correctly today.
+ */
+const CURRENCY_NAMES: Readonly<Record<string, string>> = {
+  NGN: 'Nigerian Naira',
+  GHS: 'Ghanaian Cedi',
+  KES: 'Kenyan Shilling',
+  USD: 'US Dollar',
+  GBP: 'Pound Sterling',
+  CAD: 'Canadian Dollar',
+  USDT: 'Tether',
+  USDC: 'USD Coin',
+  BTC: 'Bitcoin',
+};
+const nameOf = (code: string) => CURRENCY_NAMES[code] ?? code;
+
+/**
+ * The day a transaction happened, as somebody would say it out loud.
+ *
+ * "TODAY" and "YESTERDAY" rather than a date, because those are the two days
+ * a customer is actually checking against — and everything older gets the
+ * date, because "3 days ago" makes a reader do arithmetic to compare it with
+ * a bank statement.
+ *
+ * COMPARED ON THE LOCAL CALENDAR DAY, never on elapsed hours. A payment at
+ * 23:50 and one at 00:10 are eleven hours apart in the same week and on two
+ * different days, and a threshold in hours puts them under one heading.
+ */
+function dayOf(when: Date): string {
+  const midnight = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((midnight(new Date()) - midnight(when)) / 86_400_000);
+  if (days === 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  return when.toLocaleDateString(undefined, { day: 'numeric', month: 'long' });
+}
 
 export default function Wallet() {
   const client = useXetral();
@@ -85,7 +147,7 @@ export default function Wallet() {
   );
 
   return (
-    <Shell>
+    <Shell greeting={{ name: session.data?.first_name }}>
       {/*
         BY NAME, and nothing under it.
         
@@ -96,56 +158,23 @@ export default function Wallet() {
         the only place this system holds one; `there` is the honest fallback
         for somebody who has not made one yet.
       */}
-      <h1 className="animate-in">Hello {session.data?.first_name ?? 'there'}</h1>
+      {/*
+        THE GLOW SITS BEHIND THE BALANCE AND NOTHING ELSE.
 
-      <section className="balance-card animate-in d1">
-        <div className="row-between">
-          <span className="balance-label" id="balance-currency-label">
-            Available balance
-          </span>
-          {/*
-            THE SELECTOR IS HERE AND NOWHERE ELSE. There used to be a rail of
-            currency chips under the balance as well, which meant two controls
-            for one decision: the chips repeated every figure the balance was
-            already showing, pushed Send and Top up toward the fold, and gave
-            the card a different height depending on how many currencies the
-            platform happened to offer. One dropdown, at the top, beside the
-            number it changes.
-          */}
-          <div className="ccy-select">
-            <Select
-              labelledBy="balance-currency-label"
-              value={currency}
-              onChange={setPreferred}
-              options={assets.map((b: Balance) => ({
-                value: b.currency,
-                label: b.currency,
-                // The figure, so choosing is a decision made with the numbers
-                // rather than one that reveals them.
-                ...(hidden ? {} : { hint: formatAmount(b.spendable, b.currency) }),
-              }))}
-              renderMark={(code) => <CurrencyMark currency={code} size={20} />}
-            />
-          </div>
-        </div>
+        It is a light source rather than a fill: `pointer-events:none`, never
+        on a surface that carries its own text, and behind the figure the
+        screen exists to show. `.glow-wrap` raises every sibling above it so
+        nothing is tinted by it.
+      */}
+      <section className="glow-wrap animate-in">
+        <span className="glow" aria-hidden="true" />
 
-        <div className="balance-line">
-          {/* Keyed on the state so React replaces the node and the figure
-              cross-fades instead of snapping between dots and digits. The
-              global reduced-motion rule turns it off for anybody who asked. */}
-          <div className="balance-value fade-in" key={hidden ? 'masked' : 'shown'}>
-            {balances.loading ? (
-              <span className="skeleton" style={{ display: 'block', width: 190, height: 38 }} />
-            ) : hidden ? (
-              `${symbolFor(currency)} ${MASK}`
-            ) : (
-              formatAmount(active?.spendable ?? '0.00', currency)
-            )}
-          </div>
+        <div className="balance-head">
+          <span className="balance-label" id="balance-currency-label">Total balance</span>
           {/*
             Hiding the balance is not decoration. Somebody checks their phone
             in a danfo with a stranger's shoulder at theirs, and one tap is
-            the difference between that being fine and not. Which is also why
+            the difference between that being fine and not — which is also why
             the choice is remembered rather than reset by a reload.
           */}
           <button
@@ -155,35 +184,106 @@ export default function Wallet() {
             aria-pressed={hidden}
             aria-label={hidden ? 'Show balance' : 'Hide balance'}
           >
-            <Icon name={hidden ? 'eyeOff' : 'eye'} size={20} />
+            <Icon name={hidden ? 'eyeOff' : 'eye'} size={18} />
           </button>
         </div>
 
-        {active !== undefined && !isZero(active.pending) && (
-          <div className="balance-sub">
-            {formatAmount(active.pending, currency)} pending — held, not yet spendable
+        {/* Keyed on the state so React replaces the node and the figure
+            cross-fades instead of snapping between dots and digits. */}
+        <div className="balance-value fade-in" key={hidden ? 'masked' : 'shown'}>
+          {balances.loading ? (
+            <span className="skeleton" style={{ display: 'block', width: 210, height: 42 }} />
+          ) : hidden ? (
+            `${symbolFor(currency)} ${MASK}`
+          ) : (
+            <Figure amount={active?.spendable ?? '0.00'} currency={currency} />
+          )}
+        </div>
+
+        {/*
+          THE CHIP SAYS WHAT IS PENDING, WHICH IS THE ONE THING HERE THAT IS
+          TRUE.
+
+          The mockup puts a "+₦150,000 this week" chip in this slot. There is
+          no figure behind it: `/v1/wallets` answers a spendable and a pending
+          balance, and a week's inflow would have to be summed from ONE PAGE
+          of history — which is however many entries that page happens to hold
+          and not a week. A plausible number in the place a customer reads
+          their money is the one thing this screen must not invent, so the
+          slot carries money that is genuinely held instead, and is absent
+          when there is none.
+        */}
+        {active !== undefined && !isZero(active.pending) && !hidden && (
+          <div style={{ marginTop: 11 }}>
+            <span className="delta-chip">
+              <Icon name="clock" size={13} />
+              {formatAmount(active.pending, currency)} pending
+            </span>
           </div>
         )}
 
         {/*
-          THE ACCOUNT NUMBER IS NOT HERE ANY MORE, and that is a decision about
-          what this box is for.
+          THE RAIL REPLACED A DROPDOWN, and it answers a different question.
 
-          It sat under the balance, which put a beneficiary's name, a bank and
-          a ten-digit number — three things nobody reads while checking what
-          they have — inside the one figure a customer opens the app to see.
-          The account lives on the top-up screen, which is the screen somebody
-          opens in order to be paid, and is the only place it is needed.
+          A `<select>` says which currency the figure above is in; the rail
+          shows what is in every one of them at once, which is what somebody
+          holding four currencies opens this screen to see. Tapping a card
+          moves the big figure — so the rail is the selector as well, and
+          there is still exactly one control for one decision.
         */}
-        <div className="quick-actions">
-          <Link href="/transfer" className="btn">
-            <Icon name="send" size={17} /> Send
+        <div className="ccy-rail" role="tablist" aria-label="Currencies">
+          {balances.loading
+            ? [0, 1, 2].map((i) => (
+                <span className="ccy-card" key={i} aria-hidden="true">
+                  <span className="skeleton" style={{ display: 'block', width: 92, height: 26, borderRadius: 999 }} />
+                  <span className="skeleton" style={{ display: 'block', width: 130, height: 24, marginTop: 18 }} />
+                </span>
+              ))
+            : assets.map((b: Balance) => (
+                <button
+                  type="button"
+                  key={b.currency}
+                  role="tab"
+                  aria-selected={b.currency === currency}
+                  className={b.currency === currency ? 'ccy-card on' : 'ccy-card'}
+                  onClick={() => setPreferred(b.currency)}
+                >
+                  <span className="ccy-top">
+                    <CurrencyMark currency={b.currency} size={26} />
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span className="ccy-code">{b.currency}</span>
+                      <span className="ccy-name">{nameOf(b.currency)}</span>
+                    </span>
+                  </span>
+                  <span className="ccy-amt">
+                    {hidden ? `${symbolFor(b.currency)} ${MASK}` : formatAmount(b.spendable, b.currency)}
+                  </span>
+                  <span className="ccy-sub">Spendable</span>
+                </button>
+              ))}
+        </div>
+
+        {/*
+          FOUR ACTIONS, ONE OF THEM FILLED. Send is what this app is for; the
+          other three are beside it because they are beside it in somebody's
+          head, not because they are equal to it.
+        */}
+        <div className="act-row">
+          <Link href="/transfer" className="act primary">
+            <span className="act-ico"><Icon name="send" size={22} /></span>
+            Send
           </Link>
-          <Link href="/add-money" className="btn quiet">
-            <Icon name="plus" size={17} /> Add money
+          <Link href="/add-money" className="act">
+            <span className="act-ico"><Icon name="plus" size={22} /></span>
+            Add
           </Link>
-          <Link href="/fx" className="btn quiet">
-            <Icon name="swap" size={17} /> Convert
+          <Link href="/fx" className="act">
+            <span className="act-ico"><Icon name="swap" size={22} /></span>
+            Convert
+          </Link>
+          <Link href="/add-money" className="act">
+            <span className="act-ico"><Icon name="download" size={22} /></span>
+            Request
           </Link>
         </div>
       </section>
@@ -199,9 +299,9 @@ export default function Wallet() {
         grew the page by however many currencies the platform happens to offer.
       */}
       <section className="animate-in d2">
-        <div className="row-between section-head">
-          <h2>Products</h2>
-          <Link href="/more" className="btn link">View all</Link>
+        <div className="sec-head">
+          <h2>Explore</h2>
+          <Link href="/more" className="more">All services</Link>
         </div>
         <div className="tiles">
           {PRODUCTS.map((p) => (
@@ -232,10 +332,10 @@ export default function Wallet() {
         </div>
       </section>
 
-      <section className="card animate-in d4">
-        <div className="card-head">
+      <section className="animate-in d4">
+        <div className="sec-head">
           <h2>Recent activity</h2>
-          <Link href="/activity" className="btn link">See all</Link>
+          <Link href="/activity" className="more">See all</Link>
         </div>
 
         {history.loading && (
@@ -262,31 +362,69 @@ export default function Wallet() {
           </div>
         )}
 
-        <div className="list">
-          {history.data?.entries.slice(0, 6).map((t: Transaction) => {
-            const outgoing = t.amount.trim().startsWith('-');
-            return (
-              <div className="list-row" key={t.id}>
-                <span className="row-icon">
-                  <Icon name={outgoing ? 'arrowUpRight' : 'download'} size={19} />
-                </span>
-                <span className="row-main">
-                  <span className="row-title">{t.description}</span>
-                  <span className="row-sub">
-                    {new Date(t.occurred_at).toLocaleDateString(undefined, {
-                      day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
-                    })}
+        {/*
+          GROUPED BY DAY, and the heading is what lets the row drop its own
+          date — a list where every row repeats "Sep 20" spends a column
+          saying the same thing six times. `seen` is the running heading
+          rather than a pre-built map, because the list is already in order
+          and a second pass to group it would be a second place the ordering
+          has to agree with the ledger's.
+
+          A HEADING CAN LEGITIMATELY REPEAT, and re-sorting to prevent it
+          would be the bug. History is keyset paginated on the POSTING ID —
+          which for ordinary traffic is time order, and deliberately is not
+          when a reconciliation sweep posts a deposit today for money that
+          arrived on Tuesday. Sorting this page by `occurred_at` would make it
+          disagree with the cursor "See all" pages on, which is how a list
+          grows duplicates and gaps. The heading describes the rows beneath
+          it, and that stays true however many times it appears.
+        */}
+        <div>
+          {(() => {
+            let seen: string | undefined;
+            return history.data?.entries.slice(0, 6).map((t: Transaction) => {
+              const outgoing = t.amount.trim().startsWith('-');
+              const when = new Date(t.occurred_at);
+              const day = dayOf(when);
+              const heading = day === seen ? undefined : day;
+              seen = day;
+              return (
+                <div key={t.id}>
+                  {heading !== undefined && <div className="day-head">{heading}</div>}
+              <Link className="tx-row" href={`/activity?entry=${t.id}`}>
+                <span className="tx-mark">
+                  <span className="avatar">
+                    <Icon name={outgoing ? 'arrowUpRight' : 'download'} size={19} />
+                  </span>
+                  {/* The currency rides ON the avatar rather than beside it,
+                      so a row is two columns and not three — and is read at a
+                      glance without a label taking a line. */}
+                  <span className="tx-flag">
+                    <CurrencyMark currency={t.currency} size={14} />
                   </span>
                 </span>
-                <span
-                  className="row-value amount"
-                  style={outgoing ? undefined : { color: 'var(--ok)' }}
-                >
-                  {formatAmount(t.amount, t.currency)}
+                <span className="tx-main">
+                  <span className="tx-name">{t.description}</span>
+                  {/* THE TIME, NOT THE DATE. The day heading above already
+                      said which day, and a row repeating it is a column of
+                      identical text. */}
+                  <span className="tx-sub">
+                    {when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+                  </span>
                 </span>
-              </div>
-            );
-          })}
+                <span className="tx-side">
+                  {/* MONEY LEAVING IS RED AND MONEY ARRIVING IS GREEN. It was
+                      red for neither, so the only thing separating "you were
+                      paid" from "you paid" at a glance was a minus sign. */}
+                  <span className={outgoing ? 'tx-amt out' : 'tx-amt in'}>
+                    {formatAmount(t.amount, t.currency)}
+                  </span>
+                </span>
+              </Link>
+                </div>
+              );
+            });
+          })()}
         </div>
 
         {balances.error !== undefined && <p className="error">

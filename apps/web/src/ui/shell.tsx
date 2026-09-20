@@ -43,15 +43,45 @@ const TABS: readonly Dest[] = [
   { href: '/more', label: 'More', icon: 'grid', tab: true },
 ];
 
+/**
+ * Up to two initials from a display name.
+ *
+ * `undefined` rather than a placeholder letter when there is nothing to work
+ * with: an avatar reading "T" for "there" would be a made-up initial on the
+ * screen that says who you are signed in as.
+ */
+function initialsOf(name: string | null | undefined): string | undefined {
+  if (name === undefined || name === null) return undefined;
+  const parts = name.trim().split(/\s+/).filter((w) => w.length > 0);
+  if (parts.length === 0) return undefined;
+  const first = parts[0]?.[0] ?? '';
+  const last = parts.length > 1 ? (parts[parts.length - 1]?.[0] ?? '') : '';
+  const out = `${first}${last}`.toUpperCase();
+  return out === '' ? undefined : out;
+}
+
 export function Shell({
   title,
   children,
   back,
+  greeting,
 }: {
   readonly title?: string;
   readonly children: ReactNode;
   /** Show a back chevron instead of the logo — for a screen one level down. */
   readonly back?: string;
+  /**
+   * THE HOME SCREEN'S HEADER IS A GREETING, NOT A LOGO, and it lives here
+   * rather than on the page for the reason the sign-in gate and the tab bar
+   * do: the header is the shell's, and a page that drew its own would be a
+   * second header that drifts from this one the first time either changes.
+   *
+   * A customer who has opened the app knows which app they opened. What the
+   * mark was doing at the top of the one screen they see most was taking the
+   * width that now says who they are signed in as — which is the thing worth
+   * confirming at a glance on a screen showing money.
+   */
+  readonly greeting?: { readonly name: string | null | undefined };
 }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -171,6 +201,20 @@ export function Shell({
                 <Icon name="chevronLeft" size={22} />
               </Link>
               <span className="appbar-title">{title}</span>
+            </>
+          ) : greeting !== undefined ? (
+            <>
+              {/* The initials are DERIVED, never stored — see `initialsOf`. A
+                  customer with no name yet gets the mark rather than a blank
+                  disc, because an empty circle reads as something that failed
+                  to load. */}
+              <span className="avatar" aria-hidden="true">
+                {initialsOf(greeting.name) ?? <Logo size={18} />}
+              </span>
+              <span className="home-hello">
+                <span className="lead">Welcome back</span>
+                <span className="name">{greeting.name ?? 'there'}</span>
+              </span>
             </>
           ) : (
             <Link href="/wallet" className="appbar-brand" aria-label="Xetral home">

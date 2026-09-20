@@ -4881,6 +4881,10 @@ html, body { overflow-x: hidden; }
  * Every measurement below is the mockup's own, not a rounding of it.
  */
 
+/* The label and the hide toggle, on one line above the figure. */
+.balance-head { display: flex; align-items: center; gap: 4px; padding-top: 4px; }
+.balance-head .balance-label { font-size: 13px; font-weight: 600; color: var(--text-2); }
+
 /* THE WASH BEHIND THE BALANCE. A light source, not a fill: it sits BEHIND the
    header and the figure, is never on a surface that carries its own text, and
    is `pointer-events:none` so it cannot eat a tap. */
@@ -4913,8 +4917,19 @@ html, body { overflow-x: hidden; }
    forty selected items. The fill alone is enough to group them. */
 .tx-row .avatar { border-color: transparent; background: var(--surface-2); color: var(--text-2); }
 .home-hello { flex: 1; min-width: 0; }
-.home-hello .lead { display: block; font-size: 12.5px; font-weight: 500; color: var(--text-3); }
-.home-hello .name { display: block; font-size: 16px; font-weight: 700; letter-spacing: -0.012em; }
+/* BOTH LINES ARE ONE LINE EACH. At 320px the avatar and the two icon buttons
+   squeezed this column until "Welcome back" wrapped, which made the header
+   three lines tall and pushed the balance — the thing the screen is for —
+   down the page on the narrowest handset. The name truncates rather than
+   wraps for the same reason. */
+.home-hello .lead {
+  display: block; font-size: 12.5px; font-weight: 500; color: var(--text-3);
+  white-space: nowrap;
+}
+.home-hello .name {
+  display: block; font-size: 16px; font-weight: 700; letter-spacing: -0.012em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 
 /* THE MOVEMENT CHIP. Tinted rather than filled, because it is information
    rather than an action and there is already one filled thing on the screen. */
@@ -4941,12 +4956,54 @@ html, body { overflow-x: hidden; }
   gap: 12px;
   overflow-x: auto;
   scroll-snap-type: x mandatory;
-  padding: 16px 20px 2px;
-  margin: 0 -20px;
+  /*
+   * THE BLEED IS THE SHELL'S OWN INSET, AND IT WAS 20px AGAINST A 16px
+   * SHELL.
+   *
+   * Four pixels does not sound like a bug and it is not what it looked like:
+   * the rail hung four pixels past both screen edges, so the first card was
+   * clipped at x=0 with no gutter under it while every other block on the
+   * page kept one. A bleed has to be EXACTLY the inset it is undoing, or the
+   * rail is simply misaligned with the page.
+   *
+   * `scroll-padding-left` is the second half and is not optional — the
+   * scrollport ignores this container's padding, so the browser scrolls the
+   * rail leftwards to satisfy the snap and eats the 16px that was there to
+   * align it. `.promo-rail` already records this, measured in a browser; this
+   * rail was written without it and reproduced the fault one class away.
+   */
+  padding: 16px 16px 2px;
+  margin: 0 -16px;
+  scroll-padding-left: 16px;
   scrollbar-width: none;
 }
+@media (min-width: 720px) {
+  .ccy-rail { margin: 0 -24px; padding: 16px 24px 2px; scroll-padding-left: 24px; }
+}
 .ccy-rail::-webkit-scrollbar { display: none; }
+/*
+ * A <button> USED AS A CARD MUST RESTATE EVERYTHING THE BARE RULE SETS.
+ *
+ * OMITTING A PROPERTY IS NOT THE SAME AS NEUTRALISING ONE — the lesson
+ * `.icon-btn` already records, in a second place and with a worse symptom.
+ * `.btn, button` sets `display: inline-flex`, `align-items: center`,
+ * `justify-content: center`, `gap: 8px`, `min-height: 48px`, `padding` and
+ * `white-space: nowrap`. `.ccy-card` outranks it — but only for the
+ * properties it actually declares, and it declared none of those. So the
+ * three stacked rows of a currency card laid out as ONE CENTRED FLEX ROW: the
+ * code, the amount and "Spendable" side by side, the mark of the next card
+ * overlapping the one before it, and nothing able to wrap.
+ *
+ * Every one of them is written out below, including the ones that look like
+ * noise. A property left out here is a property the bare rule wins.
+ */
 .ccy-card {
+  display: block;
+  align-items: initial;
+  justify-content: initial;
+  gap: 0;
+  min-height: 0;
+  white-space: normal;
   flex: none;
   width: 212px;
   scroll-snap-align: start;
@@ -4968,14 +5025,32 @@ html, body { overflow-x: hidden; }
 .ccy-card .ccy-top { display: flex; align-items: center; gap: 9px; }
 .ccy-card .ccy-code { display: block; font-size: 14px; font-weight: 700; }
 .ccy-card .ccy-name { display: block; font-size: 11px; font-weight: 500; color: var(--text-3); }
+/*
+ * BOTH OF THESE SAY `display: block`, and leaving it off cost the card its
+ * shape.
+ *
+ * `.ccy-card` is `display: block` now, so its children are ordinary inline
+ * spans — the figure and the word "Spendable" laid out on ONE line, which
+ * pushed a ten-character balance past the card's right edge and off the
+ * screen. `.ccy-code` and `.ccy-name` already said it; these two did not, and
+ * an inline span is the default nobody writes down.
+ */
 .ccy-card .ccy-amt {
+  display: block;
   font-family: var(--font-num);
   font-size: 22px; font-weight: 700;
   letter-spacing: -0.027em;
   font-variant-numeric: tabular-nums;
   margin-top: 16px;
+  /* A BTC balance is eight decimals. It fits at this size, and if a longer
+     one ever does not, the card must grow a scrollbar rather than let a
+     figure escape it — a number half off the screen is a number read wrong. */
+  overflow: hidden;
 }
-.ccy-card .ccy-sub { font-size: 11.5px; font-weight: 500; color: var(--text-3); margin-top: 3px; }
+.ccy-card .ccy-sub {
+  display: block;
+  font-size: 11.5px; font-weight: 500; color: var(--text-3); margin-top: 3px;
+}
 
 /* ── the four actions ───────────────────────────────────────────────────────
  *
@@ -4984,6 +5059,18 @@ html, body { overflow-x: hidden; }
  * near it in somebody's head, not because they are equal to it.
  */
 .act-row { display: flex; justify-content: space-between; padding: 22px 10px 8px; }
+/*
+ * THE FOUR ACTIONS STAY TOGETHER ON A LAPTOP.
+ *
+ * `space-between` is right on a handset, where the row is the width of the
+ * screen. In a 720px shell it spread four 56px tiles across 672px, so the
+ * labels floated with a hand's width between them and the group stopped
+ * reading as one control. Capped and left-aligned, the row is the same shape
+ * at every width — which is the point of one design across three countries.
+ */
+@media (min-width: 720px) {
+  .act-row { justify-content: flex-start; gap: 44px; padding: 26px 0 8px; }
+}
 .act {
   display: flex; flex-direction: column; align-items: center; gap: 9px;
   background: none; border: none; padding: 0;
@@ -5010,9 +5097,18 @@ html, body { overflow-x: hidden; }
 .act, .act:hover, .act:active, .act:focus { background: none; }
 
 /* ── section heads, day heads, and an activity row ──────────────────────── */
+/*
+ * THE HEADING CARRIES NO TOP PADDING, because the page already spaces itself.
+ *
+ * `.shell > * + *` puts 22px between blocks; a further 24px here made every
+ * gap on the home screen 46px, which is what "loose vertical spacing" looks
+ * like when it is measured rather than felt. A dense fintech screen has one
+ * rhythm, and a section that brings its own is a second one that drifts from
+ * every screen beside it.
+ */
 .sec-head {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 24px 0 6px;
+  padding: 0 0 10px;
 }
 .sec-head h2 { font-size: 17px; font-weight: 700; letter-spacing: -0.012em; margin: 0; }
 .sec-head .more { font-size: 13px; font-weight: 600; color: var(--iris); }

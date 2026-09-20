@@ -181,4 +181,57 @@ describe('button styling specificity', () => {
         '`button:hover` paints the picker --brand-700 (white in dark) on a touch device',
     ).toBeGreaterThan(0);
   });
+  it('a <button> used as a CARD neutralises every layout property the bare rule sets', () => {
+    /*
+     * THE THIRD TIME THE BARE `button` RULE HAS REACHED SOMETHING THAT IS NOT
+     * A BUTTON, AND THE FIRST TIME SPECIFICITY WAS NOT THE MECHANISM.
+     *
+     * `.icon-btn` and `.xselect-trigger` above are both about a generic rule
+     * OUTRANKING a component class. This one is the opposite and is easier to
+     * miss: `.ccy-card` outranks `.btn, button` comfortably, and lost anyway —
+     * because it never mentioned `display`, and a class cannot win a property
+     * it does not declare. The bare rule sets `display: inline-flex`,
+     * `align-items: center`, `justify-content: center`, `gap: 8px`,
+     * `min-height: 48px` and `white-space: nowrap`, so a three-row currency
+     * card rendered as one centred flex row with its neighbours overlapping.
+     *
+     * Nothing failed. The compiler has no opinion about a stylesheet, the
+     * markup was correct, and the class was applied. It was visible only in a
+     * rendered screenshot — which is why the rule is now written down instead
+     * of relearned on the next card-shaped button.
+     */
+    const css = readFileSync(CSS, 'utf8').replace(/\/\*[\s\S]*?\*\//g, ' ');
+
+    /** What `.btn, button` sets that changes how a card's CHILDREN lay out. */
+    const LEAKS = [
+      'display',
+      'align-items',
+      'justify-content',
+      'gap',
+      'min-height',
+      'white-space',
+    ] as const;
+
+    /**
+     * Component classes rendered on a <button> that are NOT button-shaped.
+     *
+     * Listed by hand deliberately: the test cannot tell from the stylesheet
+     * which classes end up on a <button>, and a guess in either direction is
+     * worse than a decision. A new card-shaped button is added here, which is
+     * the moment somebody reads this comment.
+     */
+    const CARDS = ['.ccy-card'] as const;
+
+    for (const cls of CARDS) {
+      const at = css.search(new RegExp(`\\${cls}\\s*\\{`));
+      expect(at, `${cls} has no base rule in globals.css`).toBeGreaterThan(-1);
+      const body = css.slice(at, css.indexOf('}', at));
+      const missing = LEAKS.filter((prop) => !new RegExp(`(^|;|\\{)\\s*${prop}\\s*:`).test(body));
+      expect(
+        missing,
+        `${cls} is a <button>, so \`.btn, button\` sets these and ${cls} never ` +
+          'restates them — the bare rule wins on every one:\n' + missing.join('\n'),
+      ).toEqual([]);
+    }
+  });
 });
