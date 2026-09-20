@@ -5,8 +5,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   currencyName,
   exponentFor,
+  feeOn,
   formatAmount,
+  groupTyped,
   isValidAmount,
+  PAD,
+  pressKey,
   nationalDigits,
   networkLabel,
   phoneHint,
@@ -1313,6 +1317,14 @@ function SendAmount({
   const sf = useSf();
   const { busy, error, code, run } = useSubmit();
   const { key, next } = useIdempotencyKey();
+  /*
+   * READ ONCE WHEN THE SCREEN OPENS. A fee is a proportion, so the POLICY is
+   * fetched and applied to whatever is typed — asking the server again on
+   * every keystroke would be a round trip per digit. It is allowed to fail
+   * silently: the fee row is a courtesy on a screen whose job is moving
+   * money, and the authoritative charge is the ledger's either way.
+   */
+  const feePolicy = useLoad(() => client.transferFee().catch(() => undefined), [client]);
 
   /*
    * A PAYOUT CARRIES ONE CURRENCY, AND THIS SCREEN USED TO SEND IT TWO.
@@ -1446,139 +1458,176 @@ function SendAmount({
           </Text>
         </View>
       </View>
-
-      {/* ONE STRAIGHT FIELD PER AMOUNT: the figure on the left, the currency on
-          the right, and what it means in small text under it. */}
-      <Text style={{ color: sf.muted, fontSize: 13, marginBottom: 6 }}>You send</Text>
-      <View style={[amountBox, amount !== '' && !enough ? { borderColor: colors.danger, borderWidth: 1.5 } : null]}>
-        <TextInput
-          value={amount}
-          onChangeText={setAmount}
-          keyboardType="decimal-pad"
-          placeholder="0"
-          placeholderTextColor={sf.muted}
-          accessibilityLabel="Amount to send"
-          style={{
-            flex: 1,
-            color: sf.text,
-            fontFamily: font.sansSemi,
-            /* SLIGHTLY SMALLER AND LIGHTER. At 20 the figure was the loudest
-               thing on the screen and crowded the currency beside it. */
-            fontSize: 18,
-            letterSpacing: -0.2,
-            fontVariant: ['tabular-nums'],
-            padding: 0,
-          }}
-        />
-        {/* STATED, NOT OFFERED, where the rail decides it. A picker whose
-            only valid answer is the one already shown is a control that can
-            only be got wrong — and getting it wrong here sent two different
-            sums of money in one request. */}
-        {currencyIsFixed ? (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <CurrencyMark currency={sendCurrency} size={18} />
-            <Text style={{ color: sf.text, fontFamily: font.sansSemi, fontSize: 15 }}>
-              {sendCurrency}
-            </Text>
-          </View>
-        ) : (
-          <Select
-            /* NOT EMPTY, even though the pill draws no caption: this string is
-               the sheet's own heading and the screen reader's label. */
-            label="Currency you send"
-            variant="pill"
-            value={sendCurrency}
-            onChange={setSendCurrency}
-            options={balances.map((b) => ({ value: b.currency, label: b.currency }))}
-            renderMark={(value) => <CurrencyMark currency={value} size={18} />}
-          />
-        )}
-      </View>
-      {/* GREEN, because it is what the customer HAS — the only figure on this
-          screen that is neither leaving nor landing, and without a colour it
-          reads as a third amount. */}
       {/*
-        THREE THINGS CAN GO UNDER THE BOX, AND ONLY ONE AT A TIME.
+        THE AMOUNT IS ONE CENTRED FIGURE WITH A KEYPAD UNDER IT, which is what
+        the comp draws — and it was two stacked boxes with typed inputs, one
+        for what leaves and one for what lands.
 
-        THE MINIMUM IS SHOWN ONLY ONCE A CUSTOMER HAS TYPED LESS THAN IT. A
-        corridor's floor printed on an empty field is noise on every send;
-        printed the moment somebody asks for 2 cedis it is the one sentence
-        that gets them to a working amount. Before this the refusal reached
-        the screen as nothing at all.
+        Two boxes made the screen a FORM. The comp makes it a till: the figure
+        is the biggest thing on it, what the recipient gets is one quiet line
+        beneath, and the digits are a 3x4 grid under the thumb. On a handset
+        that is the difference between the OS keyboard covering half the
+        screen and tapping four keys — which is why the display is a `<Text>`
+        here rather than the web's transparent input: there is no hardware
+        keyboard to serve, and a `TextInput` would raise the very keyboard the
+        keypad exists to replace.
       */}
-      <Text
-        style={{
-          color: (amount !== '' && !enough) || belowMinimum ? colors.danger : colors.ok,
-          fontFamily: (amount !== '' && !enough) || belowMinimum ? font.sans : font.sansSemi,
-          fontSize: 12.5,
-          marginTop: 6,
-        }}
-      >
-        {amount !== '' && !enough
-          ? `Enter an amount in ${sendCurrency}.`
-          : belowMinimum
-            ? quote.error
-            : `Balance: ${formatAmount(balance, sendCurrency)}`}
-      </Text>
-
-      {/* THE LABEL BELONGS TO ITS BOX — 6px to the box below it, 14px to the
-          note above. The web needed a wrapper for this because its form is a
-          grid with a gap; here the margins are the whole spacing, so the same
-          rhythm is written out directly. */}
-      <Text style={{ color: sf.muted, fontSize: 13, marginTop: 14, marginBottom: 6 }}>
-        {firstNameOf(to.display_name)} receives
-      </Text>
-      <View style={amountBox}>
-        {/*
-         * A FIGURE, NEVER A DASH AND NEVER A STALE ZERO.
-         *
-         * The conversion is automatic: type 100 naira and the cedi figure
-         * follows as soon as the quote lands. What it must not do is sit at
-         * zero in the gap — that reads as a claim about what the corridor
-         * pays. The currency's own SYMBOL comes from `formatAmount`, so a cedi
-         * renders ₵ rather than a code beside a ₦ figure.
-         */}
+      <View style={{ alignItems: 'center', paddingTop: 4 }}>
         <Text
           style={{
-            flex: 1,
-            color: converting ? sf.muted : sf.text,
-            fontFamily: converting ? font.sans : font.sansSemi,
-            fontSize: converting ? 14.5 : 18,
-            letterSpacing: converting ? 0 : -0.2,
-            fontVariant: ['tabular-nums'],
+            color: sf.muted, fontFamily: font.sansSemi, fontSize: 12,
+            letterSpacing: 1.2, textTransform: 'uppercase',
           }}
         >
-          {converting
-            ? 'Converting…'
-            : sameCurrency
-              ? formatAmount(amount === '' ? '0' : amount, lands_in)
-              : formatAmount(lands?.receives ?? '0', lands_in)}
+          You send
         </Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
-          <CurrencyMark currency={lands_in} size={18} />
-          <Text style={{ color: sf.text, fontFamily: font.sansSemi, fontSize: 14.5 }}>
-            {lands_in}
+        <Text
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          accessibilityLabel={`You send ${amount === '' ? '0' : amount} ${sendCurrency}`}
+          style={{
+            marginTop: 6,
+            color: amount !== '' && !enough ? colors.danger : sf.text,
+            fontFamily: font.numBold,
+            fontSize: 46,
+            letterSpacing: -2,
+            fontVariant: ['tabular-nums'] as ('tabular-nums')[],
+          }}
+        >
+          {symbolFor(sendCurrency)}{amount === '' ? '0' : groupTyped(amount)}
+        </Text>
+
+        {/* WHICH CURRENCY, where the rail has not already decided it. Stated
+            rather than offered where it has — a picker whose only valid answer
+            is the one already shown is a control that can only be got wrong,
+            and getting it wrong here sent two different sums in one request. */}
+        {!currencyIsFixed && (
+          <View style={{ marginTop: 10 }}>
+            <Select
+              value={sendCurrency}
+              onChange={setSendCurrency}
+              label="Currency"
+              variant="pill"
+              options={balances.map((b) => ({ value: b.currency, label: b.currency }))}
+              renderMark={(value) => <CurrencyMark currency={value} size={18} />}
+            />
+          </View>
+        )}
+
+        <Text style={{ color: sf.muted, fontSize: 13, marginTop: 8 }}>
+          {firstNameOf(to.display_name)} receives{' '}
+          <Text
+            style={{
+              color: sf.section, fontFamily: font.numSemi,
+              fontVariant: ['tabular-nums'] as ('tabular-nums')[],
+            }}
+          >
+            {converting
+              ? '…'
+              : sameCurrency
+                ? formatAmount(amount === '' ? '0' : amount, lands_in)
+                : formatAmount(lands?.receives ?? '0', lands_in)}
+          </Text>
+        </Text>
+
+        {/*
+          ONE CHIP, SAYING THE ONE THING THERE IS TO SAY — a rate, a floor, an
+          arrival time or a refusal. They were separate notes that could all be
+          absent at once, leaving the space under the figure empty.
+
+          THE MINIMUM APPEARS ONLY ONCE A CUSTOMER HAS TYPED LESS THAN IT. A
+          corridor's floor printed on an empty field is noise on every send;
+          printed the moment somebody asks for 2 cedis it is the one sentence
+          that gets them to a working amount.
+        */}
+        <View
+          style={{
+            marginTop: 10, paddingVertical: 6, paddingHorizontal: 12,
+            borderRadius: radius.pill,
+            backgroundColor:
+              (amount !== '' && !enough) || belowMinimum || quote.code === 'pair_not_supported'
+                ? colors.dangerBg
+                : colors.surface,
+          }}
+        >
+          <Text
+            style={{
+              fontSize: 12, fontFamily: font.sansSemi,
+              color:
+                (amount !== '' && !enough) || belowMinimum || quote.code === 'pair_not_supported'
+                  ? colors.danger
+                  : sf.section,
+            }}
+          >
+            {amount !== '' && !enough
+              ? `Exceeds your ${formatAmount(balance, sendCurrency)} balance`
+              : belowMinimum
+                ? (quote.error ?? '')
+                : quote.code === 'pair_not_supported'
+                  ? `We cannot convert ${sendCurrency} to ${lands_in} yet`
+                  : !sameCurrency && lands !== undefined
+                    ? `1 ${sendCurrency} = ${formatAmount(lands.rate, lands_in)}`
+                    : to.kind === 'xetral'
+                      ? 'Arrives instantly'
+                      : 'Usually arrives within minutes'}
           </Text>
         </View>
       </View>
-      {/* DIRECTLY UNDER THE BOX — one line saying when it lands, which is what
-          the footer used to repeat further down the screen. */}
-      <Text
-        style={{
-          color: quote.code === 'pair_not_supported' ? colors.danger : sf.muted,
-          fontSize: 12.5,
-          marginTop: 6,
-          marginBottom: 16,
-        }}
+
+      {/*
+        THE FEE IS READ FROM THE SERVER AND NEVER ASSUMED — a POLICY in basis
+        points, applied to what is in the box. The row is ABSENT until the
+        answer arrives rather than showing a zero that becomes a real figure a
+        moment later.
+      */}
+      {feePolicy.data !== undefined && (
+        <View
+          style={{
+            flexDirection: 'row', justifyContent: 'space-between',
+            paddingVertical: 12, paddingHorizontal: 4,
+            marginTop: 14,
+            borderTopWidth: 1, borderTopColor: colors.line,
+          }}
+        >
+          <Text style={{ color: sf.muted, fontSize: 13 }}>Fee</Text>
+          <Text
+            style={{
+              color: sf.section, fontSize: 13, fontFamily: font.numSemi,
+              fontVariant: ['tabular-nums'] as ('tabular-nums')[],
+            }}
+          >
+            {formatAmount(feeOn(amount, feePolicy.data.basis_points, sendCurrency), sendCurrency)}
+          </Text>
+        </View>
+      )}
+
+      {/* THE KEYPAD. */}
+      <View
+        style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 6, marginBottom: 14 }}
+        accessibilityRole="none"
       >
-        {!sameCurrency && lands !== undefined
-          ? `1 ${sendCurrency} = ${formatAmount(lands.rate, lands_in)}`
-          : !sameCurrency && quote.code === 'pair_not_supported'
-            ? `We cannot convert ${sendCurrency} to ${lands_in} yet`
-            : to.kind === 'xetral'
-              ? 'Arrives instantly'
-              : 'Usually arrives within minutes'}
-      </Text>
+        {PAD.map((k) => (
+          <Pressable
+            key={k}
+            onPress={() => setAmount((was) => pressKey(was, k))}
+            android_ripple={null}
+            accessibilityRole="button"
+            accessibilityLabel={k === '<' ? 'Delete' : k}
+            style={{
+              width: '33.33%',
+              alignItems: 'center', justifyContent: 'center',
+              paddingVertical: 12,
+            }}
+          >
+            {k === '<' ? (
+              <Icon name="chevronLeft" size={24} color={sf.text} />
+            ) : (
+              <Text style={{ color: sf.text, fontFamily: font.sansSemi, fontSize: 24 }}>{k}</Text>
+            )}
+          </Pressable>
+        ))}
+      </View>
+
 
       <Field
         label="Transaction PIN"
