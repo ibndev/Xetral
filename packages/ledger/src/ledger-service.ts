@@ -401,6 +401,20 @@ export class LedgerService {
        * money.
        */
       readonly kinds?: readonly string[];
+      /**
+       * WHICH OF THE CUSTOMER'S ACCOUNTS, and it is a closed union rather
+       * than a string for the reason `kinds` is a parameter: this value
+       * chooses which money a customer is shown, and a free string here would
+       * be one typo away from showing them `provider_float`.
+       *
+       * `customer_wallet` is the default because it is what a history means
+       * without qualification. `customer_card` is what the cards screen asks
+       * for — a card spends its OWN balance, so a card authorization has no
+       * wallet leg at all and is invisible to the default. That is correct
+       * for a wallet history and is why the cards screen could show nothing
+       * that had ever happened on a card.
+       */
+      readonly account?: 'customer_wallet' | 'customer_card';
     } = {},
   ): Promise<readonly HistoryEntry[]> {
     const limit = Math.min(Math.max(options.limit ?? 50, 1), 200);
@@ -427,7 +441,7 @@ export class LedgerService {
          JOIN journal_entries e ON e.id = p.journal_entry_id
          JOIN entry_status s    ON s.id = e.id
         WHERE a.owner_id = $1::bigint
-          AND a.kind = 'customer_wallet'
+          AND a.kind = $6::account_kind
           AND p.currency = $2
           AND ($3::bigint IS NULL OR p.id < $3::bigint)
           -- NULL means "every kind", so one query serves both the unfiltered
@@ -442,6 +456,12 @@ export class LedgerService {
         options.before ?? null,
         limit,
         options.kinds === undefined ? null : [...options.kinds],
+        // APPENDED AS $6 RATHER THAN SLOTTED IN. Renumbering the five above
+        // it to make room is how one comes to name the wrong value — the
+        // fault 045 shipped, where a statement referenced `$9` against an
+        // array of eight and every card issue answered 500 with the compiler
+        // entirely satisfied.
+        options.account ?? 'customer_wallet',
       ],
     );
 

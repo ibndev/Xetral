@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { formatAmount } from '@xetral/client';
-import type { Card, CardSecrets } from '@xetral/client';
+import type { Card, CardActivity, CardSecrets } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { FormError } from '@/ui/form-error';
 import { Icon } from '@/ui/icon';
@@ -59,7 +59,10 @@ export default function Cards() {
       <div className="section-head row-between">
         <div>
           <h1>Your cards</h1>
-          <p className="lead">Manage your virtual dollar cards</p>
+          {/* SHORT ENOUGH FOR ONE LINE BESIDE THE BUTTON. "Manage your
+              virtual dollar cards" wrapped at 390 and left the word "cards"
+              alone on a second line under a heading that already says it. */}
+          <p className="lead">Spend online in dollars</p>
         </div>
         {cards !== undefined && cards.length > 0 && !adding && (
           <button type="button" className="ghost" onClick={() => setAdding(true)}>
@@ -94,6 +97,12 @@ export default function Cards() {
           position={{ index, of: cards.length }}
         />
       ))}
+
+      {/* Only where there is a card to have spent anything. On the
+          onboarding screen it would be an empty section under a specimen,
+          which reads as a feature that is broken rather than as one that has
+          not been used yet. */}
+      {cards !== undefined && cards.length > 0 && <CardActivityList />}
 
       {/*
         THE OFFER IS ALWAYS SHOWN; THE KYC SECTION APPEARS WHEN THEY ASK FOR A
@@ -131,6 +140,93 @@ export default function Cards() {
       )}
     </Shell>
   );
+}
+
+/**
+ * WHAT HAS HAPPENED ON THE CARDS.
+ *
+ * THE HEADING SAYS "your cards" AND NOT "this card", and that is the ledger
+ * being honest rather than a wording choice. A card's role resolves to ONE
+ * `customer_card` account per customer per currency, so nothing in `postings`
+ * records which card a charge was on; a per-card list would be a screen
+ * claiming a precision the books do not have. The design draws this section
+ * under a single card, and the only version of it that is true is this one.
+ *
+ * IT IS A SEPARATE READ FROM THE WALLET HISTORY. A card spends its OWN
+ * balance — an authorization moves card → pending with no `customer_wallet`
+ * leg at all — so every card spend ever made was invisible to the only
+ * history this product had. That is correct for a wallet history, and it is
+ * why this screen could show nothing that had ever happened on a card.
+ *
+ * A FAILURE IS SILENT HERE, DELIBERATELY. This is a decoration on a screen
+ * whose job is the card and its controls; an error banner for a list that did
+ * not load would put a red box between a customer and the Freeze button.
+ */
+function CardActivityList() {
+  const client = useXetral();
+  const activity = useLoad(
+    () => client.cardActivity().catch(() => ({ entries: [] as readonly CardActivity[] })),
+    [client],
+  );
+  const entries = activity.data?.entries ?? [];
+  if (activity.loading || entries.length === 0) return null;
+
+  let seen: string | undefined;
+  return (
+    <section>
+      <div className="sec-head">
+        <h2>Card activity</h2>
+      </div>
+      <div>
+        {entries.slice(0, 8).map((t) => {
+          const outgoing = t.amount.trim().startsWith('-');
+          const when = new Date(t.occurred_at);
+          const day = dayOf(when);
+          const heading = day === seen ? undefined : day;
+          seen = day;
+          return (
+            <div key={t.id}>
+              {heading !== undefined && <div className="day-head">{heading}</div>}
+              <div className="tx-row">
+                <span className="tx-mark">
+                  <span className="avatar">
+                    <Icon name={outgoing ? 'arrowUpRight' : 'download'} size={19} />
+                  </span>
+                </span>
+                <span className="tx-main">
+                  <span className="tx-name">{t.description}</span>
+                  <span className="tx-sub">
+                    {when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+                  </span>
+                </span>
+                <span className="tx-side">
+                  <span className={outgoing ? 'tx-amt out' : 'tx-amt in'}>
+                    {formatAmount(t.amount, t.currency)}
+                  </span>
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * The day a transaction happened, as somebody would say it out loud.
+ *
+ * COMPARED ON THE LOCAL CALENDAR DAY, never on elapsed hours — the home
+ * screen's own function, because two screens disagreeing about what
+ * "yesterday" means is the kind of thing nobody reports and everybody
+ * notices.
+ */
+function dayOf(when: Date): string {
+  const midnight = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((midnight(new Date()) - midnight(when)) / 86_400_000);
+  if (days === 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  return when.toLocaleDateString(undefined, { day: 'numeric', month: 'long' });
 }
 
 /**
@@ -310,7 +406,20 @@ function CardRow({
       : `${String(card.expiry_month).padStart(2, '0')}/${String(card.expiry_year).slice(-2)}`;
 
   return (
-    <div className="card card-holder">
+    /*
+      NO PANEL AROUND THE CARD.
+
+      It was `card card-holder` — a bordered surface with the card drawn
+      inside it, which is a picture of a card inside a picture of a card. The
+      face already has its own edge, its own shadow and its own material; a
+      container behind it adds a second frame and shrinks the one thing on
+      this screen that is meant to be recognised before it is read.
+
+      `.card-holder` stays, because it is the STACK — the card, the figures
+      and the tiles at one rhythm — and nothing else here should have to
+      restate those gaps.
+    */
+    <div className="card-holder">
       {/*
         THE CARD FACE.
         
@@ -338,22 +447,37 @@ function CardRow({
           ))}
         </div>
       )}
-      <div className="row">
-        <span className="muted">Name</span>
-        {naming ? (
-          <span className="mono">{card.label ?? `Card ending ${card.last4 ?? '••••'}`}</span>
-        ) : (
-          <button
-            type="button"
-            className="btn link"
-            onClick={() => {
-              setLabel(card.label ?? '');
-              setNaming(true);
-            }}
-          >
-            {card.label ?? `Card ending ${card.last4 ?? '••••'}`}
-          </button>
-        )}
+      {/*
+        THE BALANCE IS A FIGURE, NOT A TABLE ROW.
+
+        It was `Balance   $12.00` in a two-column row beside the card's name —
+        which is an accurate summary and reads as a settings list. What is on
+        the card is the one number this screen exists to answer, so it is set
+        the way the home screen sets a balance: large, in the figure face,
+        with the name beside it as a label rather than above it as a peer.
+      */}
+      <div className="card-stats">
+        <div>
+          <span className="card-stat-label">On this card</span>
+          <span className="card-stat-value">{formatAmount(card.balance, card.currency)}</span>
+        </div>
+        <div style={{ textAlign: 'right', minWidth: 0 }}>
+          <span className="card-stat-label">Name</span>
+          {naming ? (
+            <span className="mono">{card.label ?? `Card ending ${card.last4 ?? '••••'}`}</span>
+          ) : (
+            <button
+              type="button"
+              className="btn link"
+              onClick={() => {
+                setLabel(card.label ?? '');
+                setNaming(true);
+              }}
+            >
+              {card.label ?? `Card ending ${card.last4 ?? '••••'}`}
+            </button>
+          )}
+        </div>
       </div>
 
       {naming && (
@@ -394,23 +518,30 @@ function CardRow({
         </div>
       )}
 
-      <div className="row">
-        <span className="muted">Balance</span>
-        <span className="mono">{formatAmount(card.balance, card.currency)}</span>
-      </div>
+      {/*
+        FOUR TILES, WHICH IS THE HOME SCREEN'S ACTION ROW AT A SMALLER SIZE.
 
+        They were four small ghost pills in a wrapping row — the shape this
+        product uses for "cancel / save", put on the four things a customer
+        opens this screen to do. A tile with its label under it is one
+        vocabulary for an action, and reusing it here rather than inventing a
+        second is most of what makes two screens look like one product.
+
+        NOTHING ABOUT WHAT THEY DO CHANGED. Freezing still asks for nothing —
+        the server does not require a PIN either, and the reason is the same
+        on both sides: a customer watching fraudulent charges land should not
+        have to remember a PIN before they can stop them. Unfreezing
+        re-enables spending, so it asks; and so does reading the number,
+        because a PAN, a CVV and an expiry together are everything needed to
+        spend online, and unlike a transfer there is no ledger entry
+        afterwards for anybody to notice.
+      */}
       {card.status !== 'terminated' && pending === undefined && (
-        <div className="actions">
-          {/*
-            Freezing asks for nothing. The server does not require a PIN either,
-            and the reason is the same on both sides: a customer watching
-            fraudulent charges land should not have to remember a PIN before
-            they can stop them. Unfreezing re-enables spending, so it asks.
-          */}
+        <div className="card-acts">
           {card.status === 'active' ? (
             <button
               type="button"
-              className="ghost small"
+              className="card-act"
               disabled={busy}
               onClick={() =>
                 void run(async () => {
@@ -420,26 +551,40 @@ function CardRow({
                 })
               }
             >
+              <span className="card-act-ico"><Icon name="lock" size={21} /></span>
               Freeze
             </button>
           ) : (
-            <button type="button" className="ghost small" onClick={() => setPending('unfreeze')}>
+            <button
+              type="button"
+              className="card-act warm"
+              onClick={() => setPending('unfreeze')}
+            >
+              <span className="card-act-ico"><Icon name="lock" size={21} /></span>
               Unfreeze
             </button>
           )}
 
-          <button type="button" className="ghost small" onClick={() => setPending('fund')}>
+          <button type="button" className="card-act on" onClick={() => setPending('fund')}>
+            <span className="card-act-ico"><Icon name="plus" size={21} /></span>
             Add money
           </button>
 
-          {/*
-            Reading the number asks for the PIN, because the server does. A
-            number, a CVV and an expiry together are everything needed to spend
-            online, and unlike a transfer there is no ledger entry afterwards
-            for anyone to notice.
-          */}
-          <button type="button" className="ghost small" onClick={() => setPending('reveal')}>
-            Show details
+          <button type="button" className="card-act" onClick={() => setPending('reveal')}>
+            <span className="card-act-ico"><Icon name="eye" size={21} /></span>
+            Details
+          </button>
+
+          <button
+            type="button"
+            className="card-act"
+            onClick={() => {
+              setLabel(card.label ?? '');
+              setNaming(true);
+            }}
+          >
+            <span className="card-act-ico"><Icon name="settings" size={21} /></span>
+            Rename
           </button>
         </div>
       )}

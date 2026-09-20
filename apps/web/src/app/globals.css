@@ -5165,3 +5165,89 @@ html, body { overflow-x: hidden; }
 /* THE PROSE FACE, for the pages that are paragraphs rather than product.
    Manrope is right for a balance and wrong for four hundred words. */
 .legal-prose, .legal-lede, .legal-defs dd { font-family: var(--font-read); }
+
+/* ── the card screen ────────────────────────────────────────────────────────
+ *
+ * THE DESIGN'S CARD PAGE IS THE PAGE AFTER A PURCHASE, not the onboarding
+ * one — the specimen and the Issue form stay exactly where they are, because
+ * that is the screen somebody decides on and it is doing its job.
+ *
+ * WHAT IS DELIBERATELY NOT ADOPTED IS THE CARD'S OWN COLOUR. The design draws
+ * it as a purple gradient; this product's card is black, glossy and built out
+ * of light falling on black rather than out of a hue, and a customer who has
+ * seen the specimen must be handed the same object they chose. `.virtual-card`
+ * is untouched.
+ */
+.card-acts {
+  display: flex;
+  gap: 10px;
+  padding-top: 4px;
+}
+/* A 50px TILE AND A LABEL UNDER IT, which is the home screen's action row at
+   a smaller size — one vocabulary for "a thing you can do here", rather than
+   a second one invented for this page. */
+.card-act {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 7px;
+  /* Every one of these is stated because `.btn, button` sets it and a
+     property this rule omits is a property the bare rule wins — the fault
+     `.ccy-card` shipped and `button-specificity.test.ts` now refuses. */
+  min-height: 0;
+  padding: 0;
+  white-space: normal;
+  background: none;
+  border: none;
+  border-radius: 0;
+  color: var(--text-2);
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+.card-act .card-act-ico {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 50px;
+  height: 50px;
+  border-radius: 16px;
+  background: var(--surface);
+  border: 1px solid var(--edge);
+  color: var(--text);
+  transition: transform var(--t-fast) var(--ease);
+}
+.card-act.on .card-act-ico {
+  background: var(--iris);
+  border-color: var(--iris);
+  color: var(--on-iris);
+}
+/* A FROZEN CARD'S UNFREEZE TILE IS THE WARM ONE, so the state is visible in
+   the control that changes it rather than only in a badge above. */
+.card-act.warm .card-act-ico { background: var(--warn-bg); border-color: var(--warn-bg); color: var(--warn); }
+.card-act:active .card-act-ico { transform: scale(.94); }
+.card-act:disabled { opacity: .5; cursor: default; }
+/* No fill in any state — the feedback is the ICON, the rule `.icon-btn`
+   already follows. Stated unguarded rather than inside a hover query, because
+   a touch device reporting `hover: none` never matches one and the sticky
+   `:hover` a tap leaves behind would paint the generic button fill. */
+.card-act:hover, .card-act:focus, .card-act:active, .card-act:disabled { background: none; }
+.card-act:hover .card-act-ico { background: var(--surface-2); }
+.card-act.on:hover .card-act-ico { background: var(--iris); }
+
+/* The two figures under the card: what is on it, and what it is called. */
+.card-stats { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
+.card-stat-label { display: block; font-size: 12px; font-weight: 600; color: var(--text-3); }
+.card-stat-value {
+  display: block;
+  font-family: var(--font-num);
+  font-size: 26px; font-weight: 700;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  margin-top: 3px;
+}

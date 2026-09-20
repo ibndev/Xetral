@@ -7,12 +7,13 @@ import {
   Inject,
   Param,
   Post,
+  Query,
   Req,
 } from '@nestjs/common';
 import type { Request } from 'express';
 import type { AuthenticatedRequest } from '../auth/auth.guard.js';
 import { CardService } from './card.service.js';
-import type { CardSecretsView, CardView } from './card.service.js';
+import type { CardActivityView, CardSecretsView, CardView } from './card.service.js';
 import { CardWebhookService } from './webhook.service.js';
 import type { WebhookOutcome } from './webhook.service.js';
 import {
@@ -43,6 +44,27 @@ export class CardController {
       this.cards.issuanceFee(),
     ]);
     return { cards, issuance_fee: issuanceFee };
+  }
+
+  /**
+   * WHAT HAS HAPPENED ON THE CARDS, and it is declared BEFORE `:id` on
+   * purpose.
+   *
+   * Nest matches routes in declaration order, so `@Get(':id')` above this
+   * would swallow `/v1/cards/activity` and answer `card_not_found` for a
+   * word that is not a uuid — a 404 on a working endpoint, which reads as a
+   * missing feature rather than as a routing mistake.
+   */
+  @Get('activity')
+  async activity(
+    @Req() request: AuthenticatedRequest,
+    @Query('before') before?: string,
+  ): Promise<{ entries: readonly CardActivityView[] }> {
+    return {
+      entries: await this.cards.activity(subjectOf(request), {
+        ...(before === undefined ? {} : { before }),
+      }),
+    };
   }
 
   @Get(':id')

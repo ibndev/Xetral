@@ -51,6 +51,26 @@ const REVEALS_PER_CUSTOMER = 10;
  * happened to be present — and the day it did, nothing would fail. A separate
  * type means the number can only travel through code that named it.
  */
+/**
+ * One posting against the customer's card account.
+ *
+ * A separate view from a wallet transaction deliberately: this one carries no
+ * card id, because the ledger cannot say which card a charge was on (see
+ * `activity`), and a field that could hold one would invite somebody to fill
+ * it in from the nearest card to hand.
+ */
+export interface CardActivityView {
+  readonly id: string;
+  readonly entry_id: string;
+  readonly kind: string;
+  readonly description: string;
+  /** Major units, as a string. Never a number. */
+  readonly amount: string;
+  readonly currency: string;
+  readonly occurred_at: string;
+  readonly status: string;
+}
+
 export interface CardSecretsView {
   readonly pan: string;
   readonly cvv: string;
@@ -145,6 +165,49 @@ export class CardService {
       [userId],
     );
     return Promise.all(rows.rows.map(async (row) => this.#toView(row)));
+  }
+
+  /**
+   * What has happened on this customer's cards, newest first.
+   *
+   * SCOPED TO THE CARD ACCOUNT AND NOT TO ONE CARD, and that is a statement
+   * about the ledger rather than a shortcut. A card's role resolves to
+   * `{ kind: 'customer_card', ownerId: userId, currency: 'USD' }` — ONE
+   * account per customer per currency, since Phase 5 — so a customer holding
+   * two cards has both spending against it and nothing in `postings` says
+   * which card a charge was on. Returning this list per card id would be a
+   * screen claiming a precision the books do not have; the heading says
+   * "your cards" for that reason.
+   *
+   * IT IS A SEPARATE READ FROM THE WALLET HISTORY because a card spends its
+   * OWN balance. An authorization moves card → pending and has no
+   * `customer_wallet` leg at all, so every card spend ever made was invisible
+   * to the only history this product had — correct for a wallet history, and
+   * why the cards screen could show nothing that had ever happened on a card.
+   */
+  async activity(
+    userUuid: string,
+    options: { readonly limit?: number; readonly before?: string } = {},
+  ): Promise<readonly CardActivityView[]> {
+    const userId = await this.#activeUserId(userUuid);
+    const rows = await this.ledger.history(userId, 'USD', {
+      ...(options.before === undefined ? {} : { before: options.before }),
+      limit: Math.min(Math.max(options.limit ?? 20, 1), 100),
+      account: 'customer_card',
+    });
+    return rows.map((row) => ({
+      id: row.postingId,
+      entry_id: row.entryUuid,
+      kind: row.kind,
+      description: row.description,
+      // MAJOR UNITS AS A STRING, like every other amount crossing this
+      // boundary. A bigint would throw in `JSON.stringify` and a number would
+      // be a float holding money.
+      amount: toMajor({ amount: row.amountMinor, currency: 'USD' }),
+      currency: row.currency,
+      occurred_at: row.occurredAt.toISOString(),
+      status: row.status,
+    }));
   }
 
   /**

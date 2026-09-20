@@ -410,6 +410,26 @@ export interface Card {
  * the end of its life here; a caller that puts it in state is making that
  * decision visibly.
  */
+/**
+ * One posting against the customer's card account.
+ *
+ * NO CARD ID, and that is the ledger's shape rather than an omission. A
+ * card's role resolves to one `customer_card` account per customer per
+ * currency, so nothing in `postings` says which card a charge was on. A field
+ * here would invite a screen to fill it in from the nearest card to hand.
+ */
+export interface CardActivity {
+  readonly id: string;
+  readonly entry_id: string;
+  readonly kind: string;
+  readonly description: string;
+  /** Major units, as a string — never a number. */
+  readonly amount: string;
+  readonly currency: string;
+  readonly occurred_at: string;
+  readonly status: string;
+}
+
 export interface CardSecrets {
   readonly pan: string;
   readonly cvv: string;
@@ -1487,6 +1507,19 @@ export class XetralClient {
 
   async card(id: string): Promise<Card> {
     return this.#get(`/v1/cards/${encodeURIComponent(id)}`);
+  }
+
+  /**
+   * What has happened on the customer's cards.
+   *
+   * SEPARATE FROM `transactions()`, because a card spends its OWN balance: an
+   * authorization moves card → pending and has no wallet leg, so every card
+   * spend is invisible to the wallet history. It is not per card — see
+   * `CardActivity`.
+   */
+  async cardActivity(before?: string): Promise<{ readonly entries: readonly CardActivity[] }> {
+    const query = before === undefined ? '' : `?before=${encodeURIComponent(before)}`;
+    return this.#get(`/v1/cards/activity${query}`);
   }
 
   /**

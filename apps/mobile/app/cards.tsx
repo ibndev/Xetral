@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import { formatAmount } from '@xetral/client';
-import type { Card, CardSecrets } from '@xetral/client';
+import type { Card, CardActivity, CardSecrets } from '@xetral/client';
 import { Logo } from '@/logo';
 import { Shell } from '@/shell';
 import { Icon } from '@/icon';
@@ -58,7 +58,10 @@ export default function Cards() {
       <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: space.md }}>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={styles.h1}>Your cards</Text>
-          <Text style={styles.lead}>Manage your virtual dollar cards</Text>
+          {/* Short enough for one line beside the button — the web's own
+              change, for the same reason: the long version wrapped and left
+              "cards" alone on a second line under a heading that says it. */}
+          <Text style={styles.lead}>Spend online in dollars</Text>
         </View>
         {(list?.length ?? 0) > 0 && !adding && (
           <Button label="Add a card" icon="plus" quiet onPress={() => setAdding(true)} />
@@ -93,6 +96,12 @@ export default function Cards() {
       </View>
 
       <FormError error={cards.error} code={cards.code} />
+
+      {/* Only where there is a card to have spent anything. On the onboarding
+          screen it would be an empty section under a specimen, which reads as
+          a feature that is broken rather than one not yet used. */}
+      {(list?.length ?? 0) > 0 && <CardActivityList />}
+
       {/*
         SPACE UNDER THE CARD. The specimen sits in a stack with its own gap and
         the panel below is that stack's SIBLING, so nothing separated them —
@@ -377,6 +386,7 @@ function CardRow({
 }) {
   const client = useXetral();
   const styles = useStyles();
+  const colors = useTheme();
   const { busy, error, code, done, run } = useSubmit();
   const [pin, setPin] = useState('');
   const [amount, setAmount] = useState('');
@@ -428,14 +438,50 @@ function CardRow({
   }, [secrets]);
 
   return (
-    <View style={[styles.card, { gap: space.md }]}>
+    /*
+      NO PANEL AROUND THE CARD, matching the web.
+
+      It was `styles.card` — a bordered surface with the card drawn inside it,
+      which is a picture of a card inside a picture of a card. The face has
+      its own edge, its own shadow and its own material; a container behind it
+      adds a second frame and shrinks the one thing on this screen meant to be
+      recognised before it is read.
+    */
+    <View style={{ gap: space.md }}>
       <CardFace card={card} holder={holder} />
 
-      <View style={styles.row}>
-        <Text style={styles.muted}>Name</Text>
-        <Text style={styles.amount}>
-          {card.label ?? `Card ending ${card.last4 ?? '••••'}`}
-        </Text>
+      {/*
+        THE BALANCE IS A FIGURE, NOT A TABLE ROW — the web's own change.
+
+        It was `Balance   $12.00` in a two-column row, which is an accurate
+        summary and reads as a settings list. What is on the card is the one
+        number this screen exists to answer, so it is set the way the home
+        screen sets a balance, with the name beside it as a label rather than
+        above it as a peer.
+      */}
+      <View style={{ flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12 }}>
+        <View>
+          <Text style={{ color: colors.text3, fontFamily: font.sansSemi, fontSize: 12 }}>
+            On this card
+          </Text>
+          <Text
+            style={{
+              color: colors.text, fontFamily: font.numBold,
+              fontSize: 26, letterSpacing: -0.8, marginTop: 3,
+            }}
+          >
+            {formatAmount(card.balance, card.currency)}
+          </Text>
+        </View>
+        <View style={{ alignItems: 'flex-end', minWidth: 0, flexShrink: 1 }}>
+          <Text style={{ color: colors.text3, fontFamily: font.sansSemi, fontSize: 12 }}>Name</Text>
+          <Text
+            numberOfLines={1}
+            style={{ color: colors.text, fontFamily: font.sansSemi, fontSize: 14.5, marginTop: 4 }}
+          >
+            {card.label ?? `Card ending ${card.last4 ?? '••••'}`}
+          </Text>
+        </View>
       </View>
 
       {naming ? (
@@ -464,31 +510,32 @@ function CardRow({
           />
           <Button label="Cancel" quiet onPress={() => setNaming(false)} />
         </>
-      ) : (
-        <Button
-          label="Name this card"
-          quiet
-          onPress={() => {
-            setLabel(card.label ?? '');
-            setNaming(true);
-          }}
-        />
-      )}
+      ) : null}
 
+      {/*
+        FOUR TILES, WHICH IS THE HOME SCREEN'S ACTION ROW AT A SMALLER SIZE.
+
+        They were four stacked full-width buttons — the shape this product
+        uses for "Confirm" and "Cancel", applied to the four things a customer
+        opens this screen to do, taking most of a handset between the card and
+        anything else. A tile with its label under it is one vocabulary for an
+        action, and reusing it here rather than inventing a second is most of
+        what makes two screens look like one product.
+
+        NOTHING ABOUT WHAT THEY DO CHANGED. Freezing still asks for nothing,
+        and the server does not require a PIN either: a customer watching
+        fraudulent charges land should not have to remember a PIN before they
+        can stop them. Unfreezing re-enables spending, so it asks; and a
+        frozen card can still be revealed, because freezing stops spending,
+        not looking.
+      */}
       {card.status !== 'terminated' && pending === undefined && (
-        <View style={{ gap: space.sm }}>
-          {/*
-            Freezing asks for nothing, and the server does not require a PIN
-            either. The reason is the same on both sides: a customer watching
-            fraudulent charges land should not have to remember a PIN before
-            they can stop them. Unfreezing re-enables spending, so it asks.
-          */}
+        <View style={{ flexDirection: 'row', gap: 10, paddingTop: 4 }}>
           {card.status === 'active' ? (
-            <Button
-              label="Freeze"
-              quiet
-              busy={busy}
+            <CardAction
               icon="lock"
+              label="Freeze"
+              disabled={busy}
               onPress={() =>
                 void run(async () => {
                   await client.freezeCard(card.id);
@@ -498,24 +545,18 @@ function CardRow({
               }
             />
           ) : (
-            <Button label="Unfreeze" quiet onPress={() => setPending('unfreeze')} />
+            <CardAction icon="lock" label="Unfreeze" warm onPress={() => setPending('unfreeze')} />
           )}
 
-          <Button
-            label="Add money to card"
-            quiet
-            icon="plus"
-            onPress={() => setPending('fund')}
-          />
-
-          {/* A frozen card can still be revealed; a terminated one cannot.
-              Freezing stops spending, not looking — a customer disputing
-              charges still needs to read the number. */}
-          <Button
-            label="Show card details"
-            quiet
-            icon="eye"
-            onPress={() => setPending('reveal')}
+          <CardAction icon="plus" label="Add money" primary onPress={() => setPending('fund')} />
+          <CardAction icon="eye" label="Details" onPress={() => setPending('reveal')} />
+          <CardAction
+            icon="settings"
+            label="Rename"
+            onPress={() => {
+              setLabel(card.label ?? '');
+              setNaming(true);
+            }}
           />
         </View>
       )}
@@ -832,4 +873,184 @@ function Benefit({
       </View>
     </View>
   );
+}
+
+/**
+ * One of the four things a customer can do to a card.
+ *
+ * A 50pt TILE AND A LABEL UNDER IT, which is the home screen's action row at
+ * a smaller size. Reusing that shape rather than inventing a second is most
+ * of what makes two screens look like one product — and it is why this takes
+ * an icon and a word rather than the full-width `Button` the rest of this
+ * file uses for "Confirm" and "Cancel".
+ *
+ * A FROZEN CARD'S UNFREEZE TILE IS THE WARM ONE, so the state is visible in
+ * the control that changes it rather than only in a badge on the face.
+ */
+function CardAction({
+  icon, label, onPress, primary, warm, disabled,
+}: {
+  readonly icon: IconName;
+  readonly label: string;
+  readonly onPress: () => void;
+  readonly primary?: boolean;
+  readonly warm?: boolean;
+  readonly disabled?: boolean;
+}) {
+  const colors = useTheme();
+  const fill =
+    primary === true ? colors.iris : warm === true ? colors.warnBg : colors.surface;
+  const ink =
+    primary === true ? colors.onIris : warm === true ? colors.warn : colors.text;
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled === true}
+      // No ripple: on a 50pt tile around a 21pt glyph the ripple IS a
+      // circular background, which is the report `.icon-btn` already carries.
+      android_ripple={null}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: disabled === true }}
+      style={{ flex: 1, alignItems: 'center', gap: 7, opacity: disabled === true ? 0.5 : 1 }}
+    >
+      <View
+        style={{
+          width: 50, height: 50, borderRadius: 16,
+          alignItems: 'center', justifyContent: 'center',
+          backgroundColor: fill,
+          borderWidth: 1,
+          borderColor: primary === true ? colors.iris : warm === true ? colors.warnBg : colors.edge,
+        }}
+      >
+        <Icon name={icon} size={21} color={ink} />
+      </View>
+      <Text
+        numberOfLines={1}
+        style={{ fontSize: 11.5, fontFamily: font.sansSemi, color: colors.text2 }}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+/**
+ * WHAT HAS HAPPENED ON THE CARDS.
+ *
+ * THE HEADING SAYS "Card activity" AND NOT "this card's", and that is the
+ * ledger being honest rather than a wording choice. A card's role resolves to
+ * ONE `customer_card` account per customer per currency, so nothing in
+ * `postings` records which card a charge was on; a per-card list would be a
+ * screen claiming a precision the books do not have.
+ *
+ * IT IS A SEPARATE READ FROM THE WALLET HISTORY, because a card spends its
+ * OWN balance: an authorization moves card → pending with no
+ * `customer_wallet` leg at all, so every card spend ever made was invisible
+ * to the only history this product had.
+ *
+ * A FAILURE IS SILENT, DELIBERATELY. This is a decoration on a screen whose
+ * job is the card and its controls; an error banner for a list that did not
+ * load would put a red box between a customer and the Freeze button.
+ */
+function CardActivityList() {
+  const client = useXetral();
+  const colors = useTheme();
+  const styles = useStyles();
+  const activity = useLoad(
+    () => client.cardActivity().catch(() => ({ entries: [] as readonly CardActivity[] })),
+    [client],
+  );
+  const entries = activity.data?.entries ?? [];
+  if (activity.loading || entries.length === 0) return null;
+
+  let seen: string | undefined;
+  return (
+    <View style={{ marginTop: space.xl }}>
+      <Text style={[styles.h2, { marginBottom: space.sm }]}>Card activity</Text>
+      {entries.slice(0, 8).map((t) => {
+        const outgoing = t.amount.trim().startsWith('-');
+        const when = new Date(t.occurred_at);
+        const day = dayOf(when);
+        const heading = day === seen ? undefined : day;
+        seen = day;
+        return (
+          <View key={t.id}>
+            {heading !== undefined && (
+              <Text
+                style={{
+                  color: colors.text3, fontFamily: font.sansBold,
+                  fontSize: 11, letterSpacing: 1.1, textTransform: 'uppercase',
+                  paddingTop: 8, paddingBottom: 4,
+                }}
+              >
+                {heading}
+              </Text>
+            )}
+            <View
+              style={{
+                flexDirection: 'row', alignItems: 'center', gap: 13,
+                paddingVertical: 12,
+                borderTopWidth: 1, borderTopColor: colors.line,
+              }}
+            >
+              <View
+                style={{
+                  width: 42, height: 42, borderRadius: 999,
+                  alignItems: 'center', justifyContent: 'center',
+                  backgroundColor: colors.surface2,
+                }}
+              >
+                <Icon
+                  name={outgoing ? 'arrowUpRight' : 'download'}
+                  size={19}
+                  color={colors.text2}
+                />
+              </View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text
+                  numberOfLines={1}
+                  style={{ color: colors.text, fontFamily: font.sansSemi, fontSize: 14.5 }}
+                >
+                  {t.description}
+                </Text>
+                <Text
+                  style={{ color: colors.text3, fontFamily: font.sansMedium, fontSize: 12.5, marginTop: 2 }}
+                >
+                  {when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+                </Text>
+              </View>
+              {/* MONEY LEAVING IS RED AND MONEY ARRIVING IS GREEN — the home
+                  screen's rule, because a minus sign is not enough to tell
+                  "you were charged" from "you topped up" at a glance. */}
+              <Text
+                style={{
+                  fontFamily: font.numSemi, fontSize: 14.5, letterSpacing: -0.3,
+                  color: outgoing ? colors.danger : colors.ok,
+                }}
+              >
+                {formatAmount(t.amount, t.currency)}
+              </Text>
+            </View>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+/**
+ * The day a transaction happened, as somebody would say it out loud.
+ *
+ * COMPARED ON THE LOCAL CALENDAR DAY, never on elapsed hours — the home
+ * screen's own function, because two screens disagreeing about what
+ * "yesterday" means is the kind of thing nobody reports and everybody
+ * notices.
+ */
+function dayOf(when: Date): string {
+  const midnight = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((midnight(new Date()) - midnight(when)) / 86_400_000);
+  if (days === 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  return when.toLocaleDateString(undefined, { day: 'numeric', month: 'long' });
 }

@@ -217,6 +217,8 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       .authenticated('POST', '/v1/wallets/transfers', { pin: true })
 
       .authenticated('GET', '/v1/cards', { pin: false })
+      // Declared before ':id' in the controller so the literal wins the match.
+      .authenticated('GET', '/v1/cards/activity', { pin: false })
       .authenticated('GET', '/v1/cards/:id', { pin: false })
       // Issuing and funding move money onto a card.
       .authenticated('POST', '/v1/cards', { pin: true })
