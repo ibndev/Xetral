@@ -688,7 +688,27 @@ h3 { font-size: 16px; }
     transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
   }
   .sidenav a:hover { background: var(--surface-2); color: var(--text); }
-  .sidenav a.active { background: var(--brand); color: var(--on-brand); font-weight: 600; }
+  /*
+   * ONE ACTIVE TREATMENT ACROSS ALL THREE NAVIGATIONS.
+   *
+   * This was `--brand` — a SOLID NAVY PILL — while the tab bar six pixels
+   * below it used iris and the operations sidebar used `--link`, which is
+   * blue. Three navigations, three answers to "which one am I on", in one
+   * product. Navy is also the TEXT colour here, so the filled pill was the
+   * same ink as the heading beside it and read as a block rather than as a
+   * selection.
+   *
+   * Iris is the accent the design gives this product and the only saturated
+   * thing on a page, so the selection is tinted with it rather than filled:
+   * a filled item is heavier than the primary action on the page it leads to,
+   * which inverts the hierarchy on every screen at once.
+   */
+  .sidenav a.active {
+    background: var(--iris-tint);
+    color: var(--iris-text);
+    font-weight: 700;
+  }
+  .sidenav a.active svg { color: var(--iris); }
   .sidenav .spacer { flex: 1; }
 }
 
@@ -1898,7 +1918,31 @@ th {
 tbody tr { transition: background var(--t-fast) var(--ease); }
 tbody tr:hover { background: var(--surface-2); }
 tbody tr:last-child td { border-bottom: 0; }
+/*
+ * A RIGHT-ALIGNED CELL IS A FIGURE, and it is set in the figure face.
+ *
+ * Every operations table here is a column of money or a column of counts,
+ * and they were set in the body face with proportional numerals — so a "1"
+ * was narrower than a "7" and the columns did not line up under each other.
+ * That is most of what makes a table of amounts hard to scan, and it is the
+ * one thing a reviewer deciding whether a figure is out of place is doing.
+ *
+ * `--font-num` is Space Grotesk, which the design sets every balance in, and
+ * `tabular-nums` is what makes the digits one width. Keyed on `.right`
+ * rather than on a new class, because the alignment and the face answer the
+ * same question — this column holds numbers — and two ways of saying it is
+ * one way to say it wrong.
+ */
 td.right, th.right { text-align: right; padding-right: 0; }
+td.right {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.012em;
+}
+/* The HEADING over a figure column stays in the body face: it is a word, and
+   a label set in the numeral face reads as a different kind of thing from
+   every other heading on the row. */
+th.right { font-family: var(--font-sans); }
 
 /* ═══════════════════════════ badges & notices ═══════════════════════════ */
 
@@ -2125,12 +2169,16 @@ td.right, th.right { text-align: right; padding-right: 0; }
   .admin-side a:hover,
   .admin-side button:hover { background: var(--surface-2); color: var(--text); }
 }
+/* THE SAME TREATMENT THE CUSTOMER SIDEBAR USES, and it was `--link` — blue,
+   where every other selection in the product is iris. An operator moving
+   between the two surfaces should not have to learn a second colour for "you
+   are here". */
 .admin-side a.active {
-  background: color-mix(in srgb, var(--link) 12%, transparent);
-  color: var(--text);
-  font-weight: 600;
+  background: var(--iris-tint);
+  color: var(--iris-text);
+  font-weight: 700;
 }
-.admin-side a.active svg { color: var(--link); }
+.admin-side a.active svg { color: var(--iris); }
 
 /* Covers the page while the drawer is out. A button rather than a div so it
    is reachable from the keyboard and announces what it does. */
@@ -2166,16 +2214,47 @@ td.right, th.right { text-align: right; padding-right: 0; }
 .stats { display: grid; gap: 12px; grid-template-columns: repeat(2, 1fr); }
 @media (min-width: 860px) { .stats { grid-template-columns: repeat(4, 1fr); } }
 
+/*
+ * A STAT TILE IS A WELL INSIDE A PANEL, so it takes the step deeper.
+ *
+ * It was `--surface` on a panel that is ALSO `--surface`, with a border in
+ * `--edge` — which is `transparent` in the light theme. Identical fill and no
+ * edge means the four tiles on the operations overview were not tiles at all
+ * in light mode: four labels and four figures floating on the panel, with
+ * nothing grouping a number to its name. In dark they rendered correctly,
+ * because `--edge` has a value there and the fills differ by a point of
+ * lightness — so the fault was invisible on the theme most of this was built
+ * in, which is the exact failure `light-edges.test.ts` describes, arriving
+ * from the other direction.
+ *
+ * `--surface-2` is what the token is FOR — its own comment says "a well
+ * INSIDE a container, one step deeper", and a well is exactly what this is.
+ *
+ * THE BORDER STAYS `--edge`, and the first attempt at this changed it to
+ * `--line` and was refused by `light-edges.test.ts`, correctly. In light a
+ * container is a shade DARKER than what it sits on and that recess IS the
+ * cue; a hairline on top is a second cue for the same fact, and two cues read
+ * as an outline. The fault here was never a missing edge — it was a missing
+ * RECESS, because the fill and the panel's fill were the same colour.
+ */
 .stat {
-  background: var(--surface);
+  background: var(--surface-2);
   border: 1px solid var(--edge);
   border-radius: var(--r);
   padding: 15px 16px;
 }
 .stat .label { color: var(--text-2); font-size: 12.5px; font-weight: 500; }
+/*
+ * THE FIGURE FACE, NOT THE DISPLAY FACE. Every one of these is a count or an
+ * amount, and the display face has proportional numerals — so a column of
+ * tiles showing 1,204 / 77 / 1,911 did not line up and a "1" was narrower
+ * than a "7". Space Grotesk with `tabular-nums` is what the design sets every
+ * balance in, and this is the same kind of number.
+ */
 .stat .value {
-  font-family: var(--font-display);
-  font-weight: 800;
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
   font-size: 24px;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;

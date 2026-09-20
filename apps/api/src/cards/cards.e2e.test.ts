@@ -543,6 +543,71 @@ describe('funding an existing card', () => {
     expect(await balance(wallet(customer.userId))).toBe(7300n);
   });
 
+  it('shows what happened on the CARD, which the wallet history cannot', async () => {
+    /*
+     * THE READ THIS ENDPOINT EXISTS FOR, and the assertion that matters is
+     * the second one.
+     *
+     * A card spends its OWN balance: an authorization moves card → pending
+     * and has NO `customer_wallet` leg at all. So every card spend ever made
+     * was invisible to `GET /v1/wallets/transactions`, which is wallet legs
+     * only and is right to be — and that is why the cards screen could show
+     * nothing that had ever happened on a card.
+     *
+     * Funding is the one event with a leg on both sides, so it is the event
+     * that proves the two reads are genuinely different rather than the same
+     * query with a different name: it appears in BOTH, with opposite signs,
+     * because the money left one account and arrived in the other.
+     */
+    const customer = await onboard();
+    await fundWallet(customer.userId, 100_00);
+    const card = await issueCard(customer, '10.00');
+
+    await request(app.getHttpServer())
+      .post(`/v1/cards/${card.id}/fund`)
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send({ amount: '15.00', transaction_pin: PIN, idempotency_key: randomUUID() })
+      .expect(200);
+
+    const res = await request(app.getHttpServer())
+      .get('/v1/cards/activity')
+      .set('Authorization', `Bearer ${customer.token}`)
+      .expect(200);
+
+    const entries = res.body.entries as readonly { amount: string; currency: string }[];
+    // THE CARD'S SIDE OF THE TOP-UP IS POSITIVE: money arrived on the card.
+    // The wallet history shows the same entry as a negative, and a screen
+    // reading the wrong one would tell a customer they were charged when
+    // they topped up.
+    expect(entries.some((e) => e.amount === '15.00')).toBe(true);
+    expect(entries.every((e) => e.currency === 'USD')).toBe(true);
+
+    // AND IT CARRIES NO CARD ID. One `customer_card` account per customer per
+    // currency, so nothing in `postings` says which card a charge was on — a
+    // field here would invite a screen to fill it in from the nearest card to
+    // hand. Asserted on the SHAPE rather than by reading a value, because the
+    // thing being guarded against is a field nobody has added yet.
+    for (const entry of entries) {
+      expect(Object.keys(entry as object)).not.toContain('card_id');
+    }
+  });
+
+  it('answers the activity route rather than treating it as a card id', async () => {
+    /*
+     * NEST MATCHES ROUTES IN DECLARATION ORDER, so `@Get(':id')` declared
+     * above `@Get('activity')` swallows this path and answers
+     * `card_not_found` for a word that is not a uuid — a 404 on a working
+     * endpoint, which reads as a missing feature rather than as a routing
+     * mistake. A 200 here is the whole assertion.
+     */
+    const customer = await onboard();
+    const res = await request(app.getHttpServer())
+      .get('/v1/cards/activity')
+      .set('Authorization', `Bearer ${customer.token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.entries).toEqual([]);
+  });
+
   it('does not treat a pending provider response as a failure', async () => {
     // Bitnob answers immediately with pending and settles later. The money has
     // left the wallet in our ledger either way; the top-up is what is pending.
