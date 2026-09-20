@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  body{margin:0;background:#c9c7c1;font-family:Manrope,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  *{box-sizing:border-box}
+  ::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:rgba(128,128,140,.35);border-radius:8px}
+  .stage{min-height:100vh;padding:26px;display:flex;justify-content:center}
+  .app{display:flex;width:1240px;height:824px;background:var(--appbg);color:var(--text);border-radius:20px;overflow:hidden;border:1px solid var(--panelborder);box-shadow:0 40px 90px -34px rgba(15,17,34,.55)}
+  .side{flex:none;width:238px;background:var(--sidebg);border-right:1px solid var(--hair);display:flex;flex-direction:column;padding:18px 14px}
+  .nav{overflow-y:auto;flex:1}
+  .nav a{display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:10px;color:var(--navtext);font:600 13px Manrope;margin-bottom:2px;cursor:pointer}
+  .nav a:hover{color:var(--text)}
+  .nav a.on{background:var(--iristint);color:var(--iristext)}
+  .nav a .ct{margin-left:auto;font:700 10.5px Manrope;padding:2px 7px;border-radius:999px}
+  .eyb{font:700 10px Manrope;letter-spacing:.11em;text-transform:uppercase;color:var(--text3);padding:14px 11px 6px}
+  .main{flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden}
+  .top{flex:none;display:flex;align-items:center;gap:14px;padding:16px 24px;border-bottom:1px solid var(--hair)}
+  .top h1{margin:0;font:800 20px Manrope;letter-spacing:-.4px}
+  .ico{width:34px;height:34px;border-radius:10px;background:var(--track);display:flex;align-items:center;justify-content:center;cursor:pointer;border:none}
+  .body{flex:1;overflow-y:auto;padding:22px 24px;display:flex;flex-direction:column;gap:16px}
+  .panel{background:var(--panel);border:1px solid var(--panelborder);border-radius:16px}
+  .mono{font-family:'Space Grotesk',monospace;font-variant-numeric:tabular-nums}
+  .kgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+  .kpi{padding:16px}
+  .klab{font:600 11.5px Manrope;color:var(--text3);margin-bottom:8px}
+  .kval{font:700 23px 'Space Grotesk',monospace;letter-spacing:-.5px;font-variant-numeric:tabular-nums}
+  .tbl{width:100%;border-collapse:collapse}
+  .tbl th{text-align:left;font:700 10.5px Manrope;letter-spacing:.06em;text-transform:uppercase;color:var(--text3);padding:0 14px 10px;border-bottom:1px solid var(--hair)}
+  .tbl th.r,.tbl td.r{text-align:right}
+  .tbl td{padding:13px 14px;border-bottom:1px solid var(--hair);font:600 13px Manrope}
+  .tbl tr:last-child td{border-bottom:none}
+  .pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font:600 11.5px Manrope}
+  .flag{display:inline-flex;width:20px;height:20px;border-radius:50%;overflow:hidden;vertical-align:middle}
+  .sec{font:700 15px Manrope}
+  .btnp{border:none;border-radius:10px;background:var(--iris);color:var(--oniris);font:700 12.5px Manrope;padding:8px 14px;cursor:pointer}
+  .btng{border:1px solid var(--panelborder);border-radius:10px;background:transparent;color:var(--text);font:700 12.5px Manrope;padding:8px 14px;cursor:pointer}
+</style>
+</helmet>
+
+<div class="stage">
+  <div class="app" style="{{ rootVars }}">
+    <div class="side">
+      <div style="display:flex;align-items:center;gap:9px;padding:6px 11px 16px">
+        <svg width="24" height="24" viewBox="0 0 26 26"><rect width="26" height="26" rx="8" fill="var(--brandmark)"/><path d="M8 8l10 10M18 8 8 18" stroke="var(--brandink)" stroke-width="2.3" stroke-linecap="round"/></svg>
+        <span style="font:700 15px Manrope;letter-spacing:-.2px">Xetral</span><span style="font:600 11px Manrope;color:var(--text3);padding-top:3px">ops</span>
+      </div>
+      <div class="nav">
+        <sc-for list="{{ navGroups }}" as="g" hint-placeholder-count="4">
+          <sc-if value="{{ g.title }}" hint-placeholder-val="{{ false }}"><div class="eyb">{{ g.title }}</div></sc-if>
+          <sc-for list="{{ g.items }}" as="it" hint-placeholder-count="3">
+            <a class="{{ it.on }}" onClick="{{ it.go }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="{{ it.d }}"/></svg>{{ it.label }}<sc-if value="{{ it.hasBadge }}" hint-placeholder-val="{{ false }}"><span class="ct" style="{{ it.badgeStyle }}">{{ it.badge }}</span></sc-if></a>
+          </sc-for>
+        </sc-for>
+      </div>
+      <div style="border-top:1px solid var(--hair);padding-top:8px">
+        <a onClick="{{ goOverview }}" style="display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:10px;color:var(--navtext);font:600 13px Manrope;cursor:pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5A2 2 0 0 1 5 5.5h12a2 2 0 0 1 2 2M3 7.5v11a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-9H5a2 2 0 0 1-2-2ZM16.5 14.5h1.5"/></svg>My wallet</a>
+        <a style="display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:10px;color:var(--navtext);font:600 13px Manrope;cursor:pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 8V5.5a1.5 1.5 0 0 0-1.5-1.5h-8A1.5 1.5 0 0 0 4 5.5v13A1.5 1.5 0 0 0 5.5 20h8a1.5 1.5 0 0 0 1.5-1.5V16M9.5 12h11M17 8.5l3.5 3.5-3.5 3.5"/></svg>Sign out</a>
+        <div style="display:flex;align-items:center;gap:10px;padding:12px 11px 2px;margin-top:6px;border-top:1px solid var(--hair)"><span style="width:30px;height:30px;border-radius:50%;background:var(--avatarbg);display:flex;align-items:center;justify-content:center;font:700 12px Manrope;color:var(--avatartext)">TA</span><span style="min-width:0"><span style="display:block;font:600 12.5px Manrope">Tunde A.</span><span style="font:500 10.5px Manrope;color:var(--text3)">Operations</span></span></div>
+      </div>
+    </div>
+
+    <div class="main">
+      <div class="top">
+        <h1>{{ title }}</h1>
+        <sc-if value="{{ isOverview }}" hint-placeholder-val="{{ true }}"><span class="pill" style="background:var(--okbg);color:var(--ok)"><span style="width:7px;height:7px;border-radius:50%;background:var(--ok)"></span>All ledgers balanced</span></sc-if>
+        <span style="flex:1"></span>
+        <span class="mono" style="font:500 12.5px 'Space Grotesk';color:var(--text3)">Sat 20 Sep · 03:34 UTC</span>
+        <button class="ico" onClick="{{ toggleTheme }}" aria-label="Toggle theme">
+          <sc-if value="{{ isDark }}" hint-placeholder-val="{{ true }}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--text2)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16.5a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9ZM12 2v2.5M12 19.5V22M4.2 4.2l1.8 1.8M18 18l1.8 1.8M2 12h2.5M19.5 12H22M4.2 19.8 6 18M18 6l1.8-1.8"/></svg></sc-if>
+          <sc-if value="{{ isLight }}" hint-placeholder-val="{{ false }}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--text2)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11Z"/></svg></sc-if>
+        </button>
+        <button class="ico" aria-label="Notifications" style="position:relative"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--text2)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8.5a6 6 0 1 0-12 0c0 6-2 7.5-2 7.5h16s-2-1.5-2-7.5ZM10.3 19.5a2 2 0 0 0 3.4 0"/></svg><span style="position:absolute;top:7px;right:8px;width:7px;height:7px;border-radius:50%;background:var(--danger);border:2px solid var(--track)"></span></button>
+      </div>
+
+      <div class="body">
+
+        <!-- ============ OVERVIEW ============ -->
+        <sc-if value="{{ isOverview }}" hint-placeholder-val="{{ true }}">
+          <div class="kgrid">
+            <div class="panel kpi"><div class="klab">Total owed to customers</div><div class="kval">₦4.82<span style="color:var(--text3);font-size:15px">B</span></div><div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px"><span style="font:600 11px Manrope;color:var(--ok)">▲ 3.1%</span><svg width="72" height="26" viewBox="0 0 72 26" fill="none"><polyline points="0,20 12,17 24,19 36,12 48,14 60,7 72,5" stroke="var(--iris)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div></div>
+            <div class="panel kpi"><div class="klab">Ledger entries · 24h</div><div class="kval">128,904</div><div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px"><span style="font:600 11px Manrope;color:var(--ok)">▲ 12%</span><svg width="72" height="26" viewBox="0 0 72 26" fill="none"><polyline points="0,18 12,20 24,12 36,15 48,9 60,11 72,4" stroke="var(--info)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div></div>
+            <div class="panel kpi"><div class="klab">Settled volume · 24h</div><div class="kval">₦912<span style="color:var(--text3);font-size:15px">M</span></div><div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px"><span style="font:600 11px Manrope;color:var(--danger)">▼ 1.4%</span><svg width="72" height="26" viewBox="0 0 72 26" fill="none"><polyline points="0,8 12,10 24,7 36,13 48,11 60,16 72,15" stroke="var(--warn)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div></div>
+            <div class="panel kpi"><div class="klab">Platform earnings · 24h</div><div class="kval">₦6.4<span style="color:var(--text3);font-size:15px">M</span></div><div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px"><span style="font:600 11px Manrope;color:var(--ok)">▲ 5.7%</span><svg width="72" height="26" viewBox="0 0 72 26" fill="none"><polyline points="0,19 12,15 24,16 36,10 48,11 60,6 72,4" stroke="var(--ok)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div></div>
+          </div>
+          <div style="display:grid;grid-template-columns:1.9fr 1fr;gap:16px">
+            <div class="panel" style="padding:18px 18px 8px;display:flex;flex-direction:column"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><span class="sec">Ledger throughput</span><span style="display:flex;gap:12px;font:600 11px Manrope;color:var(--text3)"><span style="color:var(--iris)">● entries</span><span style="color:var(--info)">● settlements</span></span></div>
+              <svg viewBox="0 0 640 210" style="width:100%;height:210px" preserveAspectRatio="none"><defs><linearGradient id="ag2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--iris)" stop-opacity=".32"/><stop offset="1" stop-color="var(--iris)" stop-opacity="0"/></linearGradient></defs><line x1="0" y1="52" x2="640" y2="52" stroke="var(--hair)"/><line x1="0" y1="104" x2="640" y2="104" stroke="var(--hair)"/><line x1="0" y1="156" x2="640" y2="156" stroke="var(--hair)"/><path d="M0,150 C60,140 90,120 140,124 C200,128 220,80 280,88 C340,96 360,60 420,70 C480,80 520,40 560,48 C590,54 620,44 640,40 L640,210 L0,210 Z" fill="url(#ag2)"/><path d="M0,150 C60,140 90,120 140,124 C200,128 220,80 280,88 C340,96 360,60 420,70 C480,80 520,40 560,48 C590,54 620,44 640,40" fill="none" stroke="var(--iris)" stroke-width="2.5"/><path d="M0,178 C70,174 110,166 160,168 C230,171 250,148 320,154 C390,160 410,138 470,144 C520,149 560,130 640,136" fill="none" stroke="var(--info)" stroke-width="2.5"/></svg>
+              <div style="display:flex;justify-content:space-between;font:500 10.5px Manrope;color:var(--text3);padding:6px 2px 4px"><span>18:00</span><span>21:00</span><span>00:00</span><span>03:00</span><span>now</span></div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:16px">
+              <div class="panel" style="padding:18px;flex:1;display:flex;flex-direction:column;justify-content:center"><div style="display:flex;align-items:center;gap:10px"><span style="width:40px;height:40px;border-radius:12px;background:var(--okbg);display:flex;align-items:center;justify-content:center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5 20 6v6c0 5-3.4 8.2-8 9.5-4.6-1.3-8-4.5-8-9.5V6l8-3.5ZM9 12l2 2 4-4"/></svg></span><span><span style="display:block;font:800 24px Manrope;letter-spacing:-.5px">0</span><span style="font:600 11.5px Manrope;color:var(--text3)">accounts drifted</span></span></div><div style="font:500 12px Manrope;color:var(--text3);margin-top:12px;line-height:1.5">Every materialised balance matches its postings.</div></div>
+              <div class="panel" style="padding:18px;flex:1;display:flex;flex-direction:column;justify-content:center"><div class="klab">Entries · last hour</div><div class="kval" style="font-size:26px">5,417</div><div style="display:flex;gap:3px;align-items:flex-end;height:28px;margin-top:10px"><span style="flex:1;background:var(--track);height:40%;border-radius:2px"></span><span style="flex:1;background:var(--track);height:55%;border-radius:2px"></span><span style="flex:1;background:var(--track);height:48%;border-radius:2px"></span><span style="flex:1;background:var(--irisedge);height:70%;border-radius:2px"></span><span style="flex:1;background:var(--irisedge);height:62%;border-radius:2px"></span><span style="flex:1;background:var(--iris);height:88%;border-radius:2px"></span><span style="flex:1;background:var(--iris);height:100%;border-radius:2px"></span></div></div>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+            <div class="panel" style="padding:16px 18px"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><span class="sec">Needs a person</span><span style="font:600 11px Manrope;color:var(--text3)">14 waiting · 18 clear</span></div>
+              <div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--hair)"><span style="width:7px;height:7px;border-radius:50%;background:var(--danger)"></span><span style="flex:1;font:600 13px Manrope">Compliance signals</span><span class="mono" style="font:600 13px 'Space Grotesk'">3</span><span style="width:80px;text-align:right;font:500 11.5px Manrope;color:var(--text3)">2h oldest</span></div>
+              <div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--hair)"><span style="width:7px;height:7px;border-radius:50%;background:var(--warn)"></span><span style="flex:1;font:600 13px Manrope">Identity review</span><span class="mono" style="font:600 13px 'Space Grotesk'">7</span><span style="width:80px;text-align:right;font:500 11.5px Manrope;color:var(--text3)">40m oldest</span></div>
+              <div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--hair)"><span style="width:7px;height:7px;border-radius:50%;background:var(--warn)"></span><span style="flex:1;font:600 13px Manrope">Suspense</span><span class="mono" style="font:600 13px 'Space Grotesk'">4</span><span style="width:80px;text-align:right;font:500 11.5px Manrope;color:var(--text3)">6h oldest</span></div>
+              <div style="display:flex;align-items:center;gap:10px;padding:9px 0"><span style="width:7px;height:7px;border-radius:50%;background:var(--text3)"></span><span style="flex:1;font:600 13px Manrope;color:var(--text2)">Gift-card holds</span><span class="mono" style="font:600 13px 'Space Grotesk';color:var(--text2)">0</span><span style="width:80px;text-align:right;font:500 11.5px Manrope;color:var(--text3)">clear</span></div>
+            </div>
+            <div class="panel" style="padding:16px 18px"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px"><span class="sec">Owed by currency</span><span style="font:600 11px Manrope;color:var(--text3)">from postings</span></div>
+              <div style="display:flex;flex-direction:column;gap:13px">
+                <div><div style="display:flex;justify-content:space-between;font:600 12px Manrope;margin-bottom:5px"><span>NGN</span><span class="mono" style="color:var(--text2)">₦3,910,220,000</span></div><div style="height:7px;border-radius:4px;background:var(--track);overflow:hidden"><span style="display:block;height:100%;width:82%;background:var(--iris)"></span></div></div>
+                <div><div style="display:flex;justify-content:space-between;font:600 12px Manrope;margin-bottom:5px"><span>USD</span><span class="mono" style="color:var(--text2)">$412,900</span></div><div style="height:7px;border-radius:4px;background:var(--track);overflow:hidden"><span style="display:block;height:100%;width:44%;background:var(--info)"></span></div></div>
+                <div><div style="display:flex;justify-content:space-between;font:600 12px Manrope;margin-bottom:5px"><span>GHS</span><span class="mono" style="color:var(--text2)">₵1,240,500</span></div><div style="height:7px;border-radius:4px;background:var(--track);overflow:hidden"><span style="display:block;height:100%;width:26%;background:var(--ok)"></span></div></div>
+                <div><div style="display:flex;justify-content:space-between;font:600 12px Manrope;margin-bottom:5px"><span>KES</span><span class="mono" style="color:var(--text2)">KSh 8,904,000</span></div><div style="height:7px;border-radius:4px;background:var(--track);overflow:hidden"><span style="display:block;height:100%;width:18%;background:var(--warn)"></span></div></div>
+              </div>
+            </div>
+          </div>
+          <div class="panel" style="padding:12px 18px;display:flex;align-items:center;gap:20px;flex-wrap:wrap"><span style="font:700 12.5px Manrope;color:var(--text2)">Providers</span><span style="display:flex;align-items:center;gap:7px;font:600 12px Manrope"><span style="width:7px;height:7px;border-radius:50%;background:var(--ok)"></span>Flutterwave <span class="mono" style="color:var(--text3)">142ms</span></span><span style="display:flex;align-items:center;gap:7px;font:600 12px Manrope"><span style="width:7px;height:7px;border-radius:50%;background:var(--ok)"></span>Bitnob <span class="mono" style="color:var(--text3)">210ms</span></span><span style="display:flex;align-items:center;gap:7px;font:600 12px Manrope"><span style="width:7px;height:7px;border-radius:50%;background:var(--warn)"></span>Paystack <span class="mono" style="color:var(--text3)">degraded</span></span><span style="display:flex;align-items:center;gap:7px;font:600 12px Manrope"><span style="width:7px;height:7px;border-radius:50%;background:var(--ok)"></span>M-PESA <span class="mono" style="color:var(--text3)">98ms</span></span></div>
+        </sc-if>
+
+        <!-- ============ CUSTOMERS ============ -->
+        <sc-if value="{{ isCustomers }}" hint-placeholder-val="{{ false }}">
+          <div class="kgrid">
+            <div class="panel kpi"><div class="klab">Total customers</div><div class="kval">184,220</div></div>
+            <div class="panel kpi"><div class="klab">New · 24h</div><div class="kval" style="color:var(--ok)">+1,204</div></div>
+            <div class="panel kpi"><div class="klab">KYC pending</div><div class="kval" style="color:var(--warn)">312</div></div>
+            <div class="panel kpi"><div class="klab">Frozen</div><div class="kval" style="color:var(--danger)">18</div></div>
+          </div>
+          <div class="panel" style="padding:6px 0 4px">
+            <div style="display:flex;align-items:center;gap:10px;padding:14px 18px">
+              <span style="flex:1;display:flex;align-items:center;gap:9px;background:var(--track);border-radius:11px;padding:0 13px"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M11 18.5a7.5 7.5 0 1 0 0-15 7.5 7.5 0 0 0 0 15ZM20.5 20.5l-4-4"/></svg><input placeholder="Search name, email or account number" style="flex:1;border:none;background:transparent;outline:none;min-height:42px;color:var(--text);font:500 13.5px Manrope"></span>
+              <button class="btng">All countries</button><button class="btng">KYC status</button>
+            </div>
+            <table class="tbl"><thead><tr><th>Customer</th><th>Country</th><th>KYC</th><th class="r">Balance</th><th>Joined</th><th>Status</th></tr></thead><tbody>
+              <tr><td><div style="display:flex;align-items:center;gap:10px"><span style="width:32px;height:32px;border-radius:50%;background:var(--avatarbg);display:flex;align-items:center;justify-content:center;font:700 11.5px Manrope;color:var(--avatartext)">AO</span><span><span style="display:block">Ada Obi</span><span style="font:500 11px Manrope;color:var(--text3)">ada.obi@mail.com</span></span></div></td><td><span class="flag"><svg width="20" height="20" viewBox="0 0 3 2" preserveAspectRatio="xMidYMid slice"><rect width="1" height="2" fill="#008751"/><rect width="1" height="2" x="1" fill="#fff"/><rect width="1" height="2" x="2" fill="#008751"/></svg></span></td><td><span class="pill" style="background:var(--okbg);color:var(--ok)">Verified</span></td><td class="r mono" style="color:var(--text2)">₦2,450,900</td><td style="color:var(--text3);font-weight:500">12 Mar 2025</td><td><span class="pill" style="background:var(--okbg);color:var(--ok)">Active</span></td></tr>
+              <tr><td><div style="display:flex;align-items:center;gap:10px"><span style="width:32px;height:32px;border-radius:50%;background:var(--avatarbg);display:flex;align-items:center;justify-content:center;font:700 11.5px Manrope;color:var(--avatartext)">KM</span><span><span style="display:block">Kwame Mensah</span><span style="font:500 11px Manrope;color:var(--text3)">k.mensah@mail.com</span></span></div></td><td><span class="flag"><svg width="20" height="20" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid slice"><rect width="24" height="8" fill="#CE1126"/><rect y="8" width="24" height="8" fill="#FCD116"/><rect y="16" width="24" height="8" fill="#006B3F"/><polygon points="12,7 13.4,11 17.6,11 14.2,13.6 15.5,17.6 12,15.1 8.5,17.6 9.8,13.6 6.4,11 10.6,11" fill="#000"/></svg></span></td><td><span class="pill" style="background:var(--warnbg);color:var(--warn)">Pending</span></td><td class="r mono" style="color:var(--text2)">₵3,120</td><td style="color:var(--text3);font-weight:500">2 Sep 2026</td><td><span class="pill" style="background:var(--okbg);color:var(--ok)">Active</span></td></tr>
+              <tr><td><div style="display:flex;align-items:center;gap:10px"><span style="width:32px;height:32px;border-radius:50%;background:var(--avatarbg);display:flex;align-items:center;justify-content:center;font:700 11.5px Manrope;color:var(--avatartext)">JW</span><span><span style="display:block">Joan Wanjiru</span><span style="font:500 11px Manrope;color:var(--text3)">joan.w@mail.com</span></span></div></td><td><span class="flag"><svg width="20" height="20" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid slice"><rect width="24" height="6.5" fill="#000"/><rect y="6.5" width="24" height="1.5" fill="#fff"/><rect y="8" width="24" height="8" fill="#BB0000"/><rect y="16" width="24" height="1.5" fill="#fff"/><rect y="17.5" width="24" height="6.5" fill="#006600"/><ellipse cx="12" cy="12" rx="3" ry="6" fill="#BB0000" stroke="#fff" stroke-width="1"/></svg></span></td><td><span class="pill" style="background:var(--okbg);color:var(--ok)">Verified</span></td><td class="r mono" style="color:var(--text2)">KSh 84,000</td><td style="color:var(--text3);font-weight:500">19 Jul 2026</td><td><span class="pill" style="background:var(--okbg);color:var(--ok)">Active</span></td></tr>
+              <tr><td><div style="display:flex;align-items:center;gap:10px"><span style="width:32px;height:32px;border-radius:50%;background:var(--avatarbg);display:flex;align-items:center;justify-content:center;font:700 11.5px Manrope;color:var(--avatartext)">CO</span><span><span style="display:block">Chidi Okafor</span><span style="font:500 11px Manrope;color:var(--text3)">chidi.o@mail.com</span></span></div></td><td><span class="flag"><svg width="20" height="20" viewBox="0 0 3 2" preserveAspectRatio="xMidYMid slice"><rect width="1" height="2" fill="#008751"/><rect width="1" height="2" x="1" fill="#fff"/><rect width="1" height="2" x="2" fill="#008751"/></svg></span></td><td><span class="pill" style="background:var(--dangerbg);color:var(--danger)">Rejected</span></td><td class="r mono" style="color:var(--text2)">₦12,400</td><td style="color:var(--text3);font-weight:500">28 Aug 2026</td><td><span class="pill" style="background:var(--dangerbg);color:var(--danger)">Frozen</span></td></tr>
+              <tr><td><div style="display:flex;align-items:center;gap:10px"><span style="width:32px;height:32px;border-radius:50%;background:var(--avatarbg);display:flex;align-items:center;justify-content:center;font:700 11.5px Manrope;color:var(--avatartext)">AB</span><span><span style="display:block">Aisha Bello</span><span style="font:500 11px Manrope;color:var(--text3)">aisha.b@mail.com</span></span></div></td><td><span class="flag"><svg width="20" height="20" viewBox="0 0 3 2" preserveAspectRatio="xMidYMid slice"><rect width="1" height="2" fill="#008751"/><rect width="1" height="2" x="1" fill="#fff"/><rect width="1" height="2" x="2" fill="#008751"/></svg></span></td><td><span class="pill" style="background:var(--okbg);color:var(--ok)">Verified</span></td><td class="r mono" style="color:var(--text2)">₦905,200</td><td style="color:var(--text3);font-weight:500">4 Jan 2026</td><td><span class="pill" style="background:var(--okbg);color:var(--ok)">Active</span></td></tr>
+            </tbody></table>
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px"><span style="font:500 12px Manrope;color:var(--text3)">Showing 1–5 of 184,220</span><span style="display:flex;gap:8px"><button class="btng">Previous</button><button class="btng">Next</button></span></div>
+          </div>
+        </sc-if>
+
+        <!-- ============ IDENTITY ============ -->
+        <sc-if value="{{ isIdentity }}" hint-placeholder-val="{{ false }}">
+          <div class="kgrid" style="grid-template-columns:repeat(3,1fr)">
+            <div class="panel kpi"><div class="klab">Awaiting review</div><div class="kval" style="color:var(--warn)">7</div></div>
+            <div class="panel kpi"><div class="klab">Oldest waiting</div><div class="kval">40m</div></div>
+            <div class="panel kpi"><div class="klab">Approved · 24h</div><div class="kval" style="color:var(--ok)">148</div></div>
+          </div>
+          <div class="panel" style="padding:6px 0">
+            <table class="tbl"><thead><tr><th>Applicant</th><th>Document</th><th>Country</th><th>Waiting</th><th class="r">Decision</th></tr></thead><tbody>
+              <tr><td>Kwame Mensah</td><td>National ID</td><td><span class="flag"><svg width="20" height="20" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid slice"><rect width="24" height="8" fill="#CE1126"/><rect y="8" width="24" height="8" fill="#FCD116"/><rect y="16" width="24" height="8" fill="#006B3F"/><polygon points="12,7 13.4,11 17.6,11 14.2,13.6 15.5,17.6 12,15.1 8.5,17.6 9.8,13.6 6.4,11 10.6,11" fill="#000"/></svg></span></td><td style="color:var(--text3);font-weight:500">40m</td><td class="r"><span style="display:inline-flex;gap:8px"><button class="btng">Reject</button><button class="btnp">Approve</button></span></td></tr>
+              <tr><td>Femi Adeyemi</td><td>BVN + Passport</td><td><span class="flag"><svg width="20" height="20" viewBox="0 0 3 2" preserveAspectRatio="xMidYMid slice"><rect width="1" height="2" fill="#008751"/><rect width="1" height="2" x="1" fill="#fff"/><rect width="1" height="2" x="2" fill="#008751"/></svg></span></td><td style="color:var(--text3);font-weight:500">1h 12m</td><td class="r"><span style="display:inline-flex;gap:8px"><button class="btng">Reject</button><button class="btnp">Approve</button></span></td></tr>
+              <tr><td>Joan Wanjiru</td><td>National ID</td><td><span class="flag"><svg width="20" height="20" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid slice"><rect width="24" height="6.5" fill="#000"/><rect y="6.5" width="24" height="1.5" fill="#fff"/><rect y="8" width="24" height="8" fill="#BB0000"/><rect y="16" width="24" height="1.5" fill="#fff"/><rect y="17.5" width="24" height="6.5" fill="#006600"/><ellipse cx="12" cy="12" rx="3" ry="6" fill="#BB0000" stroke="#fff" stroke-width="1"/></svg></span></td><td style="color:var(--text3);font-weight:500">2h 05m</td><td class="r"><span style="display:inline-flex;gap:8px"><button class="btng">Reject</button><button class="btnp">Approve</button></span></td></tr>
+            </tbody></table>
+          </div>
+        </sc-if>
+
+        <!-- ============ COMPLIANCE ============ -->
+        <sc-if value="{{ isCompliance }}" hint-placeholder-val="{{ false }}">
+          <div class="kgrid" style="grid-template-columns:repeat(3,1fr)">
+            <div class="panel kpi"><div class="klab">Open cases</div><div class="kval" style="color:var(--danger)">3</div></div>
+            <div class="panel kpi"><div class="klab">High severity</div><div class="kval" style="color:var(--danger)">1</div></div>
+            <div class="panel kpi"><div class="klab">Cleared · 7d</div><div class="kval" style="color:var(--ok)">42</div></div>
+          </div>
+          <div class="panel" style="padding:6px 0">
+            <table class="tbl"><thead><tr><th>Case</th><th>Signal</th><th>Subject</th><th>Severity</th><th>Age</th><th class="r"></th></tr></thead><tbody>
+              <tr><td class="mono" style="font-weight:600">RC-2291</td><td>Velocity · 14 sends / 5m</td><td>Chidi Okafor</td><td><span class="pill" style="background:var(--dangerbg);color:var(--danger)">High</span></td><td style="color:var(--text3);font-weight:500">2h</td><td class="r"><button class="btnp">Review</button></td></tr>
+              <tr><td class="mono" style="font-weight:600">RC-2288</td><td>New device + large payout</td><td>Femi Adeyemi</td><td><span class="pill" style="background:var(--warnbg);color:var(--warn)">Medium</span></td><td style="color:var(--text3);font-weight:500">5h</td><td class="r"><button class="btnp">Review</button></td></tr>
+              <tr><td class="mono" style="font-weight:600">RC-2280</td><td>Sanctions name match</td><td>A. Ivanov</td><td><span class="pill" style="background:var(--warnbg);color:var(--warn)">Medium</span></td><td style="color:var(--text3);font-weight:500">9h</td><td class="r"><button class="btnp">Review</button></td></tr>
+            </tbody></table>
+          </div>
+        </sc-if>
+
+        <!-- ============ SUSPENSE ============ -->
+        <sc-if value="{{ isSuspense }}" hint-placeholder-val="{{ false }}">
+          <div class="kgrid" style="grid-template-columns:repeat(3,1fr)">
+            <div class="panel kpi"><div class="klab">Unattributed credits</div><div class="kval" style="color:var(--warn)">4</div></div>
+            <div class="panel kpi"><div class="klab">Held in suspense</div><div class="kval">₦1.94<span style="color:var(--text3);font-size:15px">M</span></div></div>
+            <div class="panel kpi"><div class="klab">Oldest</div><div class="kval">6h</div></div>
+          </div>
+          <div class="panel" style="padding:6px 0">
+            <table class="tbl"><thead><tr><th>Reference</th><th>Provider</th><th class="r">Amount</th><th>Received</th><th class="r"></th></tr></thead><tbody>
+              <tr><td class="mono" style="font-weight:600">FLW-77213</td><td>Flutterwave</td><td class="r mono" style="color:var(--text2)">₦850,000.00</td><td style="color:var(--text3);font-weight:500">6h ago</td><td class="r"><button class="btnp">Attribute</button></td></tr>
+              <tr><td class="mono" style="font-weight:600">FLW-77188</td><td>Flutterwave</td><td class="r mono" style="color:var(--text2)">₦620,500.00</td><td style="color:var(--text3);font-weight:500">4h ago</td><td class="r"><button class="btnp">Attribute</button></td></tr>
+              <tr><td class="mono" style="font-weight:600">MPE-40021</td><td>M-PESA</td><td class="r mono" style="color:var(--text2)">KSh 210,000.00</td><td style="color:var(--text3);font-weight:500">2h ago</td><td class="r"><button class="btnp">Attribute</button></td></tr>
+              <tr><td class="mono" style="font-weight:600">FLW-77240</td><td>Flutterwave</td><td class="r mono" style="color:var(--text2)">₦92,300.00</td><td style="color:var(--text3);font-weight:500">40m ago</td><td class="r"><button class="btnp">Attribute</button></td></tr>
+            </tbody></table>
+          </div>
+        </sc-if>
+
+        <!-- ============ EARNINGS ============ -->
+        <sc-if value="{{ isEarnings }}" hint-placeholder-val="{{ false }}">
+          <div class="kgrid"><div class="panel kpi"><div class="klab">Earnings · 24h</div><div class="kval">₦6.4<span style="color:var(--text3);font-size:15px">M</span></div></div><div class="panel kpi"><div class="klab">Earnings · 7d</div><div class="kval">₦41.2<span style="color:var(--text3);font-size:15px">M</span></div></div><div class="panel kpi"><div class="klab">FX spread</div><div class="kval">₦4.1<span style="color:var(--text3);font-size:15px">M</span></div></div><div class="panel kpi"><div class="klab">Transfer fees</div><div class="kval">₦2.3<span style="color:var(--text3);font-size:15px">M</span></div></div></div>
+          <div class="panel" style="padding:18px 18px 8px"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><span class="sec">Earnings · last 7 days</span><span style="font:600 11px Manrope;color:var(--ok)">▲ 5.7%</span></div>
+            <svg viewBox="0 0 640 200" style="width:100%;height:200px" preserveAspectRatio="none"><defs><linearGradient id="eg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--ok)" stop-opacity=".3"/><stop offset="1" stop-color="var(--ok)" stop-opacity="0"/></linearGradient></defs><line x1="0" y1="50" x2="640" y2="50" stroke="var(--hair)"/><line x1="0" y1="100" x2="640" y2="100" stroke="var(--hair)"/><line x1="0" y1="150" x2="640" y2="150" stroke="var(--hair)"/><path d="M0,160 C80,150 110,130 190,120 C270,110 300,140 380,110 C460,80 500,90 560,60 C590,46 620,52 640,44 L640,200 L0,200 Z" fill="url(#eg)"/><path d="M0,160 C80,150 110,130 190,120 C270,110 300,140 380,110 C460,80 500,90 560,60 C590,46 620,52 640,44" fill="none" stroke="var(--ok)" stroke-width="2.5"/></svg>
+            <div style="display:flex;justify-content:space-between;font:500 10.5px Manrope;color:var(--text3);padding:6px 2px 4px"><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div>
+          </div>
+        </sc-if>
+
+        <!-- ============ PROVIDERS ============ -->
+        <sc-if value="{{ isProviders }}" hint-placeholder-val="{{ false }}">
+          <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:16px">
+            <div class="panel" style="padding:18px"><div style="display:flex;align-items:center;justify-content:space-between"><span class="sec">Flutterwave</span><span class="pill" style="background:var(--okbg);color:var(--ok)"><span style="width:7px;height:7px;border-radius:50%;background:var(--ok)"></span>Healthy</span></div><div style="display:flex;gap:26px;margin-top:16px"><span><span style="display:block;font:600 11px Manrope;color:var(--text3)">Latency</span><span class="mono" style="font:700 18px 'Space Grotesk'">142ms</span></span><span><span style="display:block;font:600 11px Manrope;color:var(--text3)">Success · 24h</span><span class="mono" style="font:700 18px 'Space Grotesk';color:var(--ok)">99.8%</span></span><span><span style="display:block;font:600 11px Manrope;color:var(--text3)">Rail</span><span style="font:700 15px Manrope">NGN bank</span></span></div></div>
+            <div class="panel" style="padding:18px"><div style="display:flex;align-items:center;justify-content:space-between"><span class="sec">Bitnob</span><span class="pill" style="background:var(--okbg);color:var(--ok)"><span style="width:7px;height:7px;border-radius:50%;background:var(--ok)"></span>Healthy</span></div><div style="display:flex;gap:26px;margin-top:16px"><span><span style="display:block;font:600 11px Manrope;color:var(--text3)">Latency</span><span class="mono" style="font:700 18px 'Space Grotesk'">210ms</span></span><span><span style="display:block;font:600 11px Manrope;color:var(--text3)">Success · 24h</span><span class="mono" style="font:700 18px 'Space Grotesk';color:var(--ok)">99.4%</span></span><span><span style="display:block;font:600 11px Manrope;color:var(--text3)">Rail</span><span style="font:700 15px Manrope">Crypto</span></span></div></div>
+            <div class="panel" style="padding:18px;border-color:var(--warn)"><div style="display:flex;align-items:center;justify-content:space-between"><span class="sec">Paystack</span><span class="pill" style="background:var(--warnbg);color:var(--warn)"><span style="width:7px;height:7px;border-radius:50%;background:var(--warn)"></span>Degraded</span></div><div style="display:flex;gap:26px;margin-top:16px"><span><span style="display:block;font:600 11px Manrope;color:var(--text3)">Latency</span><span class="mono" style="font:700 18px 'Space Grotesk';color:var(--warn)">1,840ms</span></span><span><span style="display:block;font:600 11px Manrope;color:var(--text3)">Success · 24h</span><span class="mono" style="font:700 18px 'Space Grotesk';color:var(--warn)">94.1%</span></span><span><span style="display:block;font:600 11px Manrope;color:var(--text3)">Rail</span><span style="font:700 15px Manrope">NGN bank</span></span></div></div>
+            <div class="panel" style="padding:18px"><div style="display:flex;align-items:center;justify-content:space-between"><span class="sec">M-PESA</span><span class="pill" style="background:var(--okbg);color:var(--ok)"><span style="width:7px;height:7px;border-radius:50%;background:var(--ok)"></span>Healthy</span></div><div style="display:flex;gap:26px;margin-top:16px"><span><span style="display:block;font:600 11px Manrope;color:var(--text3)">Latency</span><span class="mono" style="font:700 18px 'Space Grotesk'">98ms</span></span><span><span style="display:block;font:600 11px Manrope;color:var(--text3)">Success · 24h</span><span class="mono" style="font:700 18px 'Space Grotesk';color:var(--ok)">99.9%</span></span><span><span style="display:block;font:600 11px Manrope;color:var(--text3)">Rail</span><span style="font:700 15px Manrope">KES wallet</span></span></div></div>
+          </div>
+        </sc-if>
+
+        <!-- ============ SETTINGS ============ -->
+        <sc-if value="{{ isSettings }}" hint-placeholder-val="{{ false }}">
+          <div class="panel" style="padding:6px 0">
+            <div style="display:flex;align-items:center;gap:14px;padding:16px 18px;border-bottom:1px solid var(--hair)"><span style="flex:1"><span style="display:block;font:700 14px Manrope">Notification worker</span><span style="font:500 12px Manrope;color:var(--text3)">Interval that flushes the outbox to email</span></span><span class="mono" style="font:600 13px 'Space Grotesk';color:var(--text2)">30s</span><span style="width:44px;height:26px;border-radius:999px;background:var(--iris);position:relative"><span style="position:absolute;top:3px;right:3px;width:20px;height:20px;border-radius:50%;background:#fff"></span></span></div>
+            <div style="display:flex;align-items:center;gap:14px;padding:16px 18px;border-bottom:1px solid var(--hair)"><span style="flex:1"><span style="display:block;font:700 14px Manrope">Broadcast worker</span><span style="font:500 12px Manrope;color:var(--text3)">Interval that sends push announcements</span></span><span class="mono" style="font:600 13px 'Space Grotesk';color:var(--text2)">60s</span><span style="width:44px;height:26px;border-radius:999px;background:var(--iris);position:relative"><span style="position:absolute;top:3px;right:3px;width:20px;height:20px;border-radius:50%;background:#fff"></span></span></div>
+            <div style="display:flex;align-items:center;gap:14px;padding:16px 18px"><span style="flex:1"><span style="display:block;font:700 14px Manrope">Maintenance mode</span><span style="font:500 12px Manrope;color:var(--text3)">Pause new transfers platform-wide</span></span><span style="width:44px;height:26px;border-radius:999px;background:var(--track);position:relative"><span style="position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:var(--text3)"></span></span></div>
+          </div>
+        </sc-if>
+
+        <!-- ============ COUNTRIES ============ -->
+        <sc-if value="{{ isCountries }}" hint-placeholder-val="{{ false }}">
+          <div class="panel" style="padding:20px 22px">
+            <div class="sec">Countries</div>
+            <div style="font:500 13px Manrope;color:var(--text3);margin:5px 0 6px">Where somebody can open an account.</div>
+            <div style="display:flex;align-items:center;gap:13px;padding:15px 0;border-bottom:1px solid var(--hair)"><span class="flag"><svg width="20" height="20" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid slice"><rect width="24" height="8" fill="#CE1126"/><rect y="8" width="24" height="8" fill="#FCD116"/><rect y="16" width="24" height="8" fill="#006B3F"/><polygon points="12,7 13.4,11 17.6,11 14.2,13.6 15.5,17.6 12,15.1 8.5,17.6 9.8,13.6 6.4,11 10.6,11" fill="#000"/></svg></span><span style="flex:1"><span style="font:700 14px Manrope">Ghana</span> <span class="mono" style="color:var(--text3);font-weight:500">+233 · GHS</span></span><button class="btng">Close</button></div>
+            <div style="display:flex;align-items:center;gap:13px;padding:15px 0;border-bottom:1px solid var(--hair)"><span class="flag"><svg width="20" height="20" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid slice"><rect width="24" height="6.5" fill="#000"/><rect y="6.5" width="24" height="1.5" fill="#fff"/><rect y="8" width="24" height="8" fill="#BB0000"/><rect y="16" width="24" height="1.5" fill="#fff"/><rect y="17.5" width="24" height="6.5" fill="#006600"/><ellipse cx="12" cy="12" rx="3" ry="6" fill="#BB0000" stroke="#fff" stroke-width="1"/></svg></span><span style="flex:1"><span style="font:700 14px Manrope">Kenya</span> <span class="mono" style="color:var(--text3);font-weight:500">+254 · KES</span></span><button class="btng">Close</button></div>
+            <div style="display:flex;align-items:center;gap:13px;padding:15px 0;border-bottom:1px solid var(--hair)"><span class="flag"><svg width="20" height="20" viewBox="0 0 3 2" preserveAspectRatio="xMidYMid slice"><rect width="1" height="2" fill="#008751"/><rect width="1" height="2" x="1" fill="#fff"/><rect width="1" height="2" x="2" fill="#008751"/></svg></span><span style="flex:1"><span style="font:700 14px Manrope">Nigeria</span> <span class="mono" style="color:var(--text3);font-weight:500">+234 · NGN</span></span><button class="btng">Close</button></div>
+            <div style="display:flex;align-items:center;gap:13px;padding:15px 0;border-bottom:1px solid var(--hair)"><span class="flag"><svg width="20" height="20" viewBox="0 0 26 26" preserveAspectRatio="xMidYMid slice"><rect width="26" height="26" fill="#B22234"/><rect y="2" width="26" height="2" fill="#fff"/><rect y="6" width="26" height="2" fill="#fff"/><rect y="10" width="26" height="2" fill="#fff"/><rect y="14" width="26" height="2" fill="#fff"/><rect y="18" width="26" height="2" fill="#fff"/><rect y="22" width="26" height="2" fill="#fff"/><rect width="13" height="14" fill="#3C3B6E"/></svg></span><span style="flex:1"><span style="font:700 14px Manrope">United States</span> <span class="mono" style="color:var(--text3);font-weight:500">+1 · USD</span></span><button class="btng">Close</button></div>
+            <div style="display:flex;align-items:center;gap:13px;padding:15px 0"><span class="flag" style="background:var(--surface2);display:flex;align-items:center;justify-content:center;font:700 8px Manrope;color:var(--text2)">GB</span><span style="flex:1"><span style="font:700 14px Manrope">United Kingdom</span> <span class="mono" style="color:var(--text3);font-weight:500">+44 · GBP</span> <span class="pill" style="background:var(--warnbg);color:var(--warn)">closed</span></span><button class="btnp">Open</button></div>
+          </div>
+          <div class="panel" style="padding:20px 22px">
+            <div class="sec">Add a country</div>
+            <div style="font:500 13px Manrope;color:var(--text3);margin:5px 0 16px">It is added closed. Opening it is a separate decision.</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+              <label style="display:flex;flex-direction:column;gap:6px;font:600 12px Manrope;color:var(--text2)">ISO code<input placeholder="RW" style="min-height:44px;border-radius:11px;border:1px solid var(--panelborder);background:var(--field);color:var(--text);padding:0 13px;font:500 14px Manrope;outline:none"></label>
+              <label style="display:flex;flex-direction:column;gap:6px;font:600 12px Manrope;color:var(--text2)">Name<input placeholder="Rwanda" style="min-height:44px;border-radius:11px;border:1px solid var(--panelborder);background:var(--field);color:var(--text);padding:0 13px;font:500 14px Manrope;outline:none"></label>
+              <label style="display:flex;flex-direction:column;gap:6px;font:600 12px Manrope;color:var(--text2)">Dialling code<input placeholder="250" style="min-height:44px;border-radius:11px;border:1px solid var(--panelborder);background:var(--field);color:var(--text);padding:0 13px;font:500 14px Manrope;outline:none"></label>
+              <label style="display:flex;flex-direction:column;gap:6px;font:600 12px Manrope;color:var(--text2)">Currency<span style="display:flex;align-items:center;justify-content:space-between;min-height:44px;border-radius:11px;border:1px solid var(--panelborder);background:var(--field);color:var(--text3);padding:0 13px;font:500 14px Manrope">Pick one<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 9.5 12 16l6.5-6.5"/></svg></span></label>
+            </div>
+            <div style="display:flex;align-items:flex-start;gap:8px;margin-top:14px;font:500 12px Manrope;color:var(--text3);line-height:1.5;max-width:520px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:1px"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM12 11v5.5M12 7.5h.01"/></svg>Only currencies Xetral already handles are listed. A new one needs an exponent, a daily limit at every tier and a monitoring threshold first.</div>
+            <button class="btnp" style="margin-top:16px">Add country</button>
+          </div>
+        </sc-if>
+
+        <!-- ============ PRICES ============ -->
+        <sc-if value="{{ isPrices }}" hint-placeholder-val="{{ false }}">
+          <div class="panel" style="padding:18px 22px"><div class="sec">Prices</div><div style="font:500 13px Manrope;color:var(--text3);margin-top:5px;max-width:580px;line-height:1.5">Every FX spread and gift-card rate a customer can be quoted. Prices are never edited — retire one and publish its replacement.</div></div>
+          <div class="panel" style="padding:6px 0"><div style="display:flex;align-items:center;justify-content:space-between;padding:15px 18px 8px"><span class="sec">FX spreads</span><button class="btnp">Publish spread</button></div>
+            <table class="tbl"><thead><tr><th>Pair</th><th>Spread</th><th>Quoted at</th><th class="r">Minimum</th><th>Published by</th><th class="r"></th></tr></thead><tbody>
+              <tr><td class="mono">NGN → USD</td><td>1.50%</td><td style="color:var(--text3);font-weight:500">as published</td><td class="r mono" style="color:var(--text2)">₦1,000.00</td><td style="color:var(--text3);font-weight:500">tunde@</td><td class="r"><span style="display:inline-flex;gap:6px"><button class="btng">Edit</button><button class="btng">Retire</button></span></td></tr>
+              <tr><td class="mono">USD → NGN</td><td>1.50%</td><td><span class="pill" style="background:var(--warnbg);color:var(--warn)">1.92% — payout up 0.42%</span></td><td class="r mono" style="color:var(--text2)">$10.00</td><td style="color:var(--text3);font-weight:500">tunde@</td><td class="r"><span style="display:inline-flex;gap:6px"><button class="btng">Edit</button><button class="btng">Retire</button></span></td></tr>
+              <tr><td class="mono">NGN → GHS</td><td>2.00%</td><td style="color:var(--text3);font-weight:500">as published</td><td class="r mono" style="color:var(--text2)">₦5,000.00</td><td style="color:var(--text3);font-weight:500"><em>at a prompt</em></td><td class="r"><span style="display:inline-flex;gap:6px"><button class="btng">Edit</button><button class="btng">Retire</button></span></td></tr>
+            </tbody></table>
+          </div>
+          <div class="panel" style="padding:6px 0"><div style="display:flex;align-items:center;justify-content:space-between;padding:15px 18px 8px;gap:12px;flex-wrap:wrap"><span class="sec">Exchange rates</span><span style="display:flex;gap:8px;align-items:center"><input placeholder="PIN" type="password" style="width:78px;min-height:38px;border-radius:10px;border:1px solid var(--panelborder);background:var(--field);color:var(--text);padding:0 12px;font:500 13px Manrope;outline:none"><button class="btnp">Generate latest</button></span></div>
+            <table class="tbl"><thead><tr><th>Pair</th><th>Rate</th><th>Our margin</th><th>Source</th><th>Age</th></tr></thead><tbody>
+              <tr><td class="mono">NGN → GHS</td><td class="mono" style="color:var(--text2)">1 NGN = 0.0078 GHS</td><td>2.00%</td><td style="color:var(--text3);font-weight:500">tunde@</td><td class="mono" style="color:var(--text3)">2h</td></tr>
+              <tr><td class="mono">USD → NGN</td><td class="mono" style="color:var(--text2)">1 USD = 1,512 NGN</td><td><span class="pill" style="background:var(--infobg);color:var(--info)">automatic</span></td><td style="color:var(--text3);font-weight:500">—</td><td class="mono" style="color:var(--text3)">6m</td></tr>
+              <tr><td class="mono">BTC → USD</td><td class="mono" style="color:var(--text2)">1 BTC = 68,400 USD</td><td><span class="pill" style="background:var(--warnbg);color:var(--warn)">no spread</span></td><td><span class="pill" style="background:var(--infobg);color:var(--info)">automatic</span></td><td class="mono" style="color:var(--danger)">3d</td></tr>
+            </tbody></table>
+          </div>
+          <div class="panel" style="padding:6px 0"><div style="display:flex;align-items:center;justify-content:space-between;padding:15px 18px 8px"><span class="sec">Gift-card rates</span><button class="btnp">Publish rate</button></div>
+            <table class="tbl"><thead><tr><th>Card</th><th>Band</th><th>Rate</th><th>Published by</th><th class="r"></th></tr></thead><tbody>
+              <tr><td>Amazon US · e-code</td><td class="mono" style="color:var(--text2)">$25 – $100</td><td class="mono" style="color:var(--text2)">₦1,250.00 / $1</td><td style="color:var(--text3);font-weight:500">tunde@</td><td class="r"><button class="btng">Retire</button></td></tr>
+              <tr><td>Steam US · e-code</td><td class="mono" style="color:var(--text2)">$50 – $200</td><td class="mono" style="color:var(--text2)">₦1,180.00 / $1</td><td style="color:var(--text3);font-weight:500">ops@</td><td class="r"><button class="btng">Retire</button></td></tr>
+            </tbody></table>
+          </div>
+        </sc-if>
+
+        <!-- ============ PROVIDER KEYS ============ -->
+        <sc-if value="{{ isProviderKeys }}" hint-placeholder-val="{{ false }}">
+          <div class="kgrid" style="grid-template-columns:repeat(3,1fr)"><div class="panel kpi"><div class="klab">Keys configured</div><div class="kval">6</div></div><div class="panel kpi"><div class="klab">Missing</div><div class="kval" style="color:var(--danger)">1</div></div><div class="panel kpi"><div class="klab">Rotate soon</div><div class="kval" style="color:var(--warn)">2</div></div></div>
+          <div class="panel" style="padding:6px 0">
+            <table class="tbl"><thead><tr><th>Provider</th><th>Environment</th><th>Key</th><th>Status</th><th>Last rotated</th><th class="r"></th></tr></thead><tbody>
+              <tr><td>Flutterwave</td><td style="color:var(--text3);font-weight:500">live</td><td class="mono" style="color:var(--text2)">••••3f2a</td><td><span class="pill" style="background:var(--okbg);color:var(--ok)">Set</span></td><td style="color:var(--text3);font-weight:500">12d ago</td><td class="r"><button class="btng">Rotate</button></td></tr>
+              <tr><td>Bitnob</td><td style="color:var(--text3);font-weight:500">live</td><td class="mono" style="color:var(--text2)">••••9c10</td><td><span class="pill" style="background:var(--okbg);color:var(--ok)">Set</span></td><td style="color:var(--warn);font-weight:600">40d ago</td><td class="r"><button class="btng">Rotate</button></td></tr>
+              <tr><td>Paystack</td><td style="color:var(--text3);font-weight:500">live</td><td class="mono" style="color:var(--text2)">••••7788</td><td><span class="pill" style="background:var(--okbg);color:var(--ok)">Set</span></td><td style="color:var(--text3);font-weight:500">8d ago</td><td class="r"><button class="btng">Rotate</button></td></tr>
+              <tr><td>M-PESA</td><td style="color:var(--text3);font-weight:500">live</td><td class="mono" style="color:var(--text2)">••••a1b2</td><td><span class="pill" style="background:var(--okbg);color:var(--ok)">Set</span></td><td style="color:var(--text3);font-weight:500">3d ago</td><td class="r"><button class="btng">Rotate</button></td></tr>
+              <tr><td>ExchangeRate-API</td><td style="color:var(--text3);font-weight:500">live</td><td class="mono" style="color:var(--text3)">—</td><td><span class="pill" style="background:var(--dangerbg);color:var(--danger)">Missing</span></td><td style="color:var(--text3);font-weight:500">never</td><td class="r"><button class="btnp">Add key</button></td></tr>
+            </tbody></table>
+          </div>
+        </sc-if>
+
+        <!-- ============ STAFF ============ -->
+        <sc-if value="{{ isStaff }}" hint-placeholder-val="{{ false }}">
+          <div class="kgrid" style="grid-template-columns:repeat(3,1fr)"><div class="panel kpi"><div class="klab">Operators</div><div class="kval">14</div></div><div class="panel kpi"><div class="klab">Without 2FA</div><div class="kval" style="color:var(--danger)">2</div></div><div class="panel kpi"><div class="klab">Admins</div><div class="kval">3</div></div></div>
+          <div class="panel" style="padding:6px 0">
+            <table class="tbl"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>2FA</th><th>Last active</th><th class="r"></th></tr></thead><tbody>
+              <tr><td>Tunde Adeleke</td><td style="color:var(--text3);font-weight:500">tunde@xetral.io</td><td>Admin</td><td><span class="pill" style="background:var(--okbg);color:var(--ok)">On</span></td><td style="color:var(--text3);font-weight:500">2m ago</td><td class="r"><button class="btng">Manage</button></td></tr>
+              <tr><td>Zainab Okoro</td><td style="color:var(--text3);font-weight:500">zainab@xetral.io</td><td>Finance</td><td><span class="pill" style="background:var(--okbg);color:var(--ok)">On</span></td><td style="color:var(--text3);font-weight:500">1h ago</td><td class="r"><button class="btng">Manage</button></td></tr>
+              <tr><td>Peter Kamau</td><td style="color:var(--text3);font-weight:500">peter@xetral.io</td><td>Support</td><td><span class="pill" style="background:var(--dangerbg);color:var(--danger)">Off</span></td><td style="color:var(--text3);font-weight:500">3d ago</td><td class="r"><button class="btnp">Require 2FA</button></td></tr>
+              <tr><td>Grace Mensah</td><td style="color:var(--text3);font-weight:500">grace@xetral.io</td><td>Compliance</td><td><span class="pill" style="background:var(--okbg);color:var(--ok)">On</span></td><td style="color:var(--text3);font-weight:500">20m ago</td><td class="r"><button class="btng">Manage</button></td></tr>
+            </tbody></table>
+          </div>
+        </sc-if>
+
+        <!-- ============ YOUR AUTHENTICATOR ============ -->
+        <sc-if value="{{ isAuthenticator }}" hint-placeholder-val="{{ false }}">
+          <div class="panel" style="padding:24px;display:flex;gap:28px;align-items:center;flex-wrap:wrap">
+            <div style="width:130px;height:130px;border-radius:16px;background:var(--track);display:grid;grid-template-columns:repeat(5,1fr);grid-template-rows:repeat(5,1fr);gap:3px;padding:12px">
+              <span style="background:var(--text);border-radius:2px"></span><span></span><span style="background:var(--text);border-radius:2px"></span><span style="background:var(--text);border-radius:2px"></span><span></span><span></span><span style="background:var(--text);border-radius:2px"></span><span></span><span></span><span style="background:var(--text);border-radius:2px"></span><span style="background:var(--text);border-radius:2px"></span><span></span><span style="background:var(--text);border-radius:2px"></span><span></span><span style="background:var(--text);border-radius:2px"></span><span></span><span style="background:var(--text);border-radius:2px"></span><span></span><span style="background:var(--text);border-radius:2px"></span><span></span><span style="background:var(--text);border-radius:2px"></span><span style="background:var(--text);border-radius:2px"></span><span></span><span style="background:var(--text);border-radius:2px"></span><span style="background:var(--text);border-radius:2px"></span>
+            </div>
+            <div style="flex:1;min-width:220px">
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><span class="sec">Your authenticator</span><span class="pill" style="background:var(--okbg);color:var(--ok)"><span style="width:7px;height:7px;border-radius:50%;background:var(--ok)"></span>Enabled</span></div>
+              <div style="font:500 13px Manrope;color:var(--text3);line-height:1.6;max-width:420px">Authenticator app added 12 Mar 2025. This is the second factor for your own operator sign-in — it works before any other setting, so you are never locked out of the screen that fixes a lockout.</div>
+              <div style="font:600 13px Manrope;color:var(--text2);margin-top:14px">Recovery codes · <span class="mono">8 of 10</span> remaining</div>
+              <div style="display:flex;gap:10px;margin-top:16px"><button class="btng">View recovery codes</button><button class="btng" style="color:var(--danger);border-color:var(--danger)">Reset authenticator</button></div>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- ============ NOTIFICATIONS ============ -->
+        <sc-if value="{{ isNotifications }}" hint-placeholder-val="{{ false }}">
+          <div class="kgrid" style="grid-template-columns:repeat(3,1fr)"><div class="panel kpi"><div class="klab">Queued</div><div class="kval">3</div></div><div class="panel kpi"><div class="klab">Sent · 24h</div><div class="kval">4,201</div></div><div class="panel kpi"><div class="klab">Worker interval</div><div class="kval">30s</div></div></div>
+          <div class="panel" style="padding:16px 18px;display:flex;align-items:center;gap:12px"><span style="width:40px;height:40px;border-radius:12px;background:var(--okbg);display:flex;align-items:center;justify-content:center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12.5 9.5 17.5 19.5 7"/></svg></span><span><span style="display:block;font:700 14px Manrope">Outbox worker running</span><span style="font:500 12px Manrope;color:var(--text3)">Flushing the email outbox every 30 seconds · last run 12s ago</span></span></div>
+          <div class="panel" style="padding:6px 0"><div style="padding:14px 18px 4px"><span class="sec">Recent</span></div>
+            <table class="tbl"><thead><tr><th>Channel</th><th>Message</th><th>To</th><th>Status</th></tr></thead><tbody>
+              <tr><td>Email</td><td>Verification code</td><td style="color:var(--text3);font-weight:500">ada.obi@mail.com</td><td><span class="pill" style="background:var(--okbg);color:var(--ok)">Sent</span></td></tr>
+              <tr><td>Email</td><td>Payout receipt</td><td style="color:var(--text3);font-weight:500">k.mensah@mail.com</td><td><span class="pill" style="background:var(--okbg);color:var(--ok)">Sent</span></td></tr>
+              <tr><td>Email</td><td>Password reset</td><td style="color:var(--text3);font-weight:500">joan.w@mail.com</td><td><span class="pill" style="background:var(--warnbg);color:var(--warn)">Queued</span></td></tr>
+            </tbody></table>
+          </div>
+        </sc-if>
+
+        <!-- ============ ANNOUNCEMENTS ============ -->
+        <sc-if value="{{ isAnnouncements }}" hint-placeholder-val="{{ false }}">
+          <div class="panel" style="padding:22px">
+            <div class="sec">New announcement</div>
+            <div style="display:flex;flex-direction:column;gap:14px;margin-top:14px">
+              <label style="display:flex;flex-direction:column;gap:6px;font:600 12px Manrope;color:var(--text2)">Title<input placeholder="Scheduled maintenance" style="min-height:44px;border-radius:11px;border:1px solid var(--panelborder);background:var(--field);color:var(--text);padding:0 13px;font:500 14px Manrope;outline:none"></label>
+              <label style="display:flex;flex-direction:column;gap:6px;font:600 12px Manrope;color:var(--text2)">Message<textarea rows="3" placeholder="Kept short — push copy carries no amount, ever." style="border-radius:11px;border:1px solid var(--panelborder);background:var(--field);color:var(--text);padding:12px 13px;font:500 14px Manrope;outline:none;resize:vertical"></textarea></label>
+              <div style="display:flex;align-items:center;gap:12px"><label style="font:600 12px Manrope;color:var(--text2)">Audience</label><span style="display:inline-flex;align-items:center;gap:8px;background:var(--field);border:1px solid var(--panelborder);border-radius:10px;padding:8px 13px;font:500 13px Manrope;color:var(--text)">All customers<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 9.5 12 16l6.5-6.5"/></svg></span><span style="flex:1"></span><button class="btnp">Send announcement</button></div>
+            </div>
+          </div>
+          <div class="panel" style="padding:6px 0"><div style="padding:14px 18px 4px"><span class="sec">Sent</span></div>
+            <table class="tbl"><thead><tr><th>Title</th><th>Audience</th><th class="r">Reach</th><th>When</th></tr></thead><tbody>
+              <tr><td>Scheduled maintenance Sunday 02:00</td><td style="color:var(--text3);font-weight:500">All customers</td><td class="r mono" style="color:var(--text2)">184,220</td><td style="color:var(--text3);font-weight:500">2d ago</td></tr>
+              <tr><td>New: send to Kenya (M-PESA)</td><td style="color:var(--text3);font-weight:500">NG + GH</td><td class="r mono" style="color:var(--text2)">121,004</td><td style="color:var(--text3);font-weight:500">9d ago</td></tr>
+            </tbody></table>
+          </div>
+        </sc-if>
+
+        <!-- ============ AUDIT ============ -->
+        <sc-if value="{{ isAudit }}" hint-placeholder-val="{{ false }}">
+          <div class="panel" style="padding:6px 0 4px">
+            <div style="padding:14px 18px"><span style="display:flex;align-items:center;gap:9px;background:var(--track);border-radius:11px;padding:0 13px"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M11 18.5a7.5 7.5 0 1 0 0-15 7.5 7.5 0 0 0 0 15ZM20.5 20.5l-4-4"/></svg><input placeholder="Search by actor, action or target" style="flex:1;border:none;background:transparent;outline:none;min-height:42px;color:var(--text);font:500 13.5px Manrope"></span></div>
+            <table class="tbl"><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Target</th><th>IP</th></tr></thead><tbody>
+              <tr><td class="mono" style="color:var(--text3)">03:31:04</td><td>tunde@</td><td class="mono">price.publish</td><td style="color:var(--text2)">NGN→USD spread</td><td class="mono" style="color:var(--text3)">102.89.44.2</td></tr>
+              <tr><td class="mono" style="color:var(--text3)">02:10:55</td><td>zainab@</td><td class="mono">suspense.attribute</td><td style="color:var(--text2)">FLW-77213</td><td class="mono" style="color:var(--text3)">102.89.44.9</td></tr>
+              <tr><td class="mono" style="color:var(--text3)">01:44:12</td><td>peter@</td><td class="mono">kyc.approve</td><td style="color:var(--text2)">user #4021</td><td class="mono" style="color:var(--text3)">41.203.7.18</td></tr>
+              <tr><td class="mono" style="color:var(--text3)">Yesterday</td><td>grace@</td><td class="mono">staff.totp.reset</td><td style="color:var(--text2)">peter@</td><td class="mono" style="color:var(--text3)">102.89.44.1</td></tr>
+            </tbody></table>
+          </div>
+        </sc-if>
+
+        <!-- ============ READINESS ============ -->
+        <sc-if value="{{ isReadiness }}" hint-placeholder-val="{{ false }}">
+          <div class="kgrid" style="grid-template-columns:repeat(2,1fr)"><div class="panel kpi"><div class="klab">Checks passing</div><div class="kval" style="color:var(--ok)">10 / 12</div></div><div class="panel kpi"><div class="klab">Blocking</div><div class="kval" style="color:var(--danger)">1</div></div></div>
+          <div class="panel" style="padding:6px 18px">
+            <div style="display:flex;align-items:center;gap:12px;padding:13px 0;border-bottom:1px solid var(--hair)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12.5 9.5 17.5 19.5 7"/></svg><span style="flex:1;font:600 13.5px Manrope">FX pairs published</span><span style="font:500 12px Manrope;color:var(--text3)">4 live corridors</span></div>
+            <div style="display:flex;align-items:center;gap:12px;padding:13px 0;border-bottom:1px solid var(--hair)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg><span style="flex:1;font:600 13.5px Manrope">ExchangeRate-API key</span><span style="font:600 12px Manrope;color:var(--danger)">unset — blocking</span></div>
+            <div style="display:flex;align-items:center;gap:12px;padding:13px 0;border-bottom:1px solid var(--hair)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12.5 9.5 17.5 19.5 7"/></svg><span style="flex:1;font:600 13.5px Manrope">Notification &amp; broadcast workers</span><span style="font:500 12px Manrope;color:var(--text3)">30s / 60s</span></div>
+            <div style="display:flex;align-items:center;gap:12px;padding:13px 0;border-bottom:1px solid var(--hair)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12.5 9.5 17.5 19.5 7"/></svg><span style="flex:1;font:600 13.5px Manrope">TOTP enforced for staff</span><span style="font:500 12px Manrope;color:var(--text3)">on</span></div>
+            <div style="display:flex;align-items:center;gap:12px;padding:13px 0"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--warn)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 22 20H2L12 3ZM12 9.5v5M12 17.5h.01"/></svg><span style="flex:1;font:600 13.5px Manrope">Daily limits · GHS</span><span style="font:600 12px Manrope;color:var(--warn)">1 of 3 tiers set</span></div>
+          </div>
+        </sc-if>
+
+        <!-- ============ DIAGNOSTICS ============ -->
+        <sc-if value="{{ isDiagnostics }}" hint-placeholder-val="{{ false }}">
+          <div class="panel" style="padding:16px 18px;display:flex;align-items:center;justify-content:space-between"><span class="sec">Provider probes</span><button class="btnp">Run all</button></div>
+          <div class="panel" style="padding:6px 18px">
+            <div style="display:flex;align-items:center;gap:12px;padding:13px 0;border-bottom:1px solid var(--hair)"><span style="width:8px;height:8px;border-radius:50%;background:var(--ok)"></span><span style="flex:1;font:600 13.5px Manrope">Flutterwave · payout</span><span class="mono" style="color:var(--text3);width:70px;text-align:right">142ms</span><span class="pill" style="background:var(--okbg);color:var(--ok);margin-left:12px">Reachable</span></div>
+            <div style="display:flex;align-items:center;gap:12px;padding:13px 0;border-bottom:1px solid var(--hair)"><span style="width:8px;height:8px;border-radius:50%;background:var(--ok)"></span><span style="flex:1;font:600 13.5px Manrope">Bitnob · quote</span><span class="mono" style="color:var(--text3);width:70px;text-align:right">210ms</span><span class="pill" style="background:var(--okbg);color:var(--ok);margin-left:12px">Reachable</span></div>
+            <div style="display:flex;align-items:center;gap:12px;padding:13px 0;border-bottom:1px solid var(--hair)"><span style="width:8px;height:8px;border-radius:50%;background:var(--danger)"></span><span style="flex:1;font:600 13.5px Manrope">Paystack · transfer</span><span class="mono" style="color:var(--danger);width:70px;text-align:right">timeout</span><span class="pill" style="background:var(--dangerbg);color:var(--danger);margin-left:12px">No response</span></div>
+            <div style="display:flex;align-items:center;gap:12px;padding:13px 0;border-bottom:1px solid var(--hair)"><span style="width:8px;height:8px;border-radius:50%;background:var(--ok)"></span><span style="flex:1;font:600 13.5px Manrope">M-PESA · B2C</span><span class="mono" style="color:var(--text3);width:70px;text-align:right">98ms</span><span class="pill" style="background:var(--okbg);color:var(--ok);margin-left:12px">Reachable</span></div>
+            <div style="display:flex;align-items:center;gap:12px;padding:13px 0"><span style="width:8px;height:8px;border-radius:50%;background:var(--danger)"></span><span style="flex:1;font:600 13.5px Manrope">ExchangeRate-API · fetch</span><span class="mono" style="color:var(--danger);width:70px;text-align:right">401</span><span class="pill" style="background:var(--dangerbg);color:var(--danger);margin-left:12px">Unauthorised</span></div>
+          </div>
+        </sc-if>
+
+        <!-- ============ ERRORS ============ -->
+        <sc-if value="{{ isErrors }}" hint-placeholder-val="{{ false }}">
+          <div class="kgrid" style="grid-template-columns:repeat(3,1fr)"><div class="panel kpi"><div class="klab">Open</div><div class="kval" style="color:var(--danger)">6</div></div><div class="panel kpi"><div class="klab">Last hour</div><div class="kval">2</div></div><div class="panel kpi"><div class="klab">Resolved · 24h</div><div class="kval" style="color:var(--ok)">18</div></div></div>
+          <div class="panel" style="padding:6px 0">
+            <table class="tbl"><thead><tr><th>Time</th><th>Code</th><th>Message</th><th class="r">Count</th><th class="r"></th></tr></thead><tbody>
+              <tr><td class="mono" style="color:var(--text3)">03:28</td><td class="mono" style="color:var(--danger)">PAYOUT_TIMEOUT</td><td style="color:var(--text2)">Paystack did not respond within 30s</td><td class="r mono">4</td><td class="r"><button class="btng">Inspect</button></td></tr>
+              <tr><td class="mono" style="color:var(--text3)">02:55</td><td class="mono" style="color:var(--warn)">FX_UNPRICED</td><td style="color:var(--text2)">No rate for NGN→GHS</td><td class="r mono">1</td><td class="r"><button class="btng">Inspect</button></td></tr>
+              <tr><td class="mono" style="color:var(--text3)">01:12</td><td class="mono" style="color:var(--danger)">KYC_PROVIDER_5XX</td><td style="color:var(--text2)">Smile ID returned 502</td><td class="r mono">2</td><td class="r"><button class="btng">Inspect</button></td></tr>
+            </tbody></table>
+          </div>
+        </sc-if>
+
+        <!-- ============ CONSENT ============ -->
+        <sc-if value="{{ isConsent }}" hint-placeholder-val="{{ false }}">
+          <div class="kgrid" style="grid-template-columns:repeat(3,1fr)"><div class="panel kpi"><div class="klab">Marketing opt-in</div><div class="kval">71%</div></div><div class="panel kpi"><div class="klab">Withdrawn · 30d</div><div class="kval" style="color:var(--warn)">1,204</div></div><div class="panel kpi"><div class="klab">Data-sharing on</div><div class="kval">58%</div></div></div>
+          <div class="panel" style="padding:6px 0">
+            <table class="tbl"><thead><tr><th>Customer</th><th>Scope</th><th>State</th><th>Updated</th></tr></thead><tbody>
+              <tr><td>Ada Obi</td><td style="color:var(--text3);font-weight:500">Marketing</td><td><span class="pill" style="background:var(--okbg);color:var(--ok)">Granted</span></td><td style="color:var(--text3);font-weight:500">12 Mar 2025</td></tr>
+              <tr><td>Kwame Mensah</td><td style="color:var(--text3);font-weight:500">Marketing</td><td><span class="pill" style="background:var(--dangerbg);color:var(--danger)">Withdrawn</span></td><td style="color:var(--text3);font-weight:500">2 Sep 2026</td></tr>
+              <tr><td>Joan Wanjiru</td><td style="color:var(--text3);font-weight:500">Data sharing</td><td><span class="pill" style="background:var(--okbg);color:var(--ok)">Granted</span></td><td style="color:var(--text3);font-weight:500">19 Jul 2026</td></tr>
+              <tr><td>Chidi Okafor</td><td style="color:var(--text3);font-weight:500">Marketing</td><td><span class="pill" style="background:var(--dangerbg);color:var(--danger)">Withdrawn</span></td><td style="color:var(--text3);font-weight:500">28 Aug 2026</td></tr>
+            </tbody></table>
+          </div>
+        </sc-if>
+
+        <!-- ============ DATA REQUESTS ============ -->
+        <sc-if value="{{ isDataRequests }}" hint-placeholder-val="{{ false }}">
+          <div class="kgrid" style="grid-template-columns:repeat(3,1fr)"><div class="panel kpi"><div class="klab">Pending</div><div class="kval" style="color:var(--warn)">3</div></div><div class="panel kpi"><div class="klab">Due soon</div><div class="kval" style="color:var(--danger)">1</div></div><div class="panel kpi"><div class="klab">Completed · 30d</div><div class="kval" style="color:var(--ok)">22</div></div></div>
+          <div class="panel" style="padding:6px 0">
+            <table class="tbl"><thead><tr><th>Customer</th><th>Type</th><th>Requested</th><th>Due</th><th>Status</th><th class="r"></th></tr></thead><tbody>
+              <tr><td>Ada Obi</td><td style="color:var(--text3);font-weight:500">Data export</td><td style="color:var(--text3);font-weight:500">2d ago</td><td style="color:var(--text3);font-weight:500">in 28d</td><td><span class="pill" style="background:var(--warnbg);color:var(--warn)">Pending</span></td><td class="r"><button class="btnp">Fulfil</button></td></tr>
+              <tr><td>Femi Adeyemi</td><td style="color:var(--text3);font-weight:500">Erasure</td><td style="color:var(--text3);font-weight:500">5d ago</td><td style="color:var(--danger);font-weight:600">in 4d</td><td><span class="pill" style="background:var(--warnbg);color:var(--warn)">Pending</span></td><td class="r"><button class="btnp">Fulfil</button></td></tr>
+              <tr><td>Joan Wanjiru</td><td style="color:var(--text3);font-weight:500">Data export</td><td style="color:var(--text3);font-weight:500">20d ago</td><td style="color:var(--text3);font-weight:500">in 10d</td><td><span class="pill" style="background:var(--infobg);color:var(--info)">In progress</span></td><td class="r"><button class="btng">Open</button></td></tr>
+              <tr><td>Chidi Okafor</td><td style="color:var(--text3);font-weight:500">Erasure</td><td style="color:var(--text3);font-weight:500">40d ago</td><td style="color:var(--text3);font-weight:500">—</td><td><span class="pill" style="background:var(--okbg);color:var(--ok)">Completed</span></td><td class="r"></td></tr>
+            </tbody></table>
+          </div>
+        </sc-if>
+
+        <!-- ============ DISPUTES ============ -->
+        <sc-if value="{{ isDisputes }}" hint-placeholder-val="{{ false }}">
+          <div class="kgrid" style="grid-template-columns:repeat(3,1fr)"><div class="panel kpi"><div class="klab">Open</div><div class="kval" style="color:var(--warn)">5</div></div><div class="panel kpi"><div class="klab">High value</div><div class="kval" style="color:var(--danger)">1</div></div><div class="panel kpi"><div class="klab">Resolved · 7d</div><div class="kval" style="color:var(--ok)">12</div></div></div>
+          <div class="panel" style="padding:6px 0">
+            <table class="tbl"><thead><tr><th>Case</th><th>Customer</th><th class="r">Amount</th><th>Reason</th><th>Age</th><th class="r"></th></tr></thead><tbody>
+              <tr><td class="mono" style="font-weight:600">DP-881</td><td>Ada Obi</td><td class="r mono" style="color:var(--text2)">₦150,000</td><td style="color:var(--text3);font-weight:500">Not received</td><td style="color:var(--text3);font-weight:500">4h</td><td class="r"><button class="btnp">Review</button></td></tr>
+              <tr><td class="mono" style="font-weight:600">DP-877</td><td>Femi Adeyemi</td><td class="r mono" style="color:var(--text2)">₦42,000</td><td style="color:var(--text3);font-weight:500">Wrong amount</td><td style="color:var(--text3);font-weight:500">1d</td><td class="r"><button class="btnp">Review</button></td></tr>
+              <tr><td class="mono" style="font-weight:600">DP-870</td><td>Joan Wanjiru</td><td class="r mono" style="color:var(--danger);font-weight:700">₦900,000</td><td style="color:var(--text3);font-weight:500">Unauthorised</td><td style="color:var(--text3);font-weight:500">2d</td><td class="r"><button class="btnp">Review</button></td></tr>
+            </tbody></table>
+          </div>
+        </sc-if>
+
+        <!-- ============ RECOVERY ============ -->
+        <sc-if value="{{ isRecovery }}" hint-placeholder-val="{{ false }}">
+          <div class="kgrid" style="grid-template-columns:repeat(3,1fr)"><div class="panel kpi"><div class="klab">Stuck payouts</div><div class="kval" style="color:var(--danger)">3</div></div><div class="panel kpi"><div class="klab">Value stuck</div><div class="kval">₦1.2<span style="color:var(--text3);font-size:15px">M</span></div></div><div class="panel kpi"><div class="klab">Recovered · 7d</div><div class="kval" style="color:var(--ok)">₦4.8<span style="color:var(--text3);font-size:15px">M</span></div></div></div>
+          <div class="panel" style="padding:6px 0"><div style="padding:14px 18px 2px"><span style="font:500 12.5px Manrope;color:var(--text3)">Money that left a wallet and did not arrive — the mirror of Suspense.</span></div>
+            <table class="tbl"><thead><tr><th>Reference</th><th>Customer</th><th class="r">Amount</th><th>Rail</th><th>Failed</th><th class="r"></th></tr></thead><tbody>
+              <tr><td class="mono" style="font-weight:600">PO-5521</td><td>Ada Obi</td><td class="r mono" style="color:var(--text2)">₦85,000.00</td><td style="color:var(--text3);font-weight:500">GTBank</td><td style="color:var(--text3);font-weight:500">2h ago</td><td class="r"><button class="btnp">Retry</button></td></tr>
+              <tr><td class="mono" style="font-weight:600">PO-5518</td><td>Kwame Mensah</td><td class="r mono" style="color:var(--text2)">₵3,120.00</td><td style="color:var(--text3);font-weight:500">MTN MoMo</td><td style="color:var(--text3);font-weight:500">5h ago</td><td class="r"><button class="btnp">Retry</button></td></tr>
+              <tr><td class="mono" style="font-weight:600">PO-5502</td><td>Joan Wanjiru</td><td class="r mono" style="color:var(--text2)">KSh 210,000.00</td><td style="color:var(--text3);font-weight:500">M-PESA</td><td style="color:var(--text3);font-weight:500">1d ago</td><td class="r"><button class="btng">Refund</button></td></tr>
+            </tbody></table>
+          </div>
+        </sc-if>
+
+        <!-- ============ TAX ============ -->
+        <sc-if value="{{ isTax }}" hint-placeholder-val="{{ false }}">
+          <div class="kgrid" style="grid-template-columns:repeat(3,1fr)"><div class="panel kpi"><div class="klab">Owed onward</div><div class="kval">₦2.1<span style="color:var(--text3);font-size:15px">M</span></div></div><div class="panel kpi"><div class="klab">Remitted · 30d</div><div class="kval" style="color:var(--ok)">₦18.4<span style="color:var(--text3);font-size:15px">M</span></div></div><div class="panel kpi"><div class="klab">Jurisdictions</div><div class="kval">3</div></div></div>
+          <div class="panel" style="padding:6px 0">
+            <table class="tbl"><thead><tr><th>Jurisdiction</th><th>Currency</th><th class="r">Collected</th><th class="r">Remitted</th><th class="r">Owed</th></tr></thead><tbody>
+              <tr><td>Nigeria · FIRS</td><td style="color:var(--text3);font-weight:500">NGN</td><td class="r mono" style="color:var(--text2)">₦4,200,000</td><td class="r mono" style="color:var(--text2)">₦2,100,000</td><td class="r mono" style="color:var(--warn);font-weight:700">₦2,100,000</td></tr>
+              <tr><td>Ghana · GRA</td><td style="color:var(--text3);font-weight:500">GHS</td><td class="r mono" style="color:var(--text2)">₵120,000</td><td class="r mono" style="color:var(--text2)">₵120,000</td><td class="r mono" style="color:var(--ok)">₵0</td></tr>
+              <tr><td>Kenya · KRA</td><td style="color:var(--text3);font-weight:500">KES</td><td class="r mono" style="color:var(--text2)">KSh 890,000</td><td class="r mono" style="color:var(--text2)">KSh 890,000</td><td class="r mono" style="color:var(--ok)">KSh 0</td></tr>
+            </tbody></table>
+          </div>
+        </sc-if>
+
+        <!-- ============ GIFT CARDS ============ -->
+        <sc-if value="{{ isGiftcards }}" hint-placeholder-val="{{ false }}">
+          <div class="kgrid" style="grid-template-columns:repeat(3,1fr)"><div class="panel kpi"><div class="klab">Awaiting review</div><div class="kval" style="color:var(--warn)">5</div></div><div class="panel kpi"><div class="klab">Holds due</div><div class="kval" style="color:var(--warn)">2</div></div><div class="panel kpi"><div class="klab">Approved · 24h</div><div class="kval" style="color:var(--ok)">63</div></div></div>
+          <div class="panel" style="padding:6px 0">
+            <table class="tbl"><thead><tr><th>Card</th><th>Face</th><th>Submitted by</th><th>Waiting</th><th class="r">Decision</th></tr></thead><tbody>
+              <tr><td>Amazon US · e-code</td><td class="mono" style="color:var(--text2)">$100</td><td style="color:var(--text3);font-weight:500">Ada Obi</td><td style="color:var(--text3);font-weight:500">40m</td><td class="r"><span style="display:inline-flex;gap:8px"><button class="btng">Reject</button><button class="btnp">Approve</button></span></td></tr>
+              <tr><td>Steam US · e-code</td><td class="mono" style="color:var(--text2)">$50</td><td style="color:var(--text3);font-weight:500">Femi Adeyemi</td><td style="color:var(--text3);font-weight:500">1h</td><td class="r"><span style="display:inline-flex;gap:8px"><button class="btng">Reject</button><button class="btnp">Approve</button></span></td></tr>
+              <tr><td>iTunes US · e-code</td><td class="mono" style="color:var(--text2)">$200</td><td style="color:var(--text3);font-weight:500">Aisha Bello</td><td style="color:var(--text3);font-weight:500">2h</td><td class="r"><span style="display:inline-flex;gap:8px"><button class="btng">Reject</button><button class="btnp">Approve</button></span></td></tr>
+            </tbody></table>
+          </div>
+        </sc-if>
+
+        <!-- ============ OTHER (placeholder, themed) ============ -->
+        <sc-if value="{{ isOther }}" hint-placeholder-val="{{ false }}">
+          <div class="panel" style="padding:48px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:12px"><span style="width:56px;height:56px;border-radius:16px;background:var(--iristint);display:flex;align-items:center;justify-content:center"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--iris)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></svg></span><span style="font:800 19px Manrope">{{ title }}</span><span style="font:500 13px Manrope;color:var(--text3);max-width:320px;line-height:1.5">Same Command layout — this screen is next to build out. The design system, nav and theme all carry across.</span></div>
+        </sc-if>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+const DARK = {
+  appbg:'#000', panel:'#0C0D10', panelborder:'#1c1d23', sidebg:'#0a0b0e', hair:'#17181d', track:'#141519',
+  text:'#EEF2FA', text2:'#A3B0CC', text3:'#6B7A9B', navtext:'#8b93a7',
+  ok:'#4ADE80', okbg:'#10291C', danger:'#F87171', dangerbg:'#2E1516', warn:'#FBBF24', warnbg:'#2C2210', info:'#93B4FF', infobg:'#131E3A',
+  iris:'#7B6CF6', iristint:'#171526', iristext:'#C9C0FF', irisedge:'#2e2b4a', oniris:'#160a24',
+  brandmark:'#EEF2FA', brandink:'#000', avatarbg:'#171526', avatartext:'#C9C0FF'
+};
+const LIGHT = {
+  appbg:'#EEF0F5', panel:'#FFFFFF', panelborder:'#E7EAF0', sidebg:'#FFFFFF', hair:'#EAEDF3', track:'#EEF1F7',
+  text:'#0D1B3E', text2:'#4A5878', text3:'#8695B4', navtext:'#5A6party'.replace('party',''),
+  ok:'#0F9D58', okbg:'#E7F6EE', danger:'#D64545', dangerbg:'#FDECEC', warn:'#B7791F', warnbg:'#FDF3E2', info:'#3866E0', infobg:'#EAF0FE',
+  iris:'#6D5AE6', iristint:'#EFEBFF', iristext:'#4B3FB0', irisedge:'#D9D1FF', oniris:'#FFFFFF',
+  brandmark:'#0D1B3E', brandink:'#FFFFFF', avatarbg:'#EFEBFF', avatartext:'#5B4BD6'
+};
+LIGHT.navtext = '#5A6478';
+
+const NAV = [
+  { items:[ {key:'overview',label:'Overview',d:'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z'} ] },
+  { title:'People', items:[
+    {key:'customers',label:'Customers',d:'M9 11.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM2.5 20.5a6.5 6.5 0 0 1 13 0M16 5.2a3.5 3.5 0 0 1 0 6.6M17.5 14.6a6.5 6.5 0 0 1 4 6'},
+    {key:'identity',label:'Identity',d:'M12 2.5 20 6v6c0 5-3.4 8.2-8 9.5-4.6-1.3-8-4.5-8-9.5V6l8-3.5ZM9 12l2 2 4-4',badge:'7',tone:'warn'},
+    {key:'compliance',label:'Compliance',d:'M12 3 22 20H2L12 3ZM12 9.5v5M12 17.5h.01',badge:'3',tone:'danger'},
+    {key:'consent',label:'Consent',d:'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM8.5 12l2.5 2.5 4.5-4.5'},
+    {key:'data-requests',label:'Data requests',d:'M6 2.5h8L19 7.5v14H6zM14 2.5V8h5M9 13h6M9 17h4'},
+    {key:'disputes',label:'Disputes',d:'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM12 11v5.5M12 7.5h.01'},
+  ]},
+  { title:'Money', items:[
+    {key:'suspense',label:'Suspense',d:'M3 7.5A2 2 0 0 1 5 5.5h12a2 2 0 0 1 2 2M3 7.5v11a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-9H5a2 2 0 0 1-2-2Z',badge:'4',tone:'warn'},
+    {key:'recovery',label:'Recovery',d:'M7 4.5 3.5 8 7 11.5M3.5 8h13M17 12.5l3.5 3.5L17 19.5M20.5 16h-13'},
+    {key:'tax',label:'Tax',d:'M6 2.5h12v19l-2.5-1.8-2.5 1.8-2.5-1.8L8 21.5 6 19.7V2.5ZM9.5 8h5M9.5 12h5'},
+    {key:'earnings',label:'Earnings',d:'M3 17 9.5 10.5l4 4L21 7M21 7h-5.5M21 7v5.5'},
+    {key:'prices',label:'Prices',d:'M4 12.5 11.5 5H19v7.5L11.5 20 4 12.5Z M15 9h.01'},
+    {key:'giftcards',label:'Gift cards',d:'M3.5 11.5h17v9a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1v-9ZM2.5 7.5h19v4h-19zM12 7.5v14M12 7.5S10.5 3 8 3a2.2 2.2 0 0 0 0 4.5M12 7.5S13.5 3 16 3a2.2 2.2 0 0 1 0 4.5'},
+  ]},
+  { title:'Platform', items:[
+    {key:'providers',label:'Providers',d:'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM3.5 12h17M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18Z'},
+    {key:'provider-keys',label:'Provider keys',d:'M5.5 10.5h13v10h-13zM8.5 10.5V7a3.5 3.5 0 0 1 7 0v3.5M12 14.5v2.5'},
+    {key:'countries',label:'Countries',d:'M3 9.5 12 4l9 5.5M4.5 9.5v9M9.5 9.5v9M14.5 9.5v9M19.5 9.5v9M3 21h18'},
+    {key:'settings',label:'Settings',d:'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19.5 12a7.5 7.5 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7.5 7.5 0 0 0-2-1.2l-.4-2.6h-4l-.4 2.6a7.5 7.5 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6a7.5 7.5 0 0 0 0 2.4l-2 1.6 2 3.4 2.4-1a7.5 7.5 0 0 0 2 1.2l.4 2.6h4l.4-2.6a7.5 7.5 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.06-.4.1-.8.1-1.2Z'},
+    {key:'staff',label:'Staff',d:'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4.5 20.5a7.5 7.5 0 0 1 15 0'},
+    {key:'authenticator',label:'Your authenticator',d:'M12 2.5 20 6v6c0 5-3.4 8.2-8 9.5-4.6-1.3-8-4.5-8-9.5V6l8-3.5Z'},
+    {key:'notifications',label:'Notifications',d:'M18 8.5a6 6 0 1 0-12 0c0 6-2 7.5-2 7.5h16s-2-1.5-2-7.5ZM10.3 19.5a2 2 0 0 0 3.4 0'},
+    {key:'announcements',label:'Announcements',d:'M4 9.5v5h3.5l6 4v-13l-6 4H4Z M17.5 9.5a3.5 3.5 0 0 1 0 5'},
+    {key:'audit',label:'Audit',d:'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM12 7v5l3 2'},
+    {key:'readiness',label:'Readiness',d:'M12 2.5 20 6v6c0 5-3.4 8.2-8 9.5-4.6-1.3-8-4.5-8-9.5V6l8-3.5ZM9 12l2 2 4-4'},
+    {key:'diagnostics',label:'Diagnostics',d:'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19.5 12a7.5 7.5 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7.5 7.5 0 0 0-2-1.2l-.4-2.6h-4l-.4 2.6a7.5 7.5 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6a7.5 7.5 0 0 0 0 2.4l-2 1.6 2 3.4 2.4-1a7.5 7.5 0 0 0 2 1.2l.4 2.6h4l.4-2.6a7.5 7.5 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.06-.4.1-.8.1-1.2Z'},
+    {key:'errors',label:'Errors',d:'M12 3 22 20H2L12 3ZM12 9.5v5M12 17.5h.01'},
+  ]},
+];
+const TITLES = { overview:'Overview', customers:'Customers', identity:'Identity', compliance:'Compliance', consent:'Consent', 'data-requests':'Data requests', disputes:'Disputes', suspense:'Suspense', recovery:'Recovery', tax:'Tax', earnings:'Earnings', prices:'Prices', giftcards:'Gift cards', providers:'Providers', 'provider-keys':'Provider keys', countries:'Countries', settings:'Settings', staff:'Staff', authenticator:'Your authenticator', notifications:'Notifications', announcements:'Announcements', audit:'Audit', readiness:'Readiness', diagnostics:'Diagnostics', errors:'Errors' };
+const BUILT = ['overview','customers','identity','compliance','suspense','earnings','providers','settings','countries','prices','provider-keys','staff','authenticator','notifications','announcements','audit','readiness','diagnostics','errors','consent','data-requests','disputes','recovery','tax','giftcards'];
+
+class Component extends DCLogic {
+  state = { theme:'dark', screen:'overview' };
+  renderVals(){
+    const s = this.state;
+    const p = s.theme==='dark' ? DARK : LIGHT;
+    const rootVars = Object.entries(p).map(([k,v])=>`--${k}:${v}`).join(';');
+    const scr = s.screen;
+    const badgeStyle = (t)=> t==='danger' ? 'background:var(--dangerbg);color:var(--danger)' : 'background:var(--warnbg);color:var(--warn)';
+    return {
+      rootVars, isDark:s.theme==='dark', isLight:s.theme==='light',
+      title: TITLES[scr] || 'Overview',
+      isOverview:scr==='overview', isCustomers:scr==='customers', isIdentity:scr==='identity',
+      isCompliance:scr==='compliance', isDisputes:scr==='disputes', isSuspense:scr==='suspense',
+      isEarnings:scr==='earnings', isProviders:scr==='providers', isSettings:scr==='settings',
+      isCountries:scr==='countries', isPrices:scr==='prices',
+      isProviderKeys:scr==='provider-keys', isStaff:scr==='staff', isAuthenticator:scr==='authenticator',
+      isNotifications:scr==='notifications', isAnnouncements:scr==='announcements', isAudit:scr==='audit',
+      isReadiness:scr==='readiness', isDiagnostics:scr==='diagnostics', isErrors:scr==='errors',
+      isConsent:scr==='consent', isDataRequests:scr==='data-requests', isRecovery:scr==='recovery',
+      isTax:scr==='tax', isGiftcards:scr==='giftcards',
+      isOther: !BUILT.includes(scr),
+      navGroups: NAV.map(g=>({ title:g.title, items:g.items.map(it=>({
+        label:it.label, d:it.d, on: scr===it.key?'on':'',
+        go: ()=> this.setState({screen:it.key}),
+        hasBadge: it.badge!=null, badge:it.badge, badgeStyle: badgeStyle(it.tone)
+      })) })),
+      toggleTheme: ()=> this.setState(st=>({theme:st.theme==='dark'?'light':'dark'})),
+      goOverview: ()=> this.setState({screen:'overview'}),
+    };
+  }
+}
+</script>
+</body>
+</html>

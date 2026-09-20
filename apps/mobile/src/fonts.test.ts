@@ -44,7 +44,20 @@ const THEME = join(HERE, 'theme.ts');
  * the thing being checked.
  */
 function named(): readonly string[] {
-  const block = readFileSync(THEME, 'utf8').match(/export const font = \{([\s\S]*?)\}/);
+  /*
+   * COMMENTS ARE STRIPPED FIRST, and leaving them in made this test fail on
+   * correct code.
+   *
+   * It matches every quoted string in the block, which is right for the
+   * VALUES and wrong for the prose around them: a comment explaining that a
+   * figure takes `fontVariant: ['tabular-nums']` put the string
+   * `tabular-nums` in the block, and the test reported it as a typeface
+   * named by the theme and never loaded. A guard that fails on correct code
+   * gets suppressed, which is the same lesson `select-coverage.test.ts`
+   * records about a `<select>` inside a comment.
+   */
+  const source = readFileSync(THEME, 'utf8').replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, ' ');
+  const block = source.match(/export const font = \{([\s\S]*?)\}/);
   if (block === null) throw new Error('no `font` object in theme.ts');
   return Array.from((block[1] ?? '').matchAll(/'([^']+)'/g), (m) => m[1] as string);
 }

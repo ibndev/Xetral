@@ -223,8 +223,20 @@ export function Shell({
           )}
           <span className="spacer" />
           <ThemeToggle />
-          <Link href="/settings" className="icon-btn" aria-label="Notifications">
+          {/*
+            THE DOT IS ONLY ON THE HOME SCREEN'S HEADER, which is where the
+            comp draws it — and it is decoration rather than a claim, so it
+            is `aria-hidden` and the link's own label is unchanged.
+
+            It says "there is something here", which on this product is
+            always true: the bell goes to the account screen, which carries
+            the customer's own settings. What it must NEVER do is imply a
+            COUNT — a badge reading a number nothing has counted is the
+            "+₦150,000 this week" problem in a smaller place.
+          */}
+          <Link href="/settings" className="icon-btn has-dot" aria-label="Notifications">
             <Icon name="bell" size={20} />
+            {greeting !== undefined && <span className="dot" aria-hidden="true" />}
           </Link>
         </header>
 

@@ -231,11 +231,25 @@
    * screen title their weight without going larger. `display` and `sans` are
    * the same family and differ by SCALE, as they did before.
    *
-   * `--font-num` is new and is the point of the pairing: every amount, every
-   * KPI and every column of figures is Space Grotesk with tabular numerals,
-   * so a table of money lines up on the decimal. It is a proportional face
-   * used for numerals, not a monospace — `--font-mono` stays Spline for
-   * anything that is genuinely code, such as a reference or a key hint.
+   * `--font-num` IS MANROPE, AND THE FIRST VERSION OF THIS MADE IT SPACE
+   * GROTESK ON THE CUSTOMER APP, WHICH THE DESIGN NEVER DOES.
+   *
+   * Read the two comps rather than inferred: `docs/mockups/app.html` contains
+   * the string "Space Grotesk" ZERO times. Every figure a customer reads —
+   * the balance at `800 40px`, a currency card at `800 22px`, an amount in a
+   * list — is MANROPE, and what makes a column line up is
+   * `font-variant-numeric: tabular-nums`, not a different family.
+   * `docs/mockups/admin.html` is where Space Grotesk lives, on `.mono`:
+   * references and the operations figures, thirteen occurrences.
+   *
+   * So the two faces are two SURFACES, not two kinds of number. Getting that
+   * backwards put a face on the balance that the design does not use there,
+   * on the one screen every customer opens.
+   *
+   * `--font-num` therefore differs from `--font-sans` only in intent, and
+   * that is deliberate rather than redundant: the token is where "this is a
+   * figure" is said, so a call site keeps saying it and the day the design
+   * gives figures their own face again there is one line to change.
    *
    * INTER IS STILL LOADED AND IS STILL CORRECT FOR PROSE. The legal pages are
    * paragraphs somebody reads, and Inter is the better face at 15px for that;
@@ -250,8 +264,14 @@
   --font-display: var(--font-manrope), 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif;
   --font-sans:    var(--font-manrope), 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif;
   --font-read:    var(--font-inter), 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif;
-  --font-num:     var(--font-grotesk), var(--font-manrope), 'Noto Sans', ui-sans-serif, system-ui, sans-serif;
-  --font-mono:    var(--font-spline), 'Noto Sans Mono', 'DejaVu Sans Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-num:     var(--font-manrope), 'Noto Sans', 'DejaVu Sans', ui-sans-serif, system-ui, sans-serif;
+  /* SPACE GROTESK, WHICH IS WHAT THE OPERATIONS COMP SETS `.mono` IN. It was
+     Spline Sans Mono, which appears in NEITHER comp — so the product was
+     loading and rendering a face the design does not contain. Space Grotesk
+     is proportional rather than monospaced, which is right for a reference
+     and a figure and is what the comp chose; the monospace fallbacks stay
+     for a browser that has neither. */
+  --font-mono:    var(--font-grotesk), 'Noto Sans Mono', 'DejaVu Sans Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* Motion — one curve and three durations, so nothing in the product moves
      to a timing nobody chose. */
@@ -494,10 +514,21 @@ h3 { font-size: 16px; }
 
 /* ═══════════════════════════ layout ═══════════════════════════ */
 
+/*
+ * THE GUTTER IS 20px, READ OFF THE COMP RATHER THAN CHOSEN.
+ *
+ * `docs/mockups/app.html` insets every block on every screen by 20 — the
+ * header at `12px 20px 4px`, the rail at `16px 20px 2px`, the Explore grid at
+ * `0 20px`, seventeen occurrences against three of 16. It was 16 here, which
+ * is four pixels narrower on every screen in the product and reads as the
+ * whole app being slightly tighter than the design it was drawn from.
+ *
+ * Both rails bleed by exactly this, so the constant moves with it.
+ */
 .shell {
   max-width: 560px;
   margin: 0 auto;
-  padding: 16px 16px calc(var(--tabbar-h) + 28px);
+  padding: 16px 20px calc(var(--tabbar-h) + 28px);
 }
 .shell.wide { max-width: 1240px; }
 
@@ -906,7 +937,7 @@ h3 { font-size: 16px; }
 
 /* ═══════════════════════════ product tiles ═══════════════════════════ */
 
-.tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; }
 @media (min-width: 380px) { .tiles { gap: 10px; } }
 @media (min-width: 720px) { .tiles { gap: 14px; } }
 
@@ -918,19 +949,24 @@ h3 { font-size: 16px; }
  * not the icons, so those come down and the 38px icon plate does not: shrinking
  * it would cost the one thing in the tile that is recognised at a glance.
  */
+/* GEOMETRY READ OFF THE COMP: `gap:6px; padding:11px 4px; border-radius:14px`,
+   with a 32px icon holder at radius 10 and an 11px label. The grid gap is 9.
+   These were 7/10px 6px/`--r`/38px/11.5px — each within a pixel or two of
+   right, and together a row of tiles a little taller and looser than the one
+   that was drawn. */
 .tile {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 7px;
-  padding: 10px 6px;
-  min-height: 76px;
+  gap: 6px;
+  padding: 11px 4px;
+  min-height: 72px;
   background: var(--surface);
   border: 1px solid var(--edge);
-  border-radius: var(--r);
+  border-radius: 14px;
   color: var(--text);
-  font-size: 11.5px;
+  font-size: 11px;
   font-weight: 600;
   line-height: 1.25;
   text-align: center;
@@ -952,8 +988,9 @@ h3 { font-size: 16px; }
 .tile .tile-icon {
   display: grid;
   place-items: center;
-  width: 38px; height: 38px;
-  border-radius: 11px;
+  /* 32px at radius 10, off the comp. */
+  width: 32px; height: 32px;
+  border-radius: 10px;
   background: var(--info-bg);
   color: var(--info);
 }
@@ -1302,8 +1339,8 @@ h3 { font-size: 16px; }
   /* Bleeds to the viewport edge so a card can be half-visible and say "there
      is more", then puts the inset back so the first one lines up with the
      content above it. */
-  margin: 0 -16px;
-  padding: 2px 16px 6px;
+  margin: 0 -20px;
+  padding: 2px 20px 6px;
   /* WITHOUT THIS the first card sits at x=0, out of line with every other
      block on the page by exactly the shell's inset.
 
@@ -1313,7 +1350,7 @@ h3 { font-size: 16px; }
      there to align it. `scroll-padding` is what moves the snap line inwards
      to match. Measured in the browser, not guessed: the rail reported 16px of
      left padding while its first child reported left: 0. */
-  scroll-padding-left: 16px;
+  scroll-padding-left: 20px;
 }
 .promo-rail::-webkit-scrollbar { display: none; }
 @media (min-width: 720px) {
@@ -1927,8 +1964,9 @@ tbody tr:last-child td { border-bottom: 0; }
  * That is most of what makes a table of amounts hard to scan, and it is the
  * one thing a reviewer deciding whether a figure is out of place is doing.
  *
- * `--font-num` is Space Grotesk, which the design sets every balance in, and
- * `tabular-nums` is what makes the digits one width. Keyed on `.right`
+ * `--font-num` carries the intent and `tabular-nums` does the work — a
+ * column lines up because the digits are one width, not because the family
+ * changed. Keyed on `.right`
  * rather than on a new class, because the alignment and the face answer the
  * same question — this column holds numbers — and two ways of saying it is
  * one way to say it wrong.
@@ -5051,9 +5089,9 @@ html, body { overflow-x: hidden; }
    * align it. `.promo-rail` already records this, measured in a browser; this
    * rail was written without it and reproduced the fault one class away.
    */
-  padding: 16px 16px 2px;
-  margin: 0 -16px;
-  scroll-padding-left: 16px;
+  padding: 16px 20px 2px;
+  margin: 0 -20px;
+  scroll-padding-left: 20px;
   scrollbar-width: none;
 }
 @media (min-width: 720px) {
@@ -5329,4 +5367,19 @@ html, body { overflow-x: hidden; }
   letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
   margin-top: 3px;
+}
+
+/* THE BELL'S MARK, off the comp: an 8px iris disc ringed in the PAGE colour
+   so it reads as sitting on top of the glyph rather than as part of it. The
+   ring is `--bg` rather than a border colour for that reason — it is a
+   cut-out, not an outline. */
+.icon-btn.has-dot { position: relative; }
+.icon-btn.has-dot .dot {
+  position: absolute;
+  top: 8px; right: 9px;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--iris);
+  border: 2px solid var(--bg);
+  pointer-events: none;
 }

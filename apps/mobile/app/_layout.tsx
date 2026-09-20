@@ -81,8 +81,12 @@ export default function Layout() {
     'Inter-SemiBold': require('../assets/fonts/Inter-SemiBold.ttf'),
     'Inter-Bold': require('../assets/fonts/Inter-Bold.ttf'),
     'Inter-ExtraBold': require('../assets/fonts/Inter-ExtraBold.ttf'),
-    'SplineSansMono-Regular': require('../assets/fonts/SplineSansMono-Regular.ttf'),
-    'SplineSansMono-SemiBold': require('../assets/fonts/SplineSansMono-SemiBold.ttf'),
+    /* SPLINE SANS MONO IS NO LONGER REGISTERED, because neither comp contains
+       it — `theme.ts` now points `mono` at Space Grotesk, which is what the
+       operations comp sets `.mono` in. Registering a face nothing asks for
+       ships two more files in every bundle and invites the next screen to
+       reach for a family the design does not have. The files stay on disk
+       until a commit that only removes assets. */
   });
 
   useEffect(() => {

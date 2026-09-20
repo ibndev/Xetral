@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { formatAmount, symbolFor } from '@xetral/client';
+import { entryKindLabel, formatAmount, symbolFor } from '@xetral/client';
 import type { Balance, Transaction } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { Icon } from '@/ui/icon';
@@ -93,6 +93,35 @@ function dayOf(when: Date): string {
   if (days === 0) return 'Today';
   if (days === 1) return 'Yesterday';
   return when.toLocaleDateString(undefined, { day: 'numeric', month: 'long' });
+}
+
+/**
+ * The list, cut into consecutive runs of one day.
+ *
+ * CONSECUTIVE, NOT COLLECTED. Two runs of the same day stay two runs, and
+ * that is deliberate rather than a limitation: history is keyset paginated on
+ * the POSTING id, which is time order for ordinary traffic and deliberately
+ * is not when a sweep posts today a deposit that arrived on Tuesday.
+ * Collecting by date would re-sort the page and make it disagree with the
+ * cursor that "See all" pages on, which is how a list grows duplicates and
+ * gaps. A heading that appears twice is the honest rendering of the order the
+ * ledger returned.
+ *
+ * The caller keys on the day AND its index for that reason: two runs of
+ * "Today" would otherwise collide as React keys and the second would not
+ * render.
+ */
+function groupByDay(
+  entries: readonly Transaction[],
+): readonly { readonly day: string; readonly entries: readonly Transaction[] }[] {
+  const out: { day: string; entries: Transaction[] }[] = [];
+  for (const entry of entries) {
+    const day = dayOf(new Date(entry.occurred_at));
+    const last = out[out.length - 1];
+    if (last !== undefined && last.day === day) last.entries.push(entry);
+    else out.push({ day, entries: [entry] });
+  }
+  return out;
 }
 
 export default function Wallet() {
@@ -313,25 +342,17 @@ export default function Wallet() {
         </div>
       </section>
 
-      <section className="animate-in d3">
-        <div className="promo-rail">
-          <article className="promo">
-            <h3>Send money home, instantly</h3>
-            <p>Convert and deliver in one move — the rate you see is the rate you get.</p>
-            <Link href="/fx" className="promo-cta">
-              Convert now <Icon name="arrowRight" size={15} />
-            </Link>
-          </article>
-          <article className="promo navy">
-            <h3>Spend online in dollars</h3>
-            <p>A virtual USD card, funded from your naira balance in seconds.</p>
-            <Link href="/cards" className="promo-cta">
-              Get a card <Icon name="arrowRight" size={15} />
-            </Link>
-          </article>
-        </div>
-      </section>
+      {/*
+        THERE IS NO PROMO RAIL HERE, and removing it is the correction.
 
+        Two marketing cards sat between Explore and Recent activity — "Send
+        money home, instantly" and "Spend online in dollars". They are not in
+        `docs/mockups/app.html`: that screen goes Explore tiles straight to
+        Recent activity, and both cards were this app's own addition. A
+        section the design does not have is a difference from the design,
+        and on the home screen it pushed the customer's own transactions
+        most of a handset further down for two things they did not ask for.
+      */}
       <section className="animate-in d4">
         <div className="sec-head">
           <h2>Recent activity</h2>
@@ -380,37 +401,52 @@ export default function Wallet() {
           it, and that stays true however many times it appears.
         */}
         <div>
-          {(() => {
-            let seen: string | undefined;
-            return history.data?.entries.slice(0, 6).map((t: Transaction) => {
-              const outgoing = t.amount.trim().startsWith('-');
-              const when = new Date(t.occurred_at);
-              const day = dayOf(when);
-              const heading = day === seen ? undefined : day;
-              seen = day;
-              return (
-                <div key={t.id}>
-                  {heading !== undefined && <div className="day-head">{heading}</div>}
+          {/*
+            EACH DAY IS ONE CONTAINER, which is what makes the hairlines come
+            out right. `.tx-row:last-child` drops its bottom border so a
+            group does not end in a rule against nothing — and with every row
+            wrapped in its own div, every row was a last child and NO row had
+            a separator at all. The comp puts a day's rows in one box under
+            one heading; this is that shape rather than a fix for the
+            symptom.
+          */}
+          {groupByDay(history.data?.entries.slice(0, 6) ?? []).map((group, i) => (
+            <div key={`${group.day}-${i}`}>
+              <div className="day-head">{group.day}</div>
+              <div>
+                {group.entries.map((t: Transaction) => {
+                  const outgoing = t.amount.trim().startsWith('-');
+                  const when = new Date(t.occurred_at);
+                  /*
+                   * THREE PIECES, WHICH IS WHAT THE COMP DRAWS: who, what it
+                   * was, and the amount with its time under it.
+                   *
+                   * It was two — the time sat in the sub line on the LEFT,
+                   * where the design puts a descriptor, and the right column
+                   * carried only a figure. That left the row unable to say
+                   * what a transaction WAS: "Chidi Okafor" with no "Xetral
+                   * transfer" under it is a name and a number.
+                   *
+                   * The descriptor comes from the entry's `kind`, which is a
+                   * closed enum, never from the description — see
+                   * `entryKindLabel`.
+                   */
+                  return (
               <Link className="tx-row" href={`/activity?entry=${t.id}`}>
                 <span className="tx-mark">
                   <span className="avatar">
                     <Icon name={outgoing ? 'arrowUpRight' : 'download'} size={19} />
                   </span>
                   {/* The currency rides ON the avatar rather than beside it,
-                      so a row is two columns and not three — and is read at a
-                      glance without a label taking a line. */}
+                      so a row is three columns and not four — and is read at
+                      a glance without a label taking a line. */}
                   <span className="tx-flag">
                     <CurrencyMark currency={t.currency} size={14} />
                   </span>
                 </span>
                 <span className="tx-main">
                   <span className="tx-name">{t.description}</span>
-                  {/* THE TIME, NOT THE DATE. The day heading above already
-                      said which day, and a row repeating it is a column of
-                      identical text. */}
-                  <span className="tx-sub">
-                    {when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
-                  </span>
+                  <span className="tx-sub">{entryKindLabel(t.kind)}</span>
                 </span>
                 <span className="tx-side">
                   {/* MONEY LEAVING IS RED AND MONEY ARRIVING IS GREEN. It was
@@ -419,12 +455,19 @@ export default function Wallet() {
                   <span className={outgoing ? 'tx-amt out' : 'tx-amt in'}>
                     {formatAmount(t.amount, t.currency)}
                   </span>
+                  {/* THE TIME, NOT THE DATE, and on the RIGHT under the
+                      amount where the comp puts it. The day heading above
+                      already said which day. */}
+                  <span className="tx-time">
+                    {when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+                  </span>
                 </span>
               </Link>
-                </div>
-              );
-            });
-          })()}
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </div>
 
         {balances.error !== undefined && <p className="error">

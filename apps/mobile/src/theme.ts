@@ -340,25 +340,39 @@ export const font = {
   sansBold: 'Manrope-Bold',
 
   /**
-   * FIGURES, and this is a different face from `mono`.
+   * FIGURES — AND THEY ARE MANROPE, WHICH THE FIRST VERSION OF THIS GOT
+   * BACKWARDS.
    *
-   * Space Grotesk is proportional with tabular numerals, which is what the
-   * design sets a balance and a table of amounts in. `mono` stays Spline for
-   * what is genuinely monospaced — a reference, a key hint, an address — so
-   * the two are not interchangeable and neither is a fallback for the other.
+   * `docs/mockups/app.html` contains the string "Space Grotesk" ZERO times.
+   * Every figure a customer reads there is Manrope: the balance at `800
+   * 40px`, a currency card at `800 22px`, an amount in a list. What makes a
+   * column line up is `fontVariant: ['tabular-nums']`, not a different
+   * family. Space Grotesk belongs to the OPERATIONS comp, on `.mono`.
+   *
+   * Kept as its own name rather than collapsed into `sansBold`, because the
+   * call site saying "this is a figure" is what makes the day the design
+   * gives figures their own face a one-line change.
+   *
+   * REACT NATIVE IGNORES `fontWeight` BESIDE A CUSTOM `fontFamily`, so the
+   * weight is in the NAME — `num` is the 800 the comp sets a balance in.
    */
-  num: 'SpaceGrotesk-Regular',
-  numSemi: 'SpaceGrotesk-SemiBold',
-  numBold: 'SpaceGrotesk-Bold',
+  num: 'Manrope-SemiBold',
+  numSemi: 'Manrope-Bold',
+  numBold: 'Manrope-ExtraBold',
 
   /** Long-form prose. Inter is the better reading face at 15px, and a privacy
    *  notice does not need to look like a dashboard. */
   read: 'Inter-Regular',
   readSemi: 'Inter-SemiBold',
 
-  /** Figures. */
-  mono: 'SplineSansMono-Regular',
-  monoSemi: 'SplineSansMono-SemiBold',
+  /**
+   * A REFERENCE, A KEY HINT, AN ADDRESS — and it is Space Grotesk, which is
+   * what the operations comp sets `.mono` in. It was Spline Sans Mono, a face
+   * that appears in NEITHER comp, so the app was shipping and rendering
+   * something the design does not contain.
+   */
+  mono: 'SpaceGrotesk-Regular',
+  monoSemi: 'SpaceGrotesk-SemiBold',
 } as const;
 
 /**

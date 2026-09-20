@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  body{margin:0;background:#c9c7c1;font-family:Manrope,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  *{box-sizing:border-box}
+  ::-webkit-scrollbar{width:0;height:0}
+  @keyframes sk{0%,100%{opacity:.5}50%{opacity:1}}
+  @keyframes pop{0%{transform:scale(.85);opacity:0}100%{transform:scale(1);opacity:1}}
+  .stage{min-height:100vh;padding:26px;display:flex;flex-direction:column;align-items:center;gap:22px}
+  .ctl{width:100%;max-width:940px;background:#141418;border:1px solid #26262e;border-radius:18px;padding:16px 18px;display:flex;flex-wrap:wrap;gap:18px;align-items:center;color:#e7e7ee}
+  .ctl h4{margin:0 10px 0 0;font:700 13px Manrope;letter-spacing:-.2px;color:#fff}
+  .grp{display:flex;flex-direction:column;gap:6px}
+  .grp span.lbl{font:600 10px Manrope;letter-spacing:.09em;text-transform:uppercase;color:#7a7a88}
+  .seg{display:flex;gap:4px;background:#0c0c10;border:1px solid #26262e;border-radius:11px;padding:4px}
+  .seg button{border:none;background:transparent;color:#b6b6c2;font:600 12px Manrope;padding:7px 12px;border-radius:8px;cursor:pointer;transition:.14s}
+  .seg button:hover{color:#fff}
+  .seg button.on{background:#7B6CF6;color:#fff}
+  .devwrap{display:flex;justify-content:center;width:100%;overflow-x:auto;padding:4px 0 30px}
+</style>
+</helmet>
+
+<div class="stage">
+  <div class="ctl">
+    <h4>Xetral · 2a prototype</h4>
+    <div class="grp"><span class="lbl">Theme</span><div class="seg"><button class="{{ darkOn }}" onClick="{{ setDark }}">Dark</button><button class="{{ lightOn }}" onClick="{{ setLight }}">Light</button></div></div>
+    <div class="grp"><span class="lbl">Width</span><div class="seg"><button class="{{ w320 }}" onClick="{{ setW320 }}">320</button><button class="{{ w390 }}" onClick="{{ setW390 }}">390</button><button class="{{ w1280 }}" onClick="{{ setW1280 }}">1280 web</button></div></div>
+    <div class="grp"><span class="lbl">Screen</span><div class="seg"><button class="{{ sHome }}" onClick="{{ jumpHome }}">Home</button><button class="{{ sWho }}" onClick="{{ jumpWho }}">Recipients</button><button class="{{ sCur }}" onClick="{{ jumpCurrency }}">Currency</button><button class="{{ sDet }}" onClick="{{ jumpDetails }}">Details</button><button class="{{ sAmt }}" onClick="{{ jumpAmount }}">Amount</button><button class="{{ sSuc }}" onClick="{{ jumpSuccess }}">Success</button></div></div>
+    <div class="grp"><span class="lbl">Recipients state</span><div class="seg"><button class="{{ lData }}" onClick="{{ setListData }}">Data</button><button class="{{ lLoad }}" onClick="{{ setListLoading }}">Loading</button><button class="{{ lEmpty }}" onClick="{{ setListEmpty }}">Empty</button></div></div>
+    <div class="grp"><span class="lbl">Verify (details)</span><div class="seg"><button class="{{ errOff }}" onClick="{{ detOk }}">OK</button><button class="{{ errOn }}" onClick="{{ detErrOn }}">Fails</button></div></div>
+    <div class="grp"><span class="lbl">Services</span><div class="seg" style="flex-wrap:wrap;max-width:520px"><button class="{{ sCards }}" onClick="{{ jumpCards }}">Cards</button><button class="{{ sActivity }}" onClick="{{ jumpActivity }}">Activity</button><button class="{{ sAdd }}" onClick="{{ jumpAdd }}">Add</button><button class="{{ sConvert }}" onClick="{{ jumpConvert }}">Convert</button><button class="{{ sRequest }}" onClick="{{ jumpRequest }}">Request</button><button class="{{ sBills }}" onClick="{{ jumpBills }}">Bills</button><button class="{{ sCrypto }}" onClick="{{ jumpCrypto }}">Crypto</button><button class="{{ sEsim }}" onClick="{{ jumpEsim }}">eSIM</button><button class="{{ sGift }}" onClick="{{ jumpGift }}">Gift</button></div></div>
+  </div>
+
+  <div class="devwrap">
+    <div style="{{ rootVars }}">
+      <div style="{{ deviceStyle }}">
+        <div style="{{ screenStyle }}">
+
+          <div style="flex:none">
+            <sc-if value="{{ isPhone }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:15px 26px 6px;color:var(--text)">
+                <span style="font:700 15px Manrope">9:41</span>
+                <span style="display:flex;gap:7px;align-items:center">
+                  <svg width="17" height="11" viewBox="0 0 17 11" fill="var(--text)"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.7" y="5" width="3" height="6" rx="1"/><rect x="9.3" y="2.5" width="3" height="8.5" rx="1"/><rect x="14" y="0" width="3" height="11" rx="1"/></svg>
+                  <svg width="16" height="11" viewBox="0 0 16 12" fill="none" stroke="var(--text)" stroke-width="1.4" stroke-linecap="round"><path d="M1 4.2a10 10 0 0 1 14 0M3.4 6.8a6.4 6.4 0 0 1 9.2 0M6 9.3a2.8 2.8 0 0 1 4 0"/></svg>
+                  <svg width="25" height="12" viewBox="0 0 25 12"><rect x=".5" y=".5" width="20.5" height="11" rx="3.2" fill="none" stroke="var(--text)" stroke-opacity=".45"/><rect x="2.2" y="2.2" width="16" height="7.6" rx="1.8" fill="var(--text)"/><rect x="22.2" y="3.8" width="1.8" height="4.4" rx=".9" fill="var(--text)" fill-opacity=".45"/></svg>
+                </span>
+              </div>
+            </sc-if>
+            <sc-if value="{{ isDesktop }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;align-items:center;gap:14px;padding:13px 18px;background:var(--surface);border-bottom:1px solid var(--line)">
+                <span style="display:flex;gap:7px"><span style="width:12px;height:12px;border-radius:50%;background:#ff5f57"></span><span style="width:12px;height:12px;border-radius:50%;background:#febc2e"></span><span style="width:12px;height:12px;border-radius:50%;background:#28c840"></span></span>
+                <span style="flex:1;display:flex;justify-content:center"><span style="display:inline-flex;align-items:center;gap:8px;background:var(--field);border-radius:9px;padding:7px 16px;font:500 12.5px Inter;color:var(--text3)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 10.5h13v10h-13zM8.5 10.5V7a3.5 3.5 0 0 1 7 0v3.5"/></svg>app.xetral.com</span></span>
+                <span style="width:60px"></span>
+              </div>
+            </sc-if>
+          </div>
+
+          <div style="{{ devBodyStyle }}">
+            <sc-if value="{{ isDesktop }}" hint-placeholder-val="{{ false }}">
+              <div style="{{ sidebarStyle }}">
+                <div style="display:flex;align-items:center;gap:9px;padding:6px 10px 20px">
+                  <svg width="26" height="26" viewBox="0 0 26 26"><rect width="26" height="26" rx="9" fill="var(--iris)"/><path d="M8 8l10 10M18 8 8 18" stroke="var(--oniris)" stroke-width="2.4" stroke-linecap="round"/></svg>
+                  <span style="font:700 18px Manrope;color:var(--text);letter-spacing:-.2px">Xetral</span>
+                </div>
+                <div onClick="{{ jumpHome }}" style="display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:12px;background:var(--iristint);color:var(--iristext);cursor:pointer;font:600 14px Manrope"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--iris)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5M5.5 9.5V20h13V9.5M9.5 20v-5.5h5V20"/></svg>Home</div>
+                <div style="display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:12px;color:var(--text2);cursor:pointer;font:600 14px Manrope"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 7.5h19v11a2 2 0 0 1-2 2h-15a2 2 0 0 1-2-2v-11ZM2.5 10.5h19M6 16.5h3"/></svg>Cards</div>
+                <div style="display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:12px;color:var(--text2);cursor:pointer;font:600 14px Manrope"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM12 7v5l3.5 2"/></svg>Activity</div>
+                <div style="display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:12px;color:var(--text2);cursor:pointer;font:600 14px Manrope"><svg width="20" height="20" viewBox="0 0 24 24" fill="var(--text3)"><rect x="4" y="4" width="6" height="6" rx="1.5"/><rect x="14" y="4" width="6" height="6" rx="1.5"/><rect x="4" y="14" width="6" height="6" rx="1.5"/><rect x="14" y="14" width="6" height="6" rx="1.5"/></svg>More</div>
+                <div style="flex:1"></div>
+                <div onClick="{{ toggleTheme }}" style="display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:12px;color:var(--text2);cursor:pointer;font:600 14px Manrope">
+                  <sc-if value="{{ isDark }}" hint-placeholder-val="{{ true }}"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16.5a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9ZM12 2v2.5M12 19.5V22M4.2 4.2l1.8 1.8M18 18l1.8 1.8M2 12h2.5M19.5 12H22M4.2 19.8 6 18M18 6l1.8-1.8"/></svg>Light mode</sc-if>
+                  <sc-if value="{{ isLight }}" hint-placeholder-val="{{ false }}"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11Z"/></svg>Dark mode</sc-if>
+                </div>
+              </div>
+            </sc-if>
+
+            <div style="{{ appColStyle }}">
+              <div style="{{ innerColStyle }}">
+
+                <!-- ============ HOME ============ -->
+                <sc-if value="{{ isHome }}" hint-placeholder-val="{{ true }}">
+                  <div style="position:relative;padding-bottom:14px">
+                    <div style="position:absolute;top:-30px;left:24px;width:280px;height:250px;background:radial-gradient(circle,var(--glow),transparent 68%);pointer-events:none"></div>
+                    <div style="display:flex;align-items:center;gap:12px;padding:12px 20px 4px;position:relative">
+                      <span style="width:44px;height:44px;border-radius:50%;background:var(--avatar);border:1.5px solid var(--iris);display:flex;align-items:center;justify-content:center;font:700 15px Manrope;color:var(--avatartext)">AO</span>
+                      <span style="flex:1;min-width:0"><span style="display:block;font:500 12.5px Manrope;color:var(--text3)">Welcome back</span><span style="display:block;font:700 16px Manrope;color:var(--text);letter-spacing:-.2px">Ada Obi</span></span>
+                      <span onClick="{{ toggleTheme }}" style="width:42px;height:42px;display:flex;align-items:center;justify-content:center;cursor:pointer"><sc-if value="{{ isDark }}" hint-placeholder-val="{{ true }}"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="var(--text2)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16.5a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9ZM12 2v2.5M12 19.5V22M4.2 4.2l1.8 1.8M18 18l1.8 1.8M2 12h2.5M19.5 12H22M4.2 19.8 6 18M18 6l1.8-1.8"/></svg></sc-if><sc-if value="{{ isLight }}" hint-placeholder-val="{{ false }}"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="var(--text2)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11Z"/></svg></sc-if></span>
+                      <span style="width:42px;height:42px;display:flex;align-items:center;justify-content:center;position:relative"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="var(--text2)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8.5a6 6 0 1 0-12 0c0 6-2 7.5-2 7.5h16s-2-1.5-2-7.5ZM10.3 19.5a2 2 0 0 0 3.4 0"/></svg><span style="position:absolute;top:8px;right:9px;width:8px;height:8px;border-radius:50%;background:var(--iris);border:2px solid var(--bg)"></span></span>
+                    </div>
+                    <div style="padding:16px 22px 2px;position:relative">
+                      <div style="display:flex;align-items:center;gap:8px"><span style="font:600 13px Manrope;color:var(--text2)">Total balance</span><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/></svg></div>
+                      <div style="font:800 40px Manrope;color:var(--text);letter-spacing:-1.6px;font-variant-numeric:tabular-nums;margin-top:8px">₦2,570,900<span style="color:var(--text3)">.00</span></div>
+                      <div style="margin-top:11px"><span style="display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:999px;background:var(--iristint);border:1px solid var(--irisedge);font:600 12px Manrope;color:var(--iristext)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--iris)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17 9.5 10.5l4 4L21 7M21 7h-5.5M21 7v5.5"/></svg>+₦150,000 this week</span></div>
+                    </div>
+                    <div style="display:flex;gap:12px;padding:16px 20px 2px;overflow-x:auto">
+                      <div style="flex:none;width:212px;border-radius:22px;padding:17px;background:linear-gradient(150deg,var(--cardgrad1),var(--cardgrad2));border:1px solid var(--iris);box-shadow:0 0 0 3px var(--irisglow)">
+                        <div style="display:flex;align-items:center;gap:9px"><span style="display:inline-flex;width:26px;height:26px;border-radius:50%;overflow:hidden"><svg width="26" height="26" viewBox="0 0 3 2" preserveAspectRatio="xMidYMid slice"><rect width="1" height="2" fill="#008751"/><rect width="1" height="2" x="1" fill="#fff"/><rect width="1" height="2" x="2" fill="#008751"/></svg></span><span style="flex:1"><span style="display:block;font:700 14px Manrope;color:var(--text)">NGN</span><span style="display:block;font:500 11px Manrope;color:var(--text3)">Nigerian Naira</span></span></div>
+                        <div style="font:800 22px Manrope;color:var(--text);letter-spacing:-.6px;font-variant-numeric:tabular-nums;margin-top:16px">₦2,450,900.00</div>
+                        <div style="font:500 11.5px Manrope;color:var(--text3);margin-top:3px">Spendable</div>
+                      </div>
+                      <div style="flex:none;width:212px;border-radius:22px;padding:17px;background:var(--surface);border:1px solid var(--edge)">
+                        <div style="display:flex;align-items:center;gap:9px"><span style="display:inline-flex;width:26px;height:26px;border-radius:50%;overflow:hidden"><svg width="26" height="26" viewBox="0 0 26 26" preserveAspectRatio="xMidYMid slice"><rect width="26" height="26" fill="#B22234"/><rect y="2" width="26" height="2" fill="#fff"/><rect y="6" width="26" height="2" fill="#fff"/><rect y="10" width="26" height="2" fill="#fff"/><rect y="14" width="26" height="2" fill="#fff"/><rect y="18" width="26" height="2" fill="#fff"/><rect y="22" width="26" height="2" fill="#fff"/><rect width="12" height="14" fill="#3C3B6E"/></svg></span><span style="flex:1"><span style="display:block;font:700 14px Manrope;color:var(--text)">USD</span><span style="display:block;font:500 11px Manrope;color:var(--text3)">US Dollar</span></span></div>
+                        <div style="font:800 22px Manrope;color:var(--text);letter-spacing:-.6px;font-variant-numeric:tabular-nums;margin-top:16px">$740.20</div>
+                        <div style="font:500 11.5px Manrope;color:var(--text3);margin-top:3px">Spendable</div>
+                      </div>
+                      <div style="flex:none;width:212px;border-radius:22px;padding:17px;background:var(--surface);border:1px solid var(--edge)">
+                        <div style="display:flex;align-items:center;gap:9px"><span style="display:inline-flex;width:26px;height:26px;border-radius:50%;overflow:hidden"><svg width="26" height="26" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid slice"><rect width="24" height="8" fill="#CE1126"/><rect y="8" width="24" height="8" fill="#FCD116"/><rect y="16" width="24" height="8" fill="#006B3F"/><polygon points="12,7 13.4,11 17.6,11 14.2,13.6 15.5,17.6 12,15.1 8.5,17.6 9.8,13.6 6.4,11 10.6,11" fill="#000"/></svg></span><span style="flex:1"><span style="display:block;font:700 14px Manrope;color:var(--text)">GHS</span><span style="display:block;font:500 11px Manrope;color:var(--text3)">Ghanaian Cedi</span></span></div>
+                        <div style="font:800 22px Manrope;color:var(--text);letter-spacing:-.6px;font-variant-numeric:tabular-nums;margin-top:16px">₵3,120.00</div>
+                        <div style="font:500 11.5px Manrope;color:var(--text3);margin-top:3px">Spendable</div>
+                      </div>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;padding:22px 30px 8px">
+                      <span onClick="{{ goSend }}" style="display:flex;flex-direction:column;align-items:center;gap:9px;cursor:pointer"><span style="width:54px;height:54px;border-radius:18px;background:var(--iris);display:flex;align-items:center;justify-content:center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--oniris)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 3 10.5 13.5M21 3l-6.5 18-4-7.5L3 9.5 21 3Z"/></svg></span><span style="font:600 12px Manrope;color:var(--text)">Send</span></span>
+                      <span onClick="{{ goAdd }}" style="display:flex;flex-direction:column;align-items:center;gap:9px;cursor:pointer"><span style="width:54px;height:54px;border-radius:18px;background:var(--surface2);border:1px solid var(--edge);display:flex;align-items:center;justify-content:center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="2" stroke-linecap="round"><path d="M12 5.5v13M5.5 12h13"/></svg></span><span style="font:600 12px Manrope;color:var(--text2)">Add</span></span>
+                      <span onClick="{{ goConvert }}" style="display:flex;flex-direction:column;align-items:center;gap:9px;cursor:pointer"><span style="width:54px;height:54px;border-radius:18px;background:var(--surface2);border:1px solid var(--edge);display:flex;align-items:center;justify-content:center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4.5 3.5 8 7 11.5M3.5 8h13M17 12.5l3.5 3.5L17 19.5M20.5 16h-13"/></svg></span><span style="font:600 12px Manrope;color:var(--text2)">Convert</span></span>
+                      <span onClick="{{ goRequest }}" style="display:flex;flex-direction:column;align-items:center;gap:9px;cursor:pointer"><span style="width:54px;height:54px;border-radius:18px;background:var(--surface2);border:1px solid var(--edge);display:flex;align-items:center;justify-content:center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5v12M7.5 11l4.5 4.5 4.5-4.5M4 20.5h16"/></svg></span><span style="font:600 12px Manrope;color:var(--text2)">Request</span></span>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;align-items:center;padding:18px 20px 12px"><span style="font:700 17px Manrope;color:var(--text);letter-spacing:-.2px">Explore</span><span style="font:600 13px Manrope;color:var(--iris)">All services</span></div>
+                    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:9px;padding:0 20px">
+                      <span onClick="{{ goBills }}" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 4px;border-radius:14px;background:var(--surface);border:1px solid var(--edge);cursor:pointer"><span style="width:32px;height:32px;border-radius:10px;background:var(--warnbg);display:flex;align-items:center;justify-content:center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--warn)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2.5h12v19l-2.5-1.8-2.5 1.8-2.5-1.8L8 21.5 6 19.7V2.5ZM9.5 8h5M9.5 12h5"/></svg></span><span style="font:600 11px Manrope;color:var(--text)">Bills</span></span>
+                      <span onClick="{{ goCrypto }}" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 4px;border-radius:14px;background:var(--surface);border:1px solid var(--edge);cursor:pointer"><span style="width:32px;height:32px;border-radius:10px;background:var(--okbg);display:flex;align-items:center;justify-content:center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM9.5 7.5h4a2.2 2.2 0 0 1 0 4.5h-4V7.5Zm0 4.5h4.5a2.2 2.2 0 0 1 0 4.5H9.5V12ZM11 5.5v2M11 16.5v2"/></svg></span><span style="font:600 11px Manrope;color:var(--text)">Crypto</span></span>
+                      <span onClick="{{ goEsim }}" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 4px;border-radius:14px;background:var(--surface);border:1px solid var(--edge);cursor:pointer"><span style="width:32px;height:32px;border-radius:10px;background:var(--infobg);display:flex;align-items:center;justify-content:center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--info)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2.5h6.5L18 7v14.5H7A1.5 1.5 0 0 1 5.5 20V4A1.5 1.5 0 0 1 7 2.5ZM9 11.5h5.5v6H9z"/></svg></span><span style="font:600 11px Manrope;color:var(--text)">eSIM</span></span>
+                      <span onClick="{{ goCards }}" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 4px;border-radius:14px;background:var(--surface);border:1px solid var(--edge);cursor:pointer"><span style="width:32px;height:32px;border-radius:10px;background:var(--iristint);display:flex;align-items:center;justify-content:center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--iristext)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 7.5h19v11a2 2 0 0 1-2 2h-15a2 2 0 0 1-2-2v-11ZM2.5 10.5h19M6 16.5h3"/></svg></span><span style="font:600 11px Manrope;color:var(--text)">Card</span></span>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;align-items:center;padding:24px 20px 6px"><span style="font:700 17px Manrope;color:var(--text);letter-spacing:-.2px">Recent activity</span><span onClick="{{ goActivity }}" style="font:600 13px Manrope;color:var(--iris);cursor:pointer">See all</span></div>
+                    <div style="font:700 11px Manrope;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);padding:0 20px 4px">Today</div>
+                    <div style="padding:0 20px">
+                      <div style="display:flex;align-items:center;gap:13px;padding:12px 0;border-bottom:1px solid var(--line)"><span style="position:relative;width:44px;height:44px;flex:none"><span style="width:44px;height:44px;border-radius:50%;background:var(--avatar);display:flex;align-items:center;justify-content:center;font:700 14px Manrope;color:var(--avatartext)">CO</span><span style="position:absolute;bottom:-2px;left:-2px;width:18px;height:18px;border-radius:50%;overflow:hidden;border:2px solid var(--bg)"><svg width="14" height="14" viewBox="0 0 3 2" preserveAspectRatio="xMidYMid slice"><rect width="1" height="2" fill="#008751"/><rect width="1" height="2" x="1" fill="#fff"/><rect width="1" height="2" x="2" fill="#008751"/></svg></span></span><span style="flex:1;min-width:0"><span style="display:block;font:600 15px Manrope;color:var(--text)">Chidi Okafor</span><span style="font:500 12.5px Manrope;color:var(--text3)">Xetral · received</span></span><span style="text-align:right"><span style="display:block;font:700 14.5px Manrope;color:var(--ok);font-variant-numeric:tabular-nums;letter-spacing:-.2px">+₦150,000.00</span><span style="font:500 11.5px Manrope;color:var(--text3)">2:14 PM</span></span></div>
+                      <div style="display:flex;align-items:center;gap:13px;padding:12px 0;border-bottom:1px solid var(--line)"><span style="width:44px;height:44px;border-radius:50%;background:var(--surface2);display:flex;align-items:center;justify-content:center;flex:none"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--text2)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 2.5h11a2 2 0 0 1 2 2v15a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-15a2 2 0 0 1 2-2ZM10.5 18.2h3"/></svg></span><span style="flex:1;min-width:0"><span style="display:block;font:600 15px Manrope;color:var(--text)">MTN Airtime</span><span style="font:500 12.5px Manrope;color:var(--text3)">Airtime · ···4021</span></span><span style="text-align:right"><span style="display:block;font:700 14.5px Manrope;color:var(--danger);font-variant-numeric:tabular-nums;letter-spacing:-.2px">-₦2,000.00</span><span style="font:500 11.5px Manrope;color:var(--text3)">11:03 AM</span></span></div>
+                      <div style="display:flex;align-items:center;gap:13px;padding:12px 0"><span style="position:relative;width:44px;height:44px;flex:none"><span style="width:44px;height:44px;border-radius:50%;background:var(--surface2);display:flex;align-items:center;justify-content:center;font:700 14px Manrope;color:var(--text2)">AE</span><span style="position:absolute;bottom:-2px;left:-2px;width:18px;height:18px;border-radius:50%;overflow:hidden;border:2px solid var(--bg)"><svg width="14" height="14" viewBox="0 0 3 2" preserveAspectRatio="xMidYMid slice"><rect width="1" height="2" fill="#008751"/><rect width="1" height="2" x="1" fill="#fff"/><rect width="1" height="2" x="2" fill="#008751"/></svg></span></span><span style="flex:1;min-width:0"><span style="display:block;font:600 15px Manrope;color:var(--text)">Ada Eze</span><span style="font:500 12.5px Manrope;color:var(--text3)">Bank · GTBank ···8842</span></span><span style="text-align:right"><span style="display:block;font:700 14.5px Manrope;color:var(--danger);font-variant-numeric:tabular-nums;letter-spacing:-.2px">-₦85,000.00</span><span style="font:500 11.5px Manrope;color:var(--text3)">Yesterday</span></span></div>
+                    </div>
+                  </div>
+                </sc-if>
+
+                <!-- ============ WHO / RECIPIENTS ============ -->
+                <sc-if value="{{ isWho }}" hint-placeholder-val="{{ false }}">
+                  <div style="padding:6px 20px 20px">
+                    <div style="display:flex;align-items:center;gap:12px;padding:8px 0 14px"><span onClick="{{ backHome }}" style="width:40px;height:40px;border-radius:12px;background:var(--surface2);display:flex;align-items:center;justify-content:center;cursor:pointer"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg></span><span style="font:700 20px Manrope;color:var(--text);letter-spacing:-.4px">Send money</span></div>
+                    <div style="font:500 14px Manrope;color:var(--text2);margin-bottom:14px">Who do you want to send to?</div>
+                    <div style="display:flex;align-items:center;gap:9px;padding:0 14px;border-radius:14px;background:var(--field);border:1px solid var(--line2)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M11 18.5a7.5 7.5 0 1 0 0-15 7.5 7.5 0 0 0 0 15ZM20.5 20.5l-4-4"/></svg><input placeholder="Search by name or account details" style="flex:1;border:none;outline:none;background:transparent;min-height:50px;color:var(--text);font:500 15px Manrope"></div>
+                    <div onClick="{{ startNew }}" style="display:flex;align-items:center;gap:13px;padding:16px 0 14px;cursor:pointer"><span style="width:46px;height:46px;border-radius:14px;background:var(--iris);display:flex;align-items:center;justify-content:center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--oniris)" stroke-width="2" stroke-linecap="round"><path d="M12 5.5v13M5.5 12h13"/></svg></span><span style="font:700 15px Manrope;color:var(--text)">New recipient</span></div>
+
+                    <sc-if value="{{ listLoading }}" hint-placeholder-val="{{ false }}">
+                      <div style="padding-top:4px">
+                        <div style="display:flex;align-items:center;gap:13px;padding:12px 0;animation:sk 1.2s infinite"><span style="width:46px;height:46px;border-radius:50%;background:var(--surface2)"></span><span style="flex:1"><span style="display:block;width:130px;height:13px;border-radius:6px;background:var(--surface2);margin-bottom:8px"></span><span style="display:block;width:90px;height:11px;border-radius:6px;background:var(--surface2)"></span></span></div>
+                        <div style="display:flex;align-items:center;gap:13px;padding:12px 0;animation:sk 1.2s infinite .15s"><span style="width:46px;height:46px;border-radius:50%;background:var(--surface2)"></span><span style="flex:1"><span style="display:block;width:150px;height:13px;border-radius:6px;background:var(--surface2);margin-bottom:8px"></span><span style="display:block;width:110px;height:11px;border-radius:6px;background:var(--surface2)"></span></span></div>
+                        <div style="display:flex;align-items:center;gap:13px;padding:12px 0;animation:sk 1.2s infinite .3s"><span style="width:46px;height:46px;border-radius:50%;background:var(--surface2)"></span><span style="flex:1"><span style="display:block;width:120px;height:13px;border-radius:6px;background:var(--surface2);margin-bottom:8px"></span><span style="display:block;width:80px;height:11px;border-radius:6px;background:var(--surface2)"></span></span></div>
+                      </div>
+                    </sc-if>
+
+                    <sc-if value="{{ listEmpty }}" hint-placeholder-val="{{ false }}">
+                      <div style="display:flex;flex-direction:column;align-items:center;text-align:center;padding:44px 24px 20px"><span style="width:60px;height:60px;border-radius:50%;background:var(--surface2);display:flex;align-items:center;justify-content:center;margin-bottom:16px"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM2.5 20.5a6.5 6.5 0 0 1 13 0M16 5.2a3.5 3.5 0 0 1 0 6.6M17.5 14.6a6.5 6.5 0 0 1 4 6"/></svg></span><span style="font:700 17px Manrope;color:var(--text);margin-bottom:6px">Nobody here yet</span><span style="font:500 13.5px Manrope;color:var(--text3);line-height:1.5;max-width:250px">Add the first person you want to pay and they stay on this list for next time.</span></div>
+                    </sc-if>
+
+                    <sc-if value="{{ listData }}" hint-placeholder-val="{{ true }}">
+                      <div style="font:700 11px Manrope;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);padding:10px 0 2px;border-top:1px solid var(--line)">All recipients</div>
+                      <sc-for list="{{ recipients }}" as="r" hint-placeholder-count="4">
+                        <div onClick="{{ r.pick }}" style="display:flex;align-items:center;gap:13px;padding:13px 0;border-bottom:1px solid var(--line);cursor:pointer">
+                          <span style="position:relative;width:48px;height:48px;flex:none"><span style="width:48px;height:48px;border-radius:50%;background:var(--avatar);display:flex;align-items:center;justify-content:center;font:700 15px Manrope;color:var(--avatartext)">{{ r.initials }}</span>
+                            <span style="position:absolute;bottom:-2px;left:-2px;width:19px;height:19px;border-radius:50%;overflow:hidden;border:2px solid var(--bg)">
+                              <sc-if value="{{ r.isNGN }}" hint-placeholder-val="{{ true }}"><svg width="15" height="15" viewBox="0 0 3 2" preserveAspectRatio="xMidYMid slice"><rect width="1" height="2" fill="#008751"/><rect width="1" height="2" x="1" fill="#fff"/><rect width="1" height="2" x="2" fill="#008751"/></svg></sc-if>
+                              <sc-if value="{{ r.isGHS }}" hint-placeholder-val="{{ false }}"><svg width="15" height="15" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid slice"><rect width="24" height="8" fill="#CE1126"/><rect y="8" width="24" height="8" fill="#FCD116"/><rect y="16" width="24" height="8" fill="#006B3F"/><polygon points="12,7 13.4,11 17.6,11 14.2,13.6 15.5,17.6 12,15.1 8.5,17.6 9.8,13.6 6.4,11 10.6,11" fill="#000"/></svg></sc-if>
+                            </span>
+                          </span>
+                          <span style="flex:1;min-width:0"><span style="display:block;font:600 15.5px Manrope;color:var(--text)">{{ r.name }}</span><span style="font:500 12.5px Manrope;color:var(--text3)">{{ r.sub }}</span></span>
+                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 5.5 16 12l-6.5 6.5"/></svg>
+                        </div>
+                      </sc-for>
+                    </sc-if>
+                  </div>
+                </sc-if>
+
+                <!-- ============ CURRENCY ============ -->
+                <sc-if value="{{ isCurrency }}" hint-placeholder-val="{{ false }}">
+                  <div style="padding:6px 20px 20px">
+                    <div style="display:flex;align-items:center;gap:12px;padding:8px 0 14px"><span onClick="{{ backToWho }}" style="width:40px;height:40px;border-radius:12px;background:var(--surface2);display:flex;align-items:center;justify-content:center;cursor:pointer"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg></span><span style="font:700 20px Manrope;color:var(--text);letter-spacing:-.4px">What are you sending?</span></div>
+                    <div style="font:500 14px Manrope;color:var(--text2);margin-bottom:8px">Pick the currency the recipient receives.</div>
+                    <div style="font:700 11px Manrope;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);padding:14px 0 4px;border-top:1px solid var(--line);margin-top:8px">Favourites</div>
+                    <div onClick="{{ pickNGN }}" style="display:flex;align-items:center;gap:14px;padding:11px 0;cursor:pointer"><span style="width:40px;height:40px;border-radius:50%;overflow:hidden;flex:none"><svg width="40" height="40" viewBox="0 0 3 2" preserveAspectRatio="xMidYMid slice"><rect width="1" height="2" fill="#008751"/><rect width="1" height="2" x="1" fill="#fff"/><rect width="1" height="2" x="2" fill="#008751"/></svg></span><span style="flex:1"><span style="display:block;font:600 15.5px Manrope;color:var(--text)">Nigerian Naira</span><span style="font:500 12.5px Manrope;color:var(--text3)">NGN (₦)</span></span><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 5.5 16 12l-6.5 6.5"/></svg></div>
+                    <div onClick="{{ pickGHS }}" style="display:flex;align-items:center;gap:14px;padding:11px 0;cursor:pointer"><span style="width:40px;height:40px;border-radius:50%;overflow:hidden;flex:none"><svg width="40" height="40" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid slice"><rect width="24" height="8" fill="#CE1126"/><rect y="8" width="24" height="8" fill="#FCD116"/><rect y="16" width="24" height="8" fill="#006B3F"/><polygon points="12,7 13.4,11 17.6,11 14.2,13.6 15.5,17.6 12,15.1 8.5,17.6 9.8,13.6 6.4,11 10.6,11" fill="#000"/></svg></span><span style="flex:1"><span style="display:block;font:600 15.5px Manrope;color:var(--text)">Ghanaian Cedi</span><span style="font:500 12.5px Manrope;color:var(--text3)">GHS (₵)</span></span><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 5.5 16 12l-6.5 6.5"/></svg></div>
+                    <div onClick="{{ pickKES }}" style="display:flex;align-items:center;gap:14px;padding:11px 0;cursor:pointer"><span style="width:40px;height:40px;border-radius:50%;overflow:hidden;flex:none"><svg width="40" height="40" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid slice"><rect width="24" height="6.5" fill="#000"/><rect y="6.5" width="24" height="1.5" fill="#fff"/><rect y="8" width="24" height="8" fill="#BB0000"/><rect y="16" width="24" height="1.5" fill="#fff"/><rect y="17.5" width="24" height="6.5" fill="#006600"/><ellipse cx="12" cy="12" rx="3" ry="6" fill="#BB0000" stroke="#fff" stroke-width="1"/></svg></span><span style="flex:1"><span style="display:block;font:600 15.5px Manrope;color:var(--text)">Kenyan Shilling</span><span style="font:500 12.5px Manrope;color:var(--text3)">KES (KSh)</span></span><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 5.5 16 12l-6.5 6.5"/></svg></div>
+                    <div onClick="{{ pickUSD }}" style="display:flex;align-items:center;gap:14px;padding:11px 0;cursor:pointer"><span style="width:40px;height:40px;border-radius:50%;overflow:hidden;flex:none"><svg width="40" height="40" viewBox="0 0 26 26" preserveAspectRatio="xMidYMid slice"><rect width="26" height="26" fill="#B22234"/><rect y="2" width="26" height="2" fill="#fff"/><rect y="6" width="26" height="2" fill="#fff"/><rect y="10" width="26" height="2" fill="#fff"/><rect y="14" width="26" height="2" fill="#fff"/><rect y="18" width="26" height="2" fill="#fff"/><rect y="22" width="26" height="2" fill="#fff"/><rect width="13" height="14" fill="#3C3B6E"/></svg></span><span style="flex:1"><span style="display:block;font:600 15.5px Manrope;color:var(--text)">US Dollar</span><span style="font:500 12.5px Manrope;color:var(--text3)">USD ($)</span></span><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 5.5 16 12l-6.5 6.5"/></svg></div>
+                    <div style="font:700 11px Manrope;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);padding:14px 0 4px;border-top:1px solid var(--line);margin-top:10px">Stablecoins</div>
+                    <div onClick="{{ pickUSD }}" style="display:flex;align-items:center;gap:14px;padding:11px 0;cursor:pointer"><span style="width:40px;height:40px;border-radius:50%;background:#26A17B;display:flex;align-items:center;justify-content:center;flex:none;font:700 18px Manrope;color:#fff">₮</span><span style="flex:1"><span style="display:block;font:600 15.5px Manrope;color:var(--text)">Tether</span><span style="font:500 12.5px Manrope;color:var(--text3)">USDT</span></span><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 5.5 16 12l-6.5 6.5"/></svg></div>
+                    <div onClick="{{ pickUSD }}" style="display:flex;align-items:center;gap:14px;padding:11px 0;cursor:pointer"><span style="width:40px;height:40px;border-radius:50%;background:#2775CA;display:flex;align-items:center;justify-content:center;flex:none;font:700 17px Manrope;color:#fff">$</span><span style="flex:1"><span style="display:block;font:600 15.5px Manrope;color:var(--text)">USD Coin</span><span style="font:500 12.5px Manrope;color:var(--text3)">USDC</span></span><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 5.5 16 12l-6.5 6.5"/></svg></div>
+                  </div>
+                </sc-if>
+
+                <!-- ============ DETAILS ============ -->
+                <sc-if value="{{ isDetails }}" hint-placeholder-val="{{ false }}">
+                  <div style="padding:6px 20px 22px">
+                    <div style="display:flex;align-items:center;gap:12px;padding:8px 0 14px"><span onClick="{{ backToCurrency }}" style="width:40px;height:40px;border-radius:12px;background:var(--surface2);display:flex;align-items:center;justify-content:center;cursor:pointer"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg></span><span style="font:700 20px Manrope;color:var(--text);letter-spacing:-.4px">Recipient details</span></div>
+                    <div style="font:500 14px Manrope;color:var(--text2);margin-bottom:16px">Fill in the bank details of your recipient.</div>
+                    <div style="font:600 13px Manrope;color:var(--text2);margin-bottom:7px">Recipient country</div>
+                    <div style="background:var(--field);border-radius:14px;padding:14px 15px;font:600 15px Manrope;color:var(--text);margin-bottom:16px">{{ detCountry }}</div>
+                    <div style="font:600 13px Manrope;color:var(--text2);margin-bottom:7px">Bank</div>
+                    <div style="display:flex;align-items:center;justify-content:space-between;background:var(--field);border-radius:14px;padding:14px 15px;margin-bottom:16px"><span style="font:600 15px Manrope;color:var(--text)">GTBank</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 9.5 12 16l6.5-6.5"/></svg></div>
+                    <div style="font:600 13px Manrope;color:var(--text2);margin-bottom:7px">Account number</div>
+                    <input value="{{ detDigits }}" onInput="{{ onDetail }}" inputmode="numeric" placeholder="0123456789" style="width:100%;background:var(--field);border:1px solid var(--line2);border-radius:14px;padding:14px 15px;font:500 16px Inter;color:var(--text);outline:none;letter-spacing:.02em">
+                    <sc-if value="{{ detShowName }}" hint-placeholder-val="{{ false }}"><div style="display:flex;align-items:center;gap:8px;margin-top:12px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12.5 9.5 17.5 19.5 7"/></svg><span style="font:600 13.5px Manrope;color:var(--ok)">{{ resolvedName }}</span></div></sc-if>
+                    <sc-if value="{{ detShowErr }}" hint-placeholder-val="{{ false }}"><div style="display:flex;align-items:flex-start;gap:8px;margin-top:12px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:1px"><path d="M12 3 22 20H2L12 3ZM12 9.5v5M12 17.5h.01"/></svg><span style="font:500 12.5px Manrope;color:var(--danger);line-height:1.5">We could not verify this account number. Check the digits with your recipient — we will not send to a number nobody answers for.</span></div></sc-if>
+                    <button onClick="{{ goAmountFromDetails }}" style="{{ continueStyle }}"><sc-if value="{{ detContinueDisabled }}" hint-placeholder-val="{{ true }}"><span>{{ continueLabel }}</span></sc-if><sc-if value="{{ detContinueEnabled }}" hint-placeholder-val="{{ false }}"><span>Continue</span></sc-if></button>
+                    <sc-if value="{{ detContinueDisabled }}" hint-placeholder-val="{{ true }}"><div style="text-align:center;font:500 12px Manrope;color:var(--text3);margin-top:10px">{{ detReason }}</div></sc-if>
+                  </div>
+                </sc-if>
+
+                <!-- ============ AMOUNT ============ -->
+                <sc-if value="{{ isAmount }}" hint-placeholder-val="{{ false }}">
+                  <div style="padding:6px 20px 20px;display:flex;flex-direction:column;min-height:640px">
+                    <div style="display:flex;align-items:center;gap:12px;padding:8px 0 14px"><span onClick="{{ backToWho }}" style="width:40px;height:40px;border-radius:12px;background:var(--surface2);display:flex;align-items:center;justify-content:center;cursor:pointer"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg></span><span style="font:700 20px Manrope;color:var(--text);letter-spacing:-.4px">Enter amount</span></div>
+                    <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:16px;background:var(--surface);border:1px solid var(--edge);margin-bottom:18px"><span style="width:42px;height:42px;border-radius:50%;background:var(--avatar);display:flex;align-items:center;justify-content:center;font:700 14px Manrope;color:var(--avatartext)">{{ recInitials }}</span><span style="flex:1;min-width:0"><span style="display:block;font:600 14.5px Manrope;color:var(--text)">{{ recName }}</span><span style="font:500 12px Manrope;color:var(--text3)">{{ recSub }}</span></span><span style="font:600 12px Manrope;color:var(--iris)">Change</span></div>
+                    <div style="text-align:center;padding:4px 0 2px"><span style="font:600 12px Manrope;letter-spacing:.1em;text-transform:uppercase;color:var(--text3)">You send</span></div>
+                    <div style="text-align:center;font:800 46px Manrope;color:{{ amtColor }};letter-spacing:-2px;font-variant-numeric:tabular-nums;line-height:1.1">₦{{ sendDisplay }}</div>
+                    <div style="text-align:center;margin-top:8px"><span style="font:500 13px Manrope;color:var(--text3)">They receive </span><span style="font:700 13px Manrope;color:var(--text2);font-variant-numeric:tabular-nums">{{ recvDisplay }}</span></div>
+                    <sc-if value="{{ amtInsufficient }}" hint-placeholder-val="{{ false }}"><div style="text-align:center;margin-top:10px"><span style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;background:var(--dangerbg);font:600 12px Manrope;color:var(--danger)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 22 20H2L12 3ZM12 9.5v5M12 17.5h.01"/></svg>Exceeds your ₦2,450,900.00 balance</span></div></sc-if>
+                    <div style="flex:1"></div>
+                    <div style="display:flex;justify-content:space-between;padding:12px 4px;font:500 13px Manrope;color:var(--text3);border-top:1px solid var(--line);margin-top:14px"><span>Fee</span><span style="color:var(--text2);font-variant-numeric:tabular-nums">₦25.00</span></div>
+                    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:6px 0 14px">
+                      <sc-for list="{{ pad }}" as="k" hint-placeholder-count="12"><button onClick="{{ k.press }}" style="border:none;background:transparent;color:var(--text);font:600 24px Manrope;padding:12px 0;border-radius:14px;cursor:pointer">{{ k.label }}</button></sc-for>
+                    </div>
+                    <button onClick="{{ doSend }}" style="{{ sendBtnStyle }}">{{ sendBtnLabel }}</button>
+                    <sc-if value="{{ sendDisabled }}" hint-placeholder-val="{{ true }}"><div style="text-align:center;font:500 12px Manrope;color:var(--text3);margin-top:9px">{{ sendReason }}</div></sc-if>
+                  </div>
+                </sc-if>
+
+                <!-- ============ SUCCESS ============ -->
+                <sc-if value="{{ isSuccess }}" hint-placeholder-val="{{ false }}">
+                  <div style="padding:20px;display:flex;flex-direction:column;align-items:center;text-align:center;min-height:660px">
+                    <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center">
+                      <span style="width:88px;height:88px;border-radius:50%;background:var(--okbg);display:flex;align-items:center;justify-content:center;margin-bottom:22px;animation:pop .32s cubic-bezier(.32,.72,0,1)"><span style="width:60px;height:60px;border-radius:50%;background:var(--ok);display:flex;align-items:center;justify-content:center"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="var(--bg)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12.5 9.5 17.5 19.5 7"/></svg></span></span>
+                      <span style="font:800 26px Manrope;color:var(--text);letter-spacing:-.6px">Money sent</span>
+                      <span style="font:500 14.5px Manrope;color:var(--text2);margin-top:8px;line-height:1.5;max-width:280px">You sent <b style="color:var(--text)">₦{{ sendDisplay }}.00</b> to {{ recName }}. It usually arrives within minutes.</span>
+                      <div style="width:100%;max-width:320px;margin-top:26px;background:var(--surface);border:1px solid var(--edge);border-radius:18px;padding:6px 16px">
+                        <div style="display:flex;justify-content:space-between;padding:13px 0;border-bottom:1px solid var(--line)"><span style="font:500 13px Manrope;color:var(--text3)">To</span><span style="font:600 13px Manrope;color:var(--text)">{{ recName }}</span></div>
+                        <div style="display:flex;justify-content:space-between;padding:13px 0;border-bottom:1px solid var(--line)"><span style="font:500 13px Manrope;color:var(--text3)">Account</span><span style="font:600 13px Manrope;color:var(--text)">{{ recSub }}</span></div>
+                        <div style="display:flex;justify-content:space-between;padding:13px 0"><span style="font:500 13px Manrope;color:var(--text3)">Reference</span><span style="font:600 13px Inter;color:var(--text);letter-spacing:.02em">XTL-8F2A9C</span></div>
+                      </div>
+                    </div>
+                    <button onClick="{{ doneHome }}" style="width:100%;min-height:52px;border:none;border-radius:16px;background:var(--iris);color:var(--oniris);font:700 15.5px Manrope;cursor:pointer">Done</button>
+                    <button onClick="{{ sendAgain }}" style="width:100%;min-height:48px;border:none;background:transparent;color:var(--text2);font:600 14.5px Manrope;cursor:pointer;margin-top:6px">Send to someone else</button>
+                  </div>
+                </sc-if>
+
+                <!-- ============ CARDS ============ -->
+                <sc-if value="{{ isCards }}" hint-placeholder-val="{{ false }}">
+                  <div style="padding:6px 20px 24px">
+                    <div style="display:flex;align-items:center;gap:12px;padding:8px 0 16px"><span onClick="{{ backHome }}" style="width:40px;height:40px;border-radius:12px;background:var(--surface2);display:flex;align-items:center;justify-content:center;cursor:pointer"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg></span><span style="flex:1;font:700 20px Manrope;color:var(--text);letter-spacing:-.4px">Cards</span><span style="width:38px;height:38px;border-radius:11px;background:var(--surface2);display:flex;align-items:center;justify-content:center;cursor:pointer"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="2" stroke-linecap="round"><path d="M12 5.5v13M5.5 12h13"/></svg></span></div>
+                    <div style="border-radius:22px;padding:20px;background:linear-gradient(135deg,#7B6CF6,#4B3FB0);position:relative;overflow:hidden;min-height:172px;display:flex;flex-direction:column;justify-content:space-between">
+                      <div style="position:absolute;top:-40px;right:-30px;width:150px;height:150px;border-radius:50%;background:rgba(255,255,255,.08)"></div>
+                      <div style="display:flex;justify-content:space-between;align-items:flex-start;position:relative"><span style="font:700 14px Manrope;color:#fff">Xetral USD</span><span style="width:34px;height:26px;border-radius:5px;background:linear-gradient(135deg,#f6d365,#e6b34a)"></span></div>
+                      <div style="font:600 20px 'Inter';color:#fff;letter-spacing:3px;font-variant-numeric:tabular-nums;position:relative">4021&nbsp;&nbsp;••••&nbsp;&nbsp;••••&nbsp;&nbsp;8842</div>
+                      <div style="display:flex;justify-content:space-between;align-items:flex-end;position:relative"><span><span style="display:block;font:500 9px Manrope;color:rgba(255,255,255,.6);letter-spacing:.1em">CARD HOLDER</span><span style="font:600 13px Manrope;color:#fff">ADA OBI</span></span><span><span style="display:block;font:500 9px Manrope;color:rgba(255,255,255,.6);letter-spacing:.1em">EXPIRES</span><span style="font:600 13px Manrope;color:#fff">08/29</span></span><span style="font:800 17px Manrope;font-style:italic;color:#fff">VISA</span></div>
+                    </div>
+                    <div style="display:flex;justify-content:space-around;padding:18px 0 6px">
+                      <span style="display:flex;flex-direction:column;align-items:center;gap:8px;cursor:pointer"><span style="width:50px;height:50px;border-radius:16px;background:var(--surface2);border:1px solid var(--edge);display:flex;align-items:center;justify-content:center"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10.5V7.5a5 5 0 0 1 10 0v3M5.5 10.5h13v9a1.5 1.5 0 0 1-1.5 1.5h-10a1.5 1.5 0 0 1-1.5-1.5v-9Z"/></svg></span><span style="font:600 12px Manrope;color:var(--text2)">Freeze</span></span>
+                      <span style="display:flex;flex-direction:column;align-items:center;gap:8px;cursor:pointer"><span style="width:50px;height:50px;border-radius:16px;background:var(--surface2);border:1px solid var(--edge);display:flex;align-items:center;justify-content:center"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/></svg></span><span style="font:600 12px Manrope;color:var(--text2)">Details</span></span>
+                      <span style="display:flex;flex-direction:column;align-items:center;gap:8px;cursor:pointer"><span style="width:50px;height:50px;border-radius:16px;background:var(--surface2);border:1px solid var(--edge);display:flex;align-items:center;justify-content:center"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19.5 12a7.5 7.5 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7.5 7.5 0 0 0-2-1.2l-.4-2.6h-4l-.4 2.6a7.5 7.5 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6a7.5 7.5 0 0 0 0 2.4l-2 1.6 2 3.4 2.4-1a7.5 7.5 0 0 0 2 1.2l.4 2.6h4l.4-2.6a7.5 7.5 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.06-.4.1-.8.1-1.2Z"/></svg></span><span style="font:600 12px Manrope;color:var(--text2)">Settings</span></span>
+                    </div>
+                    <div style="background:var(--surface);border:1px solid var(--edge);border-radius:16px;margin-top:12px;padding:2px 16px">
+                      <div style="display:flex;align-items:center;gap:12px;padding:14px 0;border-bottom:1px solid var(--line)"><span style="flex:1;font:600 14px Manrope;color:var(--text)">Online payments</span><span style="width:44px;height:26px;border-radius:999px;background:var(--iris);position:relative"><span style="position:absolute;top:3px;right:3px;width:20px;height:20px;border-radius:50%;background:#fff"></span></span></div>
+                      <div style="display:flex;align-items:center;gap:12px;padding:14px 0"><span style="flex:1;font:600 14px Manrope;color:var(--text)">ATM withdrawals</span><span style="width:44px;height:26px;border-radius:999px;background:var(--surface2);position:relative"><span style="position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:var(--text3)"></span></span></div>
+                    </div>
+                    <div style="font:700 11px Manrope;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);padding:20px 0 4px">Card activity</div>
+                    <div style="display:flex;align-items:center;gap:13px;padding:12px 0;border-bottom:1px solid var(--line)"><span style="width:42px;height:42px;border-radius:12px;background:var(--surface2);display:flex;align-items:center;justify-content:center"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--text2)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12h8M12 8v8"/></svg></span><span style="flex:1"><span style="display:block;font:600 14.5px Manrope;color:var(--text)">Spotify</span><span style="font:500 12px Manrope;color:var(--text3)">Subscription</span></span><span style="font:700 14px Manrope;color:var(--danger);font-variant-numeric:tabular-nums">-$10.99</span></div>
+                    <div style="display:flex;align-items:center;gap:13px;padding:12px 0"><span style="width:42px;height:42px;border-radius:12px;background:var(--surface2);display:flex;align-items:center;justify-content:center"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--text2)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5h18M6 14h4M3 6.5A2 2 0 0 1 5 4.5h14a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-11Z"/></svg></span><span style="flex:1"><span style="display:block;font:600 14.5px Manrope;color:var(--text)">Amazon</span><span style="font:500 12px Manrope;color:var(--text3)">Shopping</span></span><span style="font:700 14px Manrope;color:var(--danger);font-variant-numeric:tabular-nums">-$42.30</span></div>
+                  </div>
+                </sc-if>
+
+                <!-- ============ ADD MONEY ============ -->
+                <sc-if value="{{ isAdd }}" hint-placeholder-val="{{ false }}">
+                  <div style="padding:6px 20px 24px">
+                    <div style="display:flex;align-items:center;gap:12px;padding:8px 0 16px"><span onClick="{{ backHome }}" style="width:40px;height:40px;border-radius:12px;background:var(--surface2);display:flex;align-items:center;justify-content:center;cursor:pointer"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg></span><span style="font:700 20px Manrope;color:var(--text);letter-spacing:-.4px">Add money</span></div>
+                    <div style="font:500 14px Manrope;color:var(--text2);margin-bottom:16px">Choose how you want to fund your NGN balance.</div>
+                    <div style="border-radius:18px;background:linear-gradient(150deg,var(--cardgrad1),var(--cardgrad2));border:1px solid var(--iris);padding:18px">
+                      <div style="font:600 11px Manrope;letter-spacing:.1em;text-transform:uppercase;color:var(--iristext)">Your Xetral account</div>
+                      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px"><span style="font:800 22px Manrope;color:var(--text);font-variant-numeric:tabular-nums;letter-spacing:.02em">9021 4477 30</span><span style="display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:10px;background:rgba(255,255,255,.08);font:600 12px Manrope;color:var(--iristext);cursor:pointer"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 9h10v10H9zM5 15V5h10"/></svg>Copy</span></div>
+                      <div style="font:500 12.5px Manrope;color:var(--text3);margin-top:6px">Providus Bank · Ada Obi — transfers reflect instantly</div>
+                    </div>
+                    <div style="font:700 11px Manrope;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);padding:20px 0 6px">Other methods</div>
+                    <div style="display:flex;align-items:center;gap:13px;padding:14px 0;border-bottom:1px solid var(--line);cursor:pointer"><span style="width:46px;height:46px;border-radius:14px;background:var(--iristint);display:flex;align-items:center;justify-content:center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--iristext)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 7.5h19v11a2 2 0 0 1-2 2h-15a2 2 0 0 1-2-2v-11ZM2.5 10.5h19"/></svg></span><span style="flex:1"><span style="display:block;font:600 15px Manrope;color:var(--text)">Debit card</span><span style="font:500 12.5px Manrope;color:var(--text3)">Instant · 1.4% fee</span></span><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 5.5 16 12l-6.5 6.5"/></svg></div>
+                    <div style="display:flex;align-items:center;gap:13px;padding:14px 0;cursor:pointer"><span style="width:46px;height:46px;border-radius:14px;background:var(--okbg);display:flex;align-items:center;justify-content:center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 2.5h11a2 2 0 0 1 2 2v15a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-15a2 2 0 0 1 2-2ZM9 6h6M9 18h6"/></svg></span><span style="flex:1"><span style="display:block;font:600 15px Manrope;color:var(--text)">USSD</span><span style="font:500 12.5px Manrope;color:var(--text3)">Dial *737# · no data needed</span></span><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 5.5 16 12l-6.5 6.5"/></svg></div>
+                  </div>
+                </sc-if>
+
+                <!-- ============ CONVERT ============ -->
+                <sc-if value="{{ isConvert }}" hint-placeholder-val="{{ false }}">
+                  <div style="padding:6px 20px 24px">
+                    <div style="display:flex;align-items:center;gap:12px;padding:8px 0 16px"><span onClick="{{ backHome }}" style="width:40px;height:40px;border-radius:12px;background:var(--surface2);display:flex;align-items:center;justify-content:center;cursor:pointer"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg></span><span style="font:700 20px Manrope;color:var(--text);letter-spacing:-.4px">Convert</span></div>
+                    <div style="position:relative;display:flex;flex-direction:column;gap:10px">
+                      <div style="background:var(--surface);border:1px solid var(--edge);border-radius:18px;padding:16px 18px"><div style="display:flex;justify-content:space-between;align-items:center"><span style="font:500 12px Manrope;color:var(--text3)">From</span><span style="display:flex;align-items:center;gap:7px;font:700 14px Manrope;color:var(--text)"><span style="display:inline-flex;width:20px;height:20px;border-radius:50%;overflow:hidden"><svg width="20" height="20" viewBox="0 0 3 2" preserveAspectRatio="xMidYMid slice"><rect width="1" height="2" fill="#008751"/><rect width="1" height="2" x="1" fill="#fff"/><rect width="1" height="2" x="2" fill="#008751"/></svg></span>NGN<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 9.5 12 16l6.5-6.5"/></svg></span></div><div style="font:800 30px Manrope;color:var(--text);letter-spacing:-1px;font-variant-numeric:tabular-nums;margin-top:8px">₦500,000</div><div style="font:500 12px Manrope;color:var(--text3);margin-top:2px">Balance ₦2,450,900.00</div></div>
+                      <span style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:40px;height:40px;border-radius:12px;background:var(--iris);border:3px solid var(--bg);display:flex;align-items:center;justify-content:center;z-index:2;cursor:pointer"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--oniris)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4.5v15M7 19.5 4 16.5M7 4.5l3 3M17 19.5v-15M17 4.5l3 3M17 19.5l-3-3"/></svg></span>
+                      <div style="background:var(--surface);border:1px solid var(--edge);border-radius:18px;padding:16px 18px"><div style="display:flex;justify-content:space-between;align-items:center"><span style="font:500 12px Manrope;color:var(--text3)">To</span><span style="display:flex;align-items:center;gap:7px;font:700 14px Manrope;color:var(--text)"><span style="display:inline-flex;width:20px;height:20px;border-radius:50%;overflow:hidden"><svg width="20" height="20" viewBox="0 0 26 26" preserveAspectRatio="xMidYMid slice"><rect width="26" height="26" fill="#B22234"/><rect y="3" width="26" height="3" fill="#fff"/><rect y="9" width="26" height="3" fill="#fff"/><rect y="15" width="26" height="3" fill="#fff"/><rect y="21" width="26" height="3" fill="#fff"/><rect width="12" height="14" fill="#3C3B6E"/></svg></span>USD<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 9.5 12 16l6.5-6.5"/></svg></span></div><div style="font:800 30px Manrope;color:var(--text2);letter-spacing:-1px;font-variant-numeric:tabular-nums;margin-top:8px">$330.00</div><div style="font:500 12px Manrope;color:var(--text3);margin-top:2px">Balance $740.20</div></div>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;padding:16px 4px;font:500 13px Manrope;color:var(--text3)"><span>Rate</span><span style="color:var(--text2);font-variant-numeric:tabular-nums">$1 = ₦1,515.15</span></div>
+                    <button style="width:100%;min-height:54px;border:none;border-radius:16px;background:var(--iris);color:var(--oniris);font:700 16px Manrope;cursor:pointer">Convert now</button>
+                  </div>
+                </sc-if>
+
+                <!-- ============ REQUEST ============ -->
+                <sc-if value="{{ isRequest }}" hint-placeholder-val="{{ false }}">
+                  <div style="padding:6px 20px 24px;display:flex;flex-direction:column;min-height:600px">
+                    <div style="display:flex;align-items:center;gap:12px;padding:8px 0 16px"><span onClick="{{ backHome }}" style="width:40px;height:40px;border-radius:12px;background:var(--surface2);display:flex;align-items:center;justify-content:center;cursor:pointer"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg></span><span style="font:700 20px Manrope;color:var(--text);letter-spacing:-.4px">Request money</span></div>
+                    <div style="text-align:center;padding:12px 0 4px"><span style="font:600 12px Manrope;letter-spacing:.1em;text-transform:uppercase;color:var(--text3)">You request</span></div>
+                    <div style="text-align:center;font:800 46px Manrope;color:var(--text);letter-spacing:-2px;font-variant-numeric:tabular-nums">₦25,000</div>
+                    <div style="background:var(--field);border-radius:14px;padding:14px 15px;margin-top:22px"><input placeholder="What's it for? (optional)" style="width:100%;border:none;background:transparent;outline:none;color:var(--text);font:500 14px Manrope"></div>
+                    <div style="font:700 11px Manrope;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);padding:22px 0 6px">Pending requests</div>
+                    <div style="display:flex;align-items:center;gap:13px;padding:12px 0;border-bottom:1px solid var(--line)"><span style="width:42px;height:42px;border-radius:50%;background:var(--avatar);display:flex;align-items:center;justify-content:center;font:700 14px Manrope;color:var(--avatartext)">KM</span><span style="flex:1"><span style="display:block;font:600 14.5px Manrope;color:var(--text)">Kwame Mensah</span><span style="font:500 12px Manrope;color:var(--text3)">Sent 2d ago</span></span><span style="font:700 14px Manrope;color:var(--text2);font-variant-numeric:tabular-nums">₦40,000</span></div>
+                    <div style="flex:1"></div>
+                    <button style="width:100%;min-height:54px;border:none;border-radius:16px;background:var(--iris);color:var(--oniris);font:700 16px Manrope;cursor:pointer">Create request link</button>
+                  </div>
+                </sc-if>
+
+                <!-- ============ ACTIVITY ============ -->
+                <sc-if value="{{ isActivity }}" hint-placeholder-val="{{ false }}">
+                  <div style="padding:6px 20px 24px">
+                    <div style="display:flex;align-items:center;gap:12px;padding:8px 0 14px"><span onClick="{{ backHome }}" style="width:40px;height:40px;border-radius:12px;background:var(--surface2);display:flex;align-items:center;justify-content:center;cursor:pointer"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg></span><span style="flex:1;font:700 20px Manrope;color:var(--text);letter-spacing:-.4px">Activity</span><span style="width:38px;height:38px;border-radius:11px;background:var(--surface2);display:flex;align-items:center;justify-content:center;cursor:pointer"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5.5h18l-7 8v6l-4 2v-8L3 5.5Z"/></svg></span></div>
+                    <div style="display:flex;gap:8px;margin-bottom:8px;overflow-x:auto">
+                      <span style="flex:none;padding:8px 14px;border-radius:999px;background:var(--iris);color:var(--oniris);font:600 12.5px Manrope">All</span>
+                      <span style="flex:none;padding:8px 14px;border-radius:999px;background:var(--surface2);color:var(--text2);font:600 12.5px Manrope">Sent</span>
+                      <span style="flex:none;padding:8px 14px;border-radius:999px;background:var(--surface2);color:var(--text2);font:600 12.5px Manrope">Received</span>
+                      <span style="flex:none;padding:8px 14px;border-radius:999px;background:var(--surface2);color:var(--text2);font:600 12.5px Manrope">Bills</span>
+                    </div>
+                    <div style="font:700 11px Manrope;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);padding:12px 0 2px">Today</div>
+                    <div style="display:flex;align-items:center;gap:13px;padding:12px 0;border-bottom:1px solid var(--line)"><span style="width:44px;height:44px;border-radius:50%;background:var(--avatar);display:flex;align-items:center;justify-content:center;font:700 14px Manrope;color:var(--avatartext);flex:none">CO</span><span style="flex:1;min-width:0"><span style="display:block;font:600 15px Manrope;color:var(--text)">Chidi Okafor</span><span style="font:500 12.5px Manrope;color:var(--text3)">Received · 2:14 PM</span></span><span style="font:700 14.5px Manrope;color:var(--ok);font-variant-numeric:tabular-nums">+₦150,000.00</span></div>
+                    <div style="display:flex;align-items:center;gap:13px;padding:12px 0;border-bottom:1px solid var(--line)"><span style="width:44px;height:44px;border-radius:50%;background:var(--surface2);display:flex;align-items:center;justify-content:center;flex:none"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--text2)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 2.5h11a2 2 0 0 1 2 2v15a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-15a2 2 0 0 1 2-2ZM10.5 18.2h3"/></svg></span><span style="flex:1;min-width:0"><span style="display:block;font:600 15px Manrope;color:var(--text)">MTN Airtime</span><span style="font:500 12.5px Manrope;color:var(--text3)">Bills · 11:03 AM</span></span><span style="font:700 14.5px Manrope;color:var(--danger);font-variant-numeric:tabular-nums">-₦2,000.00</span></div>
+                    <div style="font:700 11px Manrope;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);padding:16px 0 2px">Yesterday</div>
+                    <div style="display:flex;align-items:center;gap:13px;padding:12px 0;border-bottom:1px solid var(--line)"><span style="width:44px;height:44px;border-radius:50%;background:var(--surface2);display:flex;align-items:center;justify-content:center;font:700 14px Manrope;color:var(--text2);flex:none">AE</span><span style="flex:1;min-width:0"><span style="display:block;font:600 15px Manrope;color:var(--text)">Ada Eze</span><span style="font:500 12.5px Manrope;color:var(--text3)">Sent · GTBank ···8842</span></span><span style="font:700 14.5px Manrope;color:var(--danger);font-variant-numeric:tabular-nums">-₦85,000.00</span></div>
+                    <div style="display:flex;align-items:center;gap:13px;padding:12px 0"><span style="width:44px;height:44px;border-radius:50%;background:var(--surface2);display:flex;align-items:center;justify-content:center;flex:none"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--text2)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 7.5h19v11a2 2 0 0 1-2 2h-15a2 2 0 0 1-2-2v-11ZM2.5 10.5h19"/></svg></span><span style="flex:1;min-width:0"><span style="display:block;font:600 15px Manrope;color:var(--text)">Card top-up</span><span style="font:500 12.5px Manrope;color:var(--text3)">Convert · NGN → USD</span></span><span style="font:700 14.5px Manrope;color:var(--ok);font-variant-numeric:tabular-nums">+$200.00</span></div>
+                  </div>
+                </sc-if>
+
+                <!-- ============ BILLS ============ -->
+                <sc-if value="{{ isBills }}" hint-placeholder-val="{{ false }}">
+                  <div style="padding:6px 20px 24px">
+                    <div style="display:flex;align-items:center;gap:12px;padding:8px 0 16px"><span onClick="{{ backHome }}" style="width:40px;height:40px;border-radius:12px;background:var(--surface2);display:flex;align-items:center;justify-content:center;cursor:pointer"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg></span><span style="font:700 20px Manrope;color:var(--text);letter-spacing:-.4px">Pay a bill</span></div>
+                    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:11px">
+                      <span style="display:flex;flex-direction:column;align-items:center;gap:9px;padding:16px 6px;border-radius:16px;background:var(--surface);border:1px solid var(--edge);cursor:pointer"><span style="width:40px;height:40px;border-radius:12px;background:var(--warnbg);display:flex;align-items:center;justify-content:center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--warn)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 2.5h11a2 2 0 0 1 2 2v15a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-15a2 2 0 0 1 2-2ZM10.5 18.2h3"/></svg></span><span style="font:600 12px Manrope;color:var(--text)">Airtime</span></span>
+                      <span style="display:flex;flex-direction:column;align-items:center;gap:9px;padding:16px 6px;border-radius:16px;background:var(--surface);border:1px solid var(--edge);cursor:pointer"><span style="width:40px;height:40px;border-radius:12px;background:var(--infobg);display:flex;align-items:center;justify-content:center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--info)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20.5v.01M5 13.5a10 10 0 0 1 14 0M2 9.5a15 15 0 0 1 20 0M8.5 17a5 5 0 0 1 7 0"/></svg></span><span style="font:600 12px Manrope;color:var(--text)">Data</span></span>
+                      <span style="display:flex;flex-direction:column;align-items:center;gap:9px;padding:16px 6px;border-radius:16px;background:var(--surface);border:1px solid var(--edge);cursor:pointer"><span style="width:40px;height:40px;border-radius:12px;background:var(--okbg);display:flex;align-items:center;justify-content:center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2.5 4 13.5h7l-1 8 9-11h-7l1-8Z"/></svg></span><span style="font:600 12px Manrope;color:var(--text)">Electricity</span></span>
+                      <span style="display:flex;flex-direction:column;align-items:center;gap:9px;padding:16px 6px;border-radius:16px;background:var(--surface);border:1px solid var(--edge);cursor:pointer"><span style="width:40px;height:40px;border-radius:12px;background:var(--iristint);display:flex;align-items:center;justify-content:center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--iristext)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 5.5h17v11h-17zM8 20.5h8M12 16.5v4"/></svg></span><span style="font:600 12px Manrope;color:var(--text)">TV</span></span>
+                      <span style="display:flex;flex-direction:column;align-items:center;gap:9px;padding:16px 6px;border-radius:16px;background:var(--surface);border:1px solid var(--edge);cursor:pointer"><span style="width:40px;height:40px;border-radius:12px;background:var(--infobg);display:flex;align-items:center;justify-content:center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--info)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM3.5 12h17M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18Z"/></svg></span><span style="font:600 12px Manrope;color:var(--text)">Internet</span></span>
+                      <span style="display:flex;flex-direction:column;align-items:center;gap:9px;padding:16px 6px;border-radius:16px;background:var(--surface);border:1px solid var(--edge);cursor:pointer"><span style="width:40px;height:40px;border-radius:12px;background:var(--warnbg);display:flex;align-items:center;justify-content:center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--warn)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7.5h16v10a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5v-10ZM8 7.5V6a4 4 0 0 1 8 0v1.5M12 11.5v3"/></svg></span><span style="font:600 12px Manrope;color:var(--text)">Betting</span></span>
+                    </div>
+                    <div style="font:700 11px Manrope;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);padding:22px 0 6px">Recent billers</div>
+                    <div style="display:flex;align-items:center;gap:13px;padding:12px 0;border-bottom:1px solid var(--line);cursor:pointer"><span style="width:42px;height:42px;border-radius:12px;background:var(--warnbg);display:flex;align-items:center;justify-content:center;font:700 12px Manrope;color:var(--warn)">MTN</span><span style="flex:1"><span style="display:block;font:600 14.5px Manrope;color:var(--text)">MTN Airtime</span><span style="font:500 12px Manrope;color:var(--text3)">···4021</span></span><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 5.5 16 12l-6.5 6.5"/></svg></div>
+                    <div style="display:flex;align-items:center;gap:13px;padding:12px 0;cursor:pointer"><span style="width:42px;height:42px;border-radius:12px;background:var(--okbg);display:flex;align-items:center;justify-content:center;font:700 11px Manrope;color:var(--ok)">EKO</span><span style="flex:1"><span style="display:block;font:600 14.5px Manrope;color:var(--text)">Eko Electricity</span><span style="font:500 12px Manrope;color:var(--text3)">Meter ···88213</span></span><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 5.5 16 12l-6.5 6.5"/></svg></div>
+                  </div>
+                </sc-if>
+
+                <!-- ============ CRYPTO ============ -->
+                <sc-if value="{{ isCrypto }}" hint-placeholder-val="{{ false }}">
+                  <div style="padding:6px 20px 24px">
+                    <div style="display:flex;align-items:center;gap:12px;padding:8px 0 16px"><span onClick="{{ backHome }}" style="width:40px;height:40px;border-radius:12px;background:var(--surface2);display:flex;align-items:center;justify-content:center;cursor:pointer"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg></span><span style="font:700 20px Manrope;color:var(--text);letter-spacing:-.4px">Crypto</span></div>
+                    <div style="border-radius:20px;background:linear-gradient(150deg,var(--cardgrad1),var(--cardgrad2));border:1px solid var(--iris);padding:20px"><span style="font:500 12.5px Manrope;color:var(--iristext)">Portfolio value</span><div style="font:800 32px Manrope;color:var(--text);letter-spacing:-1px;font-variant-numeric:tabular-nums;margin-top:6px">$1,284.55</div><span style="display:inline-flex;align-items:center;gap:4px;margin-top:8px;font:600 12.5px Manrope;color:var(--ok)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17 9.5 10.5l4 4L21 7M21 7h-5.5M21 7v5.5"/></svg>+4.2% today</span></div>
+                    <div style="display:flex;gap:10px;margin-top:14px"><button style="flex:1;min-height:48px;border:none;border-radius:14px;background:var(--iris);color:var(--oniris);font:700 14px Manrope;cursor:pointer">Buy</button><button style="flex:1;min-height:48px;border:1px solid var(--edge);border-radius:14px;background:var(--surface2);color:var(--text);font:700 14px Manrope;cursor:pointer">Sell</button></div>
+                    <div style="font:700 11px Manrope;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);padding:22px 0 6px">Holdings</div>
+                    <div style="display:flex;align-items:center;gap:13px;padding:12px 0;border-bottom:1px solid var(--line)"><span style="width:42px;height:42px;border-radius:50%;background:#F7931A;display:flex;align-items:center;justify-content:center;font:800 16px Manrope;color:#fff">₿</span><span style="flex:1"><span style="display:block;font:600 15px Manrope;color:var(--text)">Bitcoin</span><span style="font:500 12px Manrope;color:var(--text3)">0.0104 BTC</span></span><span style="text-align:right"><span style="display:block;font:700 14px Manrope;color:var(--text);font-variant-numeric:tabular-nums">$684.20</span><span style="font:600 11.5px Manrope;color:var(--ok)">+3.1%</span></span></div>
+                    <div style="display:flex;align-items:center;gap:13px;padding:12px 0;border-bottom:1px solid var(--line)"><span style="width:42px;height:42px;border-radius:50%;background:#627EEA;display:flex;align-items:center;justify-content:center;font:800 16px Manrope;color:#fff">Ξ</span><span style="flex:1"><span style="display:block;font:600 15px Manrope;color:var(--text)">Ethereum</span><span style="font:500 12px Manrope;color:var(--text3)">0.142 ETH</span></span><span style="text-align:right"><span style="display:block;font:700 14px Manrope;color:var(--text);font-variant-numeric:tabular-nums">$420.35</span><span style="font:600 11.5px Manrope;color:var(--danger)">-1.2%</span></span></div>
+                    <div style="display:flex;align-items:center;gap:13px;padding:12px 0"><span style="width:42px;height:42px;border-radius:50%;background:#26A17B;display:flex;align-items:center;justify-content:center;font:800 15px Manrope;color:#fff">₮</span><span style="flex:1"><span style="display:block;font:600 15px Manrope;color:var(--text)">Tether</span><span style="font:500 12px Manrope;color:var(--text3)">180 USDT</span></span><span style="text-align:right"><span style="display:block;font:700 14px Manrope;color:var(--text);font-variant-numeric:tabular-nums">$180.00</span><span style="font:600 11.5px Manrope;color:var(--text3)">0.0%</span></span></div>
+                  </div>
+                </sc-if>
+
+                <!-- ============ eSIM ============ -->
+                <sc-if value="{{ isEsim }}" hint-placeholder-val="{{ false }}">
+                  <div style="padding:6px 20px 24px">
+                    <div style="display:flex;align-items:center;gap:12px;padding:8px 0 16px"><span onClick="{{ backHome }}" style="width:40px;height:40px;border-radius:12px;background:var(--surface2);display:flex;align-items:center;justify-content:center;cursor:pointer"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg></span><span style="font:700 20px Manrope;color:var(--text);letter-spacing:-.4px">Travel eSIM</span></div>
+                    <div style="font:500 14px Manrope;color:var(--text2);margin-bottom:14px">Stay connected abroad. Pay in NGN, install in seconds.</div>
+                    <div style="display:flex;align-items:center;gap:9px;padding:0 14px;border-radius:14px;background:var(--field);border:1px solid var(--line2);margin-bottom:16px"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M11 18.5a7.5 7.5 0 1 0 0-15 7.5 7.5 0 0 0 0 15ZM20.5 20.5l-4-4"/></svg><input placeholder="Search a country" style="flex:1;border:none;outline:none;background:transparent;min-height:48px;color:var(--text);font:500 14.5px Manrope"></div>
+                    <div style="font:700 11px Manrope;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);padding:4px 0 6px">Popular destinations</div>
+                    <div style="display:flex;align-items:center;gap:13px;padding:13px 0;border-bottom:1px solid var(--line);cursor:pointer"><span style="width:40px;height:40px;border-radius:50%;overflow:hidden;flex:none"><svg width="40" height="40" viewBox="0 0 26 26" preserveAspectRatio="xMidYMid slice"><rect width="26" height="26" fill="#B22234"/><rect y="3" width="26" height="3" fill="#fff"/><rect y="9" width="26" height="3" fill="#fff"/><rect y="15" width="26" height="3" fill="#fff"/><rect y="21" width="26" height="3" fill="#fff"/><rect width="12" height="14" fill="#3C3B6E"/></svg></span><span style="flex:1"><span style="display:block;font:600 15px Manrope;color:var(--text)">United States</span><span style="font:500 12px Manrope;color:var(--text3)">5GB · 30 days</span></span><span style="font:700 14px Manrope;color:var(--text);font-variant-numeric:tabular-nums">₦18,500</span></div>
+                    <div style="display:flex;align-items:center;gap:13px;padding:13px 0;border-bottom:1px solid var(--line);cursor:pointer"><span style="width:40px;height:40px;border-radius:50%;overflow:hidden;flex:none"><svg width="40" height="40" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid slice"><rect width="24" height="24" fill="#012169"/><path d="M0 0l24 24M24 0L0 24" stroke="#fff" stroke-width="3"/><path d="M12 0v24M0 12h24" stroke="#fff" stroke-width="5"/><path d="M12 0v24M0 12h24" stroke="#C8102E" stroke-width="3"/></svg></span><span style="flex:1"><span style="display:block;font:600 15px Manrope;color:var(--text)">United Kingdom</span><span style="font:500 12px Manrope;color:var(--text3)">3GB · 15 days</span></span><span style="font:700 14px Manrope;color:var(--text);font-variant-numeric:tabular-nums">₦14,200</span></div>
+                    <div style="display:flex;align-items:center;gap:13px;padding:13px 0;cursor:pointer"><span style="width:40px;height:40px;border-radius:50%;background:var(--iristint);display:flex;align-items:center;justify-content:center;flex:none"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--iristext)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM3.5 12h17M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18Z"/></svg></span><span style="flex:1"><span style="display:block;font:600 15px Manrope;color:var(--text)">Global · 130 countries</span><span style="font:500 12px Manrope;color:var(--text3)">10GB · 30 days</span></span><span style="font:700 14px Manrope;color:var(--text);font-variant-numeric:tabular-nums">₦42,000</span></div>
+                  </div>
+                </sc-if>
+
+                <!-- ============ GIFT CARDS ============ -->
+                <sc-if value="{{ isGift }}" hint-placeholder-val="{{ false }}">
+                  <div style="padding:6px 20px 24px">
+                    <div style="display:flex;align-items:center;gap:12px;padding:8px 0 16px"><span onClick="{{ backHome }}" style="width:40px;height:40px;border-radius:12px;background:var(--surface2);display:flex;align-items:center;justify-content:center;cursor:pointer"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg></span><span style="font:700 20px Manrope;color:var(--text);letter-spacing:-.4px">Gift cards</span></div>
+                    <div style="display:flex;gap:8px;margin-bottom:16px"><span style="flex:1;text-align:center;padding:10px 0;border-radius:12px;background:var(--iris);color:var(--oniris);font:700 13px Manrope">Sell</span><span style="flex:1;text-align:center;padding:10px 0;border-radius:12px;background:var(--surface2);color:var(--text2);font:700 13px Manrope">Buy</span></div>
+                    <div style="font:500 14px Manrope;color:var(--text2);margin-bottom:12px">Trade a gift card for instant Naira. Pick a brand to start.</div>
+                    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:11px">
+                      <span style="display:flex;flex-direction:column;align-items:center;gap:9px;padding:18px 6px;border-radius:16px;background:var(--surface);border:1px solid var(--edge);cursor:pointer"><span style="width:44px;height:44px;border-radius:12px;background:#232F3E;display:flex;align-items:center;justify-content:center;font:800 18px Manrope;color:#FF9900">a</span><span style="font:600 12px Manrope;color:var(--text)">Amazon</span></span>
+                      <span style="display:flex;flex-direction:column;align-items:center;gap:9px;padding:18px 6px;border-radius:16px;background:var(--surface);border:1px solid var(--edge);cursor:pointer"><span style="width:44px;height:44px;border-radius:12px;background:#1B2838;display:flex;align-items:center;justify-content:center;font:800 15px Manrope;color:#66C0F4">St</span><span style="font:600 12px Manrope;color:var(--text)">Steam</span></span>
+                      <span style="display:flex;flex-direction:column;align-items:center;gap:9px;padding:18px 6px;border-radius:16px;background:var(--surface);border:1px solid var(--edge);cursor:pointer"><span style="width:44px;height:44px;border-radius:12px;background:#000;display:flex;align-items:center;justify-content:center;font:800 20px Manrope;color:#fff"></span><span style="font:600 12px Manrope;color:var(--text)">iTunes</span></span>
+                      <span style="display:flex;flex-direction:column;align-items:center;gap:9px;padding:18px 6px;border-radius:16px;background:var(--surface);border:1px solid var(--edge);cursor:pointer"><span style="width:44px;height:44px;border-radius:12px;background:#fff;display:flex;align-items:center;justify-content:center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M4 3l14 9L4 21V3Z" fill="#00C4B3"/></svg></span><span style="font:600 12px Manrope;color:var(--text)">Google Play</span></span>
+                      <span style="display:flex;flex-direction:column;align-items:center;gap:9px;padding:18px 6px;border-radius:16px;background:var(--surface);border:1px solid var(--edge);cursor:pointer"><span style="width:44px;height:44px;border-radius:12px;background:#E50914;display:flex;align-items:center;justify-content:center;font:800 20px Manrope;color:#fff">N</span><span style="font:600 12px Manrope;color:var(--text)">Netflix</span></span>
+                      <span style="display:flex;flex-direction:column;align-items:center;gap:9px;padding:18px 6px;border-radius:16px;background:var(--surface);border:1px solid var(--edge);cursor:pointer"><span style="width:44px;height:44px;border-radius:12px;background:#1DB954;display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M6 15a9 9 0 0 1 12 1M6.5 11.5a13 13 0 0 1 13 1.5M7 8a16 16 0 0 1 14 2"/></svg></span><span style="font:600 12px Manrope;color:var(--text)">Spotify</span></span>
+                    </div>
+                  </div>
+                </sc-if>
+
+              </div>
+            </div>
+          </div>
+
+          <sc-if value="{{ showTabs }}" hint-placeholder-val="{{ true }}">
+            <div style="flex:none;display:flex;border-top:1px solid var(--line);background:var(--bg);padding:10px 0 6px">
+              <span style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--iris)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5M5.5 9.5V20h13V9.5M9.5 20v-5.5h5V20"/></svg><span style="font:700 11px Manrope;color:var(--iris)">Home</span></span>
+              <span onClick="{{ goCards }}" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 7.5h19v11a2 2 0 0 1-2 2h-15a2 2 0 0 1-2-2v-11ZM2.5 10.5h19M6 16.5h3"/></svg><span style="font:500 11px Manrope;color:var(--text3)">Cards</span></span>
+              <span onClick="{{ goActivity }}" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM12 7v5l3.5 2"/></svg><span style="font:500 11px Manrope;color:var(--text3)">Activity</span></span>
+              <span style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px"><svg width="22" height="22" viewBox="0 0 24 24" fill="var(--text3)"><rect x="4" y="4" width="6" height="6" rx="1.5"/><rect x="14" y="4" width="6" height="6" rx="1.5"/><rect x="4" y="14" width="6" height="6" rx="1.5"/><rect x="14" y="14" width="6" height="6" rx="1.5"/></svg><span style="font:500 11px Manrope;color:var(--text3)">More</span></span>
+            </div>
+          </sc-if>
+
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+const P = {
+  dark:{bg:'#000',surface:'#0C0D10',surface2:'#141519',raised:'#1B1D23',field:'#141519',line:'#212227',line2:'#303237',edge:'#212227',text:'#EEF2FA',text2:'#A3B0CC',text3:'#6B7A9B',ok:'#4ADE80',okbg:'#10291C',danger:'#F87171',dangerbg:'#2E1516',warn:'#FBBF24',warnbg:'#2C2210',info:'#93B4FF',infobg:'#131E3A',iris:'#7B6CF6',iristext:'#C9C0FF',iristint:'#171526',irisedge:'#2E2952',oniris:'#160a24',irisglow:'rgba(123,108,246,.12)',glow:'rgba(123,108,246,.26)',cardgrad1:'#1b1733',cardgrad2:'#100e1a',avatar:'#171526',avatartext:'#C9C0FF'},
+  light:{bg:'#FFFFFF',surface:'#F1F3F9',surface2:'#E4E8F0',raised:'#FFFFFF',field:'#E4E8F0',line:'#E7EAF0',line2:'#D5D9E2',edge:'transparent',text:'#0D1B3E',text2:'#4A5878',text3:'#8695B4',ok:'#0F9D58',okbg:'#E7F6EE',danger:'#D64545',dangerbg:'#FDECEC',warn:'#B7791F',warnbg:'#FDF3E2',info:'#3866E0',infobg:'#EAF0FE',iris:'#6D5AE6',iristext:'#4B3FB0',iristint:'#EFEBFF',irisedge:'#D9D1FF',oniris:'#FFFFFF',irisglow:'rgba(109,90,230,.14)',glow:'rgba(109,90,230,.14)',cardgrad1:'#EFEBFF',cardgrad2:'#F5F4FF',avatar:'#EFEBFF',avatartext:'#5B4BD6'}
+};
+const RECIPIENTS = [
+  {name:'Chidi Okafor', sub:'Xetral · ···3391', initials:'CO', cur:'NGN'},
+  {name:'Ada Eze', sub:'GTBank · ···8842', initials:'AE', cur:'NGN'},
+  {name:'Kwame Mensah', sub:'MTN · ···4021', initials:'KM', cur:'GHS'},
+  {name:'Aisha Bello', sub:'Xetral · ···7745', initials:'AB', cur:'NGN'},
+];
+const BAL = 2450900;
+const NAMES = {NGN:'Nigeria', GHS:'Ghana', KES:'Kenya', USD:'United States'};
+const RATE = {NGN:{r:1,sym:'₦',dec:2}, GHS:{r:0.021,sym:'₵',dec:2}, KES:{r:0.084,sym:'KSh ',dec:2}, USD:{r:0.00066,sym:'$',dec:2}};
+
+class Component extends DCLogic {
+  state = { theme:'dark', width:390, screen:'home', listState:'data', detErr:false, detDigits:'', sendRaw:'50000', recip:RECIPIENTS[0], currency:'NGN' };
+
+  group(s){ s = String(s||'0').replace(/^0+(?=\d)/,''); let out=''; for(let i=0;i<s.length;i++){ if(i>0 && (s.length-i)%3===0) out+=','; out+=s[i]; } return out; }
+
+  renderVals(){
+    const s = this.state;
+    const p = P[s.theme];
+    const isDark = s.theme==='dark';
+    const isDesktop = s.width===1280;
+    const isPhone = !isDesktop;
+    const rootVars = Object.entries(p).map(([k,v])=>`--${k}:${v}`).join(';') + ';font-family:Manrope,system-ui,sans-serif';
+
+    // frame styles
+    let deviceStyle, screenStyle, devBodyStyle, appColStyle, innerColStyle, sidebarStyle;
+    if(isDesktop){
+      deviceStyle = 'width:1180px;border-radius:16px;overflow:hidden;background:var(--bg);border:1px solid var(--line2);box-shadow:0 40px 90px -30px rgba(15,17,34,.55)';
+      screenStyle = 'position:relative;background:var(--bg);height:760px;display:flex;flex-direction:column';
+      devBodyStyle = 'flex:1;min-height:0;display:flex';
+      sidebarStyle = 'flex:none;width:236px;background:var(--surface);border-right:1px solid var(--line);padding:18px 14px;display:flex;flex-direction:column;gap:3px';
+      appColStyle = 'flex:1;min-width:0;overflow-y:auto;background:var(--bg);display:flex;justify-content:center';
+      innerColStyle = 'width:452px;max-width:100%;padding-top:6px';
+    } else {
+      const w = s.width;
+      deviceStyle = `width:${w+22}px;padding:11px;background:#08080a;border-radius:48px;box-shadow:0 34px 70px -24px rgba(15,17,34,.5);border:1px solid rgba(255,255,255,.05)`;
+      screenStyle = 'position:relative;border-radius:38px;overflow:hidden;background:var(--bg);height:770px;display:flex;flex-direction:column';
+      devBodyStyle = 'flex:1;min-height:0;display:flex';
+      sidebarStyle = 'display:none';
+      appColStyle = 'flex:1;min-width:0;overflow-y:auto;background:var(--bg)';
+      innerColStyle = 'width:100%';
+    }
+
+    const screen = s.screen;
+    const isHome = screen==='home';
+
+    // details
+    const detEnough = s.detDigits.replace(/\D/g,'').length >= 10;
+    const detShowErr = detEnough && s.detErr;
+    const detShowName = detEnough && !s.detErr;
+    const resolvedName = s.currency==='GHS' ? 'KWAME MENSAH' : s.currency==='USD' ? 'JOHN A. CARTER' : 'ADAEZE B. OKONKWO';
+    const detContinueDisabled = !detEnough || detShowErr;
+    const continueLabel = detShowErr ? 'Number not verified' : !detEnough ? 'Enter account number' : 'Continue';
+    const detReason = detShowErr ? 'Check the account number with your recipient' : !detEnough ? 'Enter the recipient’s 10-digit account number' : '';
+    const continueStyle = `width:100%;min-height:52px;margin-top:22px;border:none;border-radius:16px;font:700 15.5px Manrope;cursor:${detContinueDisabled?'not-allowed':'pointer'};background:${detContinueDisabled?'var(--surface2)':'var(--iris)'};color:${detContinueDisabled?'var(--text3)':'var(--oniris)'}`;
+
+    // amount
+    const num = Number(s.sendRaw||'0');
+    const amtInsufficient = num > BAL;
+    const sendDisabled = num<=0 || amtInsufficient;
+    const sendDisplay = this.group(s.sendRaw);
+    const amtColor = amtInsufficient ? 'var(--danger)' : num<=0 ? 'var(--text3)' : 'var(--text)';
+    const rc = RATE[s.recip.cur] || RATE.NGN;
+    const recvNum = num * rc.r;
+    const recvDisplay = rc.sym + this.group(Math.floor(recvNum)) + '.' + String(Math.round((recvNum%1)*100)).padStart(2,'0');
+    const sendReason = num<=0 ? 'Enter an amount to continue' : amtInsufficient ? 'Reduce the amount to your available balance' : '';
+    const sendBtnLabel = amtInsufficient ? 'Insufficient balance' : 'Send money';
+    const sendBtnStyle = `width:100%;min-height:54px;border:none;border-radius:16px;font:700 16px Manrope;cursor:${sendDisabled?'not-allowed':'pointer'};background:${sendDisabled?'var(--surface2)':'var(--iris)'};color:${sendDisabled?'var(--text3)':'var(--oniris)'}`;
+
+    const pad = ['1','2','3','4','5','6','7','8','9','000','0','⌫'].map(label=>({
+      label, press: ()=> this.setState(st=>{
+        let d = st.sendRaw;
+        if(label==='⌫') d = d.slice(0,-1);
+        else d = (d + label);
+        d = d.replace(/^0+(?=\d)/,'');
+        if(d.replace(/\D/g,'').length>12) d = st.sendRaw;
+        return {sendRaw:d};
+      })
+    }));
+
+    const go = (screen)=>()=>this.setState({screen});
+
+    return {
+      isDark, isLight:!isDark, isPhone, isDesktop, rootVars,
+      deviceStyle, screenStyle, devBodyStyle, appColStyle, innerColStyle, sidebarStyle,
+      // control button states
+      darkOn:isDark?'on':'', lightOn:!isDark?'on':'',
+      w320:s.width===320?'on':'', w390:s.width===390?'on':'', w1280:isDesktop?'on':'',
+      sHome:isHome?'on':'', sWho:screen==='who'?'on':'', sCur:screen==='currency'?'on':'', sDet:screen==='details'?'on':'', sAmt:screen==='amount'?'on':'', sSuc:screen==='success'?'on':'',
+      sCards:screen==='cards'?'on':'', sAdd:screen==='add'?'on':'', sConvert:screen==='convert'?'on':'', sRequest:screen==='request'?'on':'', sActivity:screen==='activity'?'on':'', sBills:screen==='bills'?'on':'', sCrypto:screen==='crypto'?'on':'', sEsim:screen==='esim'?'on':'', sGift:screen==='gift'?'on':'',
+      lData:s.listState==='data'?'on':'', lLoad:s.listState==='loading'?'on':'', lEmpty:s.listState==='empty'?'on':'',
+      errOff:!s.detErr?'on':'', errOn:s.detErr?'on':'',
+      // screen flags
+      isHome, isWho:screen==='who', isCurrency:screen==='currency', isDetails:screen==='details', isAmount:screen==='amount', isSuccess:screen==='success',
+      isCards:screen==='cards', isAdd:screen==='add', isConvert:screen==='convert', isRequest:screen==='request', isActivity:screen==='activity', isBills:screen==='bills', isCrypto:screen==='crypto', isEsim:screen==='esim', isGift:screen==='gift',
+      showTabs: isHome && isPhone,
+      // list
+      listData:s.listState==='data', listLoading:s.listState==='loading', listEmpty:s.listState==='empty',
+      recipients: RECIPIENTS.map(r=>({ ...r, isNGN:r.cur==='NGN', isGHS:r.cur!=='NGN',
+        pick: ()=>this.setState({recip:r, currency:r.cur, screen:'amount'}) })),
+      // details
+      detCountry: NAMES[s.currency]||'Nigeria', detDigits:s.detDigits, detShowErr, detShowName, resolvedName,
+      detContinueDisabled, detContinueEnabled:!detContinueDisabled, continueLabel, detReason, continueStyle,
+      onDetail: (e)=>this.setState({detDigits:(e.target.value||'').replace(/\D/g,'').slice(0,10)}),
+      // amount
+      sendDisplay, recvDisplay, amtColor, amtInsufficient, sendDisabled, sendReason, sendBtnLabel, sendBtnStyle, pad,
+      recName:s.recip.name, recInitials:s.recip.initials, recSub:s.recip.sub,
+      // handlers
+      goSend: ()=>this.setState({screen:'who'}),
+      toggleTheme: ()=>this.setState(st=>({theme:st.theme==='dark'?'light':'dark'})),
+      startNew: ()=>this.setState({screen:'currency'}),
+      backHome: go('home'), backToWho: go('who'), backToCurrency: go('currency'),
+      pickNGN: ()=>this.setState({currency:'NGN', detDigits:'', detErr:false, screen:'details'}),
+      pickGHS: ()=>this.setState({currency:'GHS', detDigits:'', detErr:false, screen:'details'}),
+      pickKES: ()=>this.setState({currency:'KES', detDigits:'', detErr:false, screen:'details'}),
+      pickUSD: ()=>this.setState({currency:'USD', detDigits:'', detErr:false, screen:'details'}),
+      goAmountFromDetails: ()=>{ if(detContinueDisabled) return; const nm=resolvedName; this.setState({recip:{name:nm.replace(/\b\w+/g,w=>w[0]+w.slice(1).toLowerCase()), initials:nm.split(' ').map(x=>x[0]).slice(0,2).join(''), sub:'GTBank · ···'+(s.detDigits.slice(-4)||'0000'), cur:s.currency}, sendRaw:'0', screen:'amount'}); },
+      doSend: ()=>{ if(sendDisabled) return; this.setState({screen:'success'}); },
+      doneHome: ()=>this.setState({screen:'home', sendRaw:'50000', recip:RECIPIENTS[0], currency:'NGN', detDigits:'', detErr:false}),
+      sendAgain: ()=>this.setState({screen:'who', sendRaw:'50000'}),
+      // controls
+      setDark: ()=>this.setState({theme:'dark'}), setLight: ()=>this.setState({theme:'light'}),
+      setW320: ()=>this.setState({width:320}), setW390: ()=>this.setState({width:390}), setW1280: ()=>this.setState({width:1280}),
+      jumpHome: go('home'), jumpWho: go('who'), jumpCurrency: go('currency'), jumpDetails: go('details'), jumpAmount: go('amount'), jumpSuccess: go('success'),
+      jumpCards:go('cards'), jumpAdd:go('add'), jumpConvert:go('convert'), jumpRequest:go('request'), jumpActivity:go('activity'), jumpBills:go('bills'), jumpCrypto:go('crypto'), jumpEsim:go('esim'), jumpGift:go('gift'),
+      goCards:go('cards'), goAdd:go('add'), goConvert:go('convert'), goRequest:go('request'), goActivity:go('activity'), goBills:go('bills'), goCrypto:go('crypto'), goEsim:go('esim'), goGift:go('gift'),
+      setListData: ()=>this.setState({listState:'data', screen:'who'}), setListLoading: ()=>this.setState({listState:'loading', screen:'who'}), setListEmpty: ()=>this.setState({listState:'empty', screen:'who'}),
+      detOk: ()=>this.setState({detErr:false, detDigits:'0123456789', currency:'NGN', screen:'details'}), detErrOn: ()=>this.setState({detErr:true, detDigits:'0123456789', currency:'NGN', screen:'details'}),
+    };
+  }
+}
+</script>
+</body>
+</html>

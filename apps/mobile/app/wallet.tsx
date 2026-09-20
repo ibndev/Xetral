@@ -1,6 +1,6 @@
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { Link } from 'expo-router';
-import { formatAmount, symbolFor } from '@xetral/client';
+import { entryKindLabel, formatAmount, symbolFor } from '@xetral/client';
 import type { Balance, Transaction } from '@xetral/client';
 import { Icon } from '@/icon';
 import type { IconName } from '@/icon';
@@ -21,13 +21,15 @@ const looksLikeACurrency = (stored: string) => /^[A-Z]{3,6}$/.test(stored);
 /**
  * THE SHELL'S GUTTER, STATED ONCE.
  *
+ * 20px, READ OFF `docs/mockups/app.html` RATHER THAN CHOSEN — the header at
+ * `12px 20px 4px`, the rail at `16px 20px 2px`, the Explore grid at `0 20px`.
  * Every block on this screen is inset by it and the currency rail and the
  * promo rail BLEED by exactly it. The web learned that four pixels of
  * disagreement between an inset and its bleed is not a rounding difference —
  * it is a rail hanging past the screen edge with no gutter under it while
  * every other block keeps one. One constant is what makes them agree.
  */
-const GUTTER = space.md;
+const GUTTER = 20;
 
 /** The four products, in the order the design puts them — same as the web. */
 const PRODUCTS: readonly {
@@ -282,6 +284,9 @@ export default function Home() {
                     style={{
                       color: colors.text, fontFamily: font.numBold,
                       fontSize: 22, letterSpacing: -0.6, marginTop: 16,
+                      // WHAT MAKES A COLUMN LINE UP, and it is the variant
+                      // rather than the family — see `font.num` in theme.ts.
+                      fontVariant: ['tabular-nums'],
                     }}
                   >
                     {hidden ? `${symbolFor(b.currency)} ${MASK}` : formatAmount(b.spendable, b.currency)}
@@ -319,7 +324,7 @@ export default function Home() {
 
       <View style={{ paddingHorizontal: GUTTER, marginTop: space.lg }}>
         <SectionHead title="Explore" moreLabel="All services" moreHref="/more" />
-        <View style={{ flexDirection: 'row', gap: 8 }}>
+        <View style={{ flexDirection: 'row', gap: 9 }}>
           {PRODUCTS.map((product) => (
             <Link key={product.label} href={product.href as never} asChild>
               <Pressable
@@ -328,27 +333,28 @@ export default function Home() {
                 style={{
                   flex: 1,
                   alignItems: 'center', justifyContent: 'center',
-                  gap: 7,
-                  paddingVertical: 12, paddingHorizontal: 4,
-                  minHeight: 82,
-                  borderRadius: radius.lg,
+                  // `gap:6; padding:11px 4px; radius:14`, off the comp.
+                  gap: 6,
+                  paddingVertical: 11, paddingHorizontal: 4,
+                  minHeight: 72,
+                  borderRadius: 14,
                   borderWidth: 1, borderColor: colors.edge,
                   backgroundColor: colors.surface,
                 }}
               >
                 <View
                   style={{
-                    width: 38, height: 38, borderRadius: 12,
+                    width: 32, height: 32, borderRadius: 10,
                     alignItems: 'center', justifyContent: 'center',
                     backgroundColor: tone[product.tone].bg,
                   }}
                 >
-                  <Icon name={product.icon} size={20} color={tone[product.tone].fg} />
+                  <Icon name={product.icon} size={18} color={tone[product.tone].fg} />
                 </View>
                 <Text
                   numberOfLines={1}
                   style={{
-                    fontSize: 11.5, fontFamily: font.sansSemi,
+                    fontSize: 11, fontFamily: font.sansSemi,
                     textAlign: 'center', color: colors.text,
                   }}
                 >
@@ -360,28 +366,17 @@ export default function Home() {
         </View>
       </View>
 
-      {/* The same two cards the web shows, bleeding the same GUTTER. */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ gap: 12, paddingHorizontal: GUTTER, paddingTop: space.lg, paddingBottom: 6 }}
-        style={{ marginHorizontal: -GUTTER }}
-      >
-        <Promo
-          href="/fx"
-          background={colors.warn}
-          title="Send money home, instantly"
-          body="Convert and deliver in one move — the rate you see is the rate you get."
-          cta="Convert now"
-        />
-        <Promo
-          href="/cards"
-          background={colors.brand === '#FFFFFF' ? '#16295A' : colors.brand}
-          title="Spend online in dollars"
-          body="A virtual USD card, funded from your naira balance in seconds."
-          cta="Get a card"
-        />
-      </ScrollView>
+      {/*
+        THERE IS NO PROMO RAIL HERE, and removing it is the correction.
+
+        Two marketing cards sat between Explore and Recent activity. They are
+        not in `docs/mockups/app.html`: that screen goes Explore tiles
+        straight to Recent activity, and both cards were this app's own
+        addition. A section the design does not have is a difference from the
+        design, and on the home screen it pushed the customer's own
+        transactions most of a handset further down for two things they did
+        not ask for.
+      */}
 
       <View style={{ paddingHorizontal: GUTTER, marginTop: space.lg }}>
         <SectionHead title="Recent activity" moreLabel="See all" moreHref="/activity" />
@@ -438,7 +433,7 @@ export default function Home() {
                   <View>
                     <View
                       style={{
-                        width: 42, height: 42, borderRadius: 999,
+                        width: 44, height: 44, borderRadius: 999,
                         alignItems: 'center', justifyContent: 'center',
                         backgroundColor: colors.surface2,
                       }}
@@ -456,20 +451,26 @@ export default function Home() {
                       <CurrencyMark currency={t.currency} size={14} />
                     </View>
                   </View>
+                  {/*
+                    THREE PIECES, WHICH IS WHAT THE COMP DRAWS: who, what it
+                    was, and the amount with its time under it. It was two —
+                    the time sat where the design puts a descriptor, so the
+                    row could not say what a transaction WAS. The descriptor
+                    comes from the entry's `kind`, a closed enum, never from
+                    the free-text description.
+                  */}
                   <View style={{ flex: 1, minWidth: 0 }}>
                     <Text
                       numberOfLines={1}
-                      style={{ color: colors.text, fontFamily: font.sansSemi, fontSize: 14.5 }}
+                      style={{ color: colors.text, fontFamily: font.sansSemi, fontSize: 15 }}
                     >
                       {t.description}
                     </Text>
-                    {/* THE TIME, NOT THE DATE. The heading above already said
-                        which day, and a row repeating it is a column of
-                        identical text. */}
                     <Text
+                      numberOfLines={1}
                       style={{ color: colors.text3, fontFamily: font.sansMedium, fontSize: 12.5, marginTop: 2 }}
                     >
-                      {when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+                      {entryKindLabel(t.kind)}
                     </Text>
                   </View>
                   {/*
@@ -484,15 +485,25 @@ export default function Home() {
                     tapped days earlier. The amount is the one thing you open
                     that list to find out.
                   */}
-                  <Text
-                    style={{
-                      fontFamily: font.numSemi, fontSize: 14.5,
-                      letterSpacing: -0.3,
-                      color: outgoing ? colors.danger : colors.ok,
-                    }}
-                  >
-                    {formatAmount(t.amount, t.currency)}
-                  </Text>
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text
+                      style={{
+                        fontFamily: font.numSemi, fontSize: 14.5,
+                        letterSpacing: -0.3,
+                        fontVariant: ['tabular-nums'] as ('tabular-nums')[],
+                        color: outgoing ? colors.danger : colors.ok,
+                      }}
+                    >
+                      {formatAmount(t.amount, t.currency)}
+                    </Text>
+                    {/* THE TIME, ON THE RIGHT UNDER THE AMOUNT, where the comp
+                        puts it. The day heading above already said which day. */}
+                    <Text
+                      style={{ color: colors.text3, fontFamily: font.sansMedium, fontSize: 11.5, marginTop: 2 }}
+                    >
+                      {when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+                    </Text>
+                  </View>
                 </View>
               </View>
             );
@@ -518,7 +529,14 @@ function Figure({ text, split }: { readonly text: string; readonly split: boolea
     fontFamily: font.numBold,
     fontSize: 40,
     letterSpacing: -1.6,
-  } as const;
+    // `800 40px Manrope; letter-spacing:-1.6px; tabular-nums` — the comp's
+    // balance, to the character.
+    // NOT `as const` on this one: React Native types `fontVariant` as a
+    // MUTABLE array, so a readonly tuple is refused — and widening the whole
+    // object with a cast to silence it would take the compiler off a style
+    // that sets a size and a colour.
+    fontVariant: ['tabular-nums'] as ('tabular-nums')[],
+  };
   if (at === -1) return <Text style={base} numberOfLines={1}>{text}</Text>;
   return (
     <Text style={base} numberOfLines={1}>
@@ -557,45 +575,6 @@ function SectionHead({
   );
 }
 
-function Promo({
-  href, background, title, body, cta,
-}: {
-  readonly href: string; readonly background: string;
-  readonly title: string; readonly body: string; readonly cta: string;
-}) {
-  return (
-    <Link href={href as never} asChild>
-      <Pressable
-        accessibilityRole="link"
-        android_ripple={null}
-        style={{
-          width: 292,
-          borderRadius: 22,
-          padding: 18,
-          backgroundColor: background,
-        }}
-      >
-        {/* WHITE ON BOTH, and stated rather than taken from a token. Amber and
-            navy are fixed colours that do not follow the theme, so text that
-            followed `colors.text` would be near-black on the amber card in
-            light mode and invisible on the navy one. */}
-        <Text style={{ color: '#FFFFFF', fontFamily: font.sansBold, fontSize: 17, letterSpacing: -0.2 }}>
-          {title}
-        </Text>
-        <Text
-          style={{ color: 'rgba(255,255,255,.88)', fontFamily: font.sans, fontSize: 13.5, lineHeight: 19, marginTop: 6 }}
-        >
-          {body}
-        </Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 14 }}>
-          <Text style={{ color: '#FFFFFF', fontFamily: font.sansBold, fontSize: 14 }}>{cta}</Text>
-          <Icon name="arrowRight" size={15} color="#FFFFFF" />
-        </View>
-      </Pressable>
-    </Link>
-  );
-}
-
 function Action({
   href, icon, label, primary,
 }: {
@@ -612,9 +591,13 @@ function Action({
       >
         <View
           style={{
-            width: 56, height: 56, borderRadius: 18,
+            // 54 AND `surface2`, off the comp. It was 56 on `surface`, which
+            // is the same tile two pixels larger on a fill one step
+            // shallower — invisible alone and visible beside the web, which
+            // had it right.
+            width: 54, height: 54, borderRadius: 18,
             alignItems: 'center', justifyContent: 'center',
-            backgroundColor: primary === true ? colors.iris : colors.surface,
+            backgroundColor: primary === true ? colors.iris : colors.surface2,
             borderWidth: 1,
             borderColor: primary === true ? colors.iris : colors.edge,
           }}
@@ -623,7 +606,7 @@ function Action({
         </View>
         <Text
           style={{
-            fontSize: 12.5, fontFamily: font.sansSemi,
+            fontSize: 12, fontFamily: font.sansSemi,
             color: primary === true ? colors.text : colors.text2,
           }}
         >
