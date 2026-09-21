@@ -2595,10 +2595,26 @@ th.right { font-family: var(--font-sans); }
 
 .admin-menu { display: grid; }
 .admin-wide-only { display: none; }
-/* THE SCREEN'S NAME, in the top bar where the comp puts it — `800 20px`, on
-   the left. Hidden on a handset, where the compact brand is showing and two
-   of them do not fit. */
-.admin-title { display: none; }
+/*
+ * THE SCREEN'S NAME, in the top bar where the comp puts it — `800 20px`, on
+ * the left.
+ *
+ * SHOWN ON A HANDSET TOO, and the compact BRAND is what gives way. The comp
+ * is desktop-only so it does not answer this, and the first version hid the
+ * title below 1000px on the reasoning that two things do not fit — which left
+ * an operator on a phone looking at a screen with no name at all, on a
+ * surface of twenty-six screens that mostly open with a table. A wordmark is
+ * the same on every one of them; the name is the only thing that differs, and
+ * the drawer's own Overview entry is the way home.
+ */
+.admin-title {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--font-display);
+  font-size: 17px; font-weight: 800;
+  letter-spacing: -0.02em;
+}
 
 @media (min-width: 1000px) {
   /* The column layout. The sidebar stops being a sheet and the header stops
@@ -2607,15 +2623,11 @@ th.right { font-family: var(--font-sans); }
   .admin-side { position: sticky; height: 100vh; transform: none; max-width: none; }
   .admin-menu,
   .admin-brand-compact { display: none; }
+  /* Room for the comp's own size once the sidebar carries the brand. */
+  .admin-title { font-size: 20px; }
   .admin-wide-only { display: inline-flex; }
   .admin-main { min-width: 0; }
-  .admin-title {
-    display: block;
-    margin: 0;
-    font-family: var(--font-display);
-    font-size: 20px; font-weight: 800;
-    letter-spacing: -0.02em;
-  }
+
 }
 
 

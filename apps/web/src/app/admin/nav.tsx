@@ -275,14 +275,10 @@ export function AdminShell({ children }: { readonly children: ReactNode }) {
           >
             <Icon name={open ? 'close' : 'menu'} size={22} />
           </button>
-          <Link
-            href="/admin"
-            className="admin-brand admin-brand-compact"
-            aria-label="Xetral operations"
-          >
-            <Logo size={22} />
-            <span className="admin-brand-suffix">operations</span>
-          </Link>
+          {/* THE BRAND IS IN THE SIDEBAR, which on a wide screen is always
+              showing and on a handset is one tap away. What the bar carries
+              is the screen's name — the only thing on it that differs between
+              twenty-six screens. */}
           {/* The comp's `.top h1` — `800 20px`, and the one place this screen
               is named. Hidden where the compact brand is showing, because two
               of them do not fit on a handset. */}
