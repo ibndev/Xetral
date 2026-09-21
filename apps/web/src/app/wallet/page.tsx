@@ -136,12 +136,17 @@ export default function Wallet() {
    * it again on every load means the number is shown at least once in that
    * room every time, which is the exact thing they asked us not to do.
    *
-   * `hidden` is also the fallback, so the first paint of an unknown preference
-   * is dots rather than a figure. See `useRemembered`.
+   * `shown` is the fallback, because ABSENCE OF A PREFERENCE IS NOT A
+   * PREFERENCE. It was `hidden`, on the reasoning that dots are the cautious
+   * first paint — and since nothing is stored until somebody presses the eye,
+   * the effect wrote that same fallback back and every customer who had never
+   * used the control had their own balance permanently masked. The one number
+   * the home screen exists for, replaced by six dots, on the screen they open
+   * to check it. See `useRemembered` for why there is no flash the other way.
    */
   const [visibility, setVisibility] = useRemembered<'hidden' | 'shown'>(
     'xetral-balance-visibility',
-    'hidden',
+    'shown',
     (stored) => stored === 'hidden' || stored === 'shown',
   );
   const hidden = visibility === 'hidden';

@@ -76,9 +76,25 @@ export function useIdempotencyKey(): { key: string; next: () => void } {
  * server's answer anyway.
  *
  * So the FIRST PAINT IS ALWAYS THE FALLBACK, and callers choose a fallback
- * that is safe to be wrong about. For the balance that is `hidden`: a moment
- * of dots for somebody who wanted the number is nothing, and a moment of the
- * number for somebody who asked for dots is the whole point of the control.
+ * that is safe to be wrong about.
+ *
+ * AND "SAFE TO BE WRONG ABOUT" IS NOT THE SAME AS "THE CAUTIOUS ANSWER",
+ * which is what the balance was set to and what made every new customer's
+ * home screen a row of dots. Absence of a preference is not a preference:
+ * nobody who has never touched the eye asked for their own balance to be
+ * withheld from them, and with no stored value the effect writes the fallback
+ * back, so it was not a first paint — it was the permanent state. The comp
+ * shows the figure, and a screen whose headline number is masked by default
+ * reads as one that failed to load.
+ *
+ * The flash the old fallback was guarding against does not arise here, and
+ * that is a claim with a test rather than an argument: a balance is fetched,
+ * so the first paint of this screen is a skeleton on a cold load and on a
+ * client-side navigation alike. By the time there is a figure to paint, this
+ * effect has run. Measured rather than argued: with `hidden` stored, and the
+ * element sampled every frame from document creation, a cold load and a
+ * client-side return to the screen each showed `₦ • • • • • •` and never once
+ * a digit.
  *
  * A private window refuses storage entirely. That is caught and ignored — the
  * preference simply does not outlive the tab, which is better than throwing on

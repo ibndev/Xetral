@@ -82,16 +82,19 @@ export default function Home() {
   const colors = useTheme();
 
   /*
-   * REMEMBERED, and hidden is the fallback.
+   * REMEMBERED, and SHOWN is the fallback — the web's change, applied here
+   * for the reason the two apps share a control at all.
    *
    * A customer who hides the balance is telling us something about the room
-   * they are standing in, and making them say it again on every launch means
-   * the figure is shown at least once in that room every time. Same control,
-   * same default, same storage rule on both apps.
+   * they are standing in, and that choice is what is stored and honoured on
+   * every launch. What was wrong was reading its ABSENCE the same way:
+   * nothing is written until somebody presses the eye, so a customer who
+   * never had was shown six dots where the figure goes, for ever, on the
+   * screen they open to check it.
    */
   const [visibility, setVisibility] = useRemembered<'hidden' | 'shown'>(
     BALANCE_VISIBILITY,
-    'hidden',
+    'shown',
     (stored) => stored === 'hidden' || stored === 'shown',
   );
   const hidden = visibility === 'hidden';
