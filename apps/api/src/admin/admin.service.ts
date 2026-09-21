@@ -31,6 +31,15 @@ export interface UserSummary {
   readonly created_at: string;
 }
 
+/**
+ * The shape of every id this surface takes in a path.
+ *
+ * Checked BEFORE the query rather than caught after it: a cast error is a 500
+ * by the time it reaches the handler, and translating it back would mean
+ * reading a driver's message to decide what the customer's id was.
+ */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 @Injectable()
 export class AdminService {
   readonly #logger = new Logger(AdminService.name);
@@ -221,6 +230,23 @@ export class AdminService {
 
   /** One customer, with everything an operator needs before acting. */
   async user(uuid: string): Promise<Record<string, unknown>> {
+    /*
+     * A MALFORMED ID ANSWERS AS AN UNKNOWN ONE, not as a broken platform.
+     *
+     * `WHERE uuid = $1` against `'1'` does not return no rows — Postgres
+     * raises `invalid input syntax for type uuid`, which reaches the operator
+     * as "Something went wrong on our side" with a reference number. An
+     * operator who has edited a URL, followed a stale link or pasted a
+     * customer's numeric id is told the dashboard is broken, and the
+     * reference sends somebody to read a stack trace about a cast.
+     *
+     * The payment link records the same rule for the opposite reason: there
+     * the two answers must MATCH so a stranger cannot learn which ids are the
+     * right shape. Here the surface is staff-only, so the argument is simply
+     * that "no such customer" is the true answer and a 500 is not.
+     */
+    if (!UUID.test(uuid)) throw new NotFoundException({ error: 'user_not_found' });
+
     const found = await this.pool.query<{ id: string }>(`SELECT id FROM users WHERE uuid = $1`, [
       uuid,
     ]);
@@ -402,6 +428,8 @@ export class AdminService {
    * `cards` stores.
    */
   async cardHistory(cardUuid: string): Promise<Record<string, unknown>> {
+    // A malformed id is an unknown one — see `user()`.
+    if (!UUID.test(cardUuid)) throw new NotFoundException({ error: 'card_not_found' });
     const card = await this.pool.query<{ id: string }>(
       `SELECT id FROM cards WHERE uuid = $1::uuid`,
       [cardUuid],
@@ -445,6 +473,9 @@ export class AdminService {
     actorUuid: string,
     reason: string,
   ): Promise<Record<string, unknown>> {
+    // A malformed id is an unknown one — see `user()`.
+    if (!UUID.test(uuid)) throw new NotFoundException({ error: 'user_not_found' });
+
     const actorId = await this.#userId(actorUuid);
 
     const client = await this.pool.connect();
@@ -520,6 +551,9 @@ export class AdminService {
       readonly before?: string;
     },
   ): Promise<readonly Record<string, unknown>[]> {
+    // A malformed id is an unknown one — see `user()`.
+    if (!UUID.test(uuid)) throw new NotFoundException({ error: 'user_not_found' });
+
     const found = await this.pool.query<{ id: string }>(`SELECT id FROM users WHERE uuid = $1`, [
       uuid,
     ]);
@@ -576,6 +610,9 @@ export class AdminService {
     reason: string,
     ip?: string,
   ): Promise<Record<string, unknown>> {
+    // A malformed id is an unknown one — see `user()`.
+    if (!UUID.test(uuid)) throw new NotFoundException({ error: 'user_not_found' });
+
     const actorId = await this.#userId(actorUuid);
     const found = await this.pool.query<{ id: string; status: string }>(
       `SELECT id, status FROM users WHERE uuid = $1`,

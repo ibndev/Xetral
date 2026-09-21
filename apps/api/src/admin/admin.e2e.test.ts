@@ -917,3 +917,54 @@ describe('the audit log', () => {
     ).rejects.toThrow();
   });
 });
+
+describe('a customer id that is not one', () => {
+  /*
+   * A MALFORMED ID ANSWERED 500, WITH A REFERENCE NUMBER.
+   *
+   * `WHERE uuid = $1` against `'1'` does not return no rows — Postgres raises
+   * `invalid input syntax for type uuid`. So an operator who edited a URL,
+   * followed a stale link, or pasted a customer's NUMERIC id was told the
+   * dashboard had broken on our side, and the reference sent somebody to read
+   * a stack trace about a cast.
+   *
+   * Driven over HTTP rather than asserted on the service, because the whole
+   * fault is what the status code is by the time it leaves the app: the
+   * service threw, correctly, and nothing between there and the operator knew
+   * that a cast error means "no such customer".
+   */
+  it('answers as an unknown one rather than as a broken platform', async () => {
+    const officer = await register();
+    await grant(officer, 'support');
+
+    for (const bad of ['1', 'not-a-uuid', '00000000-0000-0000-0000']) {
+      const read = await request(app.getHttpServer())
+        .get(`/v1/admin/users/${bad}`)
+        .set('Authorization', `Bearer ${officer.token}`);
+      expect(read.status, `GET with id ${bad}`).toBe(404);
+      expect(read.body).toEqual({ error: 'user_not_found' });
+
+      const history = await request(app.getHttpServer())
+        .get(`/v1/admin/users/${bad}/transactions`)
+        .set('Authorization', `Bearer ${officer.token}`);
+      expect(history.status, `transactions with id ${bad}`).toBe(404);
+    }
+  });
+
+  /* And a well-formed id for nobody answers the same way, which is what makes
+     the refusal above say nothing about which ids exist. */
+  it('answers identically for a well-formed id that matches nobody', async () => {
+    const officer = await register();
+    await grant(officer, 'support');
+
+    const missing = await request(app.getHttpServer())
+      .get(`/v1/admin/users/${randomUUID()}`)
+      .set('Authorization', `Bearer ${officer.token}`);
+    const malformed = await request(app.getHttpServer())
+      .get('/v1/admin/users/1')
+      .set('Authorization', `Bearer ${officer.token}`);
+
+    expect(missing.status).toBe(malformed.status);
+    expect(missing.body).toEqual(malformed.body);
+  });
+});
