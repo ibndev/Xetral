@@ -536,9 +536,26 @@ h3 { font-size: 16px; }
 .muted  { color: var(--text-2); }
 .nowrap { white-space: nowrap; }
 
-/* Figures line up only if their digits are the same width. Money in a
-   proportional font is money a customer has to read twice. */
-.amount, .figure, td.amount, .mono {
+/*
+ * Figures line up only if their digits are the same width. Money in a
+ * proportional font is money a customer has to read twice.
+ *
+ * WHICH FACE IS PER SURFACE, and the two comps disagree on purpose.
+ * `docs/mockups/app.html` contains the string "Space Grotesk" ZERO times —
+ * every customer figure is Manrope with `tabular-nums` — and
+ * `docs/mockups/admin.html` sets `.kval` and `.mono` in Space Grotesk. So the
+ * default here is the customer's, and the operations surface overrides it
+ * below. `.mono` is the admin comp's OWN class name and keeps that face
+ * wherever it is used: a URL, a reference, an address — strings that are read
+ * character by character rather than as a quantity.
+ */
+.amount, .figure, td.amount {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  letter-spacing: -0.01em;
+}
+.mono {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-feature-settings: 'tnum' 1;
@@ -2248,7 +2265,37 @@ th.right { font-family: var(--font-sans); }
  * its own edge; the customer app's buttons are full width and 48px tall,
  * where 16px reads as a considered corner rather than a lozenge.
  */
-.admin-frame .btn, .admin-frame button { border-radius: 10px; }
+/*
+ * AND ITS BUTTONS ARE SMALLER, not just rounder. `.btnp` and `.btng` are
+ * `700 12.5px` in `8px 14px` — about 33px tall — against the customer app's
+ * 48px minimum, which is a rule about a THUMB. A dashboard is operated with a
+ * mouse, several buttons sit in a row inside a panel, and a 48px control
+ * among 13px table rows is the loudest thing in a screen whose subject is the
+ * table.
+ */
+.admin-frame .btn, .admin-frame button {
+  min-height: 0;
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+/* The sidebar and the scrim set their own box and must keep it. */
+.admin-frame .admin-side a, .admin-frame .admin-side button {
+  min-height: 36px;
+  padding: 7px 12px;
+  border-radius: var(--r-sm);
+  font-size: 13px;
+  font-weight: 600;
+}
+.admin-frame .admin-scrim { padding: 0; }
+/* EVERY FIGURE ON THIS SURFACE IS SPACE GROTESK, which is what the admin comp
+   sets — the customer app's Manrope is the default and this is the override,
+   rather than the other way round. */
+.admin-frame .amount,
+.admin-frame .figure,
+.admin-frame td.amount,
+.admin-frame td.right { font-family: var(--font-mono); }
 /* Restated rather than left to declaration order: these carry their own
    radius above and a shape is not a thing to resolve by source position. */
 .admin-frame .badge, .admin-frame .pill, .admin-frame .segmented,
@@ -2463,28 +2510,40 @@ th.right { font-family: var(--font-sans); }
  * as an outline. The fault here was never a missing edge — it was a missing
  * RECESS, because the fill and the panel's fill were the same colour.
  */
+/* THE COMP'S `.panel.kpi`: a 16px panel, 16px of padding, an 11.5px label
+   eight pixels above a 23px figure. */
 .stat {
   background: var(--surface-2);
   border: 1px solid var(--edge);
-  border-radius: var(--r);
-  padding: 15px 16px;
+  border-radius: 16px;
+  padding: 16px;
 }
-.stat .label { color: var(--text-2); font-size: 12.5px; font-weight: 500; }
+.stat .label {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--text-3);
+  font-size: 11.5px; font-weight: 600;
+}
 /*
- * THE FIGURE FACE, NOT THE DISPLAY FACE. Every one of these is a count or an
- * amount, and the display face has proportional numerals — so a column of
- * tiles showing 1,204 / 77 / 1,911 did not line up and a "1" was narrower
- * than a "7". Space Grotesk with `tabular-nums` is what the design sets every
- * balance in, and this is the same kind of number.
+ * THE FIGURE FACE, AND ON THIS SURFACE THAT IS SPACE GROTESK.
+ *
+ * Every one of these is a count or an amount, and a display face has
+ * proportional numerals — a column of tiles showing 1,204 / 77 / 1,911 does
+ * not line up and a "1" is narrower than a "7".
+ *
+ * WHICH FACE, THOUGH, IS PER SURFACE. The comps are not the same here: the
+ * customer app sets every figure in Manrope with `tabular-nums` and contains
+ * no Space Grotesk at all, and the admin comp sets `.kval` and `.mono` in
+ * Space Grotesk. So this reads `--font-mono` — it was `--font-num`, written
+ * when the two were the other way round, which put the customer app's face on
+ * the operations dashboard.
  */
 .stat .value {
-  font-family: var(--font-num);
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-weight: 700;
-  font-size: 24px;
-  letter-spacing: -0.02em;
-  font-variant-numeric: tabular-nums;
-  margin-top: 3px;
+  font-size: 23px;
+  letter-spacing: -0.022em;
 }
 .stat.alarm { border-color: var(--danger); background: var(--danger-bg); }
 .stat.alarm .value, .stat.alarm .label { color: var(--danger); }

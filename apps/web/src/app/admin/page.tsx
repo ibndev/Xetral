@@ -72,6 +72,21 @@ export default function Overview() {
         <AdminError error={overview.error} code={overview.code} role="support" />
       </div>
 
+      {/*
+        THE PANELS BELOW ARE THE SAME LOAD, so when it is refused they are
+        hidden rather than drawn empty.
+
+        An operator who has not enrolled a second factor is refused every read
+        on this surface — which the banner above says, once, with the link
+        that fixes it. Underneath it were two panels with headings and nothing
+        at all beneath them: "Work queues" over blank space, and "What we owe
+        customers" over "No balances yet", which is a CLAIM about the ledger
+        rather than a statement that we did not ask. Repeating the banner in
+        each panel would be three copies of one sentence; drawing them empty
+        is worse, because one of them says something untrue.
+      */}
+      {overview.error === undefined && (
+      <>
       <div className="panel">
         <h2>Work queues</h2>
         {/*
@@ -185,6 +200,8 @@ export default function Overview() {
           </div>
         )}
       </div>
+      </>
+      )}
     </>
   );
 }
