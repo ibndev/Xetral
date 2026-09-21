@@ -6,6 +6,7 @@ import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
 import { Select } from '@/ui/select';
 import { AdminError } from '../access';
+import { AdminTitle } from '@/app/admin/nav';
 
 /**
  * TELLING CUSTOMERS SOMETHING, ON THE DEVICE THEY ALREADY CARRY.
@@ -93,7 +94,7 @@ export default function Broadcasts() {
   return (
     <>
       <div className="panel">
-        <h1>Announcements</h1>
+        <AdminTitle>Announcements</AdminTitle>
         <p className="lead">
           A notification on every customer’s phone. Only customers who have
           opted in to product news are included — security and transaction

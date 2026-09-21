@@ -6,6 +6,7 @@ import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
 import { AdminError } from '../access';
 import { Select } from '@/ui/select';
+import { AdminTitle } from '@/app/admin/nav';
 
 /**
  * Who can do what.
@@ -34,7 +35,7 @@ export default function Staff() {
   return (
     <>
       <div className="panel">
-        <h1>Staff</h1>
+        <AdminTitle>Staff</AdminTitle>
         <h2>{staff.data?.length ?? 0} active grant(s)</h2>
 
         <AdminError error={staff.error} code={staff.code} role="admin" />

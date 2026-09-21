@@ -2187,10 +2187,28 @@ th.right { font-family: var(--font-sans); }
   color: var(--text-2);
   white-space: nowrap;
 }
-.badge.ok     { background: var(--ok-bg);     color: var(--ok); }
-.badge.warn   { background: var(--warn-bg);   color: var(--warn); }
-.badge.danger { background: var(--danger-bg); color: var(--danger); }
-.badge.info   { background: var(--info-bg);   color: var(--info); }
+/*
+ * THE TONE CLASSES RESTATE THE BADGE'S OWN BOX, and that is not belt and
+ * braces — it is the only thing keeping a status pill from being a paragraph.
+ *
+ * `.ok`, `.warn` and `.danger` are ALSO the standalone message classes: `.ok`
+ * is `display: flex; margin-top: var(--s-2)` on the green line under a form.
+ * Both score (0,1,0), and the message rules come later in this file, so
+ * `class="badge ok"` resolved to a FULL-WIDTH FLEX BOX with a top margin —
+ * every `active` and `approved` pill on the customers table stretched across
+ * its column, and the card's own status pill with it. Nothing failed: the
+ * markup is right, both rules are right, and the only place it exists is on
+ * screen.
+ *
+ * `.badge.ok` scores (0,2,0) and wins. Stating the box here rather than
+ * renaming the message classes, because the tone names are what a reader
+ * reaches for in both places and the collision is a cascade problem rather
+ * than a naming one.
+ */
+.badge.ok     { display: inline-flex; margin: 0; background: var(--ok-bg);     color: var(--ok); }
+.badge.warn   { display: inline-flex; margin: 0; background: var(--warn-bg);   color: var(--warn); }
+.badge.danger { display: inline-flex; margin: 0; background: var(--danger-bg); color: var(--danger); }
+.badge.info   { display: inline-flex; margin: 0; background: var(--info-bg);   color: var(--info); }
 .badge .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 
 /*
@@ -2296,6 +2314,28 @@ th.right { font-family: var(--font-sans); }
 .admin-frame .figure,
 .admin-frame td.amount,
 .admin-frame td.right { font-family: var(--font-mono); }
+/*
+ * AND THE TABLE IS THE COMP'S `.tbl`: a `700 10.5px` heading over `600 13px`
+ * cells, both padded `14px` across. The base table is 14px at 400 with the
+ * padding only on one side, which reads as prose in columns — and a dashboard
+ * is a table with some chrome round it, so this is the one measurement on the
+ * surface worth getting exactly right.
+ */
+.admin-frame table { font-size: 13px; }
+.admin-frame th {
+  padding: 0 14px 10px;
+  font-size: 10.5px; font-weight: 700;
+  letter-spacing: .06em;
+}
+.admin-frame td { padding: 13px 14px; font-weight: 600; }
+.admin-frame th:first-child, .admin-frame td:first-child { padding-left: 0; }
+.admin-frame th:last-child, .admin-frame td:last-child { padding-right: 0; }
+
+/* THE TOP BAR HAS A HAIRLINE UNDER IT, which is what separates the chrome
+   from the body. The customer app's `.appbar` grows one only once the page
+   has scrolled, because there it sits over content that moves under it; here
+   it is a fixed bar over a scrolling body and the line is always true. */
+.admin-frame .appbar { border-bottom-color: var(--line); }
 /* Restated rather than left to declaration order: these carry their own
    radius above and a shape is not a thing to resolve by source position. */
 .admin-frame .badge, .admin-frame .pill, .admin-frame .segmented,
@@ -2469,6 +2509,10 @@ th.right { font-family: var(--font-sans); }
 
 .admin-menu { display: grid; }
 .admin-wide-only { display: none; }
+/* THE SCREEN'S NAME, in the top bar where the comp puts it — `800 20px`, on
+   the left. Hidden on a handset, where the compact brand is showing and two
+   of them do not fit. */
+.admin-title { display: none; }
 
 @media (min-width: 1000px) {
   /* The column layout. The sidebar stops being a sheet and the header stops
@@ -2479,6 +2523,13 @@ th.right { font-family: var(--font-sans); }
   .admin-brand-compact { display: none; }
   .admin-wide-only { display: inline-flex; }
   .admin-main { min-width: 0; }
+  .admin-title {
+    display: block;
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 20px; font-weight: 800;
+    letter-spacing: -0.02em;
+  }
 }
 
 
@@ -2967,7 +3018,13 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
 }
 @media (min-width: 720px) { .panel { padding: 22px; } }
 .panel > h1 { font-size: 22px; margin: 0 0 var(--s-1); }
-.panel > h2 { font-size: 14px; font-weight: 500; color: var(--text-muted); margin: 0 0 var(--s-3); }
+/* THE COMP'S `.sec` — `700 15px` in the text colour. It was `500 14px` in the
+   muted colour, so a panel's own subject read quieter than the table under
+   it and a screen of six panels had nothing telling them apart at a glance. */
+.panel > h2 {
+  font-size: 15px; font-weight: 700; color: var(--text);
+  margin: 0 0 var(--s-3);
+}
 /* A panel's own prose, then whatever acts on it. Two paragraphs of lead ran
    into each other and into the first field. */
 .panel > .lead + .lead { margin-top: var(--s-2); }

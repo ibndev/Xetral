@@ -26,12 +26,16 @@ import { describe, expect, it } from 'vitest';
 const APP = join(new URL('.', import.meta.url).pathname, '..', 'app');
 
 /** Every customer-facing `page.tsx`, excluding the operations surface. */
-function pages(dir: string, out: string[] = []): string[] {
+function pages(dir: string, out: string[] = [], all = false): string[] {
   for (const entry of readdirSync(dir)) {
-    if (entry === 'admin' || entry === 'api') continue;
+    if (!all && (entry === 'admin' || entry === 'api')) continue;
     const path = join(dir, entry);
-    if (statSync(path).isDirectory()) pages(path, out);
-    else if (entry === 'page.tsx') out.push(path);
+    if (statSync(path).isDirectory()) pages(path, out, all);
+    else if (entry.endsWith('.tsx')) {
+      // On the customer side only a `page.tsx` draws a screen; on the
+      // operations side the heading could be in any component under it.
+      if (all || entry === 'page.tsx') out.push(path);
+    }
   }
   return out;
 }
@@ -49,6 +53,35 @@ describe('one title per screen', () => {
       'these screens have a page head from Shell AND an <h1> of their own — ' +
         'the section heading will render larger than the screen it is in:\n' +
         offenders.join('\n'),
+    ).toEqual([]);
+  });
+
+  it('no operations screen writes its own <h1>', () => {
+    /*
+     * THE SAME RULE, ON THE OTHER SURFACE. `AdminShell` puts the screen's
+     * name in the top bar, where the admin comp does — and every one of the
+     * twenty-six pages was also writing an `<h1>` inside its first panel, so
+     * after the bar arrived "Customers" appeared twice on the customers
+     * screen, once as chrome and once as content.
+     *
+     * `AdminTitle` is how a screen says it is called something more specific
+     * than its sidebar entry: `/admin/risk` is the compliance QUEUE and
+     * `/admin/risk/cases` the compliance CASES, both under one entry.
+     *
+     * `nav.tsx` holds the bar's own heading and `gate.tsx` is the sign-in
+     * screen, which has no shell around it.
+     */
+    const dir = join(APP, 'admin');
+    const offenders: string[] = [];
+    for (const path of pages(dir, [], true)) {
+      if (/\/(nav|gate)\.tsx$/.test(path)) continue;
+      const source = readFileSync(path, 'utf8').replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ');
+      if (/<h1[\s>]/.test(source)) offenders.push(path.slice(APP.length + 1));
+    }
+    expect(
+      offenders,
+      'the operations shell names the screen in its top bar; these also write ' +
+        'their own <h1>, so the name appears twice:\n' + offenders.join('\n'),
     ).toEqual([]);
   });
 

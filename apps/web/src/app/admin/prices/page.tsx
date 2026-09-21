@@ -8,6 +8,7 @@ import { AdminError } from '../access';
 import { Select } from '@/ui/select';
 import { Icon } from '@/ui/icon';
 import Link from 'next/link';
+import { AdminTitle } from '@/app/admin/nav';
 
 /**
  * What a customer will be quoted, and the only place it can be set.
@@ -147,7 +148,7 @@ export default function Prices() {
   return (
     <>
       <div className="panel">
-        <h1>Prices</h1>
+        <AdminTitle>Prices</AdminTitle>
         <p className="lead">
           Every FX spread and gift card rate a customer can be quoted. Prices are
           never edited — retire one and publish its replacement.

@@ -6,6 +6,7 @@ import type { AdminHeldMoney } from '@xetral/client';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
 import { AdminError } from '../access';
+import { AdminTitle } from '@/app/admin/nav';
 
 /**
  * Money that left a customer's balance and never reached where it was going.
@@ -38,7 +39,7 @@ export default function Recovery() {
   return (
     <>
       <div className="panel">
-        <h1>Recovery</h1>
+        <AdminTitle>Recovery</AdminTitle>
         <h2>{waiting.length} held, waiting for a person</h2>
         <p className="lead">
           Money taken from a customer that never reached its destination.

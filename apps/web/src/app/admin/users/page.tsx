@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { AdminError } from '../access';
 import { Select } from '@/ui/select';
+import { AdminTitle } from '@/app/admin/nav';
 
 /**
  * Finding a customer.
@@ -53,7 +54,7 @@ export default function Users() {
 
   return (
     <div className="panel">
-      <h1>Customers</h1>
+      <AdminTitle>Customers</AdminTitle>
       <h2>Fifty most recent, or search by name, email, phone or handle</h2>
 
       <form

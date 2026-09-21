@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
+import { AdminTitle } from '@/app/admin/nav';
 
 /**
  * The gift card review queue.
@@ -32,7 +33,7 @@ export default function GiftCards() {
   return (
     <>
       <div className="panel">
-        <h1>Gift cards</h1>
+        <AdminTitle>Gift cards</AdminTitle>
         <h2>{disabled ? 'Not enabled' : `${queue.data?.length ?? 0} waiting`}</h2>
 
         {disabled ? (

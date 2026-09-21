@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
 import { AdminError } from '../access';
+import { AdminTitle } from '@/app/admin/nav';
 
 /**
  * Money that arrived and that we could not say belonged to anyone.
@@ -26,7 +27,7 @@ export default function Suspense() {
   return (
     <>
       <div className="panel">
-        <h1>Suspense</h1>
+        <AdminTitle>Suspense</AdminTitle>
         <h2>{deposits.data?.length ?? 0} unattributed deposit(s)</h2>
         <p className="lead">
           Money that arrived and has not reached anybody yet.

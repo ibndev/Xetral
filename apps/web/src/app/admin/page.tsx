@@ -46,11 +46,14 @@ export default function Overview() {
         </div>
       )}
 
-      <div className="panel">
-        <h1>Overview</h1>
-        <h2>What needs a person today</h2>
-
-        <div className="stats">
+      {/*
+        THE KPI ROW IS NOT IN A PANEL. The comp's `.kgrid` sits at the top
+        level of the body and each tile is its own `.panel.kpi` — four cards on
+        the ground. This wrapped them in a fifth panel, which is a container
+        drawn to hold a title the chrome should have been holding, and the
+        title is in the top bar now.
+      */}
+      <div className="stats">
           <div className={drifted.length > 0 ? 'stat alarm' : 'stat'}>
             <div className="label">Ledger drift</div>
             <div className="value">{drift.loading ? '—' : drifted.length}</div>
@@ -69,8 +72,7 @@ export default function Overview() {
           </div>
         </div>
 
-        <AdminError error={overview.error} code={overview.code} role="support" />
-      </div>
+      <AdminError error={overview.error} code={overview.code} role="support" />
 
       {/*
         THE PANELS BELOW ARE THE SAME LOAD, so when it is refused they are

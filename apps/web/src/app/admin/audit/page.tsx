@@ -2,6 +2,7 @@
 
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { AdminError } from '../access';
+import { AdminTitle } from '@/app/admin/nav';
 
 /**
  * What operators have done.
@@ -20,7 +21,7 @@ export default function Audit() {
 
   return (
     <div className="panel">
-      <h1>Audit</h1>
+      <AdminTitle>Audit</AdminTitle>
       <h2>The hundred most recent operator actions</h2>
 
       <AdminError error={entries.error} code={entries.code} role="admin" />

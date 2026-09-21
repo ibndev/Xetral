@@ -6,6 +6,7 @@ import { FormError } from '@/ui/form-error';
 import { Icon } from '@/ui/icon';
 import { Select } from '@/ui/select';
 import { useAdmin, useLoad, useSubmit } from '@/lib/hooks';
+import { AdminTitle } from '@/app/admin/nav';
 
 /**
  * WHERE XETRAL OPERATES, without a deploy.
@@ -29,7 +30,7 @@ export default function Countries() {
   return (
     <>
       <div className="panel">
-        <h1>Countries</h1>
+        <AdminTitle>Countries</AdminTitle>
         <p className="lead">Where somebody can open an account.</p>
 
         {state.loading && <p className="spinner">Loading…</p>}

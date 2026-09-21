@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
 import { AdminError } from '../access';
+import { AdminTitle } from '@/app/admin/nav';
 
 /**
  * The identity review queue.
@@ -24,7 +25,7 @@ export default function KycQueue() {
   return (
     <>
       <div className="panel">
-        <h1>Identity review</h1>
+        <AdminTitle>Identity review</AdminTitle>
         <h2>{queue.data?.length ?? 0} waiting</h2>
         <p className="lead">
           Approving creates the provider mapping an account number or card needs.

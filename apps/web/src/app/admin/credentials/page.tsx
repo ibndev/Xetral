@@ -5,6 +5,7 @@ import type { AdminCredential } from '@xetral/client';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
 import { AdminError } from '../access';
+import { AdminTitle } from '@/app/admin/nav';
 
 /**
  * Where an operator pastes a provider key.
@@ -36,7 +37,7 @@ export default function Credentials() {
   return (
     <>
       <div className="panel">
-        <h1>Provider keys</h1>
+        <AdminTitle>Provider keys</AdminTitle>
         <h2>Stored encrypted. Never shown again.</h2>
         <p className="lead">
           A key takes effect within seconds, with no deploy. Only its last four

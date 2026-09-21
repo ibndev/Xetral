@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Icon } from '@/ui/icon';
 import { useSubmit, useXetral } from '@/lib/hooks';
 import { FormError } from '@/ui/form-error';
+import { AdminTitle } from '@/app/admin/nav';
 
 /**
  * Setting up the staff second factor.
@@ -33,7 +34,7 @@ export default function StaffSecurity() {
 
   return (
     <div className="panel">
-      <h1>Your authenticator</h1>
+      <AdminTitle>Your authenticator</AdminTitle>
       <h2>Required before any operations screen will answer</h2>
 
       <p className="lead">

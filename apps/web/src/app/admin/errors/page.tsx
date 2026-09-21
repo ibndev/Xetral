@@ -6,6 +6,7 @@ import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
 import { AdminError } from '../access';
 import { ageSince } from '../age';
+import { AdminTitle } from '@/app/admin/nav';
 
 /**
  * What is currently failing.
@@ -38,7 +39,7 @@ export default function Errors() {
 
   return (
     <div className="panel">
-      <h1>Errors</h1>
+      <AdminTitle>Errors</AdminTitle>
       <p className="lead">
         One row per fingerprint, not per occurrence. Acknowledging one does not
         delete it — anything still failing reopens itself on its next

@@ -5,6 +5,7 @@ import type { AdminDataRequest } from '@xetral/client';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
 import { AdminError } from '../access';
+import { AdminTitle } from '@/app/admin/nav';
 
 /**
  * Requests for a copy of somebody's data, or for it to be erased.
@@ -25,7 +26,7 @@ export default function DataRequests() {
   return (
     <>
       <div className="panel">
-        <h1>Data requests</h1>
+        <AdminTitle>Data requests</AdminTitle>
         <h2>{requests.data?.length ?? 0} open</h2>
         <p className="lead">
           A copy of their data, or erasure. The deadline is the law&rsquo;s, not ours.

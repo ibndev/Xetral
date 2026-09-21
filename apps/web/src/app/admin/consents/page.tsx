@@ -2,6 +2,7 @@
 
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { AdminError } from '../access';
+import { AdminTitle } from '@/app/admin/nav';
 
 /**
  * Who has not agreed to the words currently in force.
@@ -23,7 +24,7 @@ export default function Consents() {
   return (
     <>
       <div className="panel">
-        <h1>Consent</h1>
+        <AdminTitle>Consent</AdminTitle>
         <p className="lead">
           Who has not agreed to the version currently published.
         </p>

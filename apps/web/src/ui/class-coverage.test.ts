@@ -126,3 +126,32 @@ describe('tones that come from a catalogue', () => {
     ).toEqual([]);
   });
 });
+
+/**
+ * A NAME THAT IS BOTH A TONE AND A COMPONENT MUST NOT DECIDE A BOX.
+ *
+ * `.ok`, `.warn` and `.danger` are standalone message classes — `.ok` is the
+ * green line under a form, `display: flex` with a top margin — AND the tone
+ * modifiers on `.badge`. Both score (0,1,0) and the message rules come later
+ * in the file, so `class="badge ok"` resolved to a full-width flex box with a
+ * margin: every status pill on the customers table stretched across its
+ * column, and the card's own status pill with it.
+ *
+ * The fix is that `.badge.<tone>` restates the box at (0,2,0). This is what
+ * stops somebody tidying that restatement away as redundant — it reads
+ * exactly like redundancy, and it is the only thing holding the shape.
+ */
+describe('a tone class is not allowed to set a badge’s box', () => {
+  for (const tone of ['ok', 'warn', 'danger', 'info'] as const) {
+    it(`.badge.${tone} restates its own display and margin`, () => {
+      const css = readFileSync(CSS, 'utf8');
+      // Anchored at a line start: `.virtual-card .badge.ok` appears earlier and
+      // is a different, more specific rule that sets only colours.
+      const at = css.indexOf(`\n.badge.${tone}`);
+      expect(at, `.badge.${tone} is not in globals.css`).toBeGreaterThan(-1);
+      const body = css.slice(at, css.indexOf('}', at));
+      expect(body, 'a later `.ok` would win the display').toContain('display: inline-flex');
+      expect(body, 'a later `.ok` would win the margin').toContain('margin: 0');
+    });
+  }
+});

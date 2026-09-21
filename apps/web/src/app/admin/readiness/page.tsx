@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import type { AdminReadinessRow } from '@xetral/client';
 import { AdminError } from '../access';
+import { AdminTitle } from '@/app/admin/nav';
 
 /**
  * What this deployment has not been told yet.
@@ -81,7 +82,7 @@ export default function Readiness() {
   return (
     <>
       <div className="panel">
-        <h1>Readiness</h1>
+        <AdminTitle>Readiness</AdminTitle>
         <p className="lead">
           Every prerequisite this platform has, asked of the process that answered
           this request.

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { formatMinor } from '@xetral/client';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { AdminError } from '../access';
+import { AdminTitle } from '@/app/admin/nav';
 
 /**
  * WHAT THE PLATFORM HAS EARNED, and why it might be nothing.
@@ -33,7 +34,7 @@ export default function Earnings() {
   return (
     <>
       <div className="panel">
-        <h1>Earnings</h1>
+        <AdminTitle>Earnings</AdminTitle>
         <h2>Fees and FX spread, from the ledger</h2>
         <p className="lead">
           Measured from the revenue accounts themselves, not from a counter —

@@ -6,6 +6,7 @@ import { useAdmin, useIdempotencyKey, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
 import { AdminError } from '../access';
 import { ageSince } from '../age';
+import { AdminTitle } from '@/app/admin/nav';
 
 /**
  * Disputes — "I did not do this" — and the reviewer who answers them.
@@ -38,7 +39,7 @@ export default function Disputes() {
   return (
     <>
       <div className="panel">
-        <h1>Disputes</h1>
+        <AdminTitle>Disputes</AdminTitle>
         <p className="lead">
           A customer&rsquo;s claim that a transaction was not theirs. Raising one
           moves no money; upholding one pays it from our own account.

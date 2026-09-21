@@ -2,6 +2,7 @@
 
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { AdminError } from '../access';
+import { AdminTitle } from '@/app/admin/nav';
 
 /**
  * WHETHER ANYTHING IS ACTUALLY BEING SENT.
@@ -36,7 +37,7 @@ export default function Notifications() {
   return (
     <>
       <div className="panel">
-        <h1>Notifications</h1>
+        <AdminTitle>Notifications</AdminTitle>
         <h2>{waiting} waiting to be sent</h2>
         <p className="lead">
           Nothing here sends inline. A message is a row written in the same

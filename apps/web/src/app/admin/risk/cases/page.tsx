@@ -7,6 +7,7 @@ import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
 import { AdminError } from '../../access';
 import { Select } from '@/ui/select';
+import { AdminTitle } from '@/app/admin/nav';
 
 /**
  * Compliance cases: one investigation, one customer.
@@ -46,7 +47,7 @@ export default function Cases() {
   return (
     <>
       <div className="panel">
-        <h1>Compliance cases</h1>
+        <AdminTitle>Compliance cases</AdminTitle>
         <h2>One investigation, one customer</h2>
         <p className="lead">
           Closing a case decides every signal attached to it. New information after

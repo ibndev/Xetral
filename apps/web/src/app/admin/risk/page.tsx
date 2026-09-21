@@ -7,6 +7,7 @@ import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
 import { formatMinor } from '@xetral/client';
 import { AdminError } from '../access';
+import { AdminTitle } from '@/app/admin/nav';
 
 /**
  * The compliance queue.
@@ -62,7 +63,7 @@ export default function Risk() {
   return (
     <>
       <div className="panel">
-        <h1>Compliance queue</h1>
+        <AdminTitle>Compliance queue</AdminTitle>
         <h2>What the monitoring rules thought worth a look</h2>
         <p className="lead">
           Nothing here was blocked — every transaction below already happened.

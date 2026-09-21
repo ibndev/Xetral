@@ -7,6 +7,7 @@ import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
 import { AdminError } from '../../access';
 import { Select } from '@/ui/select';
+import { AdminTitle } from '@/app/admin/nav';
 
 /**
  * One customer, and the two things support actually needs to do: see what is
@@ -47,7 +48,7 @@ export default function UserDetail({ params }: { params: Promise<{ id: string }>
   return (
     <>
       <div className="panel">
-        <h1>{profile['account_name'] ?? profile['full_name'] ?? profile['email'] ?? 'Customer'}</h1>
+        <AdminTitle>{profile['account_name'] ?? profile['full_name'] ?? profile['email'] ?? 'Customer'}</AdminTitle>
         <h2>
           <Link href="/admin/users">← All customers</Link>
         </h2>

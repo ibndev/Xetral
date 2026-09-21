@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useLayoutEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { resetXetral, xetral } from '@/lib/session';
 import { Logo } from '@/ui/logo';
@@ -118,10 +118,73 @@ function isActive(pathname: string, href: string): boolean {
   return href === '/admin' ? pathname === href : pathname.startsWith(href);
 }
 
+/**
+ * THE SCREEN'S NAME, DERIVED FROM THE SAME LIST THE SIDEBAR IS BUILT FROM.
+ *
+ * The admin comp puts an `h1` in the top bar — `800 20px`, left of the
+ * controls — and on a wide screen that bar was EMPTY here, because the brand
+ * is hidden there and everything else is right-aligned. So the only thing
+ * naming the screen was whatever heading the page happened to write inside
+ * its own first panel, which is why several of them opened with a panel
+ * wrapping a heading wrapping the content: a container drawn to hold a title
+ * the chrome should have been holding.
+ *
+ * Derived rather than passed in, for the reason `route-coverage.test.ts`
+ * refuses a hand-written controller list: twenty-six pages each declaring
+ * their own title is twenty-six chances for one to disagree with the sidebar
+ * entry an operator clicked to get there.
+ *
+ * The LONGEST matching prefix wins, so `/admin/risk/cases` is "Compliance"
+ * rather than whichever entry happened to be first.
+ */
+function screenName(pathname: string): string {
+  let best = '';
+  let label = 'Operations';
+  for (const group of GROUPS) {
+    for (const item of group.items) {
+      if (!isActive(pathname, item.href)) continue;
+      if (item.href.length < best.length) continue;
+      best = item.href;
+      label = item.label;
+    }
+  }
+  return label;
+}
+
+/**
+ * A SCREEN THAT NAMES ITSELF SOMETHING MORE SPECIFIC THAN ITS SIDEBAR ENTRY.
+ *
+ * Most do not: "Customers", "Providers", "Tax" are the entry an operator
+ * clicked. Some are one of SEVERAL screens under one entry — `/admin/risk` is
+ * the compliance QUEUE and `/admin/risk/cases` is the compliance CASES, both
+ * under "Compliance" — and there the sidebar label is the right thing in the
+ * sidebar and the wrong thing over the table.
+ *
+ * Rendered where the heading used to be, rather than passed down from a
+ * layout: the name belongs beside the screen it names, and a page that stops
+ * rendering this falls back to its sidebar entry rather than to nothing.
+ *
+ * `useLayoutEffect` rather than `useEffect`, so the bar is never painted with
+ * the previous screen's name — which on a fast navigation is exactly the kind
+ * of half-second wrongness nobody reports and everybody sees.
+ */
+const TitleContext = createContext<((name: string | undefined) => void) | undefined>(undefined);
+
+export function AdminTitle({ children }: { readonly children: string }) {
+  const set = useContext(TitleContext);
+  useLayoutEffect(() => {
+    set?.(children);
+    return () => set?.(undefined);
+  }, [set, children]);
+  return null;
+}
+
 export function AdminShell({ children }: { readonly children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  /* What the SCREEN calls itself, when that is not its sidebar entry. */
+  const [declared, setDeclared] = useState<string | undefined>(undefined);
 
   // Navigating closes the drawer. Without this a tap on a narrow screen
   // renders the new page behind a sheet that is still covering it, which reads
@@ -200,6 +263,7 @@ export function AdminShell({ children }: { readonly children: ReactNode }) {
         />
       )}
 
+      <TitleContext.Provider value={setDeclared}>
       <div className="admin-main">
         <header className="appbar">
           <button
@@ -219,6 +283,10 @@ export function AdminShell({ children }: { readonly children: ReactNode }) {
             <Logo size={22} />
             <span className="admin-brand-suffix">operations</span>
           </Link>
+          {/* The comp's `.top h1` — `800 20px`, and the one place this screen
+              is named. Hidden where the compact brand is showing, because two
+              of them do not fit on a handset. */}
+          <h1 className="admin-title">{declared ?? screenName(pathname)}</h1>
           <span className="spacer" />
           {/*
             THE SAME TOGGLE THE CUSTOMER APP USES, not a second one.
@@ -243,6 +311,7 @@ export function AdminShell({ children }: { readonly children: ReactNode }) {
 
         <main className="shell wide">{children}</main>
       </div>
+      </TitleContext.Provider>
     </div>
   );
 }

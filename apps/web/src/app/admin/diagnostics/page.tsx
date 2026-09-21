@@ -5,6 +5,7 @@ import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
 import { Icon } from '@/ui/icon';
 import { AdminError } from '../access';
+import { AdminTitle } from '@/app/admin/nav';
 
 /**
  * WHY OPENING A NAIRA ACCOUNT IS FAILING.
@@ -33,7 +34,7 @@ export default function Diagnostics() {
   return (
     <>
       <div className="panel">
-        <h1>Diagnostics</h1>
+        <AdminTitle>Diagnostics</AdminTitle>
         <h2>{report.data === undefined ? '—' : `${failing.length} blocking`}</h2>
         <p className="lead">
           What each rail says when it is asked, rather than what it is

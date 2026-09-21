@@ -6,6 +6,7 @@ import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
 import { AdminError } from '../access';
 import { Select } from '@/ui/select';
+import { AdminTitle } from '@/app/admin/nav';
 
 /**
  * The controls that used to be a deployment.
@@ -56,7 +57,7 @@ export default function Settings() {
   return (
     <>
       <div className="panel">
-        <h1>Settings</h1>
+        <AdminTitle>Settings</AdminTitle>
         <h2>Every change is recorded, and bounds are enforced by the database</h2>
         <AdminError error={settings.error} code={settings.code} role="finance" />
         {settings.loading && <p className="spinner">Loading…</p>}

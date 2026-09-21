@@ -5,6 +5,7 @@ import { formatMinor } from '@xetral/client';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { AdminError } from '../access';
 import { Select } from '@/ui/select';
+import { AdminTitle } from '@/app/admin/nav';
 
 /**
  * What was collected for a revenue authority, and what is still held.
@@ -41,7 +42,7 @@ export default function Tax() {
   return (
     <>
       <div className="panel">
-        <h1>Tax</h1>
+        <AdminTitle>Tax</AdminTitle>
         <p className="lead">
           What was collected on a revenue authority&rsquo;s behalf, read from the
           ledger. It is a liability, not revenue.

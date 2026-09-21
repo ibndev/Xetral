@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { formatMinor } from '@xetral/client';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { AdminError } from '../access';
+import { AdminTitle } from '@/app/admin/nav';
 
 /**
  * Whether the providers are answering.
@@ -30,7 +31,7 @@ export default function Providers() {
   return (
     <>
       <div className="panel">
-        <h1>Providers</h1>
+        <AdminTitle>Providers</AdminTitle>
         <p className="lead">
           How every provider has been answering. Refusals are shown and not counted
           as failures.
