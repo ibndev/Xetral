@@ -5897,3 +5897,106 @@ html, body { overflow-x: hidden; }
   color: var(--text-3);
   padding: 20px 0 6px;
 }
+
+/* ---------------------------------------------------------------------------
+ * Convert — two panels and the swap between them.
+ *
+ * The comp stacks a From panel and a To panel 10px apart and puts a 40px iris
+ * square exactly between them, punched through both with a 3px ring in the
+ * page's own ground. That button is the whole interaction: a conversion has
+ * one decision in it and it is which way round, and the screen before this
+ * asked the question twice — a currency chip in the receive row AND a
+ * "Convert to" select under it, two controls for one answer, which is what
+ * the currency selector on the home screen already replaced.
+ * ------------------------------------------------------------------------- */
+.cv-pair { position: relative; display: flex; flex-direction: column; gap: 10px; }
+.cv-panel {
+  background: var(--surface);
+  border: 1px solid var(--edge);
+  border-radius: 18px;
+  padding: 16px 18px;
+}
+.cv-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+/* THE CURRENCY PICKER IS NOT A FIELD OF ITS OWN — the Send screen's own rule,
+   applied here. `.xselect-trigger` is full-width, padded and filled, so inside
+   a panel it drew a second bordered box and pushed the panel's head row to
+   48px, where the comp draws bare text with a flag and a chevron. */
+.cv-head .xselect { width: auto; flex: 0 0 auto; }
+.cv-head .xselect-trigger {
+  width: auto;
+  min-height: 0;
+  padding: 0;
+  gap: 7px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+.cv-head .xselect-trigger > svg { width: 14px; height: 14px; }
+.cv-label { font-size: 12px; font-weight: 500; color: var(--text-3); }
+.cv-figure {
+  display: block;
+  margin-top: 8px;
+  font-family: var(--font-num);
+  font-size: 30px; font-weight: 800;
+  letter-spacing: -0.033em;
+  font-variant-numeric: tabular-nums;
+  /* The figure is an <input> on the From panel and a <span> on the To panel,
+     so every property the bare `input` rule sets is restated. */
+  width: 100%;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--text);
+}
+.cv-figure::placeholder { color: var(--text-3); }
+.cv-figure:focus, .cv-figure:focus-visible { outline: none; border: 0; background: none; }
+/* THE LANDED FIGURE IS QUIETER THAN THE TYPED ONE, which is the comp's own
+   distinction: one is what the customer said and the other is what we are
+   answering. */
+.cv-panel.to .cv-figure { color: var(--text-2); }
+/* WITHOUT A QUOTE THE FIGURE IS A DASH, and a dash at 800/30 is a thick
+   horizontal rule that reads as a divider rather than as "nothing yet". */
+.cv-figure.waiting { color: var(--text-3); }
+.cv-balance { display: block; margin-top: 2px; font-size: 12px; font-weight: 500; color: var(--text-3); }
+
+/* THE SWAP. Absolutely centred over the gap, with a 3px ring in `--bg` so it
+   punches through both panels rather than sitting on the seam. */
+.cv-swap {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 0;
+  width: 40px; height: 40px;
+  min-height: 0;
+  padding: 0;
+  border: 3px solid var(--bg);
+  border-radius: 12px;
+  background: var(--iris);
+  color: var(--on-iris);
+  white-space: nowrap;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+.cv-swap:hover:where(:not(:disabled)), .cv-swap:focus-visible, .cv-swap:active {
+  background: var(--iris);
+  color: var(--on-iris);
+}
+
+/* THE RATE IS A LINE, NEVER FOLDED INTO THE FIGURE. A customer comparing us
+   against a bureau de change compares what they receive, and hiding the
+   margin inside the rate makes that comparison quietly dishonest. */
+.cv-rate {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  padding: 16px 4px;
+  font-size: 13px; font-weight: 500; color: var(--text-3);
+}
+.cv-rate > :last-child { color: var(--text-2); font-variant-numeric: tabular-nums; }

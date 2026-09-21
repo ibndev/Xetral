@@ -55,9 +55,15 @@ export function Select({
    * where a full-width field with a label above it would be a second heading.
    * `dial` is a pill sized down further, for the dialling code IN FRONT OF a
    * phone number, where every pixel it takes is a digit pushed off a handset.
-   * The sheet is identical in all three; only the trigger differs.
+   *
+   * `bare` is the pill with no box at all — a mark, a code and a chevron,
+   * which is what the Convert comp draws in a panel's head row. A filled pill
+   * there is a second container inside a container, and it pushes the row to
+   * 40pt where the comp gives it the height of its own text.
+   *
+   * The sheet is identical in all four; only the trigger differs.
    */
-  readonly variant?: 'field' | 'pill' | 'dial';
+  readonly variant?: 'field' | 'pill' | 'dial' | 'bare';
   /** An optional badge before the label, on the trigger and in the sheet. */
   readonly renderMark?: (value: string) => React.ReactNode;
   /** What the TRIGGER shows, when that is not the option's label. The dialling
@@ -100,7 +106,8 @@ export function Select({
   }
 
   const dial = variant === 'dial';
-  const pill = variant === 'pill' || dial;
+  const bare = variant === 'bare';
+  const pill = variant === 'pill' || dial || bare;
 
   return (
     <View style={pill ? undefined : { alignSelf: 'stretch' }}>
@@ -127,9 +134,9 @@ export function Select({
                  * field spent on a country code, and an `8` that looked like
                  * it was underneath the picker. These are the same reductions.
                  */
-                gap: dial ? 5 : 6,
-                paddingLeft: dial ? 8 : 12,
-                paddingRight: dial ? 6 : 10,
+                gap: dial ? 5 : bare ? 7 : 6,
+                paddingLeft: dial ? 8 : bare ? 0 : 12,
+                paddingRight: dial ? 6 : bare ? 0 : 10,
                 /*
                  * THE DIAL BOX IS EXACTLY AS TALL AS THE FIELD BESIDE IT.
                  *
@@ -145,11 +152,11 @@ export function Select({
                  * rest and this did not, so even at equal heights they would
                  * have been two different objects side by side.
                  */
-                height: dial ? 50 : 40,
+                height: dial ? 50 : bare ? undefined : 40,
                 borderRadius: dial ? radius.md : radius.pill,
                 borderWidth: dial ? 1 : 0,
                 borderColor: colors.edgeStrong,
-                backgroundColor: dial ? colors.field : colors.surface2,
+                backgroundColor: dial ? colors.field : bare ? 'transparent' : colors.surface2,
               }
             : {
                 ...styles.input,

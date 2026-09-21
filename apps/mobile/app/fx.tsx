@@ -1,14 +1,12 @@
 import { useState } from 'react';
-import { Text, TextInput, View } from 'react-native';
-import { formatAmount, TRANSFER_CURRENCIES } from '@xetral/client';
+import { Pressable, Text, TextInput, View } from 'react-native';
+import { formatAmount, groupTyped, TRANSFER_CURRENCIES } from '@xetral/client';
 import type { FxQuote, FxTrade } from '@xetral/client';
 import { Shell } from '@/shell';
 import {
-  AmountCard,
   Button,
   Done,
   Empty,
-  Field,
   FormError,
   Loading,
   Panel,
@@ -52,11 +50,60 @@ export default function Fx() {
     ...(held.has(c) ? { hint: formatAmount(held.get(c) ?? '0', c) } : {}),
   });
 
+  /*
+   * THE COMP'S PANEL, HEAD, FIGURE AND RATE ROW — the same figures the web's
+   * `.cv-*` rules carry, written once here rather than inline at four call
+   * sites. Two copies of a panel in one file is how the To panel ends up a
+   * pixel off the From panel.
+   */
+  const panel = {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.edge,
+    borderRadius: 18,
+    paddingVertical: 16,
+    paddingHorizontal: 18,
+  } as const;
+  const head = {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  } as const;
+  const label = { color: colors.text3, fontFamily: font.sansMedium, fontSize: 12 } as const;
+  const figure = {
+    marginTop: 8,
+    padding: 0,
+    fontFamily: font.numBold,
+    fontSize: 30,
+    letterSpacing: -1,
+    fontVariant: ['tabular-nums'] as ('tabular-nums')[],
+  } as const;
+  const balanceLine = {
+    marginTop: 2,
+    color: colors.text3,
+    fontFamily: font.sansMedium,
+    fontSize: 12,
+  } as const;
+  const rateRow = {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 4,
+  } as const;
+  const rateLabel = { color: colors.text3, fontFamily: font.sansMedium, fontSize: 13 } as const;
+  const rateValue = {
+    color: colors.text2,
+    fontFamily: font.sansMedium,
+    fontSize: 13,
+    fontVariant: ['tabular-nums'] as ('tabular-nums')[],
+  } as const;
+
   const [from, setFrom] = useState('NGN');
   const [to, setTo] = useState('USD');
   const [amount, setAmount] = useState('');
-  const [recipient, setRecipient] = useState('');
-  const [pin, setPin] = useState('');
   const [quote, setQuote] = useState<FxQuote | undefined>();
 
   return (
@@ -77,184 +124,196 @@ export default function Fx() {
       <Text style={styles.h1}>Convert</Text>
       <Text style={styles.lead}>The rate you see is the rate you get.</Text>
 
-      {/* BARE, LIKE SEND. The page ground carries the flow and the wells are
-          the two hero amount cards — what leaves and what lands — rather than
-          a recessed grey panel wrapping a stack of dropdowns. */}
-      <Panel bare>
-        {/* WHAT LEAVES. The currency is a pill inside the amount row, the way
-            Send puts it, so the number and its denomination are one control. */}
-        <AmountCard>
-          <Text style={styles.fieldLabel}>You convert</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
+      {/*
+        TWO PANELS AND THE SWAP BETWEEN THEM, which is the comp's whole screen
+        — and the currency was being asked TWICE before it: a pill in the
+        receive row AND a "Convert to" picker under both cards. Two controls
+        for one answer, the fault the home screen's currency selector already
+        replaced a badge and a rail to fix. The web's Convert is the same
+        shape, to the same figures.
+      */}
+      <View style={{ position: 'relative', gap: 10, marginTop: space.md }}>
+        <View style={panel}>
+          <View style={head}>
+            <Text style={label}>From</Text>
             <Select
               label="Currency you convert"
-              variant="pill"
+              variant="bare"
               value={from}
               onChange={(next) => { setFrom(next); setQuote(undefined); }}
               options={codes.map(option)}
-              renderMark={(value) => <CurrencyMark currency={value} size={18} />}
-            />
-            <TextInput
-              value={amount}
-              onChangeText={(next) => {
-                // A quote describes ONE amount. Leaving a stale one on screen
-                // while the number under it changes is how somebody confirms a
-                // rate they were never shown.
-                setAmount(next);
-                setQuote(undefined);
-              }}
-              keyboardType="decimal-pad"
-              placeholder="0"
-              placeholderTextColor={colors.text3}
-              accessibilityLabel="Amount to convert"
-              style={{
-                flex: 1,
-                textAlign: 'right',
-                color: colors.text,
-                fontFamily: font.displayBold,
-                fontSize: 30,
-                letterSpacing: -0.6,
-                fontVariant: ['tabular-nums'],
-              }}
+              renderMark={(value) => <CurrencyMark currency={value} size={20} />}
             />
           </View>
-          {from === to && (
-            <Text style={styles.error}>Pick two different currencies.</Text>
-          )}
-        </AmountCard>
+          {/* GROUPED AS IT IS TYPED — `groupTyped` from `@xetral/client`,
+              which is the one place that arithmetic lives and never produces
+              a number. `50000` at 30px is read by counting zeros. The stored
+              value stays UNGROUPED, so what reaches the API is a decimal
+              string and not a display string. */}
+          <TextInput
+            value={groupTyped(amount)}
+            onChangeText={(next) => {
+              const digits = next.replace(/[^0-9.]/g, '');
+              // At most one decimal point: a second is a typo, and
+              // `parseFloat` is not available to decide that for us.
+              const [whole = '', ...rest] = digits.split('.');
+              // A quote describes ONE amount. Leaving a stale one on screen
+              // while the number under it changes is how somebody confirms a
+              // rate they were never shown.
+              setAmount(rest.length === 0 ? whole : `${whole}.${rest.join('')}`);
+              setQuote(undefined);
+            }}
+            keyboardType="decimal-pad"
+            placeholder="0"
+            placeholderTextColor={colors.text3}
+            accessibilityLabel="Amount to convert"
+            style={[figure, { color: colors.text }]}
+          />
+          {/* THE BALANCE UNDER THE FIGURE, which is what the comp draws and
+              what answers the only other question somebody has here. It is
+              the SPENDABLE figure: pending money cannot be converted and
+              offering it would produce a refusal. */}
+          <Text style={balanceLine}>
+            {held.has(from) ? `Balance ${formatAmount(held.get(from) ?? '0', from)}` : ' '}
+          </Text>
+        </View>
 
-        {/* WHAT LANDS. The target currency is the pill — tap it to choose —
-            and the figure fills from a quote, a dash until one is fetched
-            because the rate is the operator's answer, not a default. */}
-        <AmountCard>
-          <Text style={styles.fieldLabel}>You receive</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
+        {/*
+          THE ONE DECISION ON THIS SCREEN IS WHICH WAY ROUND, so it is a
+          button rather than two pickers. It swaps the pair and drops the
+          quote — a rate for NGN→USD is not a rate for USD→NGN, and 008's rule
+          is that a rate is a RATIO which does not simply invert through a
+          spread.
+        */}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Swap — convert ${to} to ${from} instead`}
+          android_ripple={null}
+          onPress={() => { setFrom(to); setTo(from); setQuote(undefined); }}
+          style={{
+            position: 'absolute',
+            top: '50%',
+            alignSelf: 'center',
+            marginTop: -20,
+            zIndex: 2,
+            width: 40, height: 40,
+            alignItems: 'center', justifyContent: 'center',
+            borderRadius: 12,
+            borderWidth: 3, borderColor: colors.bg,
+            backgroundColor: colors.iris,
+          }}
+        >
+          <Icon name="swap" size={20} color={colors.onIris} />
+        </Pressable>
+
+        <View style={panel}>
+          <View style={head}>
+            <Text style={label}>To</Text>
             <Select
               label="Currency you receive"
-              variant="pill"
+              variant="bare"
               value={to}
               onChange={(next) => { setTo(next); setQuote(undefined); }}
               options={codes.map(option)}
-              renderMark={(value) => <CurrencyMark currency={value} size={18} />}
+              renderMark={(value) => <CurrencyMark currency={value} size={20} />}
             />
-            <Text
-              style={{
-                flex: 1,
-                textAlign: 'right',
-                color: colors.text,
-                fontFamily: font.displayBold,
-                fontSize: 30,
-                letterSpacing: -0.6,
-                fontVariant: ['tabular-nums'],
-              }}
-            >
-              {quote === undefined ? '—' : formatAmount(quote.receives, quote.to)}
-            </Text>
           </View>
-          {quote !== undefined && (
-            <Text style={styles.muted}>
-              {/* The spread is its own line, never folded into the rate — and
-                  credited on the FILL, not the quote. */}
-              1 {quote.from} = {quote.rate} {quote.to} · our fee{' '}
-              {formatAmount(quote.spread, quote.from)}
-            </Text>
-          )}
-        </AmountCard>
+          {/* A quote fills the figure; until one is fetched it is a dash,
+              because the rate is the operator's answer and not a default —
+              and a dash at 800/30 in the text colour reads as a divider, so
+              it is drawn in `text3`. */}
+          <Text
+            style={[figure, { color: quote === undefined ? colors.text3 : colors.text2 }]}
+          >
+            {quote === undefined ? '—' : formatAmount(quote.receives, quote.to)}
+          </Text>
+          <Text style={balanceLine}>
+            {held.has(to) ? `Balance ${formatAmount(held.get(to) ?? '0', to)}` : ' '}
+          </Text>
+        </View>
+      </View>
 
-        {/* ACCENT, NOT QUIET. This is the only control that does anything until
-            there is a quote, and `quiet` made it the faintest thing on the
-            screen. `accent` is filled and obvious without spending the white
-            the primary Convert button owns on dark. */}
-        <Button
-          label={quote === undefined ? 'Get today’s rate' : 'Refresh rate'}
-          accent
-          busy={busy && quote === undefined}
-          disabled={amount === '' || from === to}
-          onPress={() =>
-            void run(async () => {
+      {from === to && <Text style={styles.error}>Pick two different currencies.</Text>}
+
+      {/* THE RATE IS ITS OWN LINE AND THE FEE IS BESIDE IT, never folded into
+          the figure. A customer comparing us against a bureau de change
+          compares what they receive, and hiding our margin inside the rate
+          makes that comparison quietly dishonest. */}
+      <View style={rateRow}>
+        <Text style={rateLabel}>Rate</Text>
+        <Text style={rateValue}>
+          {quote === undefined
+            ? 'Tap Convert to see today’s rate'
+            : `1 ${quote.from} = ${quote.rate} ${quote.to}`}
+        </Text>
+      </View>
+      {quote !== undefined && (
+        <View style={[rateRow, { paddingTop: 0 }]}>
+          <Text style={rateLabel}>Our fee</Text>
+          <Text style={rateValue}>{formatAmount(quote.spread, quote.from)}</Text>
+        </View>
+      )}
+
+      {/*
+        ONE BUTTON THAT QUOTES AND THEN CONVERTS.
+
+        It was two — "Get today's rate" and a Convert under it — so the
+        customer pressed one control, read a figure, and pressed another, with
+        a rate expiring between them. The comp has one, and a quote is a read.
+
+        AND NO RECIPIENT FIELD. Sending a conversion to somebody IS a payment,
+        and that is the Send screen: since Phase 19 it derives the rail from
+        the recipient and the currency, so a converting transfer already
+        routes to the same one journal entry this endpoint posts. An optional
+        recipient here was a second, quieter way into it — with its own PIN
+        field, on a screen headed Convert.
+      */}
+      <Button
+        label={busy ? 'Converting…' : quote === undefined ? 'Get today’s rate' : 'Convert now'}
+        busy={busy}
+        disabled={amount === '' || from === to}
+        onPress={() =>
+          void run(async () => {
+            if (quote === undefined) {
               setQuote(await client.fxQuote(from, to, amount));
               return undefined;
-            })
-          }
-        />
+            }
+            const trade = await client.convert({
+              from,
+              to,
+              amount,
+              // What they agreed to. The server refuses rather than filling
+              // below it, so a rate that moves between the quote and the tap
+              // costs a refusal instead of money.
+              minReceived: quote.receives,
+              idempotencyKey: attempt.key,
+            });
+            attempt.next();
+            setQuote(undefined);
+            setAmount('');
+            trades.reload();
+            balances.reload();
+            return `Converted. You received ${formatAmount(trade.received, trade.to)}.`;
+          })
+        }
+      />
 
-        {quote !== undefined && (
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 7,
-              marginTop: 2,
-            }}
-          >
-            <Icon name="zap" size={15} color={colors.text2} />
-            <Text style={styles.hint}>
-              This rate holds until {new Date(quote.expires_at).toLocaleTimeString()}
-            </Text>
-          </View>
-        )}
+      {quote !== undefined && (
+        <View
+          style={{
+            flexDirection: 'row', alignItems: 'center',
+            justifyContent: 'center', gap: 7, marginTop: 2,
+          }}
+        >
+          <Icon name="zap" size={15} color={colors.text2} />
+          <Text style={styles.hint}>
+            This rate holds until {new Date(quote.expires_at).toLocaleTimeString()}
+          </Text>
+        </View>
+      )}
 
-        <Field
-          label="Send to someone else (optional)"
-          placeholder="Their email or phone"
-          inputMode="email"
-          autoCapitalize="none"
-          value={recipient}
-          onChangeText={setRecipient}
-          hint="Leave empty to convert into your own wallet."
-        />
-
-        {/* ONLY WHEN IT IS GOING TO SOMEBODY. Converting your own balance is
-            not a payment, and asking for the PIN there teaches people to type
-            it for things that are not payments. */}
-        {recipient !== '' && (
-          <Field
-            label="Transaction PIN"
-            secureTextEntry
-            inputMode="numeric"
-            autoComplete="off"
-            maxLength={6}
-            value={pin}
-            onChangeText={setPin}
-          />
-        )}
-
-        <Button
-          label={recipient === '' ? 'Convert' : 'Convert and send'}
-          busy={busy}
-          disabled={amount === '' || from === to || (recipient !== '' && pin === '')}
-          onPress={() =>
-            void run(async () => {
-              /* Two calls, matching the API's two routes: converting your own
-                 balance takes no PIN, sending it to somebody does. See the
-                 web's Convert screen and `fx/dto.ts`. */
-              const movement = {
-                from,
-                to,
-                amount,
-                // What they agreed to. The server refuses rather than filling
-                // below it, so a rate that moves between the quote and the
-                // tap costs a refusal instead of money.
-                ...(quote === undefined ? {} : { minReceived: quote.receives }),
-                idempotencyKey: attempt.key,
-              };
-              const trade =
-                recipient === ''
-                  ? await client.convert(movement)
-                  : await client.remit({ ...movement, recipient, pin });
-              attempt.next();
-              setPin('');
-              setQuote(undefined);
-              trades.reload();
-              balances.reload();
-              return `Converted. You received ${formatAmount(trade.received, trade.to)}.`;
-            })
-          }
-        />
-        <FormError error={error} code={code} />
-        <Done message={done} />
-      </Panel>
+      <FormError error={error} code={code} />
+      <Done message={done} />
 
       <Panel title="Recent conversions">
         {trades.loading && <Loading />}

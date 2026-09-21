@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { formatAmount, TRANSFER_CURRENCIES } from '@xetral/client';
+import { formatAmount, groupTyped, TRANSFER_CURRENCIES } from '@xetral/client';
 import type { FxQuote } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { Select } from '@/ui/select';
@@ -37,12 +37,16 @@ export default function Fx() {
   const [from, setFrom] = useState<string>('NGN');
   const [to, setTo] = useState<string>('USD');
   const [amount, setAmount] = useState('');
-  const [recipient, setRecipient] = useState('');
-  const [pin, setPin] = useState('');
   const [quote, setQuote] = useState<FxQuote | undefined>();
   const attempt = useIdempotencyKey();
   const { busy, error, code, done, run, clear } = useSubmit();
   const trades = useLoad(() => client.fxTrades(), [client]);
+  /* The two balances the panels report. SPENDABLE, not total: pending money
+     cannot be converted and offering it would produce a refusal the customer
+     could not have predicted from the figure on screen. */
+  const balances = useLoad(() => client.balances(), [client]);
+  const fromBalance = balances.data?.find((b) => b.currency === from);
+  const toBalance = balances.data?.find((b) => b.currency === to);
 
   return (
     <Shell back="/wallet" title="Convert">
@@ -61,124 +65,191 @@ export default function Fx() {
           event.preventDefault();
           void run(async () => {
             /*
-             * CONVERTING TAKES NO PIN; SENDING IT TO SOMEBODY DOES.
+             * ONE BUTTON, TWO STEPS — quote, then convert, and the quote is
+             * what the second press is against. A rate moves between the two,
+             * so `minReceived` carries what the customer was shown: without it
+             * the difference is absorbed by whoever is not looking, which is
+             * the customer.
+             */
+            if (quote === undefined) {
+              setQuote(await client.fxQuote(from, to, amount));
+              return undefined;
+            }
+            /*
+             * CONVERTING TAKES NO PIN.
              *
              * A PIN is the second factor for money LEAVING the account, and
              * converting moves a customer's own money between their own
              * wallets — the balance afterwards is the same balance in another
-             * denomination. Two calls rather than one with an optional
-             * recipient, because the API split them for the same reason: the
-             * PIN-free route's schema has no recipient field, so the path that
-             * skips the PIN cannot be handed somebody to pay.
+             * denomination. Sending it to somebody IS a payment, and that is
+             * the Send screen: since Phase 19 it derives the rail from the
+             * recipient and the currency, so a converting transfer already
+             * routes to the same one journal entry this endpoint posts. An
+             * optional recipient here was a second, quieter way into it —
+             * with its own PIN field, on a screen headed Convert.
              */
-            const movement = {
+            const trade = await client.convert({
               from,
               to,
               amount,
-              // What the customer agreed to receive. Rates move between the
-              // quote and the request, and without this the difference is
-              // simply absorbed by whoever is not looking — which is the
-              // customer.
-              ...(quote === undefined ? {} : { minReceived: quote.receives }),
+              minReceived: quote.receives,
               idempotencyKey: attempt.key,
-            };
-            const trade =
-              recipient === ''
-                ? await client.convert(movement)
-                : await client.remit({ ...movement, recipient, pin });
+            });
             attempt.next();
-            setPin('');
             setQuote(undefined);
+            setAmount('');
             trades.reload();
+            /* BOTH PANELS REPORT A BALANCE, and a conversion changes both of
+               them — without this the screen says the money is still where it
+               was, on the screen that just moved it. */
+            balances.reload();
             return `Received ${formatAmount(trade.received, trade.to)}.`;
           });
         }}
       >
-        <p className="lead">Between your own balances, or straight to someone else.</p>
+        {/*
+          TWO PANELS AND THE SWAP BETWEEN THEM, which is the comp's whole
+          screen — and the currency was being asked TWICE before it: a chip in
+          the receive row AND a "Convert to" select under both cards. Two
+          controls for one answer, the fault the home screen's currency
+          selector already replaced a badge and a rail to fix.
+        */}
+        <div className="cv-pair">
+          <div className="cv-panel">
+            <div className="cv-head">
+              <span className="cv-label">From</span>
+              <Select
+                value={from}
+                onChange={(value) => {
+                  setFrom(value);
+                  setQuote(undefined);
+                }}
+                options={CURRENCIES.map((c) => ({ value: c, label: c }))}
+                renderMark={(value) => <CurrencyMark currency={value} size={20} />}
+                compact
+              />
+            </div>
+            {/*
+              GROUPED AS IT IS TYPED, the way the Send till groups it —
+              `groupTyped` from `@xetral/client`, which is the one place that
+              arithmetic lives and never produces a number. `50000` at 30px is
+              read by counting zeros; `50,000` is read.
 
-        {/* WHAT LEAVES. The currency lives in the amount row as a compact
-            picker, the way Send puts it, so the number and its denomination
-            are one control rather than a label floating above a dropdown. */}
-        <div className="amount-card">
-          <span className="field-label">You convert</span>
-          <div className="amount-row">
-            <Select
-              value={from}
-              onChange={(value) => {
-                setFrom(value);
-                setQuote(undefined);
-              }}
-              options={CURRENCIES.map((c) => ({ value: c, label: c }))}
-              renderMark={(value) => <CurrencyMark currency={value} size={18} />}
-              compact
-            />
+              The stored value stays UNGROUPED, so what reaches the API is a
+              decimal string and not a display string, and every separator the
+              customer's own keyboard might contribute is dropped on the way
+              in rather than being sent.
+            */}
             <input
+              className="cv-figure"
               inputMode="decimal"
-              value={amount}
+              value={groupTyped(amount)}
               onChange={(e) => {
-                setAmount(e.target.value);
+                const digits = e.target.value.replace(/[^0-9.]/g, '');
+                // At most one decimal point: a second one is a typo, and
+                // `parseFloat` is not available to decide that for us.
+                const [whole = '', ...rest] = digits.split('.');
+                setAmount(rest.length === 0 ? whole : `${whole}.${rest.join('')}`);
                 setQuote(undefined);
               }}
               placeholder="0"
               aria-label="Amount to convert"
               required
             />
-          </div>
-          {from === to && <span className="error">Pick two different currencies.</span>}
-        </div>
-
-        {/* WHAT LANDS. A quote fills the figure; until one is fetched it is a
-            dash, because the rate is the operator's answer and not a default. */}
-        <div className="amount-card">
-          <span className="field-label">You receive</span>
-          <div className="amount-row">
-            <span className="currency-pill">
-              <CurrencyMark currency={to} size={18} /> {to}
+            {/* THE BALANCE UNDER THE FIGURE, which is what the comp draws and
+                what answers the only other question somebody has here. It is
+                the SPENDABLE figure, not the total: pending money cannot be
+                converted and offering it would produce a refusal. */}
+            <span className="cv-balance">
+              {fromBalance === undefined
+                ? ' '
+                : `Balance ${formatAmount(fromBalance.spendable, from)}`}
             </span>
-            <strong className="lands">
-              {quote === undefined ? '—' : formatAmount(quote.receives, quote.to)}
-            </strong>
           </div>
-          {/* The spread is its own line, never folded into the rate. A customer
-              comparing us against a bureau de change compares the number they
-              receive, and hiding our margin inside the rate makes that
-              comparison quietly dishonest. */}
-          {quote !== undefined && (
-            <span className="hint">
-              1 {quote.from} = {quote.rate} {quote.to} · our fee{' '}
-              {formatAmount(quote.spread, quote.from)}
-            </span>
-          )}
-        </div>
 
-        {/* To is chosen here, beside its own card, as a plain field — the
-            compact picker in the receive row would fight the landed figure for
-            the same space, so the choice sits under the two cards. */}
-        <label className="field" id="fx-to-field">
-          <span className="field-label">Convert to</span>
-          <Select
-            value={to}
-            onChange={(value) => {
-              setTo(value);
+          {/*
+            THE ONE DECISION ON THIS SCREEN IS WHICH WAY ROUND, so it is a
+            button rather than two pickers. It swaps the pair and drops the
+            quote — a rate for NGN→USD is not a rate for USD→NGN, and 008's
+            rule is that a rate is a RATIO which does not simply invert
+            through a spread.
+          */}
+          <button
+            type="button"
+            className="cv-swap"
+            aria-label={`Swap — convert ${to} to ${from} instead`}
+            onClick={() => {
+              setFrom(to);
+              setTo(from);
               setQuote(undefined);
             }}
-            options={CURRENCIES.map((c) => ({ value: c, label: c }))}
-            renderMark={(value) => <CurrencyMark currency={value} size={18} />}
-          />
-        </label>
+          >
+            <Icon name="swap" size={20} />
+          </button>
 
+          <div className="cv-panel to">
+            <div className="cv-head">
+              <span className="cv-label">To</span>
+              <Select
+                value={to}
+                onChange={(value) => {
+                  setTo(value);
+                  setQuote(undefined);
+                }}
+                options={CURRENCIES.map((c) => ({ value: c, label: c }))}
+                renderMark={(value) => <CurrencyMark currency={value} size={20} />}
+                compact
+              />
+            </div>
+            {/* A quote fills the figure; until one is fetched it is a dash,
+                because the rate is the operator's answer and not a default.
+                An unpublished pair is refused rather than quoted. */}
+            <span className={quote === undefined ? 'cv-figure waiting' : 'cv-figure'}>
+              {quote === undefined ? '—' : formatAmount(quote.receives, quote.to)}
+            </span>
+            <span className="cv-balance">
+              {toBalance === undefined ? ' ' : `Balance ${formatAmount(toBalance.spendable, to)}`}
+            </span>
+          </div>
+        </div>
+
+        {from === to && <p className="error">Pick two different currencies.</p>}
+
+        {/*
+          THE RATE IS ITS OWN LINE AND THE FEE IS BESIDE IT, never folded into
+          the figure. A customer comparing us against a bureau de change
+          compares what they receive, and hiding our margin inside the rate
+          makes that comparison quietly dishonest.
+        */}
+        <div className="cv-rate">
+          <span>Rate</span>
+          <span>
+            {quote === undefined
+              ? 'Tap Convert to see today’s rate'
+              : `1 ${quote.from} = ${quote.rate} ${quote.to}`}
+          </span>
+        </div>
+        {quote !== undefined && (
+          <div className="cv-rate" style={{ paddingTop: 0 }}>
+            <span>Our fee</span>
+            <span>{formatAmount(quote.spread, quote.from)}</span>
+          </div>
+        )}
+
+        {/*
+          ONE BUTTON THAT QUOTES AND THEN CONVERTS.
+
+          It was two — a full-width "Get today's rate" above the field and a
+          Convert under it — so the customer pressed a quiet button, read a
+          figure, and pressed a loud one, with a rate expiring between them.
+          The comp has one, and a quote is a read: fetching it on the way to
+          the conversion costs a round trip and removes a step nobody wanted.
+        */}
         <button
-          type="button"
-          className="quiet block"
-          disabled={busy || amount === '' || from === to}
-          onClick={() =>
-            void run(async () => {
-              setQuote(await client.fxQuote(from, to, amount));
-              return undefined;
-            })
-          }
+          type="submit"
+          disabled={busy || from === to || amount === ''}
         >
-          {quote === undefined ? 'Get today’s rate' : 'Refresh rate'}
+          {busy ? 'Converting…' : quote === undefined ? 'Get today’s rate' : 'Convert now'}
         </button>
 
         {quote !== undefined && (
@@ -187,40 +258,6 @@ export default function Fx() {
             {new Date(quote.expires_at).toLocaleTimeString()}
           </p>
         )}
-
-        <label className="field">
-          <span className="field-label">Send to someone else (optional)</span>
-          <input
-            value={recipient}
-            onChange={(e) => setRecipient(e.target.value)}
-            placeholder="Their email or phone — leave empty to convert your own balance"
-          />
-        </label>
-
-        {/* ONLY WHEN IT IS GOING TO SOMEBODY. Converting your own balance is
-            not a payment and asking for the PIN there teaches people to type
-            it for things that are not payments. */}
-        {recipient !== '' && (
-          <label className="field">
-            <span className="field-label">Transaction PIN</span>
-            <input
-              type="password"
-              inputMode="numeric"
-              autoComplete="off"
-              maxLength={6}
-              value={pin}
-              onChange={(e) => setPin(e.target.value)}
-              required
-            />
-          </label>
-        )}
-
-        <button
-          type="submit"
-          disabled={busy || from === to || amount === '' || (recipient !== '' && pin === '')}
-        >
-          {busy ? 'Converting…' : recipient === '' ? 'Convert' : 'Convert and send'}
-        </button>
 
         <FormError error={error} code={code} />
         {done !== undefined && <p className="ok">{done}</p>}
