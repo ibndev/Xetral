@@ -34,8 +34,17 @@ const FAILURE_LABEL: Record<AdminReadinessRow['failure'], string> = {
 };
 
 function Rows({ rows }: { rows: readonly AdminReadinessRow[] }) {
+  /*
+   * THE COLUMNS ARE SIZED, because one of them is a paragraph.
+   *
+   * With widths left to the content, "If it is missed" — which is four lines
+   * of prose — took most of the table and squeezed "Flow" to about a hundred
+   * pixels, so a three-word phrase wrapped onto three lines beside it. A
+   * table where the narrow columns wrap and the wide one does not is one an
+   * operator reads by counting rows rather than by scanning.
+   */
   return (
-    <table>
+    <table className="cols-3-1-2">
       <thead>
         <tr>
           <th>What</th>

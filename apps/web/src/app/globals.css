@@ -2358,6 +2358,17 @@ th.right { font-family: var(--font-sans); }
 }
 .admin-frame .empty .empty-icon { display: none; }
 .admin-frame .empty .hint { margin: 0; }
+
+/*
+ * A TABLE WHOSE COLUMNS ARE SIZED, for the one case where a cell is a
+ * paragraph. Left to the content, a prose column takes what it likes and the
+ * short ones wrap — three words onto three lines beside four lines of text.
+ * `table-layout: fixed` is what makes the percentages binding.
+ */
+.admin-frame table.cols-3-1-2 { table-layout: fixed; }
+.admin-frame table.cols-3-1-2 th:nth-child(1) { width: 26%; }
+.admin-frame table.cols-3-1-2 th:nth-child(2) { width: 14%; }
+.admin-frame table.cols-3-1-2 th:nth-child(3) { width: 60%; }
 /* Restated rather than left to declaration order: these carry their own
    radius above and a shape is not a thing to resolve by source position. */
 .admin-frame .badge, .admin-frame .pill, .admin-frame .segmented,
