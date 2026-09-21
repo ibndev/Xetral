@@ -2113,6 +2113,22 @@ fieldset { border: 0; padding: 0; margin: 0; }
   padding: 0 18px;
 }
 @media (min-width: 720px) { .scroll { margin: 0; padding: 0; } }
+/*
+ * A TABLE THAT FOLLOWS PROSE GETS THE GAP A BARE TABLE ALREADY HAD.
+ *
+ * `.panel > table` carries a top margin, and a table inside a `.scroll`
+ * wrapper — which most of them are, because they scroll sideways on a narrow
+ * window — is not that selector. So on Earnings the sentence explaining what
+ * an unpublished pair does ran straight into the PAIR/SPREAD heading, and the
+ * heading read as the last line of the paragraph.
+ *
+ * Keyed on "not the first thing in its container", so a panel whose whole
+ * content is a table is unaffected. The horizontal margin is restated because
+ * this rule would otherwise reset the negative bleed that lets a table reach
+ * the panel's edge on a phone.
+ */
+.scroll:not(:first-child) { margin: var(--s-3) -18px 0; }
+@media (min-width: 720px) { .scroll:not(:first-child) { margin: var(--s-3) 0 0; } }
 
 /*
  * A LONG TABLE, BOXED AND SCROLLED INSIDE ITSELF.
@@ -4208,6 +4224,26 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
   color: var(--on-iris);
 }
 .chip.on:hover:where(:not(:disabled)) { background: var(--iris); color: var(--on-iris); }
+/* A COUNT INSIDE A CHIP INHERITS THE CHIP. `.muted` is a colour for text on
+   the page's ground; on a filled chip it is the one unreadable thing on it. */
+.chip .muted { color: inherit; opacity: .62; }
+/*
+ * A CHIP RAIL INSIDE A PANEL REACHES THE PANEL'S EDGE, for the reason the
+ * activity rail reaches the screen's: the half-visible chip is the thing that
+ * says there are more, and cut short of the edge it reads as an element
+ * clipped by accident rather than as a rail with more in it. The bleed is
+ * EXACTLY the panel's own padding, and `scroll-padding-left` is the second
+ * half — the scrollport ignores this container's padding and would otherwise
+ * eat the gutter aligning the first chip with everything above it.
+ */
+.panel > .chip-rail {
+  margin-right: -18px;
+  padding-right: 18px;
+  scroll-padding-left: 0;
+}
+@media (min-width: 720px) {
+  .panel > .chip-rail { margin-right: -22px; padding-right: 22px; }
+}
 
 /* The recipient list is not inside a card, so a hairline is what groups the
    rows — a divider, `--line`, which is structure rather than the outline the

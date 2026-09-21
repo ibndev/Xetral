@@ -63,11 +63,20 @@ export default function Settings() {
         {settings.loading && <p className="spinner">Loading…</p>}
 
         {categories.length > 0 && (
-          /* A RAIL, so it scrolls rather than wrapping. Eight categories do
-             not fit across a narrow window, and a wrapped row moves the tabs
-             under the pointer as the selection changes width. */
+          /*
+            CHIPS, NOT A SEGMENTED CONTROL.
+
+            A segmented control is one choice out of a FIXED, SHORT set that
+            all fit — it is a single track with two rounded ends, and the ends
+            are what say "this is the whole set". There are NINE categories
+            here, so the track ran off the side of the panel and the last one
+            was cut in half against a straight edge: a control that looks
+            complete and is not. Chips each have their own shape, so a
+            half-visible one says there are more, which is the Activity
+            screen's rail and the same argument.
+          */
           <div
-            className="segmented rail"
+            className="chip-rail"
             role="tablist"
             aria-label="Setting categories"
             style={{ marginTop: 'var(--s-4)' }}
@@ -78,7 +87,7 @@ export default function Settings() {
                 type="button"
                 role="tab"
                 aria-selected={category === active}
-                className={category === active ? 'active' : ''}
+                className={category === active ? 'chip on' : 'chip'}
                 style={{ textTransform: 'capitalize' }}
                 onClick={() => setChosen(category)}
               >
