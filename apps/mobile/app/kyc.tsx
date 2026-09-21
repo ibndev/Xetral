@@ -219,7 +219,12 @@ function Limits() {
         .map((limit) => (
           <View key={limit.currency} style={styles.row}>
             <Text style={[styles.muted, { flex: 1 }]}>{limit.currency}</Text>
-            <Text style={{ color: colors.text }}>{verified ? 'Unlimited' : 'Limited'}</Text>
+            {/* "Raised", not "Unlimited" — the web's own correction. 029's rule
+                is that the ceiling in force is the LOWER of the tier's and the
+                FLOW's, so a verified customer still has a daily limit and meets
+                it on the first transfer past `transfer_daily_limit_kobo`.
+                Verifying lifts the ceiling; it does not remove it. */}
+            <Text style={{ color: colors.text }}>{verified ? 'Raised' : 'Limited'}</Text>
           </View>
         ))}
       <Text style={[styles.hint, { color: colors.text3 }]}>

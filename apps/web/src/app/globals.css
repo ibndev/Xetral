@@ -971,7 +971,21 @@ h3 { font-size: 16px; }
   color: var(--text-muted);
   margin: 0 0 var(--s-4);
 }
-.card > h2 { margin: 0 0 var(--s-3); }
+/*
+ * A CARD'S HEADING IS THE COMP'S SECTION HEADING — `700 17px`, the same
+ * figure `.sec-head h2` carries and the same one the comp sets "Explore" and
+ * "Recent activity" in.
+ *
+ * It was the bare `h2` at 19px, which is a PAGE-level size: on a screen whose
+ * own title is 20px in the page head, a card halfway down it was heading its
+ * contents at almost the same weight as the screen. Two sizes for one job,
+ * decided by whether a section happened to be inside a card.
+ */
+.card > h2 {
+  margin: 0 0 var(--s-3);
+  font-size: 17px; font-weight: 700;
+  letter-spacing: -0.012em;
+}
 .card > h1 + .lead,
 .card > h2 + .lead { margin-top: 0; }
 .card > .lead { margin-bottom: var(--s-4); }

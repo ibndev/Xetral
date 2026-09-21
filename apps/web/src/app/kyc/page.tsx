@@ -74,7 +74,7 @@ export default function Kyc() {
 
   if (loading) {
     return (
-      <Shell>
+      <Shell back="/more" title="Identity">
         <div className="card">
           <p className="spinner">Loading…</p>
         </div>
@@ -85,7 +85,11 @@ export default function Kyc() {
   if (data !== null && data !== undefined) return <Submitted status={data} />;
 
   return (
-    <Shell>
+    /* A BACK ARROW AND A TITLE, because this screen is reached from More and
+       from a refusal elsewhere, and is not a tab. It drew the brand header,
+       so a customer sent here by a gate had no way back to what they were
+       doing. */
+    <Shell back="/more" title="Identity">
       {/*
         What they can move TODAY, before the form rather than after it.
 
@@ -97,7 +101,8 @@ export default function Kyc() {
       <Limits />
 
       <form className="card" onSubmit={submit}>
-        <h1>Verify your identity</h1>
+        {/* A SECTION HEADING — the Shell names the screen. */}
+        <h2>Verify your identity</h2>
         <h2>Your BVN, and a check of what we already hold</h2>
 
         <label>
@@ -164,13 +169,17 @@ function Submitted({ status }: { status: KycStatus }) {
         : { badge: 'warn', title: 'Under review' };
 
   return (
-    <Shell>
+    <Shell back="/more" title="Identity">
 
       <div className="card">
-        <h1>{state.title}</h1>
-        <h2>
+        {/* THE STATE AND ITS BADGE ON ONE LINE. The badge was wrapped in an
+            `<h2>` purely to get the spacing, which made a status pill a
+            heading — and `.card > h2` now sets a size, so it was also a
+            17px line containing a 12px chip. */}
+        <div className="row-between" style={{ marginBottom: 'var(--s-3)' }}>
+          <h2 style={{ margin: 0 }}>{state.title}</h2>
           <span className={`badge ${state.badge}`}>{status.status}</span>
-        </h2>
+        </div>
 
         <div className="row">
           <span className="muted">Name</span>
@@ -189,8 +198,6 @@ function Submitted({ status }: { status: KycStatus }) {
           <p className="hint">We&apos;ll notify you when review is completed</p>
         )}
 
-        <Limits />
-
         {status.rejection_reason !== null && (
           <div className="notice danger" style={{ marginTop: 16 }}>
             <p>{status.rejection_reason}</p>
@@ -200,6 +207,16 @@ function Submitted({ status }: { status: KycStatus }) {
           </div>
         )}
       </div>
+
+      {/*
+        THE LIMITS ARE THEIR OWN CARD, not one inside the identity card.
+
+        `Limits` renders a `.card`, so nesting it here drew a picture of a
+        card inside a picture of a card — two edges, two grounds, and the
+        inner one overlapping the divider of the row above it. The two answer
+        different questions and are two blocks on the page.
+      */}
+      <Limits />
     </Shell>
   );
 }
@@ -224,6 +241,15 @@ function Submitted({ status }: { status: KycStatus }) {
  * The figures have not gone anywhere: `GET /v1/kyc/limits` still answers them
  * and the ledger precondition still enforces them, so nothing about what is
  * ALLOWED changed here. This is the wording on one screen.
+ *
+ * AND ONE OF THE TWO WORDS WAS FALSE. A verified customer read "Unlimited"
+ * against every currency — and 029's rule is that the ceiling in force is the
+ * LOWER of the tier's and the FLOW's, so a verified customer still has a
+ * daily limit and meets it on the first transfer past
+ * `transfer_daily_limit_kobo`. "Unlimited" is the one claim on this screen a
+ * customer can disprove by using the product, and a screen that says it is
+ * worse than one that says nothing. "Raised" is the same two-state framing
+ * and is true: verifying lifts the ceiling, it does not remove it.
  */
 function Limits() {
   const client = useXetral();
@@ -263,7 +289,7 @@ function Limits() {
         .map((limit) => (
           <div className="row" key={limit.currency}>
             <span className="muted">{limit.currency}</span>
-            <span>{verified ? 'Unlimited' : 'Limited'}</span>
+            <span>{verified ? 'Raised' : 'Limited'}</span>
           </div>
         ))}
       {data.next_tier === 1 && (
