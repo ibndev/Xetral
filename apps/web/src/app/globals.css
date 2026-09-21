@@ -2336,6 +2336,28 @@ th.right { font-family: var(--font-sans); }
    has scrolled, because there it sits over content that moves under it; here
    it is a fixed bar over a scrolling body and the line is always true. */
 .admin-frame .appbar { border-bottom-color: var(--line); }
+
+/*
+ * AN EMPTY QUEUE IS A LINE, NOT A HERO.
+ *
+ * `.empty` is 34px of padding around a 56px mark, which is right on a
+ * customer screen where an empty list is the WHOLE screen and the tone is an
+ * invitation. On this surface an empty panel is the ordinary case — most
+ * queues are empty most of the time, which is the point of `036`'s rule that
+ * a zero row still says the queue was checked — and a screen of six panels
+ * each reserving 120px for "Nothing held." is a page an operator has to
+ * scroll to find the one thing that is not empty.
+ */
+.admin-frame .empty {
+  flex-direction: row;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 14px 0;
+  text-align: left;
+  font-size: 13px;
+}
+.admin-frame .empty .empty-icon { display: none; }
+.admin-frame .empty .hint { margin: 0; }
 /* Restated rather than left to declaration order: these carry their own
    radius above and a shape is not a thing to resolve by source position. */
 .admin-frame .badge, .admin-frame .pill, .admin-frame .segmented,
