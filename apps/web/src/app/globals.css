@@ -2368,6 +2368,29 @@ th.right { font-family: var(--font-sans); }
 .admin-frame .appbar { border-bottom-color: var(--line); }
 
 /*
+ * THE DASHBOARD READS DENSER THAN THE PHONE, and that is the comp rather
+ * than a preference: its nav rows and table cells are 13px, its KPI labels
+ * 11.5px, its buttons 12.5px and its section headings 15px. The customer
+ * app's body is 15px, which is a rule about a thumb-width column of prose.
+ *
+ * INHERITED SIZE IS WHERE IT SHOWED. `.panel > h2` is the comp's `.sec` at
+ * 15px, and a bare `<strong>` inside a panel — a credential's name, a
+ * setting's label — inherits 15px and 700 weight, so it rendered EXACTLY as
+ * large as the heading of the section containing it. A slot outranking its
+ * provider is the same fault as a section heading outranking its screen, one
+ * level further in.
+ *
+ * Only the inherited size moves: every rule that states its own px is
+ * untouched, which is most of this surface.
+ */
+.admin-frame { font-size: 13.5px; }
+.admin-frame .panel > p,
+.admin-frame .panel > .lead { font-size: 13.5px; }
+/* A FIELD'S NAME SITS UNDER ITS SECTION'S, which at `.sec`'s 15px means 13.
+   The comp's own relationship: a heading at 15 over cells at 13. */
+.slot-label { display: block; font-size: 13px; font-weight: 700; }
+
+/*
  * AN EMPTY QUEUE IS A LINE, NOT A HERO.
  *
  * `.empty` is 34px of padding around a 56px mark, which is right on a

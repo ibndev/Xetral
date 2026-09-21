@@ -159,7 +159,13 @@ function Credential({
     <div style={{ borderBottom: '1px solid var(--line)', paddingBottom: 16, marginBottom: 16 }}>
       <div className="field-row two">
         <div>
-          <strong>{credential.label}</strong>
+          {/* A LABEL, NOT EMPHASIS IN A SENTENCE. A bare `<strong>` inherits
+              the body size and 700 weight, so a slot's name rendered at the
+              same weight as the PROVIDER heading above it — a field
+              outranking the group it is in. Every other `<strong>` on this
+              surface is genuinely a word emphasised mid-sentence, which is
+              why this is a class rather than a rule about the element. */}
+          <span className="slot-label">{credential.label}</span>
           <p className="hint">{credential.description}</p>
           <p className="hint mono">
             {credential.provider}.{credential.name} · falls back to {credential.env_var}
