@@ -272,7 +272,11 @@ export default function Wallet() {
             <span className="act-ico"><Icon name="swap" size={22} /></span>
             Convert
           </Link>
-          <Link href="/add-money" className="act">
+          {/* ITS OWN SCREEN. Request and Add both pointed here at
+              `/add-money`, so two of the four actions led to one page — and
+              the one headed "Add money", which is not what somebody asking to
+              be paid came for. */}
+          <Link href="/request" className="act">
             <span className="act-ico"><Icon name="download" size={22} /></span>
             Request
           </Link>

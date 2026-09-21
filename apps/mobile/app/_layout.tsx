@@ -223,6 +223,7 @@ function Chrome() {
         <Stack.Screen name="more" />
         <Stack.Screen name="transfer" />
         <Stack.Screen name="add-money" />
+        <Stack.Screen name="request" />
         <Stack.Screen name="bills" />
         <Stack.Screen name="fx" />
         <Stack.Screen name="crypto" />

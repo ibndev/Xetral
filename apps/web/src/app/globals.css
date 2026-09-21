@@ -589,6 +589,19 @@ h3 { font-size: 16px; }
 .shell > * + * { margin-top: var(--s-5); }
 .shell > .lead { margin-top: var(--s-1); }
 .shell > .hint { margin-top: var(--s-1); }
+/*
+ * AN EYEBROW BELONGS TO WHAT FOLLOWS IT, not between two things.
+ *
+ * `.eyebrow` carries the comp's own `20px 0 6px`, which is right where it is
+ * a sibling in a flow that does not space itself — on the card screen, under
+ * the controls. As a direct child of `.shell` it gets a full step ABOVE from
+ * the rule here as well, and the block under it gets another: a group
+ * heading with more air under it than over it, reading as a label for the gap
+ * rather than for the list. Its own padding goes, and what follows it comes
+ * up tight.
+ */
+.shell > .eyebrow { padding: 0; }
+.shell > .eyebrow + * { margin-top: var(--s-2); }
 @media (min-width: 720px) { .shell > * + * { margin-top: var(--s-6); } }
 
 .stack   { display: flex; flex-direction: column; gap: 14px; }
@@ -1985,6 +1998,21 @@ fieldset { border: 0; padding: 0; margin: 0; }
   gap: 13px;
   padding: 12px 0;
   border-bottom: 1px solid var(--line);
+  /*
+   * A ROW IS NOT A LINK, EVEN WHEN IT IS AN <a>.
+   *
+   * `a { color: var(--link) }` and `--link` is iris, so every row on the More
+   * screen rendered its title in the accent — eleven saturated headings down
+   * one page, and the chevron beside each one the only part that looked
+   * quiet. An accent used eleven times is not an accent, and the comp draws
+   * these titles in `--text` with only the sub in `--text3`.
+   *
+   * Stated here rather than on `.row-title`, so it covers a row's whole
+   * content: the next thing somebody puts in one inherits the text colour
+   * too. An inline link in prose still gets `--link`, which is what that
+   * token is for.
+   */
+  color: var(--text);
   transition: background var(--t-fast) var(--ease);
 }
 .list-row:last-child { border-bottom: 0; }
@@ -3741,7 +3769,9 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
  * enough to overflow a 320px handset and a phone number is not, and breaking
  * digits mid-number is how somebody reads one back wrongly.
  */
+/* No top padding when the page is already spacing it — see `.shell > .eyebrow + *`. */
 .copy-row { display: flex; flex-direction: column; gap: 6px; padding: 12px 0; }
+.shell > .copy-row { padding-top: 0; }
 .copy-row + .copy-row { border-top: 1px solid var(--line); }
 .copy-label { font-size: 13px; color: var(--text-2); }
 .copy-value {
@@ -5787,4 +5817,83 @@ html, body { overflow-x: hidden; }
 .sent > .sent-again:hover, .sent > .sent-again:focus, .sent > .sent-again:active {
   background: none;
   color: var(--text);
+}
+
+/* ---------------------------------------------------------------------------
+ * The account card, and the eyebrow that introduces a group.
+ *
+ * The comp draws an account number ONCE and gives it the only gradient panel
+ * in the product: `cardgrad1 → cardgrad2` behind a 1px iris border, with the
+ * number at 800/22 and a Copy chip beside it. That weight is the point —
+ * a dedicated account number is the one string on the screen a customer is
+ * going to read out, photograph or save as a beneficiary, and it was rendered
+ * in the same `.amount` class a balance uses, inside an ordinary card, with
+ * no way to copy it at all.
+ *
+ * USED TWICE ACROSS THE PRODUCT AND NEVER TWICE ON ONE SCREEN: the funding
+ * account on Add money, and the customer's own number on Request money. Two
+ * gradient panels on one page would halve what the gradient says.
+ * ------------------------------------------------------------------------- */
+.acct-card {
+  border-radius: 18px;
+  padding: 18px;
+  background: linear-gradient(150deg, var(--card-grad-1), var(--card-grad-2));
+  border: 1px solid var(--iris);
+}
+.acct-card .eyebrow { color: var(--iris-text); }
+.acct-card-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-top: 12px;
+}
+.acct-number {
+  min-width: 0;
+  font-family: var(--font-num);
+  font-size: 22px; font-weight: 800;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  /* Selectable, because the clipboard API is refused often enough — an
+     insecure origin, a browser setting — that the value on screen has to be
+     the fallback. */
+  user-select: all;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.acct-sub { margin: 6px 0 0; font-size: 12.5px; font-weight: 500; color: var(--text-3); }
+
+/* THE COPY CHIP. Every property the bare `button` rule sets is restated —
+   `min-height: 48px` would make it half the height of the card it sits in. */
+.copy-chip {
+  display: inline-flex; align-items: center; justify-content: center;
+  flex: none;
+  gap: 6px;
+  min-height: 0;
+  padding: 7px 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: rgb(255 255 255 / .08);
+  color: var(--iris-text);
+  white-space: nowrap;
+  font-family: var(--font-sans);
+  font-size: 12px; font-weight: 600;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+.copy-chip:hover:where(:not(:disabled)),
+.copy-chip:focus-visible,
+.copy-chip:active { background: rgb(255 255 255 / .14); color: var(--iris-text); }
+/* In light the card's ground is a pale tint, so a white wash is invisible on
+   it — the recess argument `light-edges.test.ts` records, in reverse. */
+:root:not([data-theme='dark']) .copy-chip { background: rgb(13 27 62 / .07); }
+:root:not([data-theme='dark']) .copy-chip:hover:where(:not(:disabled)),
+:root:not([data-theme='dark']) .copy-chip:focus-visible,
+:root:not([data-theme='dark']) .copy-chip:active { background: rgb(13 27 62 / .12); }
+
+/* THE GROUP HEADING THE COMP USES EVERYWHERE — "OTHER METHODS", "PENDING
+   REQUESTS", "CARD ACTIVITY". Same figures as `.day-head`, which is the same
+   device applied to a list of transactions. */
+.eyebrow {
+  display: block;
+  font-size: 11px; font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase;
+  color: var(--text-3);
+  padding: 20px 0 6px;
 }

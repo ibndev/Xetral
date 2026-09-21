@@ -309,7 +309,10 @@ export default function Home() {
         <Action href="/transfer"  icon="send"     label="Send" primary />
         <Action href="/add-money" icon="plus"     label="Add" />
         <Action href="/fx"        icon="swap"     label="Convert" />
-        <Action href="/add-money" icon="download" label="Request" />
+        {/* ITS OWN SCREEN. Request and Add both pointed at `/add-money`, so
+            two of the four actions led to one screen — and the one headed Add
+            Money, which is not what somebody asking to be paid came for. */}
+        <Action href="/request" icon="download" label="Request" />
       </View>
 
       <View style={{ paddingHorizontal: GUTTER }}>

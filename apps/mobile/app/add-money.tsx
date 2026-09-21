@@ -5,9 +5,9 @@ import type { MomoAccount, XetralClient, XetralCountry } from '@xetral/client';
 import { MOMO_NETWORKS } from '@xetral/client';
 import { Select } from '@/select';
 import { Shell } from '@/shell';
+import { AcctCard } from '@/acct-card';
 import { Button, FormError, Loading, Panel } from '@/ui';
 import { useLoad, useSubmit, useXetral } from '@/hooks';
-import { webOrigin } from '@/session';
 import { font, radius, space, useStyles, useTheme } from '@/theme';
 
 /**
@@ -105,40 +105,26 @@ export default function AddMoney() {
 
         {account.data != null && (
           <>
-            <View
-              style={{
-                marginTop: space.sm,
-                padding: space.md,
-                borderRadius: radius.md,
-                backgroundColor: colors.surface2,
-                gap: 4,
-              }}
-            >
-              {/*
-                THE NAME ON TOP, INSIDE THE SAME BOX AS THE NUMBER.
+            {/*
+              THE COMP'S ACCOUNT CARD, with a Copy button it did not have.
 
-                It was a line of prose UNDER the box, which splits the three
-                things a customer copies into their banking app across two
-                containers and puts the one they are asked for FIRST last. A
-                beneficiary is a name, a bank and a number, read together.
-              */}
-              <Text style={styles.muted} selectable>
-                {account.data.account_name}
-              </Text>
-              <Text style={[styles.amount, { fontSize: 22 }]} selectable>
-                {account.data.account_number}
-              </Text>
-              <Text style={styles.muted}>{account.data.bank_name}</Text>
-            </View>
-
-            <Text style={styles.hint}>Transfer money to fund your wallet</Text>
-
-            {account.data.status !== 'active' && (
-              <Text style={styles.hint}>
-                Your account is still being activated. It will start accepting transfers
-                shortly.
-              </Text>
-            )}
+              The number was in the same muted box a balance uses, with no way
+              to copy it — so the one string on this screen a customer has to
+              get into their banking app was the one thing they had to retype
+              by hand. A beneficiary is a NAME, a bank and a number, and they
+              are read together, so all three sit in one panel.
+            */}
+            <AcctCard
+              eyebrow="Your Xetral account"
+              value={account.data.account_number}
+              share={account.data.account_number}
+              sub={
+                `${account.data.bank_name} · ${account.data.account_name} — transfers` +
+                (account.data.status === 'active'
+                  ? ' reflect instantly'
+                  : ' will start arriving once it finishes activating')
+              }
+            />
           </>
         )}
 
@@ -223,7 +209,15 @@ export default function AddMoney() {
         <FormError error={account.error} code={account.code} />
       </Panel>
 
-      <RequestPayment />
+      {/*
+        AND ASKING TO BE PAID IS A DIFFERENT SCREEN — `/request`.
+
+        The two identifiers a customer shares lived at the bottom of this
+        screen because this is where money arriving is the subject, which is
+        true and was not enough: the home screen's Request action pointed HERE,
+        so two of its four actions led to one screen, and somebody who tapped
+        Request landed on a heading that said Add Money.
+      */}
 
       {/*
         THE DEPOSIT HISTORY IS NOT HERE. Add Money answers "how do I put money
@@ -236,113 +230,6 @@ export default function AddMoney() {
   );
 }
 
-/**
- * REQUEST PAYMENT — its own section, under the account, on the screen whose
- * whole subject is money arriving.
- *
- * It was on the settings screen, filed under the account beside the
- * transaction PIN, which is where somebody goes to CHANGE something rather
- * than where they go when they need to be paid.
- *
- * SHARE RATHER THAN COPY, on the phone. A clipboard copy is the web's answer
- * because a browser has nowhere to send a link; a handset has a share sheet
- * that puts it straight into the message somebody was about to type, which is
- * where these actually go. The value is on screen and selectable either way,
- * because a Copy button beside an em dash is a button that copies nothing.
- */
-function RequestPayment() {
-  const client = useXetral();
-  const styles = useStyles();
-  const colors = useTheme();
-  const profile = useLoad(() => client.profile(), [client]);
-  // Their own dialling code, so it can come OFF the number.
-  const session = useLoad(() => client.currentSession(), [client]);
-  const countries = useLoad(() => client.session.countries(), [client]);
-  const here = countries.data?.find((c) => c.code === session.data?.country);
-
-  const phone = profile.data?.phone ?? null;
-  const local = nationalPhone(phone, here?.dial_code);
-  /*
-   * THE ORIGIN THIS BUILD ALREADY TALKS TO, as the fallback for a link the API
-   * could not build.
-   *
-   * With `APP_BASE_URL` unset the server returns no link, and this panel used
-   * to print "No link yet — this deployment has no public address set." to a
-   * customer, on the screen they opened in order to ASK TO BE PAID. That is an
-   * operator's problem rendered where a customer is standing, and the address
-   * was already compiled into the app. Configuration still WINS when it is
-   * set: an operator naming a canonical origin has said which one a shared
-   * link should carry.
-   */
-  const slug = profile.data?.slug ?? null;
-  const link =
-    profile.data?.link ??
-    (slug !== null && webOrigin() !== '' ? paymentLinkFor(webOrigin(), slug) : null);
-
-  const box = {
-    marginTop: space.xs,
-    paddingVertical: space.sm,
-    paddingHorizontal: space.md,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface2,
-  } as const;
-
-  return (
-    <Panel title="Request payment">
-      {profile.loading && <Loading />}
-
-      {profile.data !== undefined && (
-        <>
-          <Text style={styles.muted}>Share to a Xetral user &amp; get paid</Text>
-          {/* THE LOCAL NUMBER, WITHOUT THE COUNTRY CODE. This one is for
-              another XETRAL customer, and the Send screen puts a dialling-code
-              picker in front of its phone field — the sender picks the country
-              and types the national digits. So the national form is exactly
-              what gets typed in, and a country code beside it is a prefix
-              somebody would type twice. What is shared is what is shown. */}
-          <View style={box}>
-            <Text style={[styles.amount, { fontSize: 18 }]} selectable>
-              {local || 'Not set'}
-            </Text>
-          </View>
-          <Button
-            label="Copy my number"
-            icon="copy"
-            quiet
-            disabled={local === ''}
-            onPress={() => {
-              if (local === '') return;
-              // Silent on failure: a dismissed share sheet rejects on iOS,
-              // which is somebody changing their mind rather than an error.
-              void Share.share({ message: local }).catch(() => undefined);
-            }}
-          />
-
-          <Text style={[styles.muted, { marginTop: space.sm }]}>
-            Share your link to accept payment globally.
-          </Text>
-          <View style={box}>
-            <Text style={[styles.amount, { fontSize: 14 }]} selectable>
-              {link ?? 'Not set'}
-            </Text>
-          </View>
-          <Button
-            label="Copy payment link"
-            icon="copy"
-            quiet
-            disabled={link === null}
-            onPress={() => {
-              if (link === null) return;
-              void Share.share({ message: link }).catch(() => undefined);
-            }}
-          />
-        </>
-      )}
-
-      <FormError error={profile.error} code={profile.code} />
-    </Panel>
-  );
-}
 
 /**
  * LINKING A MOBILE MONEY WALLET — the web's component, screen for screen.

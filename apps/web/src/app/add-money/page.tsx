@@ -70,6 +70,9 @@ export default function AddMoney() {
   const session = useLoad(() => client.currentSession(), [client]);
   const countries = useLoad(() => client.session.countries(), [client]);
   const here = countries.data?.find((c) => c.code === session.data?.country);
+  /* The currency the lede names. The country's own, so Accra reads "your GHS
+     balance" — the same reason the Activate copy no longer says "naira". */
+  const home = here?.currency ?? session.data?.home_currency ?? 'NGN';
   const funding = here?.funding_methods ?? [];
   /*
    * THE ACTIVATE BUTTON IS OFFERED EVERYWHERE NOW, and `funding_methods` is
@@ -127,8 +130,7 @@ export default function AddMoney() {
    * deployment without it must show the form rather than fail the page.
    */
   const momo = useLoad(() => client.linkedMomo(), [client]);
-  const [copiedPhone, setCopiedPhone] = useState(false);
-  const [copiedLink, setCopiedLink] = useState(false);
+  const [copiedAccount, setCopiedAccount] = useState(false);
 
   /*
    * THE ORIGIN THIS PAGE IS ALREADY BEING SERVED FROM, as the fallback for a
@@ -169,9 +171,18 @@ export default function AddMoney() {
 
   return (
     <Shell back="/wallet" title="Add money">
-      <div className="card">
+      {/*
+        NOT IN A CARD — the account panel IS the card.
 
-        {account.loading && <p className="hint">Checking your account…</p>}
+        This screen's contents sat inside a `.card`, so the gradient account
+        panel was a picture of a card inside a picture of a card: two edges,
+        two grounds and the one thing meant to be recognised before it is read
+        shrunk by the padding of the box around it. The same fault the cards
+        screen's own comment records about a virtual card in a container.
+      */}
+      <p className="page-lede">Choose how you want to fund your {home} balance.</p>
+
+      {account.loading && <p className="hint">Checking your account…</p>}
 
         {account.data != null && (
           <>
@@ -184,18 +195,39 @@ export default function AddMoney() {
               the one they are asked for FIRST last. A beneficiary is a name,
               a bank and a number, and they are read together.
             */}
-            <div className="balance">
-              <div style={{ minWidth: 0 }}>
-                <div className="pending">{account.data.account_name}</div>
-                <div className="amount mono">{account.data.account_number}</div>
-                <div className="pending">{account.data.bank_name}</div>
+            {/*
+              AND IT IS THE COMP'S ACCOUNT CARD, with a Copy button it did
+              not have.
+
+              The number was drawn in the `.amount` class a balance uses,
+              inside an ordinary card, with no way to copy it — so the one
+              string on this screen a customer has to get into their banking
+              app was the one thing they had to retype by hand from a
+              photograph. The comp gives it the only gradient panel in the
+              product for exactly that reason.
+            */}
+            <div className="acct-card">
+              <span className="eyebrow" style={{ padding: 0 }}>Your Xetral account</span>
+              <div className="acct-card-row">
+                <span className="acct-number">{account.data.account_number}</span>
+                <button
+                  type="button"
+                  className="copy-chip"
+                  onClick={() => copy(account.data?.account_number ?? '', setCopiedAccount)}
+                >
+                  <Icon name="copy" size={14} /> {copiedAccount ? 'Copied' : 'Copy'}
+                </button>
               </div>
-              <div className="pending">{account.data.currency}</div>
+              {/* A beneficiary is a NAME, a bank and a number, and they are
+                  read together — so the three sit in one panel rather than
+                  with the name in a line of prose under it. */}
+              <p className="acct-sub">
+                {account.data.bank_name} · {account.data.account_name} — transfers
+                {account.data.status === 'active'
+                  ? ' reflect instantly'
+                  : ' will start arriving once it finishes activating'}
+              </p>
             </div>
-            <p className="hint">Transfer money to fund your wallet</p>
-            {account.data.status !== 'active' && (
-              <p className="hint">Still being activated. Transfers will start arriving shortly.</p>
-            )}
           </>
         )}
 
@@ -308,74 +340,20 @@ export default function AddMoney() {
           />
         )}
 
-        {/* Anything that is NOT the verification gate. A provider outage or a
-            signed-out session is a different problem and needs its own words. */}
-        <FormError error={account.error} code={account.code} />
-      </div>
+      {/* Anything that is NOT the verification gate. A provider outage or a
+          signed-out session is a different problem and needs its own words. */}
+      <FormError error={account.error} code={account.code} />
 
       {/*
-        REQUEST PAYMENT — ITS OWN SECTION, not a row inside the account box.
+        AND ASKING TO BE PAID IS A DIFFERENT SCREEN — `/request`.
 
-        Two ways to be paid, for two different people. A Xetral customer
-        paying another types a phone number, which is the one thing everybody
-        already knows about everybody they pay. The link is the answer to the
-        other question — being paid by somebody NOT on Xetral, in another
-        country, out of a message thread.
-
-        BOTH VALUES ARE ON SCREEN, ABOVE THEIR BUTTONS. A Copy button beside
-        an em dash is a button that copies nothing and says nothing about why;
-        what is shown is what is copied, so a customer can read it back over a
-        phone call when the clipboard is not the answer.
+        The two identifiers a customer shares lived at the bottom of this page
+        because this is "the screen whose whole subject is money arriving",
+        which is true and was not enough: the home screen's Request action
+        pointed HERE, so two of its four actions led to one page, and somebody
+        who tapped Request landed on a heading that said Add money and had to
+        scroll past an account number to reach what they came for.
       */}
-      <div className="card">
-        <div className="section-head">
-          <h2>Request payment</h2>
-        </div>
-
-        <div className="copy-row">
-          <span className="copy-label">Share to a Xetral user &amp; get paid</span>
-          {/*
-            THE LOCAL NUMBER, WITHOUT THE COUNTRY CODE — `553 921 133`, not
-            `+233 553 921 133`.
-            
-            This one is for another XETRAL customer, and the Send screen puts a
-            dialling-code picker in front of its phone field: the sender picks
-            the country and types the national digits, and `e164()` joins the
-            two server-side. So the national form is exactly what gets typed
-            in, and the country code shown beside it is a prefix somebody would
-            type twice.
-            
-            WHAT IS COPIED IS WHAT IS SHOWN, for the same reason. A clipboard
-            that carried a different string from the one on screen is a
-            surprise at the only moment it matters.
-          */}
-          <div className="copy-value mono">{local || 'Not set'}</div>
-          <button
-            type="button"
-            className="ghost small"
-            disabled={local === ''}
-            onClick={() => copy(local, setCopiedPhone)}
-          >
-            <Icon name="copy" size={15} /> {copiedPhone ? 'Copied' : 'Copy my number'}
-          </button>
-        </div>
-
-        <div className="copy-row">
-          <span className="copy-label">Share your link to accept payment globally.</span>
-          <div className="copy-value mono link">{link ?? 'Not set'}</div>
-          <button
-            type="button"
-            className="ghost small"
-            disabled={link === null}
-            onClick={() => copy(link ?? '', setCopiedLink)}
-          >
-            <Icon name="copy" size={15} /> {copiedLink ? 'Copied' : 'Copy payment link'}
-          </button>
-        </div>
-
-        <FormError error={profile.error} code={profile.code} />
-      </div>
-
       {/*
         THE DEPOSIT HISTORY IS NOT HERE, and that is what this screen is for
         rather than an omission.
