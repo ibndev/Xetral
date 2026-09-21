@@ -1,15 +1,64 @@
 'use client';
 
 import { useState } from 'react';
-import { CRYPTO_PAIRS, formatAmount } from '@xetral/client';
+import { CRYPTO_ASSETS, CRYPTO_PAIRS, formatAmount, currencyName } from '@xetral/client';
 import type { CryptoAddress, CryptoQuote } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { Select } from '@/ui/select';
+import { CurrencyMark } from '@/ui/currency-mark';
 import { FormError } from '@/ui/form-error';
 import { Icon } from '@/ui/icon';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/lib/hooks';
 import { VerifyPrompt } from '@/ui/verify-prompt';
 import { Toast } from '@/ui/toast';
+
+/**
+ * WHAT THE CUSTOMER ACTUALLY HOLDS, at the top of the screen.
+ *
+ * The comp opens Crypto with a portfolio: a total in dollars, a percentage
+ * move for the day and one per asset. Every one of those needs a price feed,
+ * and this platform has none — `fx_published_rates` prices the corridors an
+ * operator publishes and nothing anywhere quotes BTC in USD. A total
+ * assembled from a rate nobody published would be a figure on a screen with
+ * no source.
+ *
+ * So this takes the comp's LIST and not its arithmetic: the mark, the name,
+ * the balance. Zero rows are shown, because an asset missing from the list is
+ * indistinguishable from one that failed to load — and the customer who has
+ * never held USDC is exactly the one who needs to see that the address exists.
+ */
+function Holdings() {
+  const client = useXetral();
+  const balances = useLoad(() => client.balances(), [client]);
+  const held = new Map((balances.data ?? []).map((b) => [b.currency, b]));
+
+  return (
+    <>
+      <span className="eyebrow" style={{ paddingTop: 0 }}>Holdings</span>
+      {balances.loading && <p className="spinner">Loading…</p>}
+      <div>
+        {CRYPTO_ASSETS.map((asset) => (
+          <div className="tx-row" key={asset} style={{ cursor: 'default' }}>
+            <span className="tx-mark">
+              <span className="avatar">
+                <CurrencyMark currency={asset} size={26} />
+              </span>
+            </span>
+            <span className="tx-main">
+              <span className="tx-name">{currencyName(asset)}</span>
+              <span className="tx-sub">{asset}</span>
+            </span>
+            <span className="tx-side">
+              <span className="tx-amt">
+                {formatAmount(held.get(asset)?.spendable ?? '0', asset)}
+              </span>
+            </span>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
 
 /**
  * Deposits and withdrawals on chain.
@@ -46,14 +95,33 @@ export default function Crypto() {
   // invitation at the top rather than as red text buried in one panel.
   if (withdrawals.code === 'kyc_required') {
     return (
-      <Shell>
+      <Shell back="/more" title="Crypto">
         <VerifyPrompt what="crypto" />
       </Shell>
     );
   }
 
   return (
-    <Shell>
+    /*
+      A BACK ARROW AND A TITLE, because this screen is reached from More and
+      is not a tab. It drew the brand header — the one the home screen gets —
+      so it read as a top-level destination with no way back to the list it
+      was opened from.
+    */
+    <Shell back="/more" title="Crypto">
+      {/*
+        HOLDINGS FIRST, which is the comp's order and the question somebody
+        opens this screen with.
+
+        AND NOT THE COMP'S PORTFOLIO CARD. That draws a total in dollars and a
+        percentage move per asset, which needs a price feed this platform does
+        not have — `fx_published_rates` prices the corridors an operator
+        publishes, and nothing anywhere quotes BTC in USD. A total assembled
+        from a rate nobody published would be a number on a screen with no
+        source, which is the "+₦150,000 this week" chip in a second place.
+        What is real is the BALANCE, and that is what this shows.
+      */}
+      <Holdings />
       <Receive />
       <Send onSent={withdrawals.reload} />
 
@@ -101,8 +169,14 @@ function Receive() {
 
   return (
     <div className="card">
-      <h1>Receive</h1>
-      <h2>An address of your own, for one asset on one network</h2>
+      {/* A SECTION HEADING, NOT A SECOND PAGE TITLE. These were `<h1>` and
+          `<h2>`, so "Receive" rendered LARGER than "Crypto" — two headings
+          claiming to be the top of the same screen, with the bigger one
+          halfway down it. The page title is the Shell's. */}
+      <h2>Receive</h2>
+      <p className="hint" style={{ marginTop: 4 }}>
+        An address of your own, for one asset on one network
+      </p>
 
       <label className="field" id="crypto-receive-pair">
         <span className="field-label">Asset and network</span>
@@ -203,7 +277,7 @@ function Send({ onSent }: { onSent: () => void }) {
         });
       }}
     >
-      <h1>Send</h1>
+      <h2>Send</h2>
       <p className="lead">On-chain, to any address you control.</p>
 
       <label className="field" id="crypto-send-pair">

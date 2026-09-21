@@ -99,3 +99,30 @@ describe('css class coverage', () => {
     expect(definedClasses().has('appbar')).toBe(true);
   });
 });
+
+/**
+ * AND A CLASS ASSEMBLED FROM DATA, which the scan above cannot see.
+ *
+ * `tile big t-${s.tone}` is a template string, so the tone never appears in
+ * the source as a literal — and `PURCHASE_SERVICES` names the four tones
+ * SEMANTICALLY (`warn | info | ok | iris`) where the stylesheet had only the
+ * colour names it was first written with (`t-amber`, `t-green`, `t-blue`).
+ * Every service tile therefore fell through to the default tint and the Bills
+ * screen rendered five marks in one blue. Nothing failed: a class with no
+ * rule is exactly as valid as one with, and the only place it exists is on
+ * screen.
+ */
+describe('tones that come from a catalogue', () => {
+  it('every PURCHASE_SERVICES tone has a tile rule', async () => {
+    const { PURCHASE_SERVICES } = await import('@xetral/client');
+    const css = readFileSync(CSS, 'utf8');
+    const missing = [...new Set(PURCHASE_SERVICES.map((s) => s.tone))].filter(
+      (tone) => !css.includes(`.tile.t-${tone} `),
+    );
+    expect(
+      missing,
+      'these tones are named in the catalogue and styled nowhere, so the tile ' +
+        'renders in the default tint:\n' + missing.join('\n'),
+    ).toEqual([]);
+  });
+});

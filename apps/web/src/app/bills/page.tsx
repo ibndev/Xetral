@@ -35,19 +35,26 @@ export default function Bills() {
   return (
     <Shell back="/more" title="Bills and airtime">
 
-      <div className="tabs">
+      {/*
+        A GRID OF TILES, WHICH IS WHAT THE COMP DRAWS — and what the rail of
+        words could not do. Five labels do not fit across a handset, so the
+        fifth was clipped at the screen edge with nothing saying it was there,
+        and "Virtual number" is the one a customer is least likely to go
+        looking for. Three columns gives every service a mark, a full label
+        and a tap target the width of a thumb.
+      */}
+      <div className="tile-grid">
         {SERVICES.map((s) => (
-          <a
+          <button
+            type="button"
             key={s.code}
-            href="#"
-            className={s.code === service ? 'active' : undefined}
-            onClick={(e) => {
-              e.preventDefault();
-              setService(s.code);
-            }}
+            className={`tile big t-${s.tone}${s.code === service ? ' on' : ''}`}
+            aria-pressed={s.code === service}
+            onClick={() => setService(s.code)}
           >
+            <span className="tile-icon"><Icon name={s.icon} size={20} /></span>
             {s.label}
-          </a>
+          </button>
         ))}
       </div>
 
@@ -139,7 +146,10 @@ function Buy({ service, onBought }: { service: ServiceCode; onBought: () => void
         });
       }}
     >
-      <h1>{meta?.label}</h1>
+      {/* A SECTION HEADING, NOT A SECOND PAGE TITLE — the Shell already draws
+          the screen's own, and an `<h1>` halfway down a page is a second
+          claim to be the top of it. */}
+      <h2>{meta?.label}</h2>
 
       {catalogueError !== undefined && (
         <div className="notice warn">

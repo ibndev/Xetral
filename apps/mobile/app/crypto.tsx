@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { Text, TextInput, View } from 'react-native';
-import { CRYPTO_PAIRS, formatAmount } from '@xetral/client';
+import { CRYPTO_ASSETS, CRYPTO_PAIRS, currencyName, formatAmount } from '@xetral/client';
 import type { CryptoAddress, CryptoQuote, Withdrawal } from '@xetral/client';
 import { Shell } from '@/shell';
+import { Eyebrow } from '@/acct-card';
+import { CurrencyMark } from '@/currency-mark';
 import {
   AmountCard,
   Button,
@@ -19,6 +21,71 @@ import { Select } from '@/select';
 import { Icon } from '@/icon';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/hooks';
 import { font, space, useStyles, useTheme } from '@/theme';
+
+/**
+ * WHAT THE CUSTOMER ACTUALLY HOLDS, at the top of the screen — the comp's
+ * LIST without its arithmetic. The web's `Holdings` is the same component in
+ * the other rendering system, to the same figures.
+ *
+ * Zero rows are shown, because an asset missing from the list is
+ * indistinguishable from one that failed to load — and the customer who has
+ * never held USDC is exactly the one who needs to see that the address
+ * exists.
+ */
+function Holdings() {
+  const client = useXetral();
+  const colors = useTheme();
+  const balances = useLoad(() => client.balances(), [client]);
+  const held = new Map((balances.data ?? []).map((b) => [b.currency, b]));
+
+  return (
+    <>
+      <Eyebrow>Holdings</Eyebrow>
+      {balances.loading && <Loading />}
+      {CRYPTO_ASSETS.map((asset) => (
+        <View
+          key={asset}
+          style={{
+            flexDirection: 'row', alignItems: 'center', gap: 13,
+            paddingVertical: 12,
+            borderTopWidth: 1, borderTopColor: colors.line,
+          }}
+        >
+          <View
+            style={{
+              width: 44, height: 44, borderRadius: 999,
+              alignItems: 'center', justifyContent: 'center',
+              backgroundColor: colors.surface2,
+            }}
+          >
+            <CurrencyMark currency={asset} size={26} />
+          </View>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text
+              numberOfLines={1}
+              style={{ color: colors.text, fontFamily: font.sansSemi, fontSize: 15 }}
+            >
+              {currencyName(asset)}
+            </Text>
+            <Text style={{ color: colors.text3, fontFamily: font.sansMedium, fontSize: 12.5, marginTop: 2 }}>
+              {asset}
+            </Text>
+          </View>
+          <Text
+            style={{
+              fontFamily: font.numSemi, fontSize: 14.5,
+              letterSpacing: -0.3,
+              fontVariant: ['tabular-nums'] as ('tabular-nums')[],
+              color: colors.text,
+            }}
+          >
+            {formatAmount(held.get(asset)?.spendable ?? '0', asset)}
+          </Text>
+        </View>
+      ))}
+    </>
+  );
+}
 
 /**
  * Crypto: an address to receive on, and an irreversible way to send.
@@ -41,8 +108,7 @@ export default function Crypto() {
 
   if (withdrawals.code === 'kyc_required') {
     return (
-      <Shell>
-        <Text style={styles.h1}>Crypto</Text>
+      <Shell back="/more" title="Crypto">
         <View style={{ marginTop: space.lg }}>
           <VerifyPrompt what="crypto" />
         </View>
@@ -51,9 +117,26 @@ export default function Crypto() {
   }
 
   return (
-    <Shell>
-      <Text style={styles.h1}>Crypto</Text>
+    /*
+      A BACK ARROW AND A TITLE, because this screen is reached from More and
+      is not a tab — and the web's is the same. It drew the screen's own `h1`
+      under the brand header, so it read as a top-level destination with no
+      way back to the list it was opened from.
+    */
+    <Shell back="/more" title="Crypto">
       <Text style={styles.lead}>Receive and send stablecoins and Bitcoin.</Text>
+
+      {/*
+        HOLDINGS FIRST, which is the comp's order and the question somebody
+        opens this screen with.
+
+        AND NOT THE COMP'S PORTFOLIO CARD. That draws a total in dollars and a
+        percentage move per asset, which needs a price feed this platform does
+        not have — nothing anywhere quotes BTC in USD. A total assembled from
+        a rate nobody published would be a figure on a screen with no source.
+        What is real is the BALANCE.
+      */}
+      <Holdings />
 
       <Panel title="Asset and network">
         {/*

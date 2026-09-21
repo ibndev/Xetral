@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
 import { formatAmount, PURCHASE_SERVICES } from '@xetral/client';
 import type { CatalogueItem, Purchase, PurchaseService } from '@xetral/client';
+import { Icon } from '@/icon';
 import { Shell } from '@/shell';
 import {
   AmountCard,
@@ -39,31 +40,73 @@ export default function Bills() {
   const chosen = SERVICES.find((s) => s.code === service) ?? SERVICES[0];
 
   return (
-    <Shell>
-      <Text style={styles.h1}>Bills and top-ups</Text>
+    /* A BACK ARROW AND A TITLE, because this screen is reached from More and
+       is not a tab — the web's is the same. */
+    <Shell back="/more" title="Bills and airtime">
       <Text style={styles.lead}>Airtime, data, electricity, eSIM and numbers.</Text>
 
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: space.md }}>
+      {/*
+        A GRID OF TILES, WHICH IS WHAT THE COMP DRAWS — and what a wrapping
+        row of pills could not do: the chips reflowed as the selection changed
+        width, which moves the tabs under the thumb, and "Virtual number" is
+        the one a customer is least likely to go looking for. Three columns
+        gives every service a mark, a full label and a thumb-width target.
+
+        THE MARK AND THE TONE COME FROM THE CATALOGUE, so the phone and the
+        web draw the same one. Written out on both sides they drift, and a
+        service whose icon differs between them is one a customer describes to
+        support by the wrong name.
+      */}
+      <View
+        style={{
+          flexDirection: 'row', flexWrap: 'wrap',
+          gap: 11, marginTop: space.md,
+        }}
+      >
         {SERVICES.map((s) => {
           const on = s.code === service;
+          const tint = {
+            warn: { bg: colors.warnBg, fg: colors.warn },
+            info: { bg: colors.infoBg, fg: colors.info },
+            ok: { bg: colors.okBg, fg: colors.ok },
+            iris: { bg: colors.irisTint, fg: colors.irisText },
+          }[s.tone];
           return (
             <Pressable
               key={s.code}
               onPress={() => setService(s.code)}
               accessibilityRole="tab"
               accessibilityState={{ selected: on }}
+              android_ripple={null}
               style={{
-                paddingHorizontal: 14,
-                paddingVertical: 8,
-                borderRadius: radius.pill,
-                backgroundColor: on ? colors.brand : colors.surface2,
+                // Three across, with the two gaps taken off before the split.
+                width: `${(100 - 2 * 4) / 3}%`,
+                alignItems: 'center',
+                gap: 9,
+                paddingVertical: 16,
+                paddingHorizontal: 6,
+                borderRadius: 16,
+                borderWidth: 1,
+                borderColor: on ? colors.iris : colors.edge,
+                backgroundColor: on ? colors.irisTint : colors.surface,
               }}
             >
-              <Text
+              <View
                 style={{
-                  fontSize: 13,
+                  width: 40, height: 40, borderRadius: 12,
+                  alignItems: 'center', justifyContent: 'center',
+                  backgroundColor: on ? colors.iris : tint.bg,
+                }}
+              >
+                <Icon name={s.icon} size={20} color={on ? colors.onIris : tint.fg} />
+              </View>
+              <Text
+                numberOfLines={2}
+                style={{
+                  fontSize: 12,
                   fontFamily: font.sansSemi,
-                  color: on ? colors.onBrand : colors.text2,
+                  color: colors.text,
+                  textAlign: 'center',
                 }}
               >
                 {s.label}

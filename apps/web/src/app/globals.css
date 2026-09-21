@@ -1046,6 +1046,9 @@ h3 { font-size: 16px; }
 /* ═══════════════════════════ product tiles ═══════════════════════════ */
 
 .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; }
+/* THREE ACROSS, which is the comp's Bills grid — four would put a 40px mark
+   in a 78px box and "Electricity" on three lines. */
+.tile-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 11px; }
 @media (min-width: 380px) { .tiles { gap: 10px; } }
 @media (min-width: 720px) { .tiles { gap: 14px; } }
 
@@ -1102,11 +1105,36 @@ h3 { font-size: 16px; }
   background: var(--info-bg);
   color: var(--info);
 }
-.tile.t-amber .tile-icon { background: var(--warn-bg);  color: var(--warn); }
-.tile.t-green .tile-icon { background: var(--ok-bg);    color: var(--ok); }
-.tile.t-blue  .tile-icon { background: var(--info-bg);  color: var(--info); }
+/*
+ * NAMED BY MEANING AND BY COLOUR, because both spellings are in use and a
+ * tone that matches NEITHER falls through to the default tint in silence.
+ * `PURCHASE_SERVICES` carries `warn | info | ok | iris` — the semantic names,
+ * which is right for a shared catalogue two apps read — and the home screen's
+ * promo tiles were written with the colour names. A class with no rule is
+ * exactly as valid as one with, which is how five service tiles rendered in
+ * one blue: nothing failed, and the only place it exists is on screen.
+ */
+.tile.t-amber .tile-icon,
+.tile.t-warn  .tile-icon { background: var(--warn-bg);  color: var(--warn); }
+.tile.t-green .tile-icon,
+.tile.t-ok    .tile-icon { background: var(--ok-bg);    color: var(--ok); }
+.tile.t-blue  .tile-icon,
+.tile.t-info  .tile-icon { background: var(--info-bg);  color: var(--info); }
 .tile.t-navy  .tile-icon,
 .tile.t-iris  .tile-icon { background: var(--iris-tint); color: var(--iris-text); }
+/*
+ * THE BIGGER TILE, for a grid of three rather than four — the comp's Bills
+ * screen: 16px radius, a 40px mark at 12px radius and a 12px label, against
+ * the home screen's 14/32/11 in a row of four. Same object, two sizes,
+ * because a third of a handset is more room than a quarter of one and a
+ * 32px mark in it reads as a small thing centred in a large box.
+ */
+.tile.big { gap: 9px; padding: 16px 6px; min-height: 0; border-radius: 16px; font-size: 12px; }
+.tile.big .tile-icon { width: 40px; height: 40px; border-radius: 12px; }
+/* THE CHOSEN ONE IS THE ONLY SATURATED THING, which is what a rail of words
+   said with an underline and a grid of tiles has to say with the tile. */
+.tile.on { border-color: var(--iris); background: var(--iris-tint); }
+.tile.on .tile-icon { background: var(--iris); color: var(--on-iris); }
 
 /* ═══════════════════════ the virtual card ═══════════════════════
 

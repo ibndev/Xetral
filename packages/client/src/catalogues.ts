@@ -1,3 +1,4 @@
+import type { IconName } from './icons.js';
 /**
  * THE LISTS BOTH APPS CHOOSE FROM, and the reason they live here.
  *
@@ -74,14 +75,28 @@ export interface PurchaseService {
   readonly target: string;
   /** Which keyboard to raise for it. */
   readonly mode: 'tel' | 'numeric' | 'email' | 'text';
+  /** The mark on its tile, from the product's own icon set. */
+  readonly icon: IconName;
+  /** Which tint the mark sits on. One of the four the tiles already use. */
+  readonly tone: 'warn' | 'info' | 'ok' | 'iris';
 }
 
+/*
+ * AND EACH ONE CARRIES ITS OWN MARK, because the comp draws these as a grid
+ * of tiles rather than as a rail of words — five labels do not fit across a
+ * handset, and the rail clipped the fifth with nothing saying there was one.
+ *
+ * The icon and the tone live HERE rather than in either app, for the reason
+ * the labels do: written out on both sides they drift, and a service whose
+ * mark differs between the phone and the web is one customers describe to
+ * support by the wrong name.
+ */
 export const PURCHASE_SERVICES = [
-  { code: 'airtime', label: 'Airtime', target: 'Phone number', mode: 'tel' },
-  { code: 'data', label: 'Data', target: 'Phone number', mode: 'tel' },
-  { code: 'electricity', label: 'Electricity', target: 'Meter number', mode: 'numeric' },
-  { code: 'esim', label: 'eSIM', target: 'Email for the QR code', mode: 'email' },
-  { code: 'number', label: 'Virtual number', target: 'Country code', mode: 'text' },
+  { code: 'airtime', label: 'Airtime', target: 'Phone number', mode: 'tel', icon: 'phone', tone: 'warn' },
+  { code: 'data', label: 'Data', target: 'Phone number', mode: 'tel', icon: 'globe', tone: 'info' },
+  { code: 'electricity', label: 'Electricity', target: 'Meter number', mode: 'numeric', icon: 'zap', tone: 'ok' },
+  { code: 'esim', label: 'eSIM', target: 'Email for the QR code', mode: 'email', icon: 'sim', tone: 'iris' },
+  { code: 'number', label: 'Virtual number', target: 'Country code', mode: 'text', icon: 'receipt', tone: 'info' },
 ] as const satisfies readonly PurchaseService[];
 
 /**
