@@ -9,6 +9,8 @@ import { Icon } from '@/ui/icon';
 import { CurrencyMark } from '@/ui/currency-mark';
 import type { IconName } from '@/ui/icon';
 import { useLoad, useRemembered, useXetral } from '@/lib/hooks';
+import { TxList } from '@/ui/tx-list';
+import { TransactionSheet } from '@/ui/transaction-sheet';
 
 /** A currency code out of storage, before it is matched against what the API
  *  actually offers. Shape only — the list is the real check. */
@@ -75,55 +77,6 @@ const CURRENCY_NAMES: Readonly<Record<string, string>> = {
 };
 const nameOf = (code: string) => CURRENCY_NAMES[code] ?? code;
 
-/**
- * The day a transaction happened, as somebody would say it out loud.
- *
- * "TODAY" and "YESTERDAY" rather than a date, because those are the two days
- * a customer is actually checking against — and everything older gets the
- * date, because "3 days ago" makes a reader do arithmetic to compare it with
- * a bank statement.
- *
- * COMPARED ON THE LOCAL CALENDAR DAY, never on elapsed hours. A payment at
- * 23:50 and one at 00:10 are eleven hours apart in the same week and on two
- * different days, and a threshold in hours puts them under one heading.
- */
-function dayOf(when: Date): string {
-  const midnight = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const days = Math.round((midnight(new Date()) - midnight(when)) / 86_400_000);
-  if (days === 0) return 'Today';
-  if (days === 1) return 'Yesterday';
-  return when.toLocaleDateString(undefined, { day: 'numeric', month: 'long' });
-}
-
-/**
- * The list, cut into consecutive runs of one day.
- *
- * CONSECUTIVE, NOT COLLECTED. Two runs of the same day stay two runs, and
- * that is deliberate rather than a limitation: history is keyset paginated on
- * the POSTING id, which is time order for ordinary traffic and deliberately
- * is not when a sweep posts today a deposit that arrived on Tuesday.
- * Collecting by date would re-sort the page and make it disagree with the
- * cursor that "See all" pages on, which is how a list grows duplicates and
- * gaps. A heading that appears twice is the honest rendering of the order the
- * ledger returned.
- *
- * The caller keys on the day AND its index for that reason: two runs of
- * "Today" would otherwise collide as React keys and the second would not
- * render.
- */
-function groupByDay(
-  entries: readonly Transaction[],
-): readonly { readonly day: string; readonly entries: readonly Transaction[] }[] {
-  const out: { day: string; entries: Transaction[] }[] = [];
-  for (const entry of entries) {
-    const day = dayOf(new Date(entry.occurred_at));
-    const last = out[out.length - 1];
-    if (last !== undefined && last.day === day) last.entries.push(entry);
-    else out.push({ day, entries: [entry] });
-  }
-  return out;
-}
-
 export default function Wallet() {
   const client = useXetral();
 
@@ -144,6 +97,10 @@ export default function Wallet() {
    * the home screen exists for, replaced by six dots, on the screen they open
    * to check it. See `useRemembered` for why there is no flash the other way.
    */
+  /* Which transaction's receipt is open, by id — the list grows as pages
+     load, so an index would point at a different one after a reload. */
+  const [openTx, setOpenTx] = useState<string | undefined>(undefined);
+
   const [visibility, setVisibility] = useRemembered<'hidden' | 'shown'>(
     'xetral-balance-visibility',
     'shown',
@@ -389,91 +346,21 @@ export default function Wallet() {
         )}
 
         {/*
-          GROUPED BY DAY, and the heading is what lets the row drop its own
-          date — a list where every row repeats "Sep 20" spends a column
-          saying the same thing six times. `seen` is the running heading
-          rather than a pre-built map, because the list is already in order
-          and a second pass to group it would be a second place the ordering
-          has to agree with the ledger's.
+          THE SAME LIST THE ACTIVITY SCREEN DRAWS, from `ui/tx-list.tsx`. Two
+          copies of a transaction row had already drifted into two different
+          products, and "See all" led from the better one to the worse one.
 
-          A HEADING CAN LEGITIMATELY REPEAT, and re-sorting to prevent it
-          would be the bug. History is keyset paginated on the POSTING ID —
-          which for ordinary traffic is time order, and deliberately is not
-          when a reconciliation sweep posts a deposit today for money that
-          arrived on Tuesday. Sorting this page by `occurred_at` would make it
-          disagree with the cursor "See all" pages on, which is how a list
-          grows duplicates and gaps. The heading describes the rows beneath
-          it, and that stays true however many times it appears.
+          AND A ROW NOW OPENS THE RECEIPT RATHER THAN A DEAD LINK. It was
+          `/activity?entry=<id>`, and the Activity screen has never read that
+          query — so every tap on the home screen's own transactions landed on
+          an unfiltered list with nothing open, on the screen a customer taps
+          when somebody has asked them whether they paid.
         */}
-        <div>
-          {/*
-            EACH DAY IS ONE CONTAINER, which is what makes the hairlines come
-            out right. `.tx-row:last-child` drops its bottom border so a
-            group does not end in a rule against nothing — and with every row
-            wrapped in its own div, every row was a last child and NO row had
-            a separator at all. The comp puts a day's rows in one box under
-            one heading; this is that shape rather than a fix for the
-            symptom.
-          */}
-          {groupByDay(history.data?.entries.slice(0, 6) ?? []).map((group, i) => (
-            <div key={`${group.day}-${i}`}>
-              <div className="day-head">{group.day}</div>
-              <div>
-                {group.entries.map((t: Transaction) => {
-                  const outgoing = t.amount.trim().startsWith('-');
-                  const when = new Date(t.occurred_at);
-                  /*
-                   * THREE PIECES, WHICH IS WHAT THE COMP DRAWS: who, what it
-                   * was, and the amount with its time under it.
-                   *
-                   * It was two — the time sat in the sub line on the LEFT,
-                   * where the design puts a descriptor, and the right column
-                   * carried only a figure. That left the row unable to say
-                   * what a transaction WAS: "Chidi Okafor" with no "Xetral
-                   * transfer" under it is a name and a number.
-                   *
-                   * The descriptor comes from the entry's `kind`, which is a
-                   * closed enum, never from the description — see
-                   * `entryKindLabel`.
-                   */
-                  return (
-              <Link className="tx-row" href={`/activity?entry=${t.id}`}>
-                <span className="tx-mark">
-                  <span className="avatar">
-                    <Icon name={outgoing ? 'arrowUpRight' : 'download'} size={19} />
-                  </span>
-                  {/* The currency rides ON the avatar rather than beside it,
-                      so a row is three columns and not four — and is read at
-                      a glance without a label taking a line. */}
-                  <span className="tx-flag">
-                    <CurrencyMark currency={t.currency} size={14} />
-                  </span>
-                </span>
-                <span className="tx-main">
-                  <span className="tx-name">{t.description}</span>
-                  <span className="tx-sub">{entryKindLabel(t.kind)}</span>
-                </span>
-                <span className="tx-side">
-                  {/* MONEY LEAVING IS RED AND MONEY ARRIVING IS GREEN. It was
-                      red for neither, so the only thing separating "you were
-                      paid" from "you paid" at a glance was a minus sign. */}
-                  <span className={outgoing ? 'tx-amt out' : 'tx-amt in'}>
-                    {formatAmount(t.amount, t.currency)}
-                  </span>
-                  {/* THE TIME, NOT THE DATE, and on the RIGHT under the
-                      amount where the comp puts it. The day heading above
-                      already said which day. */}
-                  <span className="tx-time">
-                    {when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
-                  </span>
-                </span>
-              </Link>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
+        <TxList entries={history.data?.entries.slice(0, 6) ?? []} onOpen={setOpenTx} />
+
+        {openTx !== undefined && (
+          <TransactionSheet id={openTx} onClose={() => setOpenTx(undefined)} />
+        )}
 
         {balances.error !== undefined && <p className="error">
           <Icon name="alert" size={16} /> {balances.error}

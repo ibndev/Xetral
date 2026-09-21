@@ -1270,6 +1270,17 @@ h3 { font-size: 16px; }
 .vc-dot.on { background: var(--link); }
 
 .vc-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+/* The mark and the card's own name, as one block — the comp's "Xetral USD".
+   `min-width: 0` so a long name truncates rather than pushing the status pill
+   off the face. */
+.vc-mark { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.vc-name {
+  min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 13px; font-weight: 700;
+  letter-spacing: -0.01em;
+  color: rgba(255, 255, 255, .82);
+}
 /* The status pill sits on a dark face, so it cannot use the light-theme
    badge grounds — those are pale tints designed for white. */
 .virtual-card .badge {
@@ -3920,18 +3931,43 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
   -webkit-overflow-scrolling: touch;
 }
 .chip-rail::-webkit-scrollbar { display: none; }
+/*
+ * A RAIL THAT REACHES THE SCREEN EDGE, so a half-visible chip says there are
+ * more — the currency rail's argument, and the same two halves. The bleed is
+ * EXACTLY the shell's inset, and `scroll-padding-left` is not optional: the
+ * scrollport ignores this container's padding, so without it the browser eats
+ * the gutter that was there to align the first chip with the page.
+ */
+.chip-rail.bleed {
+  padding: 2px 20px 2px;
+  margin: 0 -20px 4px;
+  scroll-padding-left: 20px;
+}
+@media (min-width: 720px) {
+  .chip-rail.bleed { padding: 2px 24px; margin: 0 -24px 4px; scroll-padding-left: 24px; }
+}
+/* A CHIP IS A LABEL YOU CAN PRESS, so it keeps the pill the buttons gave up
+   — and it has to say so out loud. `.btn, button` sets `min-height: 48px`,
+   and a `<button class="chip">` that omits it is a 48px lozenge where the
+   comp draws a 33px one: the filter rail was taller than two rows of the
+   list it filters. Every property that rule sets is restated. */
 .chip {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   flex: 0 0 auto;
+  min-height: 0;
   padding: 8px 14px;
   border-radius: 999px;
-  border: 1px solid var(--edge);
-  background: var(--field);
+  border: 1px solid transparent;
+  background: var(--surface-2);
   color: var(--text-2);
-  font-size: 13px;
+  white-space: nowrap;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
   font-weight: 600;
+  letter-spacing: 0;
   cursor: pointer;
 }
 /* Stated out loud in every state, and unguarded by a hover query. `.chip` is
@@ -3939,14 +3975,18 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
    device reporting `hover: none` a neutralising rule inside
    `@media (hover: hover)` never matches, which is what turned the network
    picker into a solid white pill. */
-.chip:hover:where(:not(:disabled)) { background: var(--field); color: var(--text); }
-.chip:active { background: var(--field); }
+.chip:hover:where(:not(:disabled)) { background: var(--surface-2); color: var(--text); }
+.chip:active { background: var(--surface-2); }
+/* IRIS, NOT `--brand`. The comp fills the active chip with the accent, and
+   `--brand` is #FFFFFF in dark — so the selected filter was a white lozenge
+   on a black screen, the only pure-white object on the page, louder than the
+   figures it was filtering. Iris is the product's one saturated thing. */
 .chip.on {
-  background: var(--brand);
-  border-color: var(--brand);
-  color: var(--on-brand);
+  background: var(--iris);
+  border-color: var(--iris);
+  color: var(--on-iris);
 }
-.chip.on:hover:where(:not(:disabled)) { background: var(--brand); color: var(--on-brand); }
+.chip.on:hover:where(:not(:disabled)) { background: var(--iris); color: var(--on-iris); }
 
 /* The recipient list is not inside a card, so a hairline is what groups the
    rows — a divider, `--line`, which is structure rather than the outline the
@@ -5339,15 +5379,24 @@ html, body { overflow-x: hidden; }
   color: var(--text-3);
   padding: 8px 0 4px;
 }
+/* A ROW IS A BUTTON now — the receipt opens in place rather than by
+   navigating — so every property the bare `button` rule sets is restated
+   here. A property this rule omits is a property that rule wins, which is
+   the fault `.ccy-card` shipped and `button-specificity.test.ts` refuses. */
 .tx-row {
-  display: flex; align-items: center; gap: 13px;
+  display: flex; align-items: center; justify-content: flex-start; gap: 13px;
   padding: 12px 0;
   border-bottom: 1px solid var(--line);
   width: 100%;
   background: none; border-left: 0; border-right: 0; border-top: 0;
+  border-radius: 0;
   text-align: left;
+  white-space: normal;
   min-height: 0;
   color: inherit;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  letter-spacing: 0;
   cursor: pointer;
 }
 .tx-row:last-child { border-bottom: none; }
@@ -5609,9 +5658,13 @@ html, body { overflow-x: hidden; }
 
 .sf-pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 6px 0 14px; }
 .sf-key {
-  /* Every property the bare `button` rule sets, restated. */
+  /* Every property the bare `button` rule sets, restated — including the two
+     `place-items` covers in effect but not in the stylesheet's text. A guard
+     reads the text, and so does the next person changing this rule. */
   display: grid;
   place-items: center;
+  align-items: center;
+  justify-content: center;
   gap: 0;
   min-height: 0;
   padding: 12px 0;

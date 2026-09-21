@@ -219,8 +219,13 @@ describe('button styling specificity', () => {
      * which classes end up on a <button>, and a guess in either direction is
      * worse than a decision. A new card-shaped button is added here, which is
      * the moment somebody reads this comment.
+     *
+     * `.chip` is the one that proved the rule is not only about cards: a
+     * filter chip omitted `min-height`, so the rail of a screen's filters was
+     * 48px tall where the comp draws 33px — taller than two rows of the list
+     * it filters, and correct-looking in every other respect.
      */
-    const CARDS = ['.ccy-card'] as const;
+    const CARDS = ['.ccy-card', '.chip', '.tx-row', '.card-act', '.sf-key'] as const;
 
     for (const cls of CARDS) {
       const at = css.search(new RegExp(`\\${cls}\\s*\\{`));

@@ -261,7 +261,20 @@ function CardFace({
       }
     >
       <div className="vc-head">
-        <Logo size={20} tone="metal" />
+        {/*
+          THE NAME SITS ON THE CARD, which is where the comp puts it — its
+          face reads "Xetral USD" under the mark. It was a `Name` stat in the
+          row beside the balance, with the label itself as the button that
+          renamed it: a second control for something the action row already
+          does, right of the one figure this screen exists to answer, where a
+          right-aligned word in accent ink reads as a value rather than as a
+          title. Nothing new is shown — `label` is the customer's own note,
+          already in every listing.
+        */}
+        <span className="vc-mark">
+          <Logo size={20} tone="metal" />
+          <span className="vc-name">{card?.label ?? card?.currency ?? 'Virtual'}</span>
+        </span>
         {card === undefined ? (
           <span className="badge">Virtual</span>
         ) : (
@@ -442,23 +455,6 @@ function CardRow({
         <div>
           <span className="card-stat-label">On this card</span>
           <span className="card-stat-value">{formatAmount(card.balance, card.currency)}</span>
-        </div>
-        <div style={{ textAlign: 'right', minWidth: 0 }}>
-          <span className="card-stat-label">Name</span>
-          {naming ? (
-            <span className="mono">{card.label ?? `Card ending ${card.last4 ?? '••••'}`}</span>
-          ) : (
-            <button
-              type="button"
-              className="btn link"
-              onClick={() => {
-                setLabel(card.label ?? '');
-                setNaming(true);
-              }}
-            >
-              {card.label ?? `Card ending ${card.last4 ?? '••••'}`}
-            </button>
-          )}
         </div>
       </div>
 
