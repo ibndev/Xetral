@@ -1,12 +1,15 @@
+import { useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { Link } from 'expo-router';
-import { entryKindLabel, formatAmount, symbolFor } from '@xetral/client';
+import { formatAmount, symbolFor } from '@xetral/client';
 import type { Balance, Transaction } from '@xetral/client';
 import { Icon } from '@/icon';
 import type { IconName } from '@/icon';
 import { Shell } from '@/shell';
 import { Empty, FormError, Loading } from '@/ui';
 import { CurrencyMark } from '@/currency-mark';
+import { TxList } from '@/tx-list';
+import { TransactionSheet } from '@/transaction-sheet';
 import { useLoad, useRemembered, useXetral } from '@/hooks';
 import { font, radius, space, useTheme } from '@/theme';
 import { BALANCE_VISIBILITY } from '@/preferences';
@@ -61,22 +64,6 @@ const CURRENCY_NAMES: Readonly<Record<string, string>> = {
 };
 const nameOf = (code: string) => CURRENCY_NAMES[code] ?? code;
 
-/**
- * The day a transaction happened, as somebody would say it out loud.
- *
- * COMPARED ON THE LOCAL CALENDAR DAY, never on elapsed hours. A payment at
- * 23:50 and one at 00:10 are eleven hours apart and on two different days,
- * and a threshold in hours puts them under one heading. The web's own
- * function, to the character.
- */
-function dayOf(when: Date): string {
-  const midnight = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const days = Math.round((midnight(new Date()) - midnight(when)) / 86_400_000);
-  if (days === 0) return 'Today';
-  if (days === 1) return 'Yesterday';
-  return when.toLocaleDateString(undefined, { day: 'numeric', month: 'long' });
-}
-
 export default function Home() {
   const client = useXetral();
   const colors = useTheme();
@@ -92,6 +79,10 @@ export default function Home() {
    * never had was shown six dots where the figure goes, for ever, on the
    * screen they open to check it.
    */
+  /* Which transaction's receipt is open, by id — the list grows as pages
+     load, so an index would point at a different one after a reload. */
+  const [openTx, setOpenTx] = useState<string | undefined>(undefined);
+
   const [visibility, setVisibility] = useRemembered<'hidden' | 'shown'>(
     BALANCE_VISIBILITY,
     'shown',
@@ -404,114 +395,17 @@ export default function Home() {
           by `occurred_at` would make it disagree with the cursor "See all"
           pages on, which is how a list grows duplicates and gaps.
         */}
-        {(() => {
-          let seen: string | undefined;
-          return history.data?.entries.slice(0, 6).map((t: Transaction) => {
-            const outgoing = t.amount.trim().startsWith('-');
-            const when = new Date(t.occurred_at);
-            const day = dayOf(when);
-            const heading = day === seen ? undefined : day;
-            seen = day;
-            return (
-              <View key={t.id}>
-                {heading !== undefined && (
-                  <Text
-                    style={{
-                      color: colors.text3, fontFamily: font.sansBold,
-                      fontSize: 11, letterSpacing: 1.1,
-                      textTransform: 'uppercase',
-                      paddingTop: 8, paddingBottom: 4,
-                    }}
-                  >
-                    {heading}
-                  </Text>
-                )}
-                <View
-                  style={{
-                    flexDirection: 'row', alignItems: 'center', gap: 13,
-                    paddingVertical: 12,
-                    borderTopWidth: 1, borderTopColor: colors.line,
-                  }}
-                >
-                  <View>
-                    <View
-                      style={{
-                        width: 44, height: 44, borderRadius: 999,
-                        alignItems: 'center', justifyContent: 'center',
-                        backgroundColor: colors.surface2,
-                      }}
-                    >
-                      <Icon
-                        name={outgoing ? 'arrowUpRight' : 'download'}
-                        size={19}
-                        color={colors.text2}
-                      />
-                    </View>
-                    {/* The currency rides ON the avatar rather than beside it,
-                        so a row is two columns and not three — read at a
-                        glance without a label taking a line. */}
-                    <View style={{ position: 'absolute', bottom: -1, left: -2 }}>
-                      <CurrencyMark currency={t.currency} size={14} />
-                    </View>
-                  </View>
-                  {/*
-                    THREE PIECES, WHICH IS WHAT THE COMP DRAWS: who, what it
-                    was, and the amount with its time under it. It was two —
-                    the time sat where the design puts a descriptor, so the
-                    row could not say what a transaction WAS. The descriptor
-                    comes from the entry's `kind`, a closed enum, never from
-                    the free-text description.
-                  */}
-                  <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text
-                      numberOfLines={1}
-                      style={{ color: colors.text, fontFamily: font.sansSemi, fontSize: 15 }}
-                    >
-                      {t.description}
-                    </Text>
-                    <Text
-                      numberOfLines={1}
-                      style={{ color: colors.text3, fontFamily: font.sansMedium, fontSize: 12.5, marginTop: 2 }}
-                    >
-                      {entryKindLabel(t.kind)}
-                    </Text>
-                  </View>
-                  {/*
-                    MONEY LEAVING IS RED AND MONEY ARRIVING IS GREEN. It was
-                    red for neither, so the only thing separating "you were
-                    paid" from "you paid" at a glance was a minus sign.
+        {/*
+          THE SAME LIST THE ACTIVITY SCREEN DRAWS, from `src/tx-list.tsx`.
+          Two copies of a transaction row had already drifted into two
+          different products, and "See all" led from the better one to the
+          worse one — the web's own split, fixed the same way.
+        */}
+        <TxList entries={history.data?.entries.slice(0, 6) ?? []} onOpen={setOpenTx} />
 
-                    THE EYE HIDES THE BALANCE, NOT THE HISTORY. This line once
-                    masked the history too, which the web has never done, and
-                    it produced a list reading "Bank payout failed • • • • • •"
-                    with nothing on screen connecting the dots to a toggle
-                    tapped days earlier. The amount is the one thing you open
-                    that list to find out.
-                  */}
-                  <View style={{ alignItems: 'flex-end' }}>
-                    <Text
-                      style={{
-                        fontFamily: font.numSemi, fontSize: 14.5,
-                        letterSpacing: -0.3,
-                        fontVariant: ['tabular-nums'] as ('tabular-nums')[],
-                        color: outgoing ? colors.danger : colors.ok,
-                      }}
-                    >
-                      {formatAmount(t.amount, t.currency)}
-                    </Text>
-                    {/* THE TIME, ON THE RIGHT UNDER THE AMOUNT, where the comp
-                        puts it. The day heading above already said which day. */}
-                    <Text
-                      style={{ color: colors.text3, fontFamily: font.sansMedium, fontSize: 11.5, marginTop: 2 }}
-                    >
-                      {when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
-                    </Text>
-                  </View>
-                </View>
-              </View>
-            );
-          });
-        })()}
+        {openTx !== undefined && (
+          <TransactionSheet id={openTx} onClose={() => setOpenTx(undefined)} />
+        )}
       </View>
     </Shell>
   );
