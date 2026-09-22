@@ -170,6 +170,10 @@ export interface AdminRiskSignal {
   /** How many OTHER open signals this customer has. One signal is a
    *  transaction; several is a pattern. */
   readonly other_open_signals: number;
+  /** A greeting, not the verified name. */
+  readonly name: string | null;
+  /** Already attached to an open case — somebody is investigating it. */
+  readonly in_case: boolean;
 }
 
 /**
@@ -307,6 +311,23 @@ export interface AdminConsentReport {
     readonly version: string;
     readonly published_at: string;
   }[];
+  readonly figures: {
+    /** Whole percent of active accounts; null when there are none. */
+    readonly marketing_opt_in_percent: number | null;
+    readonly withdrawn_30d: number;
+    readonly outstanding: number;
+  };
+  /** The latest decisions, newest first. A withdrawal is its own row. */
+  readonly recent: readonly {
+    readonly id: string;
+    readonly name: string | null;
+    readonly email: string | null;
+    readonly kind: string;
+    readonly granted: boolean;
+    readonly source: string;
+    readonly version: string;
+    readonly occurred_at: string;
+  }[];
 }
 
 export interface AdminDataRequest {
@@ -316,7 +337,21 @@ export interface AdminDataRequest {
   readonly deadline_at: string;
   readonly user_uuid: string;
   readonly email: string | null;
+  /** A greeting, not the verified name. */
+  readonly name: string | null;
   readonly overdue: boolean;
+}
+
+export interface AdminClosedDataRequest {
+  readonly uuid: string;
+  readonly kind: string;
+  readonly status: 'completed' | 'refused';
+  readonly requested_at: string;
+  readonly deadline_at: string;
+  readonly completed_at: string;
+  readonly user_uuid: string;
+  readonly email: string | null;
+  readonly name: string | null;
 }
 
 /**
@@ -456,6 +491,8 @@ export interface AdminDiagnosticCheck {
   readonly name: string;
   readonly state: 'pass' | 'fail' | 'warn' | 'skip';
   readonly detail: string;
+  /** How long the provider took, only where the check asked one. */
+  readonly ms?: number;
 }
 
 /**
@@ -483,11 +520,64 @@ export interface AdminRecentFailure {
  * which. Amounts are STRINGS in minor units, like every amount that crosses
  * this boundary.
  */
+/** Per currency, in MINOR units — never added across currencies. */
+export interface AdminMoneyTotal {
+  readonly currency: string;
+  readonly amount_minor: string;
+}
+
+export interface AdminRecoverySummary {
+  readonly stuck: number;
+  readonly held: readonly AdminMoneyTotal[];
+  readonly recovered_7d: readonly AdminMoneyTotal[];
+}
+
+/**
+ * The gift card review queue, TYPED — it was `Record<string, unknown>` and the
+ * screen read `id`, `face_value`, `payout` and `email` off rows carrying none
+ * of them, so every decision posted to `/giftcards//review`. A type is what
+ * makes that a compile error rather than an inert button.
+ */
+export interface AdminGiftCardQueue {
+  readonly queue: readonly {
+    readonly submission_uuid: string;
+    readonly brand: string;
+    readonly country: string;
+    readonly card_type: string;
+    /** MINOR units, in `face_currency`. */
+    readonly face_amount_minor: string;
+    readonly face_currency: string;
+    readonly payout_amount_minor: string;
+    readonly payout_currency: string;
+    readonly created_at: string;
+    readonly name: string | null;
+    readonly email: string | null;
+  }[];
+  /** Approved and still held — the only state a clawback applies to. */
+  readonly held: readonly {
+    readonly submission_uuid: string;
+    readonly brand: string;
+    readonly card_type: string;
+    readonly payout_amount_minor: string;
+    readonly payout_currency: string;
+    readonly hold_until: string;
+    readonly name: string | null;
+    readonly email: string | null;
+  }[];
+  readonly summary: {
+    readonly awaiting: number;
+    readonly holds_due: number;
+    readonly approved_24h: number;
+  };
+}
+
 export interface AdminHeldMoney {
   readonly kind: 'bank_payout' | 'purchase';
   readonly subject_uuid: string;
   readonly user_id: string;
   readonly email: string | null;
+  /** A greeting, not the verified name. */
+  readonly name: string | null;
   readonly currency: string;
   readonly amount_minor: string;
   readonly status: string;
@@ -735,6 +825,19 @@ export interface AdminQueuedDispute {
    *  here, so a browser with a wrong date cannot make one look answered. */
   readonly overdue: boolean;
   readonly entry_kind: string;
+  /** A greeting, not the verified name. */
+  readonly name: string | null;
+  /** The customer's own side of the entry, in MINOR units — `formatMinor`. */
+  readonly amount_minor: string | null;
+  readonly currency: string | null;
+  /** At or above the reporting threshold for its currency (027). */
+  readonly high_value: boolean;
+}
+
+export interface AdminDisputeSummary {
+  readonly open: number;
+  readonly high_value: number;
+  readonly resolved_7d: number;
 }
 
 /**
@@ -902,19 +1005,18 @@ export class AdminClient {
   /** Empty unless `gift_cards_enabled` is on. The routes still authenticate
    *  when the feature is off — a disabled feature must not become an
    *  unauthenticated one — so this answers `gift_cards_disabled`, not 401. */
-  async giftCardQueue(): Promise<readonly Record<string, unknown>[]> {
-    const body = await this.#get<{ queue: Record<string, unknown>[] }>(
-      '/v1/admin/giftcards/queue',
-    );
-    return body.queue;
+  async giftCardQueue(): Promise<AdminGiftCardQueue> {
+    return this.#get<AdminGiftCardQueue>('/v1/admin/giftcards/queue');
   }
+
 
   /** Reveals ONE card code, deliberately, against one submission. The queue
    *  listing carries none: a page of bearer instruments in a browser tab is a
    *  page of bearer instruments in a screenshot and a log. */
-  async revealGiftCard(id: string): Promise<Record<string, unknown>> {
+  async revealGiftCard(id: string): Promise<{ readonly card_code: string }> {
     return this.#post(`/v1/admin/giftcards/${encodeURIComponent(id)}/reveal`, {});
   }
+
 
   async reviewGiftCard(
     id: string,
@@ -942,8 +1044,20 @@ export class AdminClient {
    *  deadline first: a statutory window is one of the few here whose
    *  consequence is regulatory rather than an unhappy customer. */
   async dataRequests(): Promise<readonly AdminDataRequest[]> {
-    const body = await this.#get<{ requests: AdminDataRequest[] }>('/v1/admin/data-requests');
-    return body.requests;
+    return (await this.dataRequestQueue()).requests;
+  }
+
+  /** The open queue, what closed in the last thirty days, and the figures. */
+  async dataRequestQueue(): Promise<{
+    readonly requests: readonly AdminDataRequest[];
+    readonly closed: readonly AdminClosedDataRequest[];
+    readonly summary: {
+      readonly pending: number;
+      readonly due_soon: number;
+      readonly completed_30d: number;
+    };
+  }> {
+    return this.#get('/v1/admin/data-requests');
   }
 
   /** Carries out an erasure. The one action in this system that cannot be
@@ -1044,6 +1158,7 @@ export class AdminClient {
   async recoveryQueue(): Promise<{
     readonly waiting: readonly AdminHeldMoney[];
     readonly recovered: readonly AdminRecoveryRecord[];
+    readonly summary: AdminRecoverySummary;
   }> {
     return this.#get('/v1/admin/recovery');
   }
@@ -1363,8 +1478,19 @@ export class AdminClient {
   /* --------------------------- risk monitoring ------------------------- */
 
   async riskSignals(): Promise<readonly AdminRiskSignal[]> {
-    const body = await this.#get<{ signals: AdminRiskSignal[] }>('/v1/admin/risk/signals');
-    return body.signals;
+    return (await this.riskQueue()).signals;
+  }
+
+  /** The open signals and the three figures over them. */
+  async riskQueue(): Promise<{
+    readonly signals: readonly AdminRiskSignal[];
+    readonly summary: {
+      readonly open_signals: number;
+      readonly open_cases: number;
+      readonly cleared_7d: number;
+    };
+  }> {
+    return this.#get('/v1/admin/risk/signals');
   }
 
   async resolveRiskSignal(
@@ -1575,6 +1701,10 @@ export class AdminClient {
    */
   async disputes(): Promise<readonly AdminQueuedDispute[]> {
     return this.#get<readonly AdminQueuedDispute[]>('/v1/admin/disputes');
+  }
+
+  async disputeSummary(): Promise<AdminDisputeSummary> {
+    return this.#get<AdminDisputeSummary>('/v1/admin/disputes/summary');
   }
 
   /**

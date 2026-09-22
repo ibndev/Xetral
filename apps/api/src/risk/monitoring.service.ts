@@ -149,10 +149,18 @@ export class MonitoringService implements OnApplicationShutdown {
       email: string | null;
       user_status: string;
       other_open_signals: string;
+      name: string | null;
+      in_case: boolean;
     }>(
-      `SELECT uuid AS id, rule, detail, observed_at, user_uuid, email,
-              user_status, other_open_signals
-         FROM risk_signals_open
+      `SELECT o.uuid AS id, o.rule, o.detail, o.observed_at, o.user_uuid, o.email,
+              o.user_status, o.other_open_signals, u.full_name AS name,
+              EXISTS (SELECT 1 FROM risk_case_signals cs
+                        JOIN risk_signals rs ON rs.id = cs.signal_id
+                        JOIN risk_cases c ON c.id = cs.case_id AND c.status = 'open'
+                       WHERE rs.uuid = o.uuid) AS in_case
+         FROM risk_signals_open o
+         JOIN users u ON u.id = o.user_id
+        ORDER BY o.observed_at
         LIMIT $1`,
       [limit],
     );
@@ -170,7 +178,37 @@ export class MonitoringService implements OnApplicationShutdown {
       // number can hold. The amounts inside `detail` stay strings, for the
       // reason every amount on this platform does.
       other_open_signals: Number(row.other_open_signals),
+      name: row.name,
+      in_case: row.in_case,
     }));
+  }
+
+  /**
+   * The three figures over the compliance queue.
+   *
+   * The comp's middle tile is "high severity", and the monitoring rules have
+   * no severity — every one is an observation, never a verdict (027). What
+   * this platform DOES have that a severity would stand for is a case: a
+   * person looked at a pattern and opened an investigation. So the tile
+   * counts open cases, which is a fact rather than a label invented for it.
+   */
+  async summary(): Promise<{ open_signals: number; open_cases: number; cleared_7d: number }> {
+    const result = await this.pool.query<{
+      open_signals: string;
+      open_cases: string;
+      cleared_7d: string;
+    }>(
+      `SELECT (SELECT count(*) FROM risk_signals WHERE resolved_at IS NULL) AS open_signals,
+              (SELECT count(*) FROM risk_cases WHERE status = 'open')       AS open_cases,
+              (SELECT count(*) FROM risk_signals
+                WHERE resolved_at > now() - interval '7 days')              AS cleared_7d`,
+    );
+    const row = result.rows[0];
+    return {
+      open_signals: Number(row?.open_signals ?? 0),
+      open_cases: Number(row?.open_cases ?? 0),
+      cleared_7d: Number(row?.cleared_7d ?? 0),
+    };
   }
 
   /**

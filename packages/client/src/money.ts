@@ -211,3 +211,48 @@ export function formatMinor(minor: string, currency: string): string {
 
   return formatAmount(`${negative ? '-' : ''}${whole}${fraction === '' ? '' : `.${fraction}`}`, currency);
 }
+
+/**
+ * A figure for a KPI tile — the comp's "₦1.2M" — as a figure and a unit, so
+ * the tile can set the unit quieter than the digits.
+ *
+ * DISPLAY ONLY, AND IT ROUNDS DOWN, stated here because every rounding moves
+ * money to somebody and a truncated display moves none: "₦1.2M" for
+ * ₦1,299,999 understates by less than the unit it names, and never claims
+ * more is held than is. Below a thousand it is the whole amount, grouped.
+ *
+ * Integers throughout. The major part is `minor / 10^exponent` in bigint,
+ * with the exponent per currency like everywhere else, and the one decimal
+ * place is a second integer division — no float ever holds the amount.
+ */
+export function compactMinor(
+  minor: string,
+  currency: string,
+): { readonly figure: string; readonly unit: '' | 'K' | 'M' | 'B' } {
+  const trimmed = minor.trim();
+  if (!/^-?[0-9]+$/.test(trimmed)) {
+    throw new RangeError(`'${minor}' is not an integer amount of minor units`);
+  }
+  const negative = trimmed.startsWith('-');
+  const major = BigInt(negative ? trimmed.slice(1) : trimmed) / 10n ** BigInt(exponentFor(currency));
+
+  const steps: readonly [bigint, 'K' | 'M' | 'B'][] = [
+    [1_000_000_000n, 'B'],
+    [1_000_000n, 'M'],
+    [1_000n, 'K'],
+  ];
+  const symbol = SYMBOLS[currency] ?? '';
+  const gap = /[A-Za-z]$/.test(symbol) ? ' ' : '';
+  const sign = negative ? '-' : '';
+  const suffix = symbol === '' ? ` ${currency}` : '';
+
+  for (const [size, unit] of steps) {
+    if (major >= size) {
+      const whole = major / size;
+      const tenth = ((major % size) * 10n) / size;
+      const figure = tenth === 0n ? `${whole}` : `${whole}.${tenth}`;
+      return { figure: `${sign}${symbol}${gap}${figure}${suffix}`, unit };
+    }
+  }
+  return { figure: `${sign}${symbol}${gap}${major}${suffix}`, unit: '' };
+}

@@ -1038,6 +1038,16 @@ export class XetralClient {
 
   /* ------------------------ the staff second factor ---------------------- */
 
+  /** Whether the caller's own second factor is on, and since when. Never the
+   *  secret, which comes back once at enrolment and nowhere else. */
+  async totpStatus(): Promise<{
+    readonly enrolled: boolean;
+    readonly confirmed_at: string | null;
+    readonly last_used_at: string | null;
+  }> {
+    return this.#get('/v1/auth/totp');
+  }
+
   /**
    * Issue an authenticator secret, unconfirmed.
    *

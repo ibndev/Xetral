@@ -324,6 +324,23 @@ export class AuthController {
    * The secret is returned ONCE, here, and never again. Re-reading it would
    * turn any stolen session into a way to clone the factor.
    */
+  /**
+   * Whether the caller's own second factor is on, and since when — never the
+   * secret. `authenticated`, not `staff`: an operator who has not enrolled is
+   * exactly who needs to read "not set up", and a staff route would refuse
+   * them before they could.
+   */
+  @Get('totp')
+  async totpStatus(@Req() request: AuthenticatedRequest): Promise<{
+    readonly enrolled: boolean;
+    readonly confirmed_at: string | null;
+    readonly last_used_at: string | null;
+  }> {
+    const auth = request.auth;
+    if (auth === undefined) throw new UnauthorizedException({ error: 'invalid_token' });
+    return this.totp.status(auth.sub);
+  }
+
   @Post('totp/enrol')
   @HttpCode(200)
   async enrolTotp(@Req() request: AuthenticatedRequest): Promise<TotpEnrolment> {

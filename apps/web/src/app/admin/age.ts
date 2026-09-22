@@ -46,3 +46,21 @@ export function ageSince(iso: string | undefined | null): string {
   const seconds = (Date.now() - then) / 1000;
   return seconds < 0 ? `in ${ageOf(-seconds)}` : ageOf(seconds);
 }
+
+/**
+ * "5m ago", or "just now" on its own — `${ageSince(x)} ago` printed "just
+ * now ago" on the authenticator screen, which is how a sentence built from
+ * two helpers reads when neither knew about the other.
+ */
+export function ago(iso: string | undefined | null): string {
+  const age = ageSince(iso);
+  return age === '—' || age === 'just now' || age.startsWith('in ') ? age : `${age} ago`;
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** "2 Sep 2026", as the comp writes a date. `en-GB` says "Sept". */
+export function shortDate(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '—' : `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+}

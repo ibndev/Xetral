@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { exponentFor, formatAmount, formatMinor, isValidAmount, parseAmount } from './money.js';
+import { compactMinor, exponentFor, formatAmount, formatMinor, isValidAmount, parseAmount } from './money.js';
 
 describe('formatting without a float', () => {
   it('groups a large naira balance exactly', () => {
@@ -135,5 +135,33 @@ describe('formatMinor', () => {
     // mistake is visible.
     expect(() => formatMinor('15.00', 'NGN')).toThrow(RangeError);
     expect(() => formatMinor('', 'NGN')).toThrow(RangeError);
+  });
+});
+
+describe('compactMinor', () => {
+  it('reads the comp’s figures', () => {
+    expect(compactMinor('120000000', 'NGN')).toEqual({ figure: '₦1.2', unit: 'M' });
+    expect(compactMinor('480000000', 'NGN')).toEqual({ figure: '₦4.8', unit: 'M' });
+    expect(compactMinor('8500000', 'NGN')).toEqual({ figure: '₦85', unit: 'K' });
+    expect(compactMinor('21000000', 'KES')).toEqual({ figure: 'KSh 210', unit: 'K' });
+  });
+
+  it('rounds down, so it never shows more than is held', () => {
+    expect(compactMinor('129999999', 'NGN')).toEqual({ figure: '₦1.2', unit: 'M' });
+    expect(compactMinor('99999', 'NGN')).toEqual({ figure: '₦999', unit: '' });
+  });
+
+  it('uses each currency’s own exponent', () => {
+    // 2,500 USDT is 2,500,000,000 micro-units; read as kobo it would be 25M.
+    expect(compactMinor('2500000000', 'USDT')).toEqual({ figure: '₮2.5', unit: 'K' });
+    expect(compactMinor('0', 'NGN')).toEqual({ figure: '₦0', unit: '' });
+  });
+
+  it('keeps digits past 2^53 exact', () => {
+    expect(compactMinor('900719925474099300', 'NGN')).toEqual({ figure: '₦9007199.2', unit: 'B' });
+  });
+
+  it('refuses a figure that is not minor units', () => {
+    expect(() => compactMinor('1.5', 'NGN')).toThrow(RangeError);
   });
 });

@@ -189,6 +189,32 @@ export class StaffTotpService {
     this.#logger.log(`second factor confirmed for user ${userUuid}`);
   }
 
+  /**
+   * This operator's own factor, for the screen that manages it: on or not,
+   * since when, and when it last let them in. NEVER the secret — it is
+   * returned once at enrolment and re-reading it would turn a stolen session
+   * into a way to clone the factor.
+   */
+  async status(userUuid: string): Promise<{
+    readonly enrolled: boolean;
+    readonly confirmed_at: string | null;
+    readonly last_used_at: string | null;
+  }> {
+    const result = await this.pool.query<{ confirmed_at: Date | null; last_used_at: Date | null }>(
+      `SELECT t.confirmed_at, t.last_used_at
+         FROM staff_totp t
+         JOIN users u ON u.id = t.user_id
+        WHERE u.uuid = $1`,
+      [userUuid],
+    );
+    const row = result.rows[0];
+    return {
+      enrolled: row?.confirmed_at != null,
+      confirmed_at: row?.confirmed_at?.toISOString() ?? null,
+      last_used_at: row?.last_used_at?.toISOString() ?? null,
+    };
+  }
+
   /** Whether this operator has a working second factor. */
   async isEnrolled(userUuid: string): Promise<boolean> {
     const row = await this.#row(userUuid);

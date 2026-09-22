@@ -32,7 +32,7 @@ import { CardService } from '../cards/card.service.js';
 import { KycService } from '../kyc/kyc.service.js';
 import { ErrorRecorder } from '../observability/error-recorder.service.js';
 import { ReadinessService, type Readiness } from '../golive/readiness.service.js';
-import { RecoveryService, type HeldMoney, type RecoveryRecord } from './recovery.service.js';
+import { RecoveryService, type HeldMoney, type RecoveryRecord, type RecoverySummary } from './recovery.service.js';
 import { EarningsService, type EarningsReport } from './earnings.service.js';
 import {
   FundingDiagnosticsService,
@@ -409,12 +409,14 @@ export class AdminController {
   async recoveryQueue(): Promise<{
     waiting: readonly HeldMoney[];
     recovered: readonly RecoveryRecord[];
+    summary: RecoverySummary;
   }> {
-    const [waiting, recovered] = await Promise.all([
+    const [waiting, recovered, summary] = await Promise.all([
       this.recovery.waiting(),
       this.recovery.recovered(),
+      this.recovery.summary(),
     ]);
-    return { waiting, recovered };
+    return { waiting, recovered, summary };
   }
 
   /**
@@ -675,10 +677,17 @@ export class AdminController {
    * reviewer should know which they are looking at before they open the first.
    */
   @Get('risk/signals')
-  async riskSignals(@Query() query: unknown): Promise<{ signals: readonly unknown[] }> {
+  async riskSignals(@Query() query: unknown): Promise<{
+    signals: readonly unknown[];
+    summary: { open_signals: number; open_cases: number; cleared_7d: number };
+  }> {
     const parsed = queueQuery.safeParse(query);
     if (!parsed.success) throw invalid(parsed.error.issues);
-    return { signals: await this.monitoring.queue(parsed.data.limit) };
+    const [signals, summary] = await Promise.all([
+      this.monitoring.queue(parsed.data.limit),
+      this.monitoring.summary(),
+    ]);
+    return { signals, summary };
   }
 
   /**
@@ -926,12 +935,16 @@ export class AdminController {
   async consents(): Promise<{
     summary: readonly unknown[];
     outstanding: readonly unknown[];
+    figures: Awaited<ReturnType<ConsentService['figures']>>;
+    recent: readonly unknown[];
   }> {
-    const [summary, outstanding] = await Promise.all([
+    const [summary, outstanding, figures, recent] = await Promise.all([
       this.consentService.outstandingSummary(),
       this.consentService.outstanding(100),
+      this.consentService.figures(),
+      this.consentService.recent(100),
     ]);
-    return { summary, outstanding };
+    return { summary, outstanding, figures, recent };
   }
 
   /* ----------------------------- data rights ---------------------------- */
@@ -943,8 +956,17 @@ export class AdminController {
    * whose consequence is regulatory rather than an unhappy customer.
    */
   @Get('data-requests')
-  async dataRequests(): Promise<{ requests: readonly unknown[] }> {
-    return { requests: await this.rights.due() };
+  async dataRequests(): Promise<{
+    requests: readonly unknown[];
+    closed: readonly unknown[];
+    summary: { pending: number; due_soon: number; completed_30d: number };
+  }> {
+    const [requests, closed, summary] = await Promise.all([
+      this.rights.due(),
+      this.rights.closedRecently(),
+      this.rights.summary(),
+    ]);
+    return { requests, closed, summary };
   }
 
   /**

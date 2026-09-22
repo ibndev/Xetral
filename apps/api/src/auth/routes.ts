@@ -145,6 +145,7 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // deliberately: every staff route now requires an enrolled factor, so
       // gating enrolment behind staff() would be a circular lock that a newly
       // granted operator could never open.
+      .authenticated('GET', '/v1/auth/totp', { pin: false })
       .authenticated('POST', '/v1/auth/totp/enrol', { pin: false })
       .authenticated('POST', '/v1/auth/totp/confirm', { pin: false })
       /*
@@ -630,6 +631,7 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // reviewer's: a dispute is a different job with a different risk, and
       // somebody holding both should be a staffing decision.
       .staff('GET', '/v1/admin/disputes', { pin: false, role: 'dispute_reviewer' })
+      .staff('GET', '/v1/admin/disputes/summary', { pin: false, role: 'dispute_reviewer' })
       // Upholding one pays money out of our own account, so it takes the PIN
       // and — through the guard — a fresh second factor.
       .staff('POST', '/v1/admin/disputes/:id/resolve', {

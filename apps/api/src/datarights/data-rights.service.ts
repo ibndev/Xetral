@@ -189,8 +189,56 @@ export class DataRightsService {
   /** The queue, worst first. A statutory window is one of the few deadlines
    *  here whose consequence is regulatory rather than an unhappy customer. */
   async due(): Promise<readonly Record<string, unknown>[]> {
-    const rows = await this.pool.query(`SELECT * FROM data_requests_due LIMIT 200`);
+    const rows = await this.pool.query(
+      `SELECT d.*, u.full_name AS name
+         FROM data_requests_due d
+         JOIN users u ON u.uuid = d.user_uuid
+        ORDER BY d.deadline_at
+        LIMIT 200`,
+    );
     return rows.rows as Record<string, unknown>[];
+  }
+
+  /**
+   * What was answered in the last thirty days, either way — so the screen can
+   * show a request leaving the queue rather than simply vanishing from it,
+   * which is what a reviewer who closed one by mistake needs to see.
+   */
+  async closedRecently(): Promise<readonly Record<string, unknown>[]> {
+    const rows = await this.pool.query(
+      `SELECT r.uuid, r.kind::text AS kind, r.status::text AS status, r.requested_at,
+              r.deadline_at, r.completed_at, u.uuid AS user_uuid, u.email,
+              u.full_name AS name
+         FROM data_requests r
+         JOIN users u ON u.id = r.user_id
+        WHERE r.status <> 'open'
+          AND r.completed_at > now() - interval '30 days'
+        ORDER BY r.completed_at DESC
+        LIMIT 50`,
+    );
+    return rows.rows as Record<string, unknown>[];
+  }
+
+  /**
+   * The three figures over the queue. DUE SOON is a deadline inside seven
+   * days, overdue included — the window is the law's, and "soon" has to count
+   * the ones already past it or the worst of them read as fine.
+   */
+  async summary(): Promise<{ pending: number; due_soon: number; completed_30d: number }> {
+    const result = await this.pool.query<{ pending: string; due_soon: string; completed_30d: string }>(
+      `SELECT count(*) FILTER (WHERE status = 'open') AS pending,
+              count(*) FILTER (WHERE status = 'open'
+                                 AND deadline_at < now() + interval '7 days') AS due_soon,
+              count(*) FILTER (WHERE status = 'completed'
+                                 AND completed_at > now() - interval '30 days') AS completed_30d
+         FROM data_requests`,
+    );
+    const row = result.rows[0];
+    return {
+      pending: Number(row?.pending ?? 0),
+      due_soon: Number(row?.due_soon ?? 0),
+      completed_30d: Number(row?.completed_30d ?? 0),
+    };
   }
 
   /** What can lawfully be erased, and what cannot, with the reason. Read from

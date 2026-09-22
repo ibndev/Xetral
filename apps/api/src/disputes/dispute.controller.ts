@@ -1,7 +1,7 @@
 import { BadRequestException, Body, Controller, Get, HttpCode, Inject, Param, Post, Req } from '@nestjs/common';
 import type { AuthenticatedRequest } from '../auth/auth.guard.js';
 import { DisputeService } from './dispute.service.js';
-import type { DisputeView, QueuedDispute } from './dispute.service.js';
+import type { DisputeSummary, DisputeView, QueuedDispute } from './dispute.service.js';
 import { raiseDisputeSchema, resolveDisputeSchema, withdrawDisputeSchema } from './dto.js';
 import { uuidOr404 } from '../uuid-param.js';
 
@@ -64,6 +64,12 @@ export class AdminDisputeController {
   @Get()
   async queue(): Promise<readonly QueuedDispute[]> {
     return this.disputes.queue();
+  }
+
+  /** The three figures over the queue — counted, not read off a capped page. */
+  @Get('summary')
+  async summary(): Promise<DisputeSummary> {
+    return this.disputes.summary();
   }
 
   @Post(':id/resolve')

@@ -205,6 +205,7 @@ describe('the privileged surface is declared as privileged', () => {
       // The complaints queue. Its own role rather than the gift card
       // reviewer's — a different job with a different risk.
       'GET /v1/admin/disputes (dispute_reviewer)',
+      'GET /v1/admin/disputes/summary (dispute_reviewer)',
       'GET /v1/admin/drift (finance)',
       // What the platform has earned, and why it might be nothing. `finance`
       // — the same audience that sets the fee and publishes a spread.

@@ -465,6 +465,22 @@ describe('review', () => {
     // browser tab is a page of bearer instruments in a screenshot.
     expect(JSON.stringify(queue.body)).not.toContain(CARD_CODE);
 
+    // THE FIELDS THE REVIEW SCREEN READS. It read `id`, `face_value`,
+    // `payout` and `email` from a row that carried none of them, so every
+    // Approve and Reject posted to `/giftcards//review` and 404'd — the whole
+    // review surface was inert with nothing failing anywhere. The row names
+    // the submission by the SAME id the customer was given.
+    const row = (queue.body.queue as Record<string, unknown>[]).find(
+      (r) => r['submission_uuid'] === submitted.body.id,
+    );
+    expect(row).toMatchObject({
+      face_amount_minor: expect.stringMatching(/^[0-9]+$/),
+      payout_amount_minor: expect.stringMatching(/^[0-9]+$/),
+      email: expect.any(String),
+    });
+    expect(queue.body.summary.awaiting).toBeGreaterThanOrEqual(1);
+    expect(Array.isArray(queue.body.held)).toBe(true);
+
     const revealed = await request(app.getHttpServer())
       .post(`/v1/admin/giftcards/${submitted.body.id}/reveal`)
       .set('Authorization', `Bearer ${reviewer.token}`)

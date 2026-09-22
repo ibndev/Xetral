@@ -57,6 +57,12 @@ export interface DiagnosticCheck {
   readonly state: CheckState;
   /** One sentence an operator can act on. Never a credential. */
   readonly detail: string;
+  /**
+   * How long the provider took to answer, where this check ASKED one. Absent
+   * for a check that only reads configuration — a latency on those would be
+   * the time it took to read a row, printed where a reader expects the rail's.
+   */
+  readonly ms?: number;
 }
 
 /**
@@ -442,6 +448,7 @@ export class FundingDiagnosticsService {
     checks.push({
       name: 'The key is accepted',
       state: banks.ok ? 'pass' : 'fail',
+      ms: banks.ms,
       detail: banks.ok
         ? `Paystack answered the bank list, so the credential reaches them and is valid.`
         : `Paystack refused an ordinary authenticated read: ${banks.detail}`,
@@ -460,6 +467,7 @@ export class FundingDiagnosticsService {
     checks.push({
       name: 'Dedicated accounts are enabled',
       state: providers.ok ? (slugs.length > 0 ? 'pass' : 'warn') : 'fail',
+      ms: providers.ms,
       detail: providers.ok
         ? slugs.length > 0
           ? `Enabled. This integration may name: ${slugs.join(', ')}.`
@@ -608,20 +616,29 @@ export class FundingDiagnosticsService {
    */
   async #probe(
     call: () => Promise<unknown>,
-  ): Promise<{ ok: true; value: unknown } | { ok: false; detail: string }> {
+  ): Promise<
+    { ok: true; value: unknown; ms: number } | { ok: false; detail: string; ms: number }
+  > {
+    const started = performance.now();
+    const took = (): number => Math.round(performance.now() - started);
     try {
-      return { ok: true, value: await call() };
+      const value = await call();
+      return { ok: true, value, ms: took() };
     } catch (error) {
       if (error instanceof ProviderRejectedError) {
-        return { ok: false, detail: `${error.message} (a refusal, not an outage).` };
+        return { ok: false, detail: `${error.message} (a refusal, not an outage).`, ms: took() };
       }
       if (error instanceof ProviderTimeoutError) {
-        return { ok: false, detail: 'they did not answer in time.' };
+        return { ok: false, detail: 'they did not answer in time.', ms: took() };
       }
       if (error instanceof ProviderUnavailableError) {
-        return { ok: false, detail: `${error.message} — they could not be reached.` };
+        return { ok: false, detail: `${error.message} — they could not be reached.`, ms: took() };
       }
-      return { ok: false, detail: error instanceof Error ? error.message : String(error) };
+      return {
+        ok: false,
+        detail: error instanceof Error ? error.message : String(error),
+        ms: took(),
+      };
     }
   }
 }

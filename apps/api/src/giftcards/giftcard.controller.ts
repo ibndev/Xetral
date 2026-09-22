@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import type { AuthenticatedRequest } from '../auth/auth.guard.js';
 import { GiftCardService } from './giftcard.service.js';
+import type { GiftCardSummary, HeldCardRow, ReviewQueueRow } from './giftcard.service.js';
 import type { GiftCardView, QuoteView } from './giftcard.service.js';
 import { clawbackSchema, quoteSchema, reviewSchema, submitGiftCardSchema } from './dto.js';
 import { uuidOr404 } from '../uuid-param.js';
@@ -76,9 +77,23 @@ export class GiftCardController {
 export class GiftCardReviewController {
   constructor(@Inject(GiftCardService) private readonly giftcards: GiftCardService) {}
 
+  /**
+   * The queue, what is still held, and the figures over both — one response,
+   * because a reviewer deciding whether to approve the next card wants to see
+   * what is already sitting in holds from the same customer.
+   */
   @Get('queue')
-  async queue(): Promise<{ queue: readonly Record<string, unknown>[] }> {
-    return { queue: await this.giftcards.queue() };
+  async queue(): Promise<{
+    queue: readonly ReviewQueueRow[];
+    held: readonly HeldCardRow[];
+    summary: GiftCardSummary;
+  }> {
+    const [queue, held, summary] = await Promise.all([
+      this.giftcards.queue(),
+      this.giftcards.held(),
+      this.giftcards.summary(),
+    ]);
+    return { queue, held, summary };
   }
 
   /** Reveals ONE card code, so a reviewer can check its balance. Deliberately

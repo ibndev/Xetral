@@ -49,12 +49,22 @@ export interface HeldMoney {
   readonly subject_uuid: string;
   readonly user_id: string;
   readonly email: string | null;
+  /** What the customer calls themselves — a greeting, not the verified name. */
+  readonly name: string | null;
   readonly currency: string;
   readonly amount_minor: string;
   readonly status: string;
   readonly created_at: string;
   readonly hours_held: number;
   readonly destination: string;
+}
+
+export interface RecoverySummary {
+  /** Rows held, of both kinds. */
+  readonly stuck: number;
+  /** Per currency, in minor units. */
+  readonly held: readonly { readonly currency: string; readonly amount_minor: string }[];
+  readonly recovered_7d: readonly { readonly currency: string; readonly amount_minor: string }[];
 }
 
 export interface RecoveryRecord {
@@ -93,11 +103,13 @@ export class RecoveryService {
   async waiting(): Promise<readonly HeldMoney[]> {
     try {
       const rows = await this.pool.query<HeldMoney>(
-        `SELECT kind::text AS kind, subject_uuid, user_id::text AS user_id, email,
-                currency, amount_minor::text AS amount_minor, status, created_at,
-                round(hours_held::numeric, 1)::float8 AS hours_held, destination
-           FROM money_awaiting_recovery
-          ORDER BY created_at
+        `SELECT m.kind::text AS kind, m.subject_uuid, m.user_id::text AS user_id, m.email,
+                u.full_name AS name,
+                m.currency, m.amount_minor::text AS amount_minor, m.status, m.created_at,
+                round(m.hours_held::numeric, 1)::float8 AS hours_held, m.destination
+           FROM money_awaiting_recovery m
+           LEFT JOIN users u ON u.id = m.user_id
+          ORDER BY m.created_at
           LIMIT 200`,
       );
       return rows.rows;
@@ -135,7 +147,45 @@ export class RecoveryService {
     }
   }
 
-  async #recovered(limit: number): Promise<readonly RecoveryRecord[]> {
+/**
+   * The three figures over the console, counted by the database.
+   *
+   * Money is summed PER CURRENCY and never across: kobo and cedis are both
+   * integers and their sum is nothing. Largest first, so the tile leads with
+   * the figure that matters most.
+   */
+  async summary(): Promise<RecoverySummary> {
+    try {
+      const [held, recovered] = await Promise.all([
+        this.pool.query<{ currency: string; amount_minor: string; n: string }>(
+          `SELECT currency, sum(amount_minor)::text AS amount_minor, count(*)::text AS n
+             FROM money_awaiting_recovery
+            GROUP BY currency
+            ORDER BY sum(amount_minor) DESC`,
+        ),
+        this.pool.query<{ currency: string; amount_minor: string }>(
+          `SELECT currency, sum(amount_minor)::text AS amount_minor
+             FROM recovery_actions
+            WHERE created_at > now() - interval '7 days'
+            GROUP BY currency
+            ORDER BY sum(amount_minor) DESC`,
+        ),
+      ]);
+      return {
+        stuck: held.rows.reduce((total, row) => total + Number(row.n), 0),
+        held: held.rows.map(({ currency, amount_minor }) => ({ currency, amount_minor })),
+        recovered_7d: recovered.rows,
+      };
+    } catch (error) {
+      this.#logger.error(
+        `could not total the recovery console: ${describe(error)}. ` +
+          `Apply packages/ledger/sql/049_recovery.sql to this database.`,
+      );
+      throw new ServiceUnavailableException({ error: 'recovery_unavailable' });
+    }
+  }
+
+    async #recovered(limit: number): Promise<readonly RecoveryRecord[]> {
     const rows = await this.pool.query<RecoveryRecord>(
       `SELECT r.uuid, r.kind::text AS kind, r.subject_uuid, u.email,
               r.amount_minor::text AS amount_minor, r.currency, r.reason,

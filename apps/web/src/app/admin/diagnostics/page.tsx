@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
-import { Icon } from '@/ui/icon';
 import { AdminError } from '../access';
 import { AdminTitle } from '@/app/admin/nav';
 
@@ -33,29 +32,49 @@ export default function Diagnostics() {
 
   return (
     <>
-      <div className="panel">
-        <AdminTitle>Diagnostics</AdminTitle>
-        <h2>{report.data === undefined ? '—' : `${failing.length} blocking`}</h2>
-        <p className="lead">
-          What each rail says when it is asked, rather than what it is
-          configured to be — including which currencies a payment link can
-          actually take.
-        </p>
-        <AdminError error={report.error} code={report.code} role="admin" />
-        {report.loading && <p className="spinner">Checking…</p>}
+      <AdminTitle>Diagnostics</AdminTitle>
+      {/* The comp's header row: what this is, and the one button. */}
+      <div className="panel panel-head">
+        <span className="sec">
+          Provider probes
+          {report.data !== undefined && (
+            <span className={failing.length > 0 ? 'badge danger' : 'badge ok'}>
+              {failing.length > 0 ? `${failing.length} blocking` : 'Nothing blocking'}
+            </span>
+          )}
+        </span>
+        <button type="button" disabled={report.loading} onClick={report.reload}>
+          {report.loading ? 'Checking…' : 'Run all'}
+        </button>
+      </div>
 
-        {report.data !== undefined && (
-          <div className="actions">
-            <button type="button" className="ghost" onClick={report.reload}>
-              Check again
-            </button>
+      <div className="panel probe-panel">
+        <AdminError error={report.error} code={report.code} role="admin" />
+        {report.loading && report.data === undefined && <p className="spinner">Checking…</p>}
+        {/*
+          What each rail says when it is ASKED, rather than what it is
+          configured to be. The detail is the provider's own sentence, and it
+          is why every route behind this is `staff()`: it names our
+          integration and must never reach a customer.
+        */}
+        {report.data?.checks.map((check) => (
+          <div className="probe" key={check.name}>
+            <span className={`dot ${badgeFor(check.state)}`} aria-hidden />
+            <span className="what">
+              <span className="name">{check.name}</span>
+              <span className="sub">{check.detail}</span>
+            </span>
+            {/* Only a check that asked a provider has a latency; a configuration
+                read printing "2ms" would read as the rail's. */}
+            <span className="ms">{check.ms === undefined ? '' : `${check.ms}ms`}</span>
+            <span className={`badge ${badgeFor(check.state)}`}>{labelFor(check.state)}</span>
           </div>
-        )}
+        ))}
       </div>
 
       {/*
         WHAT ACTUALLY THREW, and this is the half no configuration check can
-        reach. The checks below answer "is the rail set up correctly"; a null
+        reach. The probes above answer "is the rail set up correctly"; a null
         column, a constraint or a typo in a SQL string passes every one of
         them and still answers 500. Every one of those has happened in this
         codebase, and every one presented to a person as the same sentence.
@@ -128,35 +147,10 @@ export default function Diagnostics() {
         </div>
       )}
 
-      {report.data?.checks.map((check) => (
-        <div className="panel" key={check.name}>
-          <div className="row">
-            <span>
-              <Icon name={iconFor(check.state)} size={16} /> <strong>{check.name}</strong>
-            </span>
-            <span className={`badge ${badgeFor(check.state)}`}>{labelFor(check.state)}</span>
-          </div>
-          {/*
-            The provider's OWN sentence, verbatim. It is the whole reason this
-            page is worth building, and it is why every route behind it is
-            `staff()`: it names our integration and must never reach a
-            customer.
-          */}
-          <p className="hint">{check.detail}</p>
-        </div>
-      ))}
     </>
   );
 }
 
-function iconFor(state: string): 'check' | 'alert' | 'clock' {
-  if (state === 'pass') return 'check';
-  if (state === 'fail') return 'alert';
-  return 'clock';
-}
-
-/** The product's own status chip, so this page looks like the rest of the
- *  dashboard rather than inventing a fourth vocabulary of colours. */
 function badgeFor(state: string): 'ok' | 'danger' | 'warn' | 'info' {
   if (state === 'pass') return 'ok';
   if (state === 'fail') return 'danger';

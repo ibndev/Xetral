@@ -89,6 +89,40 @@ interface SubmissionRow {
   card_sealed: string;
 }
 
+/** A submission waiting for a person. Amounts are MINOR units. */
+export interface ReviewQueueRow {
+  readonly submission_uuid: string;
+  readonly brand: string;
+  readonly country: string;
+  readonly card_type: string;
+  readonly face_amount_minor: string;
+  readonly face_currency: string;
+  readonly payout_amount_minor: string;
+  readonly payout_currency: string;
+  readonly created_at: string;
+  readonly name: string | null;
+  readonly email: string | null;
+}
+
+export interface HeldCardRow {
+  readonly submission_uuid: string;
+  readonly brand: string;
+  readonly card_type: string;
+  readonly payout_amount_minor: string;
+  readonly payout_currency: string;
+  readonly hold_until: string;
+  readonly name: string | null;
+  readonly email: string | null;
+}
+
+export interface GiftCardSummary {
+  readonly awaiting: number;
+  /** Past their hold and not yet released — the release worker's backlog. */
+  readonly holds_due: number;
+  /** Approved in the last day, whatever happened to them since. */
+  readonly approved_24h: number;
+}
+
 @Injectable()
 export class GiftCardService {
   readonly #logger = new Logger(GiftCardService.name);
@@ -206,17 +240,63 @@ export class GiftCardService {
 
   /* ----------------------------- review ----------------------------- */
 
-  async queue(): Promise<readonly Record<string, unknown>[]> {
+  async queue(): Promise<readonly ReviewQueueRow[]> {
     await this.#assertEnabled();
-    const rows = await this.pool.query(
-      `SELECT submission_uuid, brand, country, card_type,
-              face_amount_minor::text, face_currency,
-              payout_amount_minor::text, payout_currency,
-              created_at, waiting_for::text
-         FROM giftcard_review_queue LIMIT 200`,
+    const rows = await this.pool.query<ReviewQueueRow>(
+      `SELECT q.submission_uuid, q.brand, q.country, q.card_type,
+              q.face_amount_minor::text AS face_amount_minor, q.face_currency,
+              q.payout_amount_minor::text AS payout_amount_minor, q.payout_currency,
+              q.created_at, u.full_name AS name, u.email
+         FROM giftcard_review_queue q
+         JOIN users u ON u.id = q.user_id
+        LIMIT 200`,
     );
-    return rows.rows as Record<string, unknown>[];
+    return rows.rows;
   }
+
+  /**
+   * Approved and still HELD — the only state a clawback applies to (005: after
+   * release the money may be spent, and clawing back would overdraw a
+   * customer who did nothing wrong).
+   *
+   * The review screen's Claw back button used to sit on PENDING rows, where
+   * it could only ever answer `not_clawable`; a held card had nowhere to be
+   * seen at all. This is that list.
+   */
+  async held(): Promise<readonly HeldCardRow[]> {
+    await this.#assertEnabled();
+    const rows = await this.pool.query<HeldCardRow>(
+      `SELECT s.uuid AS submission_uuid, r.brand, r.card_type,
+              s.payout_amount_minor::text AS payout_amount_minor, s.payout_currency,
+              s.hold_until, u.full_name AS name, u.email
+         FROM giftcard_submissions s
+         JOIN giftcard_rate_cards r ON r.id = s.rate_card_id
+         JOIN users u ON u.id = s.user_id
+        WHERE s.status = 'approved'
+        ORDER BY s.hold_until
+        LIMIT 200`,
+    );
+    return rows.rows;
+  }
+
+  /** The three figures over the queue, counted by the database. */
+  async summary(): Promise<GiftCardSummary> {
+    await this.#assertEnabled();
+    const result = await this.pool.query<{ awaiting: string; holds_due: string; approved_24h: string }>(
+      `SELECT (SELECT count(*) FROM giftcard_review_queue) AS awaiting,
+              (SELECT count(*) FROM giftcard_holds_due)     AS holds_due,
+              (SELECT count(*) FROM giftcard_submissions
+                WHERE status IN ('approved', 'released', 'clawed_back')
+                  AND reviewed_at > now() - interval '24 hours') AS approved_24h`,
+    );
+    const row = result.rows[0];
+    return {
+      awaiting: Number(row?.awaiting ?? 0),
+      holds_due: Number(row?.holds_due ?? 0),
+      approved_24h: Number(row?.approved_24h ?? 0),
+    };
+  }
+
 
   /**
    * The card code, revealed to a reviewer so they can check its balance.

@@ -210,6 +210,69 @@ export class ConsentService {
     return rows.rows as Record<string, unknown>[];
   }
 
+/**
+   * The three figures over the consent screen.
+   *
+   * OPT-IN IS A SHARE OF ACTIVE ACCOUNTS WITH A LIVE GRANT — the latest record
+   * per customer, which is what `customer_consents` already means by "now".
+   * Rounded to the nearest whole percent for display only; nothing reads the
+   * figure back. Null on a platform with no active accounts, because 0% of
+   * nobody is not a finding.
+   *
+   * OUTSTANDING is where the comp draws "data-sharing on", which is not a
+   * consent this platform collects. A tile for a kind that does not exist
+   * would be a figure nobody could ever change; the one an operator does act
+   * on is how many customers have not agreed to the words in force.
+   */
+  async figures(): Promise<{
+    marketing_opt_in_percent: number | null;
+    withdrawn_30d: number;
+    outstanding: number;
+  }> {
+    const result = await this.pool.query<{
+      active: string;
+      opted_in: string;
+      withdrawn_30d: string;
+      outstanding: string;
+    }>(
+      `SELECT (SELECT count(*) FROM users WHERE status = 'active') AS active,
+              (SELECT count(*) FROM customer_consents c
+                 JOIN users u ON u.id = c.user_id AND u.status = 'active'
+                WHERE c.kind = 'marketing_email' AND c.granted) AS opted_in,
+              (SELECT count(*) FROM consent_records
+                WHERE kind = 'marketing_email' AND NOT granted
+                  AND occurred_at > now() - interval '30 days') AS withdrawn_30d,
+              (SELECT count(DISTINCT uuid) FROM consent_outstanding) AS outstanding`,
+    );
+    const row = result.rows[0];
+    const active = Number(row?.active ?? 0);
+    return {
+      marketing_opt_in_percent:
+        active === 0 ? null : Math.round((Number(row?.opted_in ?? 0) * 100) / active),
+      withdrawn_30d: Number(row?.withdrawn_30d ?? 0),
+      outstanding: Number(row?.outstanding ?? 0),
+    };
+  }
+
+  /**
+   * The latest consent decisions, newest first — what the comp's table is.
+   * A withdrawal is a row of its own (033), so this is history rather than a
+   * current state that could have been edited into what it now says.
+   */
+  async recent(limit: number): Promise<readonly Record<string, unknown>[]> {
+    const rows = await this.pool.query(
+      `SELECT r.id::text AS id, u.full_name AS name, u.email, r.kind::text AS kind,
+              r.granted, r.source::text AS source, d.version, r.occurred_at
+         FROM consent_records r
+         JOIN users u ON u.id = r.user_id
+         JOIN consent_documents d ON d.id = r.document_id
+        ORDER BY r.id DESC
+        LIMIT $1`,
+      [limit],
+    );
+    return rows.rows as Record<string, unknown>[];
+  }
+
   /** How many, per document. The number an operator watches after publishing
    *  a new version, and the one that says whether anybody is being asked. */
   async outstandingSummary(): Promise<readonly Record<string, unknown>[]> {

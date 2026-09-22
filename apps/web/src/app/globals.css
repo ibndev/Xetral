@@ -2428,6 +2428,59 @@ th.right { font-family: var(--font-sans); }
 .admin-frame .segmented button { border-radius: var(--r-pill); }
 
 /*
+ * THE QUEUE SCREENS, as the comp draws every one of them: a row of THREE
+ * figures, then one panel that IS a table — `padding: 6px 0`, the cells
+ * carrying their own 14px right to the panel's edge, a hairline under each
+ * row and none under the last.
+ *
+ * They were a stack of form-panels, one per item, each with its own PIN box
+ * and textarea open at rest. That is a screen an operator scrolls to COUNT;
+ * the comp's is one they scan, and the decision opens under the row they
+ * chose (`tr.detail`) rather than being laid out for all of them at once.
+ */
+.stats.three { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.stat .value.warn { color: var(--warn); }
+.stat .value.danger { color: var(--danger); }
+.stat .value.ok { color: var(--ok); }
+/* The comp's "₦1.2M": the unit is quieter than the figure. */
+.stat .value .unit { color: var(--text-3); font-size: 15px; }
+.stat .value .more { display: block; color: var(--text-3); font-size: 12px; font-weight: 600; letter-spacing: 0; margin-top: 2px; }
+
+.admin-frame .panel.tbl-panel { padding: 6px 0; }
+.admin-frame .tbl-panel .scroll { margin: 0; padding: 0; }
+.admin-frame .tbl-panel th:first-child, .admin-frame .tbl-panel td:first-child { padding-left: 14px; }
+.admin-frame .tbl-panel th:last-child, .admin-frame .tbl-panel td:last-child { padding-right: 14px; }
+.admin-frame .tbl-panel th { border-bottom: 1px solid var(--line); }
+.admin-frame .tbl-panel tr:last-child > td { border-bottom: none; }
+.admin-frame .tbl-panel .empty { padding: 14px 18px; }
+.admin-frame .tbl-panel > .error, .admin-frame .tbl-panel > .spinner { padding: 8px 18px; }
+/* The one sentence the comp puts over a table: `500 12.5px`, quiet. */
+.admin-frame .tbl-note {
+  display: block;
+  padding: 14px 18px 2px;
+  font-size: 12.5px; font-weight: 500;
+  color: var(--text-3);
+}
+.admin-frame th.r, .admin-frame td.r { text-align: right; }
+.admin-frame td.quiet { color: var(--text-3); font-weight: 500; }
+.admin-frame td.soft { color: var(--text-2); }
+.admin-frame td.alarm { color: var(--danger); font-weight: 700; }
+.admin-frame td.ref { font-family: var(--font-mono); font-weight: 600; }
+.admin-frame td .acts { display: inline-flex; gap: 8px; }
+.admin-frame .badge { font-size: 11.5px; }
+
+/* THE DECISION OPENS UNDER ITS ROW, one step deeper than the table. */
+.admin-frame tr.detail > td {
+  padding: 16px 18px 18px;
+  background: var(--surface-2);
+  font-weight: 500;
+  white-space: normal;
+}
+.admin-frame tr.detail label { margin-top: 10px; }
+.admin-frame tr.detail .actions { margin-top: 12px; }
+.admin-frame tr.detail p { margin: 0 0 8px; }
+
+/*
  * THE SIDEBAR ITSELF NEVER SCROLLS; ITS NAV DOES.
  *
  * This was one `overflow-y: auto` column at `height: 100vh` holding the brand,
@@ -6262,3 +6315,140 @@ html, body { overflow-x: hidden; }
   font-size: 13px; font-weight: 500; color: var(--text-3);
 }
 .cv-rate > :last-child { color: var(--text-2); font-variant-numeric: tabular-nums; }
+.admin-frame .tbl-note.danger { color: var(--danger); font-weight: 600; }
+/*
+ * AN OPENED REVIEW IS TWO COLUMNS on a laptop: what was claimed on the left,
+ * the decision on the right. Stacked full width it was a form 600px tall
+ * under one row of a table — the reviewer scrolled away from the row they
+ * were deciding, which is the thing the table exists to keep in view.
+ */
+.review-grid { display: grid; gap: 14px; }
+@media (min-width: 900px) { .review-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 28px; } }
+.review-grid > div > label:first-child { margin-top: 0; }
+.review-grid textarea { min-height: 76px; }
+.review-grid .field-row.two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.review-grid .field-row.two > label { margin-top: 10px; }
+
+/*
+ * DIAGNOSTICS, as the comp draws it: a header panel carrying the one action,
+ * then one panel of probe rows — a status dot, what was asked, how long the
+ * rail took, and the verdict. Each check was its own panel, so eleven checks
+ * were eleven boxes and "is anything blocking?" meant scrolling.
+ */
+.admin-frame .panel.panel-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 16px 18px;
+}
+.admin-frame .sec { display: inline-flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 700; }
+.admin-frame .panel.probe-panel { padding: 6px 18px; }
+.probe {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--line);
+}
+.probe:last-child { border-bottom: none; }
+.probe .dot { flex: none; width: 8px; height: 8px; margin-top: 6px; border-radius: 50%; background: var(--text-3); }
+.probe .dot.ok { background: var(--ok); }
+.probe .dot.danger { background: var(--danger); }
+.probe .dot.warn { background: var(--warn); }
+.probe .dot.info { background: var(--info); }
+.probe .what { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.probe .name { font-size: 13.5px; font-weight: 600; }
+.probe .sub { font-size: 12.5px; font-weight: 500; color: var(--text-3); line-height: 1.5; }
+.probe .ms {
+  flex: none; width: 70px; text-align: right;
+  font-family: var(--font-mono); font-size: 13px; color: var(--text-3);
+}
+.probe .badge { flex: none; margin-left: 12px; }
+@media (max-width: 560px) {
+  .probe { flex-wrap: wrap; }
+  .probe .what { flex-basis: calc(100% - 20px); }
+  .probe .ms { width: auto; margin-left: 20px; text-align: left; }
+}
+
+/*
+ * THE AUDIT SEARCH, as the comp draws it: a recessed pill with the glass
+ * inside it and an input that has no box of its own. Every property the base
+ * `input` sets is restated, because omitting one is not neutralising it.
+ */
+.admin-frame .panel.tbl-panel.audit { padding: 6px 0 4px; }
+.search-row { padding: 14px 18px; }
+.search-field {
+  display: flex; align-items: center; gap: 9px;
+  margin: 0;
+  padding: 0 13px;
+  border-radius: 11px;
+  background: var(--surface-2);
+  color: var(--text-3);
+}
+.search-field input {
+  flex: 1; min-width: 0;
+  min-height: 42px;
+  margin: 0; padding: 0;
+  border: none; border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+  color: var(--text);
+  font-size: 13.5px; font-weight: 500;
+}
+.search-field:has(input:focus-visible) { outline: 2px solid var(--link); outline-offset: 2px; }
+.search-field input:focus-visible { outline: none; }
+
+/*
+ * YOUR AUTHENTICATOR, as the comp draws it: one panel, a 130px tile on the
+ * left and the state on the right, wrapping under it on a phone.
+ */
+.admin-frame .panel.auth-card {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 28px;
+  padding: 24px;
+}
+.auth-tile {
+  flex: none;
+  width: 130px; height: 130px;
+  display: grid; place-items: center;
+  padding: 12px;
+  border-radius: 16px;
+  background: var(--surface-2);
+  color: var(--text-3);
+}
+.auth-tile.on { color: var(--ok); }
+.auth-secret { font-size: 12.5px; line-height: 1.7; text-align: center; color: var(--text); word-break: break-all; }
+.auth-body { flex: 1; min-width: 220px; }
+.auth-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.auth-copy { margin: 0 0 10px; max-width: 420px; font-size: 13px; font-weight: 500; line-height: 1.6; color: var(--text-3); }
+.auth-line { margin: 14px 0 10px; font-size: 13px; font-weight: 600; color: var(--text-2); }
+/* An actor is a name to scan, so one line: a long address ends in an
+   ellipsis and the whole of it is the cell's title. */
+.admin-frame td.actor { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/*
+ * A FIELD INSIDE THE OPENED ROW TAKES THE PAGE'S GROUND. `--field` is the
+ * same value as `--surface-2` in both themes — right for a field on a card,
+ * and invisible on the review row, which IS `--surface-2`: the PIN box and
+ * the reason box rendered as a label over nothing. `--bg` is one step off
+ * that fill in each theme — white on the grey well in light, black in the
+ * charcoal one in dark — so the field reads as a field either way.
+ */
+.admin-frame tr.detail input:where(:not([type='checkbox'], [type='radio'])),
+.admin-frame tr.detail textarea,
+.admin-frame tr.detail select { background: var(--bg); }
+
+/* A rule's own figures, inside the opened row: a key-value list, not a
+   second full-height table. */
+.admin-frame tr.detail table { margin-top: 8px; }
+.admin-frame tr.detail table td {
+  padding: 5px 16px 5px 0;
+  border: none;
+  font-weight: 500;
+  font-size: 12.5px;
+}
+.admin-frame tr.detail table td:first-child { padding-left: 0; }
+
+/* ON A PHONE A ROW STAYS ONE LINE and the panel scrolls. Wrapped, "DP-" sat
+   over "DCFC38" and every name took two lines, so a three-row queue was a
+   screen tall and no column lined up. The opened review row still wraps. */
+@media (max-width: 720px) {
+  .admin-frame .tbl-panel tr:not(.detail) > td,
+  .admin-frame .tbl-panel th { white-space: nowrap; }
+}

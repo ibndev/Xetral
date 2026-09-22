@@ -48,6 +48,31 @@ export interface QueuedDispute extends DisputeView {
   readonly email: string | null;
   readonly overdue: boolean;
   readonly entry_kind: string;
+  /** What the customer calls themselves — a greeting, not the verified name. */
+  readonly name: string | null;
+  /**
+   * What the claim is ABOUT: the customer's own side of the entry, in minor
+   * units. Their debit when they have one (a transfer's −₦5,050 including its
+   * fee is what they say they lost), otherwise their largest leg. Null only
+   * for an entry with no leg of theirs, which 018's trigger makes unreachable.
+   */
+  readonly amount_minor: string | null;
+  readonly currency: string | null;
+  /**
+   * At or above `risk_thresholds.large_value_minor` for its currency — the
+   * REPORTING threshold, 027's regulatory figure, not a number invented for
+   * this screen. False for a currency with no row, which
+   * `risk_currency_coverage` already reports as a gap.
+   */
+  readonly high_value: boolean;
+}
+
+/** The three figures over the disputes queue. */
+export interface DisputeSummary {
+  readonly open: number;
+  readonly high_value: number;
+  /** Decided either way in the last seven days. Withdrawn is not decided. */
+  readonly resolved_7d: number;
 }
 
 interface DisputeRow {
@@ -61,6 +86,41 @@ interface DisputeRow {
   resolved_at: Date | null;
   resolution: string | null;
 }
+
+/**
+ * The open queue, with what each claim is about.
+ *
+ * The amount is the customer's OWN side of the entry, summed per currency:
+ * a transfer is −₦5,000 and a −₦50 fee against one wallet, and −₦5,050 is
+ * what they say left their account. Their debit wins where there is one — an
+ * FX trade has a naira debit and a dollar credit, and the claim is about the
+ * naira that left.
+ */
+const QUEUE_SQL = `
+  SELECT o.uuid, o.entry_uuid, o.reason::text AS reason, o.detail,
+         'open' AS status, o.raised_at, o.due_at,
+         NULL::timestamptz AS resolved_at, NULL::text AS resolution,
+         o.email, o.overdue, o.entry_kind,
+         u.full_name AS name,
+         leg.amount_minor::text AS amount_minor,
+         leg.currency,
+         COALESCE(leg.amount_minor >= t.large_value_minor, false) AS high_value
+    FROM disputes_open o
+    JOIN users u ON u.id = o.user_id
+    JOIN journal_entries e ON e.uuid = o.entry_uuid
+    LEFT JOIN LATERAL (
+      SELECT abs(sum(p.amount_minor)) AS amount_minor, a.currency
+        FROM postings p
+        JOIN accounts a ON a.id = p.account_id
+       WHERE p.journal_entry_id = e.id
+         AND a.owner_type = 'user'
+         AND a.owner_id = o.user_id
+       GROUP BY a.currency
+       ORDER BY sum(p.amount_minor) < 0 DESC, abs(sum(p.amount_minor)) DESC
+       LIMIT 1
+    ) leg ON true
+    LEFT JOIN risk_thresholds t ON t.currency = leg.currency
+   ORDER BY o.due_at`;
 
 @Injectable()
 export class DisputeService {
@@ -162,22 +222,52 @@ export class DisputeService {
   /** What staff work through, oldest deadline first. */
   async queue(): Promise<readonly QueuedDispute[]> {
     const result = await this.pool.query<
-      DisputeRow & { email: string | null; overdue: boolean; entry_kind: string }
+      DisputeRow & {
+        email: string | null;
+        overdue: boolean;
+        entry_kind: string;
+        name: string | null;
+        amount_minor: string | null;
+        currency: string | null;
+        high_value: boolean;
+      }
     >(
-      `SELECT uuid, entry_uuid, reason::text AS reason, detail,
-              'open' AS status, raised_at, due_at,
-              NULL::timestamptz AS resolved_at, NULL::text AS resolution,
-              email, overdue, entry_kind
-         FROM disputes_open
-        LIMIT 200`,
+      `${QUEUE_SQL}
+       LIMIT 200`,
     );
     return result.rows.map((row) => ({
       ...view(row),
       email: row.email,
       overdue: row.overdue,
       entry_kind: row.entry_kind,
+      name: row.name,
+      amount_minor: row.amount_minor,
+      currency: row.currency,
+      high_value: row.high_value,
     }));
   }
+
+  /**
+   * The figures over the queue, counted by the database rather than from a
+   * page of rows — the queue is capped at 200 and a count of a capped list is
+   * a count that stops at 200.
+   */
+  async summary(): Promise<DisputeSummary> {
+    const result = await this.pool.query<{ open: string; high_value: string; resolved_7d: string }>(
+      `SELECT (SELECT count(*) FROM (${QUEUE_SQL}) q)                    AS open,
+              (SELECT count(*) FROM (${QUEUE_SQL}) q WHERE q.high_value) AS high_value,
+              (SELECT count(*) FROM disputes
+                WHERE status IN ('accepted', 'rejected')
+                  AND resolved_at > now() - interval '7 days')           AS resolved_7d`,
+    );
+    const row = result.rows[0];
+    return {
+      open: Number(row?.open ?? 0),
+      high_value: Number(row?.high_value ?? 0),
+      resolved_7d: Number(row?.resolved_7d ?? 0),
+    };
+  }
+
 
   /**
    * A reviewer's decision.
