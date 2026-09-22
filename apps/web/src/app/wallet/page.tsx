@@ -119,6 +119,15 @@ export default function Wallet() {
   const session = useLoad(() => client.currentSession(), [client]);
   const balances = useLoad(() => client.balances(), [client]);
   /*
+   * THE HEADLINE IS IN DOLLARS, because the card spends in dollars and a
+   * customer paid in naira or cedis should read one figure for "what can I
+   * spend", not do the conversion in their head. It is priced exactly as a
+   * conversion would pay (see `dollarTotal`), and it is its OWN request: if
+   * pricing is unavailable the headline falls back to the selected balance
+   * below rather than the home screen going blank.
+   */
+  const dollars = useLoad(() => client.dollarTotal(), [client]);
+  /*
    * EVERY CURRENCY THE PLATFORM OFFERS, not only the ones this customer has
    * happened to receive.
    *
@@ -131,6 +140,12 @@ export default function Wallet() {
   const assets = balances.data ?? [];
   const active = assets.find((b) => b.currency === preferred) ?? assets[0];
   const currency = active?.currency ?? 'NGN';
+  /* The dollar total when it priced; otherwise the selected balance, which
+     is what this line showed before and is always true. */
+  const headline =
+    dollars.data !== undefined
+      ? { amount: dollars.data.amount, currency: 'USD' }
+      : { amount: active?.spendable ?? '0.00', currency };
 
   const history = useLoad(
     () => client.transactions(currency).catch(() => ({ entries: [], nextCursor: null })),
@@ -182,12 +197,12 @@ export default function Wallet() {
         {/* Keyed on the state so React replaces the node and the figure
             cross-fades instead of snapping between dots and digits. */}
         <div className="balance-value fade-in" key={hidden ? 'masked' : 'shown'}>
-          {balances.loading ? (
+          {balances.loading || dollars.loading ? (
             <span className="skeleton" style={{ display: 'block', width: 210, height: 42 }} />
           ) : hidden ? (
-            `${symbolFor(currency)} ${MASK}`
+            `${symbolFor(headline.currency)} ${MASK}`
           ) : (
-            <Figure amount={active?.spendable ?? '0.00'} currency={currency} />
+            <Figure amount={headline.amount} currency={headline.currency} />
           )}
         </div>
 
@@ -204,12 +219,29 @@ export default function Wallet() {
           slot carries money that is genuinely held instead, and is absent
           when there is none.
         */}
-        {active !== undefined && !isZero(active.pending) && !hidden && (
-          <div style={{ marginTop: 11 }}>
-            <span className="delta-chip">
-              <Icon name="clock" size={13} />
-              {formatAmount(active.pending, currency)} pending
-            </span>
+        {/*
+          WHAT THE HEADLINE IS, said in the comp's chip slot. "Approximately"
+          is the honest word: the figure moves with the rate while the money
+          stays in the currency it arrived in. A balance with no published
+          dollar price is NAMED, because a total that quietly skipped one
+          reads as money gone.
+        */}
+        {!hidden && (dollars.data !== undefined || (active !== undefined && !isZero(active.pending))) && (
+          <div className="balance-chips">
+            {dollars.data !== undefined && (
+              <span className="delta-chip">
+                <Icon name="swap" size={13} />
+                {dollars.data.excluded.length === 0
+                  ? 'In dollars, at today’s rate'
+                  : `In dollars · not counted: ${dollars.data.excluded.join(', ')}`}
+              </span>
+            )}
+            {active !== undefined && !isZero(active.pending) && (
+              <span className="delta-chip">
+                <Icon name="clock" size={13} />
+                {formatAmount(active.pending, currency)} pending
+              </span>
+            )}
           </div>
         )}
 

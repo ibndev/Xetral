@@ -105,6 +105,17 @@ export default function Home() {
 
   const active = assets.find((b) => b.currency === preferred) ?? assets[0];
   const currency = active?.currency ?? 'NGN';
+  /*
+   * THE HEADLINE IS IN DOLLARS — the web's reasoning, and the same request:
+   * the card spends in dollars, so one figure answers "what can I spend"
+   * whatever the customer is paid in. Priced as a conversion would pay, and
+   * falling back to the selected balance if pricing is unavailable.
+   */
+  const dollars = useLoad(() => client.dollarTotal(), [client]);
+  const headline =
+    dollars.data !== undefined
+      ? { amount: dollars.data.amount, currency: 'USD' }
+      : { amount: active?.spendable ?? '0.00', currency };
 
   const history = useLoad(
     () => client.transactions(currency).catch(() => ({ entries: [], nextCursor: null })),
@@ -180,13 +191,13 @@ export default function Home() {
         */}
         <Figure
           text={
-            balances.loading
+            balances.loading || dollars.loading
               ? ' '
               : hidden
-                ? `${symbolFor(currency)} ${MASK}`
-                : formatAmount(active?.spendable ?? '0.00', currency)
+                ? `${symbolFor(headline.currency)} ${MASK}`
+                : formatAmount(headline.amount, headline.currency)
           }
-          split={!hidden && !balances.loading}
+          split={!hidden && !balances.loading && !dollars.loading}
         />
 
         {/*
@@ -198,22 +209,23 @@ export default function Home() {
           the one thing this screen must not invent, so the slot carries money
           that is genuinely held and is absent when there is none.
         */}
-        {active !== undefined && !isZero(active.pending) && !hidden && (
-          <View style={{ marginTop: 11, flexDirection: 'row' }}>
-            <View
-              style={{
-                flexDirection: 'row', alignItems: 'center', gap: 5,
-                paddingVertical: 4, paddingHorizontal: 10,
-                borderRadius: radius.pill,
-                backgroundColor: colors.irisTint,
-                borderWidth: 1, borderColor: colors.irisEdge,
-              }}
-            >
-              <Icon name="clock" size={13} color={colors.irisText} />
-              <Text style={{ color: colors.irisText, fontFamily: font.sansSemi, fontSize: 12 }}>
-                {formatAmount(active.pending, currency)} pending
-              </Text>
-            </View>
+        {/*
+          WHAT THE HEADLINE IS, in the comp's chip slot — and a balance with
+          no published dollar price is NAMED, because a total that quietly
+          skipped one reads as money gone. Pending money stays beside it.
+        */}
+        {!hidden && (dollars.data !== undefined || (active !== undefined && !isZero(active.pending))) && (
+          <View style={{ marginTop: 11, flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            {dollars.data !== undefined && (
+              <Chip icon="swap">
+                {dollars.data.excluded.length === 0
+                  ? 'In dollars, at today’s rate'
+                  : `In dollars · not counted: ${dollars.data.excluded.join(', ')}`}
+              </Chip>
+            )}
+            {active !== undefined && !isZero(active.pending) && (
+              <Chip icon="clock">{`${formatAmount(active.pending, currency)} pending`}</Chip>
+            )}
           </View>
         )}
       </View>
@@ -514,5 +526,24 @@ function Action({
         </Text>
       </Pressable>
     </Link>
+  );
+}
+
+/** The comp's iris chip under the headline: a tint, a hairline, 12px text. */
+function Chip({ icon, children }: { readonly icon: IconName; readonly children: string }) {
+  const colors = useTheme();
+  return (
+    <View
+      style={{
+        flexDirection: 'row', alignItems: 'center', gap: 5,
+        paddingVertical: 4, paddingHorizontal: 10,
+        borderRadius: radius.pill,
+        backgroundColor: colors.irisTint,
+        borderWidth: 1, borderColor: colors.irisEdge,
+      }}
+    >
+      <Icon name={icon} size={13} color={colors.irisText} />
+      <Text style={{ color: colors.irisText, fontFamily: font.sansSemi, fontSize: 12 }}>{children}</Text>
+    </View>
   );
 }

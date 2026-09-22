@@ -206,6 +206,7 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       .authenticated('POST', '/v1/auth/password', { pin: true })
 
       .authenticated('GET', '/v1/wallets', { pin: false })
+      .authenticated('GET', '/v1/wallets/total', { pin: false })
       // The fee POLICY, not a quote — see WalletService.transferFee.
       .authenticated('GET', '/v1/wallets/fee', { pin: false })
       .authenticated('GET', '/v1/wallets/transactions', { pin: false })

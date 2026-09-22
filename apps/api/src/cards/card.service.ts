@@ -19,12 +19,13 @@ import {
   ProviderUnavailableError,
 } from '@xetral/providers';
 import type { CardPort, VirtualCard } from '@xetral/providers';
-import { fromMajor, subtract, toMajor } from '@xetral/shared';
-import type { Money } from '@xetral/shared';
+import { fromMajor, isCurrency, subtract, toMajor } from '@xetral/shared';
+import type { Currency, Money } from '@xetral/shared';
 import { CARD_PORT, DATABASE, LEDGER } from '../tokens.js';
 import { CardProtectionService } from './card-protection.service.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { TaxService } from '../tax/tax.service.js';
+import { FxService } from '../fx/fx.service.js';
 
 const PROVIDER = 'bitnob';
 
@@ -154,6 +155,7 @@ export class CardService {
     @Inject(CardProtectionService) private readonly protection: CardProtectionService,
     @Inject(SettingsService) private readonly settings: SettingsService,
     @Inject(TaxService) private readonly tax: TaxService,
+    @Inject(FxService) private readonly fx: FxService,
   ) {}
 
   async list(userUuid: string): Promise<readonly CardView[]> {
@@ -346,20 +348,71 @@ export class CardService {
   async fund(
     userUuid: string,
     cardUuid: string,
-    input: { amount: string; idempotencyKey: string },
+    input: {
+      amount: string;
+      idempotencyKey: string;
+      /** The balance that pays. Absent or USD is the dollar wallet, as ever. */
+      from?: Currency | undefined;
+      minReceived?: string | undefined;
+    },
   ): Promise<CardView> {
     await this.settings.assertServiceEnabled('cards');
     const { userId, row } = await this.#ownedCard(userUuid, cardUuid);
     this.#assertUsable(row);
 
-    const amount = this.#parseAmount(input.amount);
+    /*
+     * PAYING FROM NAIRA OR CEDIS IS A CONVERSION, THEN THE SAME TOP-UP.
+     *
+     * The card holds dollars at Bitnob and a spend is approved against THAT
+     * balance before we hear of it — so the money has to be in dollars on the
+     * card before the customer is at the till; nothing here can convert at
+     * the moment of purchase. What the customer should not have to do is
+     * visit a second screen first. So `convert()` runs here, with its spread,
+     * its minimum, its rate-moved floor and its kill switch exactly as the
+     * convert screen would, and the top-up takes EXACTLY what it delivered.
+     *
+     * TWO ENTRIES, AND THE GAP BETWEEN THEM IS SAFE BY CONSTRUCTION. The
+     * conversion lands in the customer's OWN dollar wallet — which is where
+     * they would have put it themselves — and the top-up moves it on. A
+     * process dying between the two leaves dollars in their wallet, visible
+     * and spendable, which is 043's "remittance is one entry" worry turned
+     * inside out: nothing is stranded somewhere they did not choose.
+     *
+     * BOTH KEYS DERIVE FROM THE ATTEMPT'S, so a retry replays the conversion
+     * (`convert()` returns the existing trade) and the top-up (the ledger
+     * answers `replayed`) rather than converting twice.
+     */
+    let dollars = input.amount;
+    let paidFrom: Currency | undefined;
+    if (input.from !== undefined && input.from !== row.currency) {
+      if (!isCurrency(row.currency)) {
+        throw new UnprocessableEntityException({ error: 'not_convertible' });
+      }
+      const trade = await this.fx.convert(userUuid, {
+        from: input.from,
+        to: row.currency,
+        amount: input.amount,
+        idempotency_key: `card-fx:${input.idempotencyKey}`,
+        ...(input.minReceived === undefined ? {} : { min_received: input.minReceived }),
+      });
+      dollars = trade.received;
+      paidFrom = input.from;
+    }
+
+    const amount = this.#parseAmount(dollars);
 
     // The ledger entry goes FIRST here, unlike issuing. Moving wallet -> card
     // is what the overdraft guard protects: if the customer cannot afford it,
     // nothing should be sent to Bitnob at all. The provider call is what might
     // then fail, and a funded card account with no provider top-up is
     // recoverable by reconciliation; the reverse is money out the door.
-    await this.#postCardFunding(userId, amount, `card-fund:${input.idempotencyKey}`, row.uuid);
+    await this.#postCardFunding(
+      userId,
+      amount,
+      `card-fund:${input.idempotencyKey}`,
+      row.uuid,
+      paidFrom === undefined ? 'Card top-up' : `Card top-up from ${paidFrom}`,
+    );
 
     const outcome = await this.cards.fund({
       providerCardId: row.provider_card_id,
@@ -913,13 +966,20 @@ export class CardService {
     amount: Money<'USD'>,
     idempotencyKey: string,
     cardUuid: string,
+    /*
+     * WHAT THE CUSTOMER READS on the card's activity. It was 'card funding' —
+     * the entry kind in lowercase — on every real top-up, beside provider
+     * rows reading "Netflix". A top-up paid from naira says so, because the
+     * naira balance is where the customer will look for the money that left.
+     */
+    description = 'Card top-up',
   ): Promise<void> {
     try {
       await this.ledger.post({
         idempotencyKey,
         kind: 'card_funding',
         occurredAt: new Date(),
-        description: 'card funding',
+        description,
         metadata: { card_id: cardUuid },
         postings: [
           posting(walletAccount(userId), negate(amount)),

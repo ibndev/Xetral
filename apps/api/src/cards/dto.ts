@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CONVERTIBLE } from '../fx/dto.js';
 
 /** Amounts are major-unit STRINGS for the same reason as transfers: a JSON
  *  number has already settled the precision question, badly. */
@@ -58,9 +59,22 @@ export const nameCardSchema = z.object({
 });
 
 export const fundCardSchema = z.object({
+  /** Major units of `from` — the currency the money LEAVES in. */
   amount: z.string().trim().min(1).max(32),
   transaction_pin: z.string().min(1).max(32),
   idempotency_key: z.string().trim().min(8).max(128),
+  /**
+   * WHICH BALANCE PAYS. Omitted means dollars, which is what this route has
+   * always taken, so every client written before this keeps working.
+   *
+   * A customer paid in naira or cedis should not have to visit the convert
+   * screen before they can use a dollar card: the top-up does the conversion
+   * itself, at the price the convert screen would have quoted.
+   */
+  from: z.enum(CONVERTIBLE).optional(),
+  /** The least dollars the customer will accept onto the card — the convert
+   *  screen's floor, for the same reason: rates move between quote and tap. */
+  min_received: z.string().trim().min(1).max(32).optional(),
 });
 
 /**

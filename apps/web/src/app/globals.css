@@ -6452,3 +6452,6 @@ html, body { overflow-x: hidden; }
   .admin-frame .tbl-panel tr:not(.detail) > td,
   .admin-frame .tbl-panel th { white-space: nowrap; }
 }
+
+/* The headline's chips: what the figure is, then anything pending. */
+.balance-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 11px; }

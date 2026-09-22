@@ -4,14 +4,32 @@ import { WalletService } from './wallet.service.js';
 import type { BalanceView, TransferResult } from './wallet.service.js';
 import { historyQuerySchema, transferSchema } from './dto.js';
 import { uuidOr404 } from '../uuid-param.js';
+import { FxService } from '../fx/fx.service.js';
+import type { DollarTotal } from '../fx/fx.service.js';
 
 @Controller('v1/wallets')
 export class WalletController {
-  constructor(@Inject(WalletService) private readonly wallets: WalletService) {}
+  constructor(
+    @Inject(WalletService) private readonly wallets: WalletService,
+    @Inject(FxService) private readonly fx: FxService,
+  ) {}
 
   @Get()
   async balances(@Req() request: AuthenticatedRequest): Promise<{ balances: readonly BalanceView[] }> {
     return { balances: await this.wallets.balances(claimsOf(request).sub) };
+  }
+
+  /**
+   * Everything spendable, in dollars — the home screen's headline.
+   *
+   * Its OWN route rather than a field on the balances, so a pricing problem
+   * (a retired pair, a missing rate) costs the headline and never the
+   * balances underneath it, which are what a customer checks when something
+   * looks wrong.
+   */
+  @Get('total')
+  async total(@Req() request: AuthenticatedRequest): Promise<DollarTotal> {
+    return this.fx.dollarTotal(claimsOf(request).sub);
   }
 
   /**

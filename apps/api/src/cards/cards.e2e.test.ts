@@ -10,14 +10,19 @@ import { hashPassword } from '@xetral/identity';
 import { LedgerService, posting } from '@xetral/ledger';
 import type { AccountRef } from '@xetral/ledger';
 import { BITNOB_EVENTS } from '@xetral/providers';
+import { convertWithSpread } from '@xetral/providers';
 import type {
+  FxExecution,
+  FxPort,
+  FxRate,
   CardPort,
   CardSecrets,
   IssueCardRequest,
   OperationOutcome,
   VirtualCard,
 } from '@xetral/providers';
-import { usd } from '@xetral/shared';
+import { money, ngn, usd } from '@xetral/shared';
+import type { Currency, Money } from '@xetral/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { AppModule } from '../app.module.js';
 import type { ApiConfig } from '../config.js';
@@ -125,6 +130,43 @@ let pool: Pool;
 let ledger: LedgerService;
 let app: INestApplication;
 let cardPort: FakeCardPort;
+let fxPort: FakeFxPort;
+
+/**
+ * The swap, for a top-up paid in naira. The FX suite's fake, at its rate —
+ * ₦1,650.25 to the dollar — so the two suites price the same pair the same
+ * way on the shared database. It records every swap it is asked for, which
+ * is how a retry is proved to be a replay rather than a second conversion.
+ */
+class FakeFxPort implements FxPort {
+  readonly provider = 'bitnob';
+  readonly conversions: string[] = [];
+
+  async rate(base: Currency, quote: Currency): Promise<FxRate> {
+    const naira = base === 'NGN';
+    return {
+      base,
+      quote,
+      numerator: naira ? 100n : 165_025n,
+      denominator: naira ? 165_025n : 100n,
+      expiresAt: new Date(Date.now() + 30_000),
+    };
+  }
+
+  async convert<B extends Currency>(
+    _base: B,
+    _quote: Currency,
+    amount: Money<B>,
+    reference: string,
+  ): Promise<FxExecution> {
+    this.conversions.push(reference);
+    return {
+      providerReference: `swap_${reference}`,
+      costMinor: amount.amount,
+      filledQuoteMinor: 1n << 62n,
+    };
+  }
+}
 
 function makeConfig(): ApiConfig {
   return testApiConfig(DATABASE_URL as string, {
@@ -288,9 +330,20 @@ beforeAll(async () => {
   pool = new pg.Pool({ connectionString: DATABASE_URL, max: 8 });
   ledger = new LedgerService(pool);
   cardPort = new FakeCardPort();
+  fxPort = new FakeFxPort();
+
+  // The FX suite's own values, ON CONFLICT DO NOTHING — whichever suite runs
+  // first on the shared database creates the row the other then relies on.
+  await pool.query(
+    `INSERT INTO fx_spread_policies (base_currency, quote_currency, spread_basis_points, min_base_minor)
+     VALUES ('NGN', 'USD', 150, 100000)
+     ON CONFLICT (base_currency, quote_currency) WHERE (retired_at IS NULL) DO NOTHING`,
+  );
 
   const mod = await Test.createTestingModule({
-    imports: [AppModule.forRoot({ config: makeConfig(), pool, clock: systemClock, cardPort })],
+    imports: [
+      AppModule.forRoot({ config: makeConfig(), pool, clock: systemClock, cardPort, fxPort }),
+    ],
   }).compile();
   app = mod.createNestApplication(new ExpressAdapter(), { rawBody: true });
   await app.init();
@@ -1641,5 +1694,178 @@ describe('an id in the path that is not one', () => {
       status: malformed.status,
       body: malformed.body,
     });
+  });
+});
+
+describe('a dollar card paid for from another balance', () => {
+  /*
+   * A CUSTOMER PAID IN NAIRA SHOULD NOT HAVE TO CONVERT BEFORE USING THE CARD.
+   * The card holds dollars at Bitnob and a spend is approved against that
+   * before we hear of it, so the dollars must be there first — but the
+   * top-up can take naira and convert on the way, at the convert screen's
+   * own price. These pin that it converts EXACTLY ONCE, that every dollar it
+   * produced lands on the card rather than lingering in the wallet, and that
+   * a retry replays both halves.
+   */
+  async function fundNaira(userId: string, minor: bigint): Promise<void> {
+    await ledger.post({
+      idempotencyKey: `cards-fund-ngn:${randomUUID()}`,
+      kind: 'wallet_funding',
+      occurredAt: new Date(),
+      description: 'test funding',
+      metadata: {},
+      postings: [
+        posting({ kind: 'customer_wallet', ownerId: userId, currency: 'NGN' }, ngn(minor)),
+        posting({ kind: 'provider_float', currency: 'NGN' }, ngn(-minor)),
+      ],
+    });
+  }
+  const naira = (userId: string): AccountRef => ({
+    kind: 'customer_wallet',
+    ownerId: userId,
+    currency: 'NGN',
+  });
+
+  it('converts on the way, puts every dollar on the card, and replays on a retry', async () => {
+    const customer = await onboard();
+    await fundWallet(customer.userId, 10_000); // the issuance fee
+    const card = await issueCard(customer, '0.00');
+    await fundNaira(customer.userId, 5_000_000n); // ₦50,000
+
+    const dollarsBefore = await balance(wallet(customer.userId));
+    const cardBefore = await balance(cardAccount(customer.userId));
+    const swapsBefore = fxPort.conversions.length;
+
+    const body = {
+      amount: '20000',
+      from: 'NGN',
+      transaction_pin: PIN,
+      idempotency_key: randomUUID(),
+    };
+    const first = await request(app.getHttpServer())
+      .post(`/v1/cards/${card.id}/fund`)
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send(body);
+    expect(first.status, JSON.stringify(first.body)).toBe(200);
+
+    // What the convert screen would have given for ₦20,000, to the cent.
+    const expected = convertWithSpread(
+      ngn(2_000_000n),
+      { base: 'NGN', quote: 'USD', numerator: 100n, denominator: 165_025n, expiresAt: new Date() },
+      150,
+    ).quoteMinor;
+
+    expect(await balance(naira(customer.userId))).toBe(3_000_000n);
+    expect((await balance(cardAccount(customer.userId))) - cardBefore).toBe(expected);
+    // Nothing left behind in the dollar wallet: it all went onto the card.
+    expect(await balance(wallet(customer.userId))).toBe(dollarsBefore);
+    expect(fxPort.conversions.length - swapsBefore).toBe(1);
+
+    // The same attempt again is a replay of BOTH halves.
+    await request(app.getHttpServer())
+      .post(`/v1/cards/${card.id}/fund`)
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send(body)
+      .expect(200);
+    expect(await balance(naira(customer.userId))).toBe(3_000_000n);
+    expect((await balance(cardAccount(customer.userId))) - cardBefore).toBe(expected);
+    expect(fxPort.conversions.length - swapsBefore).toBe(1);
+  });
+
+  it('refuses rather than landing fewer dollars than the customer was shown', async () => {
+    const customer = await onboard();
+    await fundWallet(customer.userId, 10_000);
+    const card = await issueCard(customer, '0.00');
+    await fundNaira(customer.userId, 5_000_000n);
+    const cardBefore = await balance(cardAccount(customer.userId));
+
+    const res = await request(app.getHttpServer())
+      .post(`/v1/cards/${card.id}/fund`)
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send({
+        amount: '20000',
+        from: 'NGN',
+        min_received: '100.00',
+        transaction_pin: PIN,
+        idempotency_key: randomUUID(),
+      });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('rate_moved');
+    expect(await balance(naira(customer.userId))).toBe(5_000_000n);
+    expect(await balance(cardAccount(customer.userId))).toBe(cardBefore);
+  });
+});
+
+describe('the dollar total on the home screen', () => {
+  /*
+   * PRICED AS A CONVERSION WOULD PAY, FROM PUBLISHED RATES ONLY, and a
+   * balance nothing prices is NAMED rather than counted at a guess. The rate
+   * is published for this test and removed again in `finally`: the suites
+   * share a database, and a live published NGN/USD rate would change what
+   * every later FX test is quoted.
+   */
+  it('counts naira at the published price and names what it cannot price', async () => {
+    const customer = await onboard();
+    await fundWallet(customer.userId, 1_250); // $12.50, counted as it is
+    await ledger.post({
+      idempotencyKey: `cards-total:${randomUUID()}`,
+      kind: 'wallet_funding',
+      occurredAt: new Date(),
+      description: 'test funding',
+      metadata: {},
+      postings: [
+        posting({ kind: 'customer_wallet', ownerId: customer.userId, currency: 'NGN' }, ngn(1_650_250n)),
+        posting({ kind: 'provider_float', currency: 'NGN' }, ngn(-1_650_250n)),
+        posting({ kind: 'customer_wallet', ownerId: customer.userId, currency: 'BTC' }, money(1_000n, 'BTC')),
+        posting({ kind: 'provider_float', currency: 'BTC' }, money(-1_000n, 'BTC')),
+      ],
+    });
+
+    const published = await pool.query<{ id: string }>(
+      `INSERT INTO fx_published_rates (base_currency, quote_currency, numerator, denominator, quote_per_base)
+       VALUES ('NGN', 'USD', 100, 165025, '0.000606')
+       ON CONFLICT DO NOTHING
+       RETURNING id`,
+    );
+    const ours = published.rows[0]?.id;
+    try {
+      const live = await pool.query<{ numerator: string; denominator: string }>(
+        `SELECT numerator, denominator FROM fx_published_rates
+          WHERE base_currency = 'NGN' AND quote_currency = 'USD' AND retired_at IS NULL`,
+      );
+      const rate = live.rows[0];
+      if (rate === undefined) throw new Error('no live NGN/USD rate');
+      const spread = await pool.query<{ spread_basis_points: number }>(
+        `SELECT spread_basis_points FROM fx_spread_policies
+          WHERE base_currency = 'NGN' AND quote_currency = 'USD' AND retired_at IS NULL`,
+      );
+      const nairaInDollars = convertWithSpread(
+        ngn(1_650_250n),
+        {
+          base: 'NGN',
+          quote: 'USD',
+          numerator: BigInt(rate.numerator),
+          denominator: BigInt(rate.denominator),
+          expiresAt: new Date(),
+        },
+        spread.rows[0]?.spread_basis_points ?? 0,
+      ).quoteMinor;
+
+      const total = await request(app.getHttpServer())
+        .get('/v1/wallets/total')
+        .set('Authorization', `Bearer ${customer.token}`)
+        .expect(200);
+
+      expect(total.body.currency).toBe('USD');
+      expect(total.body.amount_minor).toBe((1_250n + nairaInDollars).toString());
+      expect(total.body.included).toEqual(expect.arrayContaining(['NGN', 'USD']));
+      // Bitcoin has no published dollar price here: named, not guessed.
+      expect(total.body.excluded).toContain('BTC');
+    } finally {
+      if (ours !== undefined) {
+        await pool.query(`UPDATE fx_published_rates SET retired_at = now() WHERE id = $1`, [ours]);
+        await pool.query(`DELETE FROM fx_published_rates WHERE id = $1`, [ours]);
+      }
+    }
   });
 });

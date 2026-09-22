@@ -2444,6 +2444,37 @@ Service in `apps/api/src/countries/`, screen at `/admin/countries`.
 - **The deposit history is shown either way.** A customer whose transfer has
   not arrived needs it more than a verified one does.
 
+### The balance in dollars, and a card paid from naira — non-obvious rules
+
+`FxService.dollarTotal()` at `GET /v1/wallets/total`; the top-up in
+`CardService.fund()` with `from`.
+
+- **THE HOME HEADLINE IS EVERYTHING SPENDABLE, IN DOLLARS**, so a customer
+  paid in naira or cedis reads one figure in the currency their card spends
+  in. The money is NOT converted — it stays in the currency it arrived in,
+  and the chip says "In dollars, at today's rate" for that reason.
+- **IT IS WHAT A CONVERSION WOULD PAY**, not a mid-market figure: the
+  published rate, the published spread, `convertWithSpread` rounding down.
+  A kinder total would be a promise the card top-up breaks every time.
+- **PUBLISHED RATES ONLY, NEVER THE PROVIDER.** It is read on every open of
+  the home screen. A currency with no published dollar price is LEFT OUT AND
+  NAMED ("not counted: USDT") — a total that quietly skipped a balance reads
+  as money gone.
+- **ITS OWN ROUTE**, so a pricing problem costs the headline, which falls back
+  to the selected balance, and never the balances underneath.
+- **A CARD CANNOT CONVERT AT THE TILL.** A Bitnob card holds dollars and a
+  spend is approved against that balance before we hear of it — so the
+  dollars must be on the card first. What the customer is spared is the
+  second screen: a top-up with `from: 'NGN'` runs `convert()` itself — its
+  spread, minimum, rate-moved floor and kill switch — and puts EXACTLY what
+  it delivered on the card.
+- **TWO ENTRIES, AND THE GAP IS SAFE BY CONSTRUCTION.** The conversion lands
+  in the customer's own dollar wallet and the top-up moves it on, so a crash
+  between them leaves dollars they can see and spend. Both keys derive from
+  the attempt's, so a retry replays both halves; the e2e counts swaps.
+- **THE SCREEN SENDS THE QUOTE AS THE FLOOR** (`min_received`), stamped with
+  the amount it priced, and the button waits for one.
+
 ### Metrics — non-obvious rules
 
 `apps/api/src/observability/metrics.{service,controller}.ts`, at `GET /metrics`.

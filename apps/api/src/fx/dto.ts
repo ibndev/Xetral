@@ -32,7 +32,7 @@ import type { Currency } from '@xetral/shared';
  * `fx-currencies.test.ts` binds this to the registry and to the client's
  * `TRANSFER_CURRENCIES` in both directions.
  */
-const CONVERTIBLE = Object.keys(CURRENCIES) as [Currency, ...Currency[]];
+export const CONVERTIBLE = Object.keys(CURRENCIES) as [Currency, ...Currency[]];
 
 export const fxQuoteSchema = z.object({
   from: z.enum(CONVERTIBLE),

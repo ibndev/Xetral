@@ -14,7 +14,7 @@ import { InsufficientFundsError, LedgerService, posting } from '@xetral/ledger';
 import type { PostingIntent } from '@xetral/ledger';
 import { convertWithSpread, displayRate, ProviderTimeoutError } from '@xetral/providers';
 import type { FxPort, FxRate } from '@xetral/providers';
-import { exponentOf, fromMajor, money, toMajor,
+import { exponentOf, fromMajor, isCurrency, money, toMajor,
   widenedSpread,
 } from '@xetral/shared';
 import type { Currency, Money } from '@xetral/shared';
@@ -52,6 +52,19 @@ export interface FxQuoteView {
   readonly spread: string;
   readonly rate: string;
   readonly expires_at: string;
+}
+
+/** The home screen's headline, and which balances went into it. */
+export interface DollarTotal {
+  readonly currency: 'USD';
+  /** Major units, as every amount on this API is sent. */
+  readonly amount: string;
+  readonly amount_minor: string;
+  /** Balances counted, by currency. */
+  readonly included: readonly string[];
+  /** Balances this platform has no published dollar price for — named on
+   *  screen rather than counted at a guess. */
+  readonly excluded: readonly string[];
 }
 
 export interface FxTradeView {
@@ -112,6 +125,87 @@ export class FxService {
     const ours = await this.published.rateFor(from, to);
     if (ours !== undefined) return { rate: ours, ours: true };
     return { rate: await this.port.rate(from, to), ours: false };
+  }
+
+  /**
+   * EVERYTHING THIS CUSTOMER CAN SPEND, IN DOLLARS — the home screen's
+   * headline, so a customer paid in naira or cedis reads one figure in the
+   * currency their card spends in.
+   *
+   * IT IS WHAT A CONVERSION WOULD ACTUALLY GIVE THEM, not a mid-market
+   * figure: the published rate, the published spread, and `convertWithSpread`
+   * rounding down exactly as `convert()` does. A total struck at a kinder rate
+   * than the button pays would be a promise the card top-up then breaks by a
+   * few hundred naira every time somebody used it.
+   *
+   * PUBLISHED RATES ONLY, NEVER THE PROVIDER. This is read on every open of
+   * the home screen, and a provider round trip per currency per open is a
+   * rate limit waiting to be hit and a home screen that goes blank when
+   * Bitnob has a slow minute. A currency with no published pair is LEFT OUT
+   * AND NAMED rather than counted at a guess — the screen says so, and a
+   * total that silently skipped a balance would read as money gone.
+   *
+   * DISPLAY ONLY. Nothing is converted and nothing reads this back; the money
+   * stays in the currency it arrived in until the customer spends it.
+   */
+  async dollarTotal(userUuid: string): Promise<DollarTotal> {
+    const userId = await this.#activeUserId(userUuid);
+    const held = await this.ledger.walletBalances(userId);
+
+    let cents = 0n;
+    const included: string[] = [];
+    const excluded: string[] = [];
+
+    for (const balance of held) {
+      if (balance.spendableMinor <= 0n) continue;
+      if (balance.currency === 'USD') {
+        cents += balance.spendableMinor;
+        included.push('USD');
+        continue;
+      }
+      if (!isCurrency(balance.currency)) {
+        excluded.push(balance.currency);
+        continue;
+      }
+      const from = balance.currency;
+      const priced = await this.#dollarsFor(money(balance.spendableMinor, from), from);
+      if (priced === undefined) {
+        excluded.push(from);
+      } else {
+        cents += priced;
+        included.push(from);
+      }
+    }
+
+    return {
+      currency: 'USD',
+      amount: toMajor(money(cents, 'USD')),
+      amount_minor: cents.toString(),
+      included,
+      excluded,
+    };
+  }
+
+  /** One balance in dollars at the price a conversion would pay, or
+   *  undefined when this platform has not published that pair. */
+  async #dollarsFor(amount: Money<Currency>, from: Currency): Promise<bigint | undefined> {
+    const policy = await this.pool.query<SpreadPolicy>(
+      `SELECT id::text, spread_basis_points, min_base_minor::text
+         FROM fx_spread_policies
+        WHERE base_currency = $1 AND quote_currency = 'USD' AND retired_at IS NULL`,
+      [from],
+    );
+    const row = policy.rows[0];
+    if (row === undefined) return undefined;
+    const rate = await this.published.rateFor(from, 'USD');
+    if (rate === undefined) return undefined;
+    try {
+      return convertWithSpread(amount, rate, await this.#effectiveSpread(from, 'USD', row)).quoteMinor;
+    } catch {
+      // A rate that cannot price this amount prices nothing here — left out
+      // and named, exactly like an unpublished pair.
+      return undefined;
+    }
   }
 
   async quote(body: FxQuoteBody): Promise<FxQuoteView> {

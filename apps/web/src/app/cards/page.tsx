@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { entryKindLabel, formatAmount } from '@xetral/client';
+import { entryKindLabel, exponentFor, formatAmount, isValidAmount } from '@xetral/client';
 import type { Card, CardActivity, CardSecrets } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { FormError } from '@/ui/form-error';
@@ -9,6 +9,8 @@ import { Icon } from '@/ui/icon';
 import { Logo } from '@/ui/logo';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/lib/hooks';
 import { VerifyPrompt } from '@/ui/verify-prompt';
+import { Select } from '@/ui/select';
+import { CurrencyMark } from '@/ui/currency-mark';
 
 /**
  * Virtual USD cards.
@@ -18,6 +20,9 @@ import { VerifyPrompt } from '@/ui/verify-prompt';
  * number would mean a customer watching a balance that disagrees with what
  * they can actually spend.
  */
+/** A major-unit string that is zero, however many decimals it carries. */
+const isZero = (amount: string) => /^-?0(\.0+)?$/.test(amount);
+
 export default function Cards() {
   const client = useXetral();
   /*
@@ -337,6 +342,40 @@ function CardRow({
   const funding = useIdempotencyKey();
   const [amount, setAmount] = useState('');
   /*
+   * WHICH BALANCE PAYS. A customer paid in naira or cedis should not have to
+   * visit the convert screen before they can use a dollar card — the top-up
+   * converts on the way, at the convert screen's own price. Offered: every
+   * balance with money in it, the card's own currency included. Defaults to
+   * the first, which the API orders home-currency first.
+   */
+  const wallets = useLoad(() => client.balances(), [client]);
+  const payers = (wallets.data ?? []).filter((b) => !isZero(b.spendable));
+  const [from, setFrom] = useState<string | undefined>(undefined);
+  const payer = from ?? payers[0]?.currency ?? card.currency;
+  const converting = payer !== card.currency;
+  /*
+   * WHAT LANDS ON THE CARD, quoted as the customer types — and STAMPED WITH
+   * THE AMOUNT IT IS A QUOTE FOR. A quote kept past the amount that produced
+   * it shows the arithmetic for a figure the customer already replaced; it is
+   * rendered only when the stamp matches what is in the box now.
+   */
+  const [quote, setQuote] = useState<{ forAmount: string; forFrom: string; receives: string }>();
+  useEffect(() => {
+    if (!converting || !isValidAmount(amount, exponentFor(payer)) || isZero(amount)) return;
+    const asked = amount;
+    const timer = setTimeout(() => {
+      client
+        .fxQuote(payer, card.currency, asked)
+        .then((q) => setQuote({ forAmount: asked, forFrom: payer, receives: q.receives }))
+        .catch(() => setQuote(undefined));
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [client, converting, amount, payer, card.currency]);
+  const quoted =
+    quote !== undefined && quote.forAmount === amount && quote.forFrom === payer
+      ? quote.receives
+      : undefined;
+  /*
    * WHICH ACTION THE PIN IS FOR — and the reason this is one state rather than
    * a bare `open` flag.
    *
@@ -606,16 +645,46 @@ function CardRow({
           </div>
 
           {pending === 'fund' && (
-            <label>
-              Amount (USD)
-              <input
-                inputMode="decimal"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="25.00"
-                autoFocus
-              />
-            </label>
+            <>
+              {payers.length > 1 && (
+                <div className="field">
+                  <label className="field-label" id={`pay-from-${card.id}`}>
+                    Pay from
+                  </label>
+                  <Select
+                    labelledBy={`pay-from-${card.id}`}
+                    value={payer}
+                    onChange={(value) => {
+                      setFrom(value);
+                      setQuote(undefined);
+                    }}
+                    options={payers.map((b) => ({
+                      value: b.currency,
+                      label: `${b.currency} balance`,
+                      hint: `${formatAmount(b.spendable, b.currency)} available`,
+                    }))}
+                    renderMark={(value) => <CurrencyMark currency={value} size={20} />}
+                  />
+                </div>
+              )}
+              <label>
+                Amount ({payer})
+                <input
+                  inputMode="decimal"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  placeholder={converting ? '10000' : '25.00'}
+                  autoFocus
+                />
+                {converting && (
+                  <span className="hint">
+                    {quoted !== undefined
+                      ? `Adds ${formatAmount(quoted, card.currency)} to this card, converted at today’s rate.`
+                      : 'Converted to dollars on the way — no separate step.'}
+                  </span>
+                )}
+              </label>
+            </>
           )}
 
           <label>
@@ -635,14 +704,23 @@ function CardRow({
 
           <button
             type="button"
-            disabled={busy || pin === '' || (pending === 'fund' && amount === '')}
+            disabled={
+              busy ||
+              pin === '' ||
+              (pending === 'fund' && (amount === '' || (converting && quoted === undefined)))
+            }
             onClick={() =>
               void run(async () => {
                 if (pending === 'fund') {
+                  // The quoted dollars go up as the FLOOR: rates move between the
+                  // figure shown and the tap, and landing materially less than
+                  // the customer read is taking the difference on a technicality.
                   await client.fundCard(card.id, {
                     amount,
                     pin,
                     idempotencyKey: funding.key,
+                    ...(converting ? { from: payer } : {}),
+                    ...(converting && quoted !== undefined ? { minReceived: quoted } : {}),
                   });
                   // A NEW key after a success: this form is now available for a
                   // genuinely different top-up, and reusing the old one would

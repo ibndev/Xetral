@@ -770,6 +770,16 @@ export interface XetralClientOptions {
   readonly fetch?: typeof fetch;
 }
 
+/** The home headline: every spendable balance, in dollars. */
+export interface DollarTotal {
+  readonly currency: 'USD';
+  /** Major units. */
+  readonly amount: string;
+  readonly amount_minor: string;
+  readonly included: readonly string[];
+  readonly excluded: readonly string[];
+}
+
 export class XetralClient {
   readonly #baseUrl: string;
   readonly #session: Session;
@@ -790,6 +800,16 @@ export class XetralClient {
   async balances(): Promise<readonly Balance[]> {
     const body = await this.#get<{ balances: Balance[] }>('/v1/wallets');
     return body.balances;
+  }
+
+  /**
+   * Everything spendable, in dollars — the home screen's headline. At the
+   * price a conversion would pay, so it agrees with the card top-up. A
+   * balance with no published dollar price is named in `excluded` rather
+   * than counted at a guess.
+   */
+  async dollarTotal(): Promise<DollarTotal> {
+    return this.#get<DollarTotal>('/v1/wallets/total');
   }
 
   /**
@@ -1627,14 +1647,29 @@ export class XetralClient {
     return this.#post(`/v1/cards/${encodeURIComponent(id)}/label`, { label });
   }
 
+  /**
+   * Top a card up. `from` names the balance that pays — naira, cedis — and
+   * the server converts on the way, at the price the convert screen quotes;
+   * omitted, the dollar wallet pays, as it always did. `amount` is in the
+   * currency that PAYS, and `minReceived` is the fewest dollars the customer
+   * accepts onto the card.
+   */
   async fundCard(
     id: string,
-    input: { amount: string; pin: string; idempotencyKey: string },
+    input: {
+      amount: string;
+      pin: string;
+      idempotencyKey: string;
+      from?: string;
+      minReceived?: string;
+    },
   ): Promise<Card> {
     return this.#post(`/v1/cards/${encodeURIComponent(id)}/fund`, {
       amount: input.amount,
       transaction_pin: input.pin,
       idempotency_key: input.idempotencyKey,
+      ...(input.from === undefined ? {} : { from: input.from }),
+      ...(input.minReceived === undefined ? {} : { min_received: input.minReceived }),
     });
   }
 

@@ -121,6 +121,8 @@ export class CardController {
     return this.cards.fund(subjectOf(request), id, {
       amount: parsed.data.amount,
       idempotencyKey: parsed.data.idempotency_key,
+      from: parsed.data.from,
+      minReceived: parsed.data.min_received,
     });
   }
 
