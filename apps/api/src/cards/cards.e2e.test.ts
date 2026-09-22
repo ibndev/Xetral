@@ -1568,3 +1568,78 @@ describe('the two halves of a card spend', () => {
     expect(closed.rows[0]?.outcome).toBe('settled');
   });
 });
+
+describe('an id in the path that is not one', () => {
+  /*
+   * TWENTY-SEVEN ROUTES ANSWERED 500 TO `/1`, and eight of them were here.
+   *
+   * `WHERE uuid = $1` against `'1'` does not return no rows — Postgres raises
+   * `invalid input syntax for type uuid`. A customer who followed a stale
+   * link, or a client that sent a card's `last4` where its id belonged, was
+   * told the platform had broken, with a reference number that sent somebody
+   * to read a stack trace about a cast.
+   *
+   * Driven over HTTP, because the whole fault is what the status is by the
+   * time it leaves the app: every service threw correctly, and nothing between
+   * there and the customer knew a cast error means "no such card". The
+   * customer's other path ids ride along — a device, a dispute, a saved
+   * recipient, a transaction — because they had the same fault, and the
+   * `uuid-param.test.ts` guard is what keeps a new one from joining them.
+   */
+  it('answers the route’s own not-found, never a 500', async () => {
+    const customer = await onboard();
+    const withPin = { transaction_pin: PIN };
+    const cases: ReadonlyArray<
+      readonly ['get' | 'post' | 'delete', string, Record<string, unknown> | undefined, string]
+    > = [
+      ['get', '/v1/cards/1', undefined, 'card_not_found'],
+      ['post', '/v1/cards/1/label', { label: 'Groceries' }, 'card_not_found'],
+      ['post', '/v1/cards/1/freeze', {}, 'card_not_found'],
+      ['post', '/v1/cards/1/unfreeze', withPin, 'card_not_found'],
+      ['post', '/v1/cards/1/reveal', withPin, 'card_not_found'],
+      ['post', '/v1/cards/1/terminate', withPin, 'card_not_found'],
+      [
+        'post',
+        '/v1/cards/1/fund',
+        { amount: '5.00', transaction_pin: PIN, idempotency_key: randomUUID() },
+        'card_not_found',
+      ],
+      ['post', '/v1/auth/devices/1/revoke', withPin, 'device_not_found'],
+      [
+        'post',
+        '/v1/disputes/1/withdraw',
+        { resolution: 'I recognise this charge after all.' },
+        'dispute_not_found',
+      ],
+      ['delete', '/v1/recipients/1', undefined, 'recipient_not_found'],
+      ['get', '/v1/wallets/transactions/1', undefined, 'transaction_not_found'],
+    ];
+
+    for (const [method, path, body, code] of cases) {
+      const call = request(app.getHttpServer())
+        [method](path)
+        .set('Authorization', `Bearer ${customer.token}`);
+      const res = body === undefined ? await call : await call.send(body);
+      expect(res.status, `${method.toUpperCase()} ${path}`).toBe(404);
+      expect(res.body, `${method.toUpperCase()} ${path}`).toEqual({ error: code });
+    }
+  });
+
+  /* A well-formed id for nothing answers exactly as the malformed one did, so
+     the refusal above is the true answer rather than a second one. */
+  it('answers identically for a well-formed id that matches nothing', async () => {
+    const customer = await onboard();
+    // One after the other: two supertest calls started together on an
+    // unbound server race for the listener — see test-support/listener.ts.
+    const read = (id: string) =>
+      request(app.getHttpServer())
+        .get(`/v1/cards/${id}`)
+        .set('Authorization', `Bearer ${customer.token}`);
+    const malformed = await read('1');
+    const missing = await read(randomUUID());
+    expect({ status: missing.status, body: missing.body }).toEqual({
+      status: malformed.status,
+      body: malformed.body,
+    });
+  });
+});

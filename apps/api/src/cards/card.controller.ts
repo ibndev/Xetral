@@ -22,6 +22,7 @@ import {
   nameCardSchema,
   reissueCardSchema,
 } from './dto.js';
+import { uuidOr404 } from '../uuid-param.js';
 
 @Controller('v1/cards')
 export class CardController {
@@ -70,7 +71,7 @@ export class CardController {
   @Get(':id')
   async get(
     @Req() request: AuthenticatedRequest,
-    @Param('id') id: string,
+    @Param('id', uuidOr404('card_not_found')) id: string,
   ): Promise<CardView> {
     return this.cards.get(subjectOf(request), id);
   }
@@ -98,7 +99,7 @@ export class CardController {
   @HttpCode(200)
   async label(
     @Req() request: AuthenticatedRequest,
-    @Param('id') id: string,
+    @Param('id', uuidOr404('card_not_found')) id: string,
     @Body() body: unknown,
   ): Promise<CardView> {
     const parsed = nameCardSchema.safeParse(body);
@@ -111,7 +112,7 @@ export class CardController {
   @HttpCode(200)
   async fund(
     @Req() request: AuthenticatedRequest,
-    @Param('id') id: string,
+    @Param('id', uuidOr404('card_not_found')) id: string,
     @Body() body: unknown,
   ): Promise<CardView> {
     const parsed = fundCardSchema.safeParse(body);
@@ -141,7 +142,7 @@ export class CardController {
   @HttpCode(200)
   async reveal(
     @Req() request: AuthenticatedRequest,
-    @Param('id') id: string,
+    @Param('id', uuidOr404('card_not_found')) id: string,
   ): Promise<CardSecretsView> {
     return this.cards.reveal(subjectOf(request), id, request.ip);
   }
@@ -152,7 +153,7 @@ export class CardController {
   @HttpCode(200)
   async freeze(
     @Req() request: AuthenticatedRequest,
-    @Param('id') id: string,
+    @Param('id', uuidOr404('card_not_found')) id: string,
   ): Promise<CardView> {
     return this.cards.freeze(subjectOf(request), id);
   }
@@ -162,7 +163,7 @@ export class CardController {
   @HttpCode(200)
   async unfreeze(
     @Req() request: AuthenticatedRequest,
-    @Param('id') id: string,
+    @Param('id', uuidOr404('card_not_found')) id: string,
   ): Promise<CardView> {
     return this.cards.unfreeze(subjectOf(request), id);
   }
@@ -174,7 +175,7 @@ export class CardController {
   @HttpCode(200)
   async reissue(
     @Req() request: AuthenticatedRequest,
-    @Param('id') id: string,
+    @Param('id', uuidOr404('card_not_found')) id: string,
     @Body() body: unknown,
   ): Promise<CardView> {
     const parsed = reissueCardSchema.safeParse(body);
@@ -194,7 +195,7 @@ export class CardController {
   @HttpCode(200)
   async terminate(
     @Req() request: AuthenticatedRequest,
-    @Param('id') id: string,
+    @Param('id', uuidOr404('card_not_found')) id: string,
   ): Promise<CardView> {
     return this.cards.terminate(subjectOf(request), id);
   }

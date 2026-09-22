@@ -35,6 +35,7 @@ import type { AccountDetails, ProfileView } from './profile.service.js';
 import type { TotpEnrolment } from './staff-totp.service.js';
 import { AccountSecurityService } from './account-security.service.js';
 import type { DeviceView } from './account-security.service.js';
+import { uuidOr404 } from '../uuid-param.js';
 
 /**
  * The controller path and each handler path together form the key that
@@ -213,7 +214,7 @@ export class AuthController {
   @HttpCode(204)
   async revokeDevice(
     @Req() request: AuthenticatedRequest,
-    @Param('id') deviceId: string,
+    @Param('id', uuidOr404('device_not_found')) deviceId: string,
   ): Promise<void> {
     const claims = request.auth;
     if (claims === undefined) throw new Error('revokeDevice reached without verified claims');

@@ -14,6 +14,7 @@ import type { AuthenticatedRequest } from '../auth/auth.guard.js';
 import { RecipientBookService } from './recipient-book.service.js';
 import type { RecipientResolution, RecipientView } from './recipient-book.service.js';
 import { createRecipientSchema, resolveRecipientSchema } from './dto.js';
+import { uuidOr404 } from '../uuid-param.js';
 
 /**
  * The customer's own address book, behind one Send flow.
@@ -79,7 +80,7 @@ export class RecipientBookController {
 
   @Delete(':id')
   @HttpCode(204)
-  async remove(@Req() request: AuthenticatedRequest, @Param('id') id: string): Promise<void> {
+  async remove(@Req() request: AuthenticatedRequest, @Param('id', uuidOr404('recipient_not_found')) id: string): Promise<void> {
     await this.book.remove(callerOf(request), id);
   }
 }

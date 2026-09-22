@@ -1,8 +1,9 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, Inject, NotFoundException, Param, Post, Query, Req } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpCode, Inject, Param, Post, Query, Req } from '@nestjs/common';
 import type { AuthenticatedRequest } from '../auth/auth.guard.js';
 import { WalletService } from './wallet.service.js';
 import type { BalanceView, TransferResult } from './wallet.service.js';
 import { historyQuerySchema, transferSchema } from './dto.js';
+import { uuidOr404 } from '../uuid-param.js';
 
 @Controller('v1/wallets')
 export class WalletController {
@@ -57,14 +58,8 @@ export class WalletController {
   @Get('transactions/:id')
   async transaction(
     @Req() request: AuthenticatedRequest,
-    @Param('id') id: string,
+    @Param('id', uuidOr404('transaction_not_found')) id: string,
   ): Promise<unknown> {
-    // A malformed id answers as an unknown one rather than as a 500 from the
-    // uuid cast — same status, same body, so neither says which ids are the
-    // right SHAPE and therefore worth guessing.
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
-      throw new NotFoundException({ error: 'transaction_not_found' });
-    }
     return this.wallets.transaction(claimsOf(request).sub, id);
   }
 

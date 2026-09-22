@@ -42,6 +42,7 @@ import { kycReviewSchema } from '../kyc/dto.js';
 import { webhookEndpoints } from '../settings/webhook-endpoints.js';
 import { API_CONFIG } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
+import { uuidOr404 } from '../uuid-param.js';
 
 /**
  * The operations backend.
@@ -426,7 +427,7 @@ export class AdminController {
   @Post('recovery/:kind/:id')
   async recover(
     @Param('kind') kind: string,
-    @Param('id') id: string,
+    @Param('id', uuidOr404('not_recoverable')) id: string,
     @Body() body: unknown,
     @Req() request: AuthenticatedRequest,
   ): Promise<RecoveryRecord> {
@@ -468,7 +469,7 @@ export class AdminController {
   }
 
   @Get('users/:id')
-  async user(@Param('id') id: string): Promise<Record<string, unknown>> {
+  async user(@Param('id', uuidOr404('user_not_found')) id: string): Promise<Record<string, unknown>> {
     return this.admin.user(id);
   }
 
@@ -485,7 +486,7 @@ export class AdminController {
    */
   @Get('users/:id/transactions')
   async userTransactions(
-    @Param('id') id: string,
+    @Param('id', uuidOr404('user_not_found')) id: string,
     @Query() query: unknown,
   ): Promise<{ transactions: readonly unknown[] }> {
     const parsed = userTransactionsQuery.safeParse(query);
@@ -517,7 +518,7 @@ export class AdminController {
   @HttpCode(200)
   async setStatus(
     @Req() request: AuthenticatedRequest,
-    @Param('id') id: string,
+    @Param('id', uuidOr404('user_not_found')) id: string,
     @Body() body: unknown,
   ): Promise<Record<string, unknown>> {
     const parsed = statusSchema.safeParse(body);
@@ -542,7 +543,7 @@ export class AdminController {
   @HttpCode(200)
   async reviewKyc(
     @Req() request: AuthenticatedRequest,
-    @Param('id') id: string,
+    @Param('id', uuidOr404('submission_not_found')) id: string,
     @Body() body: unknown,
   ): Promise<unknown> {
     const parsed = kycReviewSchema.safeParse(body);
@@ -573,7 +574,7 @@ export class AdminController {
   @HttpCode(200)
   async attribute(
     @Req() request: AuthenticatedRequest,
-    @Param('id') id: string,
+    @Param('id', uuidOr404('deposit_not_found')) id: string,
     @Body() body: unknown,
   ): Promise<Record<string, unknown>> {
     const parsed = attributeSchema.safeParse(body);
@@ -592,7 +593,7 @@ export class AdminController {
   /** One card's whole life: every status change and who caused it. Four digits
    *  of the number and no more — this screen is read over shoulders. */
   @Get('cards/:id')
-  async card(@Param('id') id: string): Promise<unknown> {
+  async card(@Param('id', uuidOr404('card_not_found')) id: string): Promise<unknown> {
     return this.admin.cardHistory(id);
   }
 
@@ -606,7 +607,7 @@ export class AdminController {
   @HttpCode(204)
   async freezeCard(
     @Req() request: AuthenticatedRequest,
-    @Param('id') id: string,
+    @Param('id', uuidOr404('card_not_found')) id: string,
     @Body() body: unknown,
   ): Promise<void> {
     const parsed = staffFreezeSchema.safeParse(body);
@@ -640,7 +641,7 @@ export class AdminController {
   @HttpCode(200)
   async setUserTier(
     @Req() request: AuthenticatedRequest,
-    @Param('id') id: string,
+    @Param('id', uuidOr404('user_not_found')) id: string,
     @Body() body: unknown,
   ): Promise<unknown> {
     const parsed = tierSchema.safeParse(body);
@@ -692,7 +693,7 @@ export class AdminController {
   @HttpCode(200)
   async resolveRiskSignal(
     @Req() request: AuthenticatedRequest,
-    @Param('id') id: string,
+    @Param('id', uuidOr404('signal_not_found')) id: string,
     @Body() body: unknown,
   ): Promise<unknown> {
     const parsed = resolutionSchema.safeParse(body);
@@ -732,7 +733,7 @@ export class AdminController {
   /** One case, with its signals and its notes. There is deliberately no
    *  customer-facing counterpart: tipping off is an offence. */
   @Get('risk/cases/:id')
-  async riskCase(@Param('id') id: string): Promise<unknown> {
+  async riskCase(@Param('id', uuidOr404('case_not_found')) id: string): Promise<unknown> {
     return this.cases.detail(id);
   }
 
@@ -773,7 +774,7 @@ export class AdminController {
   @HttpCode(204)
   async noteRiskCase(
     @Req() request: AuthenticatedRequest,
-    @Param('id') id: string,
+    @Param('id', uuidOr404('case_not_found')) id: string,
     @Body() body: unknown,
   ): Promise<void> {
     const parsed = noteSchema.safeParse(body);
@@ -787,7 +788,7 @@ export class AdminController {
   @HttpCode(200)
   async closeRiskCase(
     @Req() request: AuthenticatedRequest,
-    @Param('id') id: string,
+    @Param('id', uuidOr404('case_not_found')) id: string,
     @Body() body: unknown,
   ): Promise<unknown> {
     const parsed = closeCaseSchema.safeParse(body);
@@ -959,7 +960,7 @@ export class AdminController {
   @HttpCode(200)
   async eraseCustomer(
     @Req() request: AuthenticatedRequest,
-    @Param('id') id: string,
+    @Param('id', uuidOr404('request_not_found')) id: string,
   ): Promise<unknown> {
     const actor = claims(request).sub;
     const completed = await this.rights.completeErasure(id, actor);
@@ -985,7 +986,7 @@ export class AdminController {
   @HttpCode(200)
   async resolveDataRequest(
     @Req() request: AuthenticatedRequest,
-    @Param('id') id: string,
+    @Param('id', uuidOr404('request_not_found')) id: string,
     @Body() body: unknown,
   ): Promise<unknown> {
     const parsed = resolveDataRequestSchema.safeParse(body);
@@ -1234,7 +1235,7 @@ export class AdminController {
   @HttpCode(200)
   async retirePrice(
     @Req() request: AuthenticatedRequest,
-    @Param('id') id: string,
+    @Param('id', uuidOr404('price_not_found')) id: string,
     @Body() body: unknown,
   ): Promise<unknown> {
     const parsed = retirePriceSchema.safeParse(body);
@@ -1277,7 +1278,7 @@ export class AdminController {
   @HttpCode(200)
   async deleteFxRate(
     @Req() request: AuthenticatedRequest,
-    @Param('id') id: string,
+    @Param('id', uuidOr404('price_not_found')) id: string,
     @Body() body: unknown,
   ): Promise<unknown> {
     const parsed = deleteRateSchema.safeParse(body);
@@ -1306,7 +1307,7 @@ export class AdminController {
   @Delete('prices/fx-spread/:id')
   async deleteFxSpread(
     @Req() request: AuthenticatedRequest,
-    @Param('id') id: string,
+    @Param('id', uuidOr404('price_not_found')) id: string,
     @Body() body: unknown,
   ): Promise<unknown> {
     const parsed = deleteRateSchema.safeParse(body);

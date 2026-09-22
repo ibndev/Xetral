@@ -3,6 +3,7 @@ import type { AuthenticatedRequest } from '../auth/auth.guard.js';
 import { DisputeService } from './dispute.service.js';
 import type { DisputeView, QueuedDispute } from './dispute.service.js';
 import { raiseDisputeSchema, resolveDisputeSchema, withdrawDisputeSchema } from './dto.js';
+import { uuidOr404 } from '../uuid-param.js';
 
 /**
  * What a customer can do about a transaction they say is wrong.
@@ -38,7 +39,7 @@ export class DisputeController {
   @HttpCode(200)
   async withdraw(
     @Req() request: AuthenticatedRequest,
-    @Param('id') id: string,
+    @Param('id', uuidOr404('dispute_not_found')) id: string,
     @Body() body: unknown,
   ): Promise<DisputeView> {
     const parsed = withdrawDisputeSchema.safeParse(body);
@@ -69,7 +70,7 @@ export class AdminDisputeController {
   @HttpCode(200)
   async resolve(
     @Req() request: AuthenticatedRequest,
-    @Param('id') id: string,
+    @Param('id', uuidOr404('dispute_not_found')) id: string,
     @Body() body: unknown,
   ): Promise<DisputeView> {
     const parsed = resolveDisputeSchema.safeParse(body);

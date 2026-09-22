@@ -13,6 +13,7 @@ import type { AuthenticatedRequest } from '../auth/auth.guard.js';
 import { GiftCardService } from './giftcard.service.js';
 import type { GiftCardView, QuoteView } from './giftcard.service.js';
 import { clawbackSchema, quoteSchema, reviewSchema, submitGiftCardSchema } from './dto.js';
+import { uuidOr404 } from '../uuid-param.js';
 
 /**
  * What a customer can do: ask a price, sell a card, see their own submissions.
@@ -86,7 +87,7 @@ export class GiftCardReviewController {
   @HttpCode(200)
   async reveal(
     @Req() request: AuthenticatedRequest,
-    @Param('id') id: string,
+    @Param('id', uuidOr404('submission_not_found')) id: string,
   ): Promise<{ card_code: string }> {
     return this.giftcards.revealCard(id, claimsOf(request).sub);
   }
@@ -102,7 +103,7 @@ export class GiftCardReviewController {
   @HttpCode(200)
   async review(
     @Req() request: AuthenticatedRequest,
-    @Param('id') id: string,
+    @Param('id', uuidOr404('submission_not_found')) id: string,
     @Body() body: unknown,
   ): Promise<GiftCardView> {
     const parsed = reviewSchema.safeParse(body);
@@ -127,7 +128,7 @@ export class GiftCardReviewController {
   @HttpCode(200)
   async clawback(
     @Req() request: AuthenticatedRequest,
-    @Param('id') id: string,
+    @Param('id', uuidOr404('submission_not_found')) id: string,
     @Body() body: unknown,
   ): Promise<GiftCardView> {
     const parsed = clawbackSchema.safeParse(body);
