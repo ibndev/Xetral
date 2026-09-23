@@ -415,6 +415,17 @@ describe('sending', () => {
     expect(failed.failureReason).toBe('wrong number');
   });
 
+  it('carries the reference THEY recorded, which is what ties an unsigned event to our payout', async () => {
+    const { client } = stub([
+      { status: 'success', data: { id: 7, status: 'SUCCESSFUL', reference: 'xetpay-out-7' } },
+      { status: 'success', data: { id: 8, status: 'NEW' } },
+    ]);
+    const adapter = new FlutterwavePayoutAdapter(client);
+    expect((await adapter.status('7')).reference).toBe('xetpay-out-7');
+    // Absent, not invented: a receipt with no echo matches no payout.
+    expect((await adapter.status('8')).reference).toBeUndefined();
+  });
+
   it('treats a state it does not recognise as still in flight, never as failed', async () => {
     /*
      * THE ASYMMETRY IS THE POINT. Reading an unknown word as failed reverses a

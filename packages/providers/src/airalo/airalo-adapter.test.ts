@@ -80,6 +80,12 @@ describe('USD amounts never pass through a float multiply', () => {
   it('rejects an amount with more precision than a cent', () => {
     expect(() => usdToCents('1.005')).toThrow();
   });
+
+  it('holds a JSON number to the same rule rather than rounding it', () => {
+    expect(() => usdToCents(1.005)).toThrow();
+    expect(usdToCents(18)).toBe(1800n);
+    expect(usdToCents(0.07)).toBe(7n);
+  });
 });
 
 describe('the eSIM activation payload is the product', () => {

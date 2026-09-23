@@ -12,7 +12,11 @@ import {
 import type { Pool } from 'pg';
 import { InsufficientFundsError, LedgerService, posting } from '@xetral/ledger';
 import type { PostingIntent } from '@xetral/ledger';
-import { convertWithSpread, displayRate, ProviderTimeoutError } from '@xetral/providers';
+import {
+  convertWithSpread,
+  displayRate,
+  providerDidNothing,
+} from '@xetral/providers';
 import type { CoverPricing, FxPort, FxRate } from '@xetral/providers';
 import { exponentOf, fromMajor, isCurrency, money, toMajor,
   widenedSpread,
@@ -65,6 +69,22 @@ export interface DollarTotal {
   /** Balances this platform has no published dollar price for — named on
    *  screen rather than counted at a guess. */
   readonly excluded: readonly string[];
+  /**
+   * What each counted balance contributes, in dollars — the same figure the
+   * total is the sum of, so a screen that shows one asset's value (the crypto
+   * portfolio) cannot disagree with the headline. Excluded balances have no
+   * line: an unpriced balance is named, never valued at a guess.
+   */
+  readonly lines: readonly DollarLine[];
+}
+
+export interface DollarLine {
+  readonly currency: string;
+  /** The balance itself, major units, in its own currency. */
+  readonly held: string;
+  /** Its dollar value, major and minor. */
+  readonly amount: string;
+  readonly amount_minor: string;
 }
 
 export interface FxTradeView {
@@ -155,12 +175,22 @@ export class FxService {
     let cents = 0n;
     const included: string[] = [];
     const excluded: string[] = [];
+    const lines: DollarLine[] = [];
+    const line = (from: Currency, heldMinor: bigint, dollars: bigint): void => {
+      lines.push({
+        currency: from,
+        held: toMajor(money(heldMinor, from)),
+        amount: toMajor(money(dollars, 'USD')),
+        amount_minor: dollars.toString(),
+      });
+    };
 
     for (const balance of held) {
       if (balance.spendableMinor <= 0n) continue;
       if (balance.currency === 'USD') {
         cents += balance.spendableMinor;
         included.push('USD');
+        line('USD', balance.spendableMinor, balance.spendableMinor);
         continue;
       }
       if (!isCurrency(balance.currency)) {
@@ -174,6 +204,7 @@ export class FxService {
       } else {
         cents += priced;
         included.push(from);
+        line(from, balance.spendableMinor, priced);
       }
     }
 
@@ -183,6 +214,7 @@ export class FxService {
       amount_minor: cents.toString(),
       included,
       excluded,
+      lines,
     };
   }
 
@@ -415,8 +447,10 @@ export class FxService {
     try {
       execution = await this.port.convert(from, to, amount, reference);
     } catch (error) {
-      if (error instanceof ProviderTimeoutError) {
-        // We do not know whether the swap happened. Posting would risk
+      if (!providerDidNothing(error)) {
+        // We do not know whether the swap happened — a 5xx or a reset leaves
+        // that as open as a timeout does, and calling it `fx_failed` invited
+        // a retry under a NEW key that the provider could not tie to this one. Posting would risk
         // crediting a customer twice on retry; not posting risks a swap we
         // paid for and did not pass on. The trade is NOT recorded, and the
         // provider's own reference — derived from ours — makes a retry

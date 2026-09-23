@@ -2577,6 +2577,61 @@ Schema: `packages/ledger/sql/078_card_funding_cascade.sql`. Planner in
   trade that executed (with its own rate) and the top-up entry. Attributing a
   single card SPEND to wallets would need the issuer to fund at authorization.
 
+### What a provider's failure means, and a key that is not ours — non-obvious rules
+
+`providerDidNothing()` in `packages/providers/src/ports/errors.ts`,
+`LedgerService.replayCarries()`, applied on every money-out path.
+
+- **ONLY A DEFINITE ANSWER GIVES MONEY BACK.** A refusal
+  (`ProviderRejectedError`) or a request that never left (`ProviderNotSentError`:
+  no credential, connection refused, no such host). Everything else — a 5xx,
+  a reset, an unreadable reply, a timeout, our own bug — leaves the money held.
+  Payouts, crypto withdrawals and purchases had "timeout holds, everything else
+  refunds", so a gateway 502 after the transfer was made refunded the customer
+  for money that had left. Every path asks the one predicate, so a new failure
+  class lands on the safe side by default.
+- **`ProviderNotSentError` IS A SUBCLASS OF UNAVAILABLE**, so health recording
+  and read retries still see it. `neverConnected()` names only the codes that
+  mean no socket was established; a reset is NOT one of them.
+- **A PAYOUT WITH NO PROVIDER ID IS UNKNOWN, NOT UNSENT.** The sweep used to
+  reverse it — undoing, one grace period later, the hold `send()` had just
+  chosen after a timeout. It escalates to `/admin/recovery` now. The rail's own
+  `transfer.*` event resolves it: its transfer id is only used to ASK, and the
+  answer counts only if the transfer Flutterwave describes carries OUR
+  reference (`PayoutReceipt.reference`, read off their response).
+- **A REFUSED CARD TOP-UP IS REVERSED**, because the entry moves wallet → card
+  before Bitnob is asked; the customer was debited for a card holding nothing.
+  A REPLAYED top-up is never reversed — the refusal may be Bitnob declining a
+  duplicate of one that landed — and a retry of a reversed attempt is refused.
+- **A LEDGER REPLAY COMPARES NOTHING, so a key a CUSTOMER chose is checked.**
+  `transfer:<key>`, `card-fund:<key>` and `card-issue-fee:<key>` are the
+  customer's string with no customer in it: another customer sending it, or the
+  same one resending it for a different amount, got somebody else's entry back
+  as a success while nothing moved — and a top-up resent for more reached
+  Bitnob with the new amount. `replayCarries()` checks the leg the request
+  meant to write; a mismatch is `idempotency_key_reused`. Amounts a setting
+  decides (a fee) are matched on owner only, so a retry across a fee change
+  still replays.
+
+### The crypto portfolio, and the client's copy of the exponents — non-obvious rules
+
+`packages/client/src/portfolio.ts`, `/v1/wallets/total`'s `lines`.
+
+- **THE DOLLAR FIGURES ARE THE TOTAL'S OWN LINES**, the same arithmetic as the
+  home headline, so the two cannot disagree about one coin. An asset with no
+  published dollar price is named and shows "No price yet", never a guess.
+- **THE COMP'S "+4.2% today" IS NOT DRAWN.** A move needs yesterday's price and
+  `fx_published_rates` keeps only the price in force.
+- **Buy and Sell open Convert on a pair** (`convertPreset`), home currency ↔
+  USDT or the largest priced holding. A query string is ignored unless both
+  codes are in `TRANSFER_CURRENCIES` and differ.
+- **THE CLIENT'S `EXPONENTS` HAD NO USDC OR CAD**, so `formatMinor` drew a
+  2.5 USDC holding as 25,000.00 USDC and the keypad refused USDC's third
+  decimal. `money-registry.test.ts` reads the server registry and fails on any
+  currency missing or different.
+- **A holding is written as a quantity** — `formatQuantity`, "15 USDT",
+  trailing zeros dropped and nothing else — where a price uses `formatAmount`.
+
 ### Metrics — non-obvious rules
 
 `apps/api/src/observability/metrics.{service,controller}.ts`, at `GET /metrics`.

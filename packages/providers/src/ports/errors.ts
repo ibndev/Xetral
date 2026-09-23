@@ -29,6 +29,39 @@ export class ProviderUnavailableError extends ProviderError {
 }
 
 /**
+ * THE REQUEST NEVER LEFT: no credential to send it with, or a connection that
+ * was refused before a byte of the body went out. Unlike its parent this is a
+ * statement about what the PROVIDER did — nothing — and it is the only kind
+ * of "unavailable" after which a money-moving caller may give the money back.
+ *
+ * WHY IT IS A SUBCLASS. `ProviderUnavailableError` also covers a 5xx and a
+ * connection that dropped after the request was written, and after either of
+ * those a transfer may well have been made. A payout that reversed on the
+ * parent refunded the customer for money that could already be in the
+ * beneficiary's account. Everything that treats both alike — health
+ * recording, retries on a read — still sees an `instanceof` match.
+ */
+export class ProviderNotSentError extends ProviderUnavailableError {}
+
+/**
+ * Did a failed `fetch` fail BEFORE the request was written? True only for the
+ * connection-level codes that mean no socket was ever established — refused,
+ * no such host, a DNS lookup that did not answer. A reset, a hang-up or an
+ * unrecognised failure is NOT one of them: those can happen after the body
+ * went out, so they stay ambiguous, which is the safe direction.
+ */
+export function neverConnected(cause: unknown): boolean {
+  const codes = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'UND_ERR_CONNECT_TIMEOUT']);
+  let current: unknown = cause;
+  for (let depth = 0; depth < 4 && current !== null && typeof current === 'object'; depth += 1) {
+    const code = (current as { code?: unknown }).code;
+    if (typeof code === 'string' && codes.has(code)) return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+/**
  * The provider understood the request and refused it: insufficient float, a
  * frozen card, a rejected KYC. Retrying sends the same refusal back.
  */
@@ -91,4 +124,20 @@ export class ProviderPendingError extends ProviderError {
  */
 export class ProviderContractError extends ProviderError {
   readonly retryable = false;
+}
+
+/**
+ * DID THE PROVIDER CERTAINLY DO NOTHING? The one question a money-moving
+ * caller must answer before giving money back.
+ *
+ * True for a refusal (they understood and said no) and for a request that
+ * never left. False for EVERYTHING else — a timeout, a 5xx, a reset, a reply
+ * we could not parse, a fault on our side of the port — because after each
+ * of those the transfer, the broadcast or the purchase may have happened.
+ * Every money path asks this one function rather than listing error classes,
+ * so a new class of failure lands on the safe side by default: held and
+ * reconciled, never refunded on a guess.
+ */
+export function providerDidNothing(error: unknown): boolean {
+  return error instanceof ProviderRejectedError || error instanceof ProviderNotSentError;
 }

@@ -312,6 +312,40 @@ describe('transfers', () => {
     expect((await balancesOf(bob))[0]?.spendable).toBe('1000.00');
   });
 
+  it('refuses a key already used for a DIFFERENT transfer, rather than calling it a replay', async () => {
+    /*
+     * The ledger answers a used key with whatever entry holds it. Keyed on the
+     * customer's string alone, Carol sending the key Alice used got Alice's
+     * entry back as "replayed" — a 200, and not a kobo of Carol's moved. The
+     * same held for Alice resending her own key to somebody else.
+     */
+    const alice = await onboard();
+    const bob = await onboard();
+    const carol = await onboard();
+    await fund(alice.userId, 10_000_00);
+    await fund(carol.userId, 10_000_00);
+    const key = randomUUID();
+
+    await transfer(alice, {
+      recipient: bob.identifier, amount: '1000.00', currency: 'NGN', transaction_pin: PIN, idempotency_key: key,
+    }).then((r) => expect(r.status).toBe(200));
+
+    const stranger = await transfer(carol, {
+      recipient: bob.identifier, amount: '1000.00', currency: 'NGN', transaction_pin: PIN, idempotency_key: key,
+    });
+    expect(stranger.status).toBe(409);
+    expect(stranger.body.error).toBe('idempotency_key_reused');
+
+    const bigger = await transfer(alice, {
+      recipient: bob.identifier, amount: '2000.00', currency: 'NGN', transaction_pin: PIN, idempotency_key: key,
+    });
+    expect(bigger.status).toBe(409);
+
+    expect((await balancesOf(alice))[0]?.spendable).toBe('9000.00');
+    expect((await balancesOf(carol))[0]?.spendable).toBe('10000.00');
+    expect((await balancesOf(bob))[0]?.spendable).toBe('1000.00');
+  });
+
   it('charges a fee when one is configured', async () => {
     // The fee comes from `platform_settings`, not from the environment. That
     // is what lets an operator change it without a deploy, and it means this

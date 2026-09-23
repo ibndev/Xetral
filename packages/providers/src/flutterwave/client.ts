@@ -3,6 +3,8 @@ import {
   ProviderRejectedError,
   ProviderTimeoutError,
   ProviderUnavailableError,
+  ProviderNotSentError,
+  neverConnected,
 } from '../ports/errors.js';
 
 const PROVIDER = 'flutterwave';
@@ -225,7 +227,7 @@ export class FlutterwaveClient {
     const secretKey =
       typeof this.#secretKey === 'string' ? this.#secretKey : await this.#secretKey();
     if (secretKey === undefined || secretKey === '') {
-      throw new ProviderUnavailableError(
+      throw new ProviderNotSentError(
         PROVIDER,
         'no Flutterwave secret key is configured. Paste one on the Provider ' +
           'keys screen, or set FLUTTERWAVE_SECRET_KEY.',
@@ -262,6 +264,12 @@ export class FlutterwaveClient {
             `was applied is unknown, so reconcile rather than retry`,
           cause,
         );
+      }
+      // Refused or unresolvable before a byte went out is NOT SENT; a reset or
+      // anything unrecognised may have landed after the body was written, so
+      // it stays merely unavailable — the caller must not assume nothing happened.
+      if (neverConnected(cause)) {
+        throw new ProviderNotSentError(PROVIDER, `${method} ${path} could not connect`, cause);
       }
       throw new ProviderUnavailableError(PROVIDER, `${method} ${path} failed`, cause);
     } finally {

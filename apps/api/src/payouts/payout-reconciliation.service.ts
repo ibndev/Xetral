@@ -201,30 +201,34 @@ export class PayoutReconciliationService implements OnApplicationShutdown {
 
   async #resolve(row: HeldPayout): Promise<'settled' | 'reversed' | 'pending'> {
     /*
-     * NO PAYOUT ID MEANS NO PAYOUT, and this is the branch that gives the
-     * customer their money back.
+     * NO PAYOUT ID MEANS WE DO NOT KNOW — IT DOES NOT MEAN NO PAYOUT.
      *
-     * `send()` returns the provider's id for the transfer. Without one, the
-     * call that MOVES MONEY either never happened or never answered — and a
-     * payout is quote → initialize → finalize, with only the last moving
-     * anything, which is why those ids are separate columns rather than one
-     * "provider reference": collapsed, they could not say which call a dying
-     * process got through, and that is the only question that matters here.
+     * This branch used to reverse, on the reasoning that without the id the
+     * money-moving call "either never happened or never answered". The
+     * second half is the trouble: a send that TIMED OUT, or came back as a
+     * 502, records no id and may well have paid the beneficiary — and
+     * `send()` itself leaves such a row reserved precisely because reversing
+     * it would refund money that has left. So the sweep was undoing, one
+     * grace period later, the decision the send path had just made, and a
+     * transfer that arrived was also refunded to the customer.
      *
-     * A quote id without a payout id is the same answer: quoted, possibly
-     * initialized, never finalized.
+     * A definite refusal never reaches here — `send()` reversed it on the
+     * spot — so a held row with no id is always an unknown. There is nothing
+     * to ask the rail by (a payout id is the only handle `status()` takes),
+     * and the rail's own event resolves it when it lands. What remains is a
+     * person on `/admin/recovery`, who can ask the provider by our reference
+     * and give the money back with a reason: the rule a purchase held too
+     * long already follows, because by now both automated answers can be
+     * the wrong one.
      */
     if (row.provider_payout_id === null) {
-      await this.payouts.fail(
+      this.#escalate(
         row,
-        'the provider never returned a payout id, so nothing was ever sent',
+        (Date.now() - row.created_at.getTime()) / 1000,
+        'the send did not return a payout id, so whether money left is unknown; ' +
+          'confirm with the provider by reference before reversing',
       );
-      this.#logger.warn(
-        `payout ${row.reference} reversed: no provider payout id after ` +
-          `${Math.round((Date.now() - row.created_at.getTime()) / 60000)} minutes, so the ` +
-          `transfer was never finalised and the money is back in the customer's wallet`,
-      );
-      return 'reversed';
+      return 'pending';
     }
 
     let receipt;

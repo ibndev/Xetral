@@ -327,9 +327,18 @@ export class AiraloAdapter implements FulfilmentPort {
   }
 }
 
-/** USD to cents without a float multiply. "4.5" and 4.5 both become 450n. */
+/**
+ * USD to cents without a float multiply. "4.5" and 4.5 both become 450n.
+ *
+ * A JSON NUMBER IS HELD TO THE STRING'S RULE. It went through `toFixed(2)`,
+ * which ROUNDS — so a price of 1.005 arriving as a number became 100 cents
+ * while the same price as a string was refused for carrying sub-cent
+ * precision. `String()` gives the shortest decimal that round-trips the
+ * parsed value, so a sub-cent price is refused either way and never priced
+ * at whatever the binary representation happened to round to.
+ */
 export function usdToCents(value: string | number): bigint {
-  const text = typeof value === 'number' ? value.toFixed(2) : value.trim();
+  const text = typeof value === 'number' ? String(value) : value.trim();
   const match = /^(-)?(\d+)(?:\.(\d{1,2}))?$/.exec(text);
   if (match === null) {
     throw new ProviderContractError(PROVIDER, `not a USD amount: '${String(value)}'`);

@@ -8,7 +8,12 @@ import pg from 'pg';
 import type { Pool } from 'pg';
 import { hashPassword } from '@xetral/identity';
 import { LedgerService, posting } from '@xetral/ledger';
-import { ProviderRejectedError, ProviderTimeoutError } from '@xetral/providers';
+import {
+  ProviderNotSentError,
+  ProviderRejectedError,
+  ProviderTimeoutError,
+  ProviderUnavailableError,
+} from '@xetral/providers';
 import type {
   BeneficiaryLookup,
   PayoutBank,
@@ -20,6 +25,7 @@ import { money, toMajor } from '@xetral/shared';
 import type { Currency } from '@xetral/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { PayoutReconciliationService } from './payout-reconciliation.service.js';
+import { PayoutService } from './payout.service.js';
 import { AppModule } from '../app.module.js';
 import type { ApiConfig } from '../config.js';
 import { systemClock } from '../tokens.js';
@@ -629,6 +635,39 @@ describe('when the provider does not answer', () => {
   });
 });
 
+describe('an answer that is not an answer', () => {
+  /*
+   * A 5xx IS NOT A REFUSAL. This branch used to reverse on everything but a
+   * timeout, so a gateway's 502 in front of the rail — after which the
+   * transfer may well have been made — refunded the customer for money that
+   * had left. Held, like a timeout.
+   */
+  it('a 5xx settles nothing and reverses nothing', async () => {
+    const customer = await onboard();
+    await fund(customer.userId, 1_000_000n);
+    port.sendAnswer = new ProviderUnavailableError('bitnob', 'POST /transfers returned 502');
+
+    const res = await pay(customer).expect(200);
+    expect(res.body.status).toBe('reserved');
+    const balance = await nairaBalance(customer);
+    expect(balance.spendable).toBe('5000.00');
+    expect(balance.pending).toBe('5000.00');
+  });
+
+  it('a request that NEVER LEFT gives the money straight back', async () => {
+    // No credential, or a refused connection: nothing reached the rail, so
+    // there is nothing to double up on and no reason to hold anybody's money.
+    const customer = await onboard();
+    await fund(customer.userId, 1_000_000n);
+    port.sendAnswer = new ProviderNotSentError('bitnob', 'no Bitnob client id is configured');
+
+    await pay(customer).expect(422);
+    const balance = await nairaBalance(customer);
+    expect(balance.spendable).toBe('10000.00');
+    expect(balance.pending).toBe('0.00');
+  });
+});
+
 describe('the sweep that gives held money back', () => {
   /*
    * THE FAILURE THIS SUITE EXISTS FOR, reported by a customer sending money to
@@ -642,26 +681,51 @@ describe('the sweep that gives held money back', () => {
    * state in practice: the books balanced, drift reported nothing, and the
    * only thing that could see it was a view that COUNTS.
    */
-  it('REVERSES A PAYOUT THE PROVIDER NEVER GAVE AN ID FOR', async () => {
+  it('HOLDS A PAYOUT WHOSE SEND NEVER ANSWERED, rather than refunding it', async () => {
+    /*
+     * IT USED TO REVERSE THIS, on the ground that no payout id meant nothing
+     * was sent. A timed-out send records no id AND may have paid the
+     * beneficiary — which is why `send()` leaves it held — so the sweep was
+     * undoing that decision one grace period later and paying twice. With no
+     * id there is nothing to ask the rail by: the rail's own event or a
+     * person on /admin/recovery resolves it.
+     */
     const customer = await onboard();
     await fund(customer.userId, 1_000_000n);
     port.sendAnswer = new ProviderTimeoutError('bitnob', 'no answer');
 
     await pay(customer).expect(200);
-    expect((await nairaBalance(customer)).pending).toBe('5000.00');
-
-    /*
-     * NO PAYOUT ID MEANS NO PAYOUT, and that is what makes this reversal safe
-     * rather than a guess. A payout is quote → initialize → finalize and only
-     * the last moves money; without an id from `send()`, the call that could
-     * have paid somebody either never ran or never answered, so there is
-     * nothing at the provider to double up on.
-     */
     const report = await app.get(PayoutReconciliationService).sweep();
-    expect(report.reversed).toBeGreaterThanOrEqual(1);
+    expect(report.stillPending).toBeGreaterThanOrEqual(1);
 
     const after = await nairaBalance(customer);
-    expect(after.spendable).toBe('10000.00');
+    expect(after.spendable).toBe('5000.00');
+    expect(after.pending).toBe('5000.00');
+  });
+
+  it('SETTLES IT FROM THE RAIL’S EVENT, but only on the RAIL’S word for which payout it is', async () => {
+    const customer = await onboard();
+    await fund(customer.userId, 1_000_000n);
+    port.sendAnswer = new ProviderTimeoutError('bitnob', 'no answer');
+    await pay(customer).expect(200);
+
+    const held = await pool.query<{ reference: string }>(
+      `SELECT reference FROM bank_payouts WHERE user_id = $1::bigint AND status = 'reserved'`,
+      [customer.userId],
+    );
+    const reference = held.rows[0]!.reference;
+    const payouts = app.get(PayoutService);
+
+    // An event naming a transfer the rail says is somebody else's settles nothing.
+    port.statusAnswer = { providerPayoutId: 'tx_other', state: 'completed', reference: 'not-ours' };
+    expect(await payouts.resolveByReference(reference, 'tx_other')).toBe('held');
+    expect((await nairaBalance(customer)).pending).toBe('5000.00');
+
+    // One the rail confirms is ours is settled: spent, not returned.
+    port.statusAnswer = { providerPayoutId: 'tx_ours', state: 'completed', reference };
+    expect(await payouts.resolveByReference(reference, 'tx_ours')).toBe('resolved');
+    const after = await nairaBalance(customer);
+    expect(after.spendable).toBe('5000.00');
     expect(after.pending).toBe('0.00');
   });
 

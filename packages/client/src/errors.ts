@@ -336,6 +336,10 @@ const API_ERROR_CODES = [
   'card_frozen',
   'card_not_found',
   'card_terminated',
+  /* The issuer refused a top-up; the money is back in the wallet. */
+  'card_funding_failed',
+  /* A retry key already used for a DIFFERENT request. */
+  'idempotency_key_reused',
   'card_provider_not_configured',
 
   /* funding */

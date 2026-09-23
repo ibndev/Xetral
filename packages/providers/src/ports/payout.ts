@@ -158,6 +158,14 @@ export interface PayoutReceipt {
   readonly providerPayoutId: string;
   readonly state: 'sent' | 'completed' | 'failed';
   readonly failureReason?: string | undefined;
+  /**
+   * OUR reference, as the RAIL recorded it — read off their response, never
+   * off a webhook body. It is what lets an unsigned event that names a
+   * transfer id be checked against the payout it claims to be about: the id
+   * comes from the doorbell, the reference from the provider's own answer,
+   * and a mismatch settles nothing. Absent where a rail does not return one.
+   */
+  readonly reference?: string | undefined;
 }
 
 /**

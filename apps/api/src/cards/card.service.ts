@@ -16,9 +16,8 @@ import type { AccountRef, WrittenEntry } from '@xetral/ledger';
 import {
   cascadeOrder,
   planCover,
-  ProviderRejectedError,
   ProviderTimeoutError,
-  ProviderUnavailableError,
+  providerDidNothing,
 } from '@xetral/providers';
 import type { CardPort, CoverPlan, CoverSource, VirtualCard } from '@xetral/providers';
 import { fromMajor, isCurrency, subtract, toMajor } from '@xetral/shared';
@@ -622,13 +621,75 @@ export class CardService {
     // nothing should be sent to Bitnob at all. The provider call is what might
     // then fail, and a funded card account with no provider top-up is
     // recoverable by reconciliation; the reverse is money out the door.
-    await this.#postCardFunding(userId, amount, `card-fund:${idempotencyKey}`, row.uuid, description);
-
-    const outcome = await this.cards.fund({
-      providerCardId: row.provider_card_id,
+    const funded = await this.#postCardFunding(
+      userId,
       amount,
-      idempotencyKey,
-    });
+      `card-fund:${idempotencyKey}`,
+      row.uuid,
+      description,
+    );
+
+    /*
+     * A RETRY OF AN ATTEMPT ALREADY GIVEN BACK IS REFUSED, and this is what
+     * makes the reversal below safe. The ledger answers a replay with the
+     * original entry and debits nothing; if that entry was reversed because
+     * Bitnob refused it, asking Bitnob again would put dollars on the card
+     * that the wallet no longer paid for.
+     */
+    if (funded.replayed) {
+      // The key is the customer's. A replay that is not THIS top-up — another
+      // customer's key, or this one resent with a different amount — must not
+      // reach Bitnob, which would load the new amount against a debit that
+      // was only ever the old one.
+      if (!(await this.ledger.replayCarries(funded.entryId, cardAccount(userId), amount.amount))) {
+        throw new ConflictException({ error: 'idempotency_key_reused' });
+      }
+      if (await this.#reversed(funded.entryId)) {
+        throw new UnprocessableEntityException({ error: 'card_funding_failed' });
+      }
+    }
+
+    let outcome;
+    try {
+      outcome = await this.cards.fund({
+        providerCardId: row.provider_card_id,
+        amount,
+        idempotencyKey,
+      });
+    } catch (error) {
+      /*
+       * A DEFINITE REFUSAL GIVES THE MONEY BACK. The entry above had already
+       * moved it wallet -> card, and nothing moved it back: the customer's
+       * wallet was debited and the card at Bitnob held nothing, so every
+       * spend against it declined — and four declines in a row terminate a
+       * Bitnob card. Anything short of a definite answer is left alone:
+       * after a timeout or a 5xx the top-up may have landed, and balance
+       * reconciliation is what compares the two.
+       */
+      /*
+       * ONLY WHEN THIS REQUEST WROTE THE ENTRY. On a replay the first attempt
+       * may well have loaded the card, and a refusal now can be the issuer
+       * declining a DUPLICATE — reversing then would refund a top-up that is
+       * on the card. That case is left for reconciliation.
+       */
+      if (providerDidNothing(error) && !funded.replayed) {
+        await this.ledger.post({
+          idempotencyKey: `card-fund-reversal:${idempotencyKey}`,
+          kind: 'reversal',
+          reversesEntryId: funded.entryId,
+          occurredAt: new Date(),
+          description: 'Card top-up returned — the card issuer refused it',
+          metadata: { card_id: row.uuid },
+          postings: [
+            posting(cardAccount(userId), negate(amount)),
+            posting(walletAccount(userId), amount),
+          ],
+        });
+        this.#logger.warn(`card ${row.uuid} top-up refused by the issuer and returned: ${String(error)}`);
+        throw new UnprocessableEntityException({ error: 'card_funding_failed' });
+      }
+      throw error;
+    }
 
     if (outcome.state === 'pending') {
       // Not a failure — Bitnob answers immediately and settles later. Recorded
@@ -1038,8 +1099,9 @@ export class CardService {
       });
     };
 
+    let charged;
     try {
-      await this.ledger.post(
+      charged = await this.ledger.post(
         {
           idempotencyKey: `card-issue-fee:${idempotencyKey}`,
           kind: 'card_creation',
@@ -1075,6 +1137,16 @@ export class CardService {
       throw error;
     }
 
+    // A replay must be THIS customer's fee. The key is theirs, and another
+    // customer's string would otherwise issue a card whose price somebody
+    // else paid.
+    if (
+      charged.replayed &&
+      !(await this.ledger.replayCarries(charged.entryId, walletAccount(userId), undefined))
+    ) {
+      throw new ConflictException({ error: 'idempotency_key_reused' });
+    }
+
     return split.gross;
   }
 
@@ -1106,9 +1178,11 @@ export class CardService {
       );
       return;
     }
-    if (!(cause instanceof ProviderRejectedError) && !(cause instanceof ProviderUnavailableError)) {
-      // Anything else is a fault on our side of the port, and we cannot say
-      // whether a card was created either. Same treatment as a timeout.
+    if (!providerDidNothing(cause)) {
+      // A 5xx, a reset or a fault on our side of the port: we cannot say
+      // whether a card was created, so the fee stays until a person looks.
+      // `ProviderUnavailableError` used to refund here, and a gateway 502
+      // after the issuer had made the card is exactly that case.
       this.#logger.error(
         `card issuance failed after the fee was charged (key ${idempotencyKey}); ` +
           `the fee is NOT reversed and needs a person.`,
@@ -1171,6 +1245,15 @@ export class CardService {
     });
   }
 
+  /** Has this entry been reversed? Read from the ledger, never remembered. */
+  async #reversed(entryId: string): Promise<boolean> {
+    const found = await this.pool.query(
+      `SELECT 1 FROM journal_entries WHERE reverses_id = $1::bigint AND kind = 'reversal' LIMIT 1`,
+      [entryId],
+    );
+    return found.rows.length > 0;
+  }
+
   async #postCardFunding(
     userId: string,
     amount: Money<'USD'>,
@@ -1183,9 +1266,9 @@ export class CardService {
      * naira balance is where the customer will look for the money that left.
      */
     description = 'Card top-up',
-  ): Promise<void> {
+  ): Promise<{ entryId: string; replayed: boolean }> {
     try {
-      await this.ledger.post({
+      return await this.ledger.post({
         idempotencyKey,
         kind: 'card_funding',
         occurredAt: new Date(),

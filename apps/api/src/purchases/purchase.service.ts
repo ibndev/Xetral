@@ -12,7 +12,10 @@ import {
 } from '@nestjs/common';
 import type { Pool } from 'pg';
 import { InsufficientFundsError, LedgerService, posting } from '@xetral/ledger';
-import { ProviderTimeoutError, supportsVerification } from '@xetral/providers';
+import {
+  supportsVerification,
+  providerDidNothing,
+} from '@xetral/providers';
 import type {
   CatalogueItem,
   FulfilmentPort,
@@ -166,13 +169,14 @@ export class PurchaseService {
         initiatedAt: reserve.initiatedAt,
       });
     } catch (error) {
-      if (error instanceof ProviderTimeoutError) {
-        // We do NOT know whether the provider acted, so the money stays
+      if (!providerDidNothing(error)) {
+        // We do NOT know whether the provider acted — a timeout, a 5xx, a
+        // reset or an unreadable reply all leave it open — so the money stays
         // reserved and `pending_purchases` picks it up. Reversing here would
         // refund a purchase that may have been delivered; retrying would buy
         // it twice.
         this.#logger.warn(
-          `purchase ${reference} timed out at ${port.provider}; left reserved for reconciliation`,
+          `purchase ${reference}: outcome unknown at ${port.provider} (${describe(error)}); left reserved for reconciliation`,
         );
         return this.#toView(await this.#reload(reserve.purchaseId));
       }

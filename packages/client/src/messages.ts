@@ -425,6 +425,10 @@ function sentenceFor(error: ApiError): string {
       return 'We could not find that card.';
     case 'card_terminated':
       return 'This card has been closed and cannot be used again.';
+    case 'card_funding_failed':
+      return 'The card could not be topped up. Your money is back in your wallet.';
+    case 'idempotency_key_reused':
+      return 'That request was already made with different details. Start again.';
     case 'card_provider_not_configured':
       return 'Cards are not available yet.';
     case 'too_many_reveals':

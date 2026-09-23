@@ -10,7 +10,7 @@ import {
 } from '@nestjs/common';
 import type { Pool, PoolClient } from 'pg';
 import { InsufficientFundsError, LedgerService, posting } from '@xetral/ledger';
-import { ProviderError, ProviderRejectedError, ProviderTimeoutError } from '@xetral/providers';
+import { ProviderError, ProviderRejectedError, providerDidNothing } from '@xetral/providers';
 import type { PayoutBank, PayoutBranch, PayoutPort, PayoutReceipt } from '@xetral/providers';
 import { applyBasisPoints, fromMajor, money, toMajor } from '@xetral/shared';
 import type { Currency, Money } from '@xetral/shared';
@@ -358,23 +358,33 @@ export class PayoutService {
         reference,
       });
     } catch (error) {
-      if (error instanceof ProviderTimeoutError) {
-        /*
-         * WE DO NOT KNOW. Reversing would refund a transfer that may already
-         * be in the beneficiary's account; retrying would send it twice. The
-         * row stays `reserved` and the reconciliation sweep ASKS — the same
-         * rule as a crypto withdrawal, a purchase and an FX swap, and here it
-         * is the one that protects a customer from paying their landlord
-         * twice.
-         */
-        this.#logger.warn(
-          `payout ${reference} timed out; left reserved for reconciliation`,
-        );
-        return toView(await this.#reload(reserved.id));
+      if (providerDidNothing(error)) {
+        // A definite answer: they refused it, or it never left. Nothing moved,
+        // so the customer's money goes back now.
+        await this.fail(reserved, describe(error));
+        return refuseIfFailed(toView(await this.#reload(reserved.id)));
       }
-      // A definite refusal. Nothing left.
-      await this.fail(reserved, describe(error));
-      return refuseIfFailed(toView(await this.#reload(reserved.id)));
+      /*
+       * WE DO NOT KNOW, and that is not only a timeout.
+       *
+       * A 502 from a gateway in front of their API, a connection reset after
+       * the body was written, an answer we could not read, a transfer they
+       * accepted and have not finished — after every one of those the
+       * payment may already be in the beneficiary's account. This branch was
+       * `ProviderTimeoutError` alone and everything else REVERSED, so any of
+       * them refunded the customer for money that had left: the platform
+       * paid twice, on the one flow where money cannot be recalled.
+       *
+       * Reversing would refund a transfer that may have arrived; retrying
+       * would send it twice. The row stays `reserved`, the rail's own event
+       * or the reconciliation sweep resolves it, and one nobody can resolve
+       * is escalated to a person — the same rule as a crypto withdrawal, a
+       * purchase and an FX swap.
+       */
+      this.#logger.warn(
+        `payout ${reference}: outcome unknown (${describe(error)}); left reserved for reconciliation`,
+      );
+      return toView(await this.#reload(reserved.id));
     }
 
     await this.applyReceipt(await this.#reload(reserved.id), receipt);
@@ -813,7 +823,10 @@ export class PayoutService {
    * the ledger, and the copy that drifts is the one that only runs against a
    * webhook nobody is watching — 006's finding 12.
    */
-  async resolveByReference(reference: string): Promise<'resolved' | 'held' | 'unknown'> {
+  async resolveByReference(
+    reference: string,
+    transactionId?: string,
+  ): Promise<'resolved' | 'held' | 'unknown'> {
     const rows = await this.pool.query<PayoutRow>(
       `SELECT * FROM bank_payouts WHERE reference = $1`,
       [reference],
@@ -830,17 +843,42 @@ export class PayoutService {
 
     if (row.provider_payout_id === null) {
       /*
-       * NOTHING TO ASK ABOUT. An event naming a reference we never got a
-       * payout id for cannot be resolved by asking, and it must not be
-       * reversed from here on the strength of an unsigned body. The sweep
-       * owns that case and reverses it on the ground that the call which
-       * moves money never returned an id.
+       * THE CASE THIS EVENT IS MOST OFTEN FOR. A send that timed out, or
+       * came back as a 502, recorded no payout id — and it is exactly the
+       * payout whose outcome only the rail's event will tell us.
+       *
+       * The event's transfer id is a CLAIM: the body is unsigned. So it is
+       * only ever used to ASK, and the answer is accepted only if the
+       * transfer the rail describes carries OUR reference. An id pointing at
+       * some other real transfer settles nothing, because the reference that
+       * decides comes from the provider's response and never from here.
        */
-      this.#logger.warn(
-        `payout ${reference}: a transfer event arrived before we recorded a ` +
-          `provider payout id; leaving it for the reconciliation sweep`,
-      );
-      return 'held';
+      if (transactionId === undefined) {
+        this.#logger.warn(
+          `payout ${reference}: a transfer event arrived with no transfer id and ` +
+            `we recorded none; leaving it held for the sweep and a person`,
+        );
+        return 'held';
+      }
+      let found: PayoutReceipt;
+      try {
+        found = await this.port.status(transactionId, row.provider);
+      } catch (error) {
+        // "No such transfer" is an answer about THEIR id, not about our
+        // payout — the event may be forged or for another integration.
+        if (!(error instanceof ProviderRejectedError)) throw error;
+        this.#logger.warn(`payout ${reference}: transfer ${transactionId} is unknown to the rail; ignored`);
+        return 'held';
+      }
+      if (found.reference !== row.reference) {
+        this.#logger.warn(
+          `payout ${reference}: the event named transfer ${transactionId}, which the ` +
+            `rail says is ${found.reference ?? 'unreferenced'}; ignored`,
+        );
+        return 'held';
+      }
+      await this.applyReceipt(row, found);
+      return 'resolved';
     }
 
     // The rail that ISSUED the id, off the row — never the active one. 046

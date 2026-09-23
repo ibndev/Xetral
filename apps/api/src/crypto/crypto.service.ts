@@ -12,7 +12,11 @@ import {
 } from '@nestjs/common';
 import type { Pool } from 'pg';
 import { InsufficientFundsError, LedgerService, posting } from '@xetral/ledger';
-import { assertValidAddress, InvalidAddressError, ProviderTimeoutError } from '@xetral/providers';
+import {
+  assertValidAddress,
+  InvalidAddressError,
+  providerDidNothing,
+} from '@xetral/providers';
 import type { CryptoNetwork, CryptoPort, WithdrawalReceipt } from '@xetral/providers';
 import { fromMajor, money, toMajor } from '@xetral/shared';
 import type { Currency, Money } from '@xetral/shared';
@@ -275,16 +279,19 @@ export class CryptoService {
         reference,
       });
     } catch (error) {
-      if (error instanceof ProviderTimeoutError) {
-        // We do NOT know whether it was broadcast. Reversing could refund a
-        // transaction that is already on a chain and gone; retrying could send
-        // twice. The row stays reserved and reconciliation asks.
+      if (!providerDidNothing(error)) {
+        // We do NOT know whether it was broadcast — after a timeout, and
+        // equally after a 5xx, a reset or a reply we could not read. This was
+        // a timeout alone, so a 502 from a gateway refunded a withdrawal that
+        // could already be on a chain. Reversing could refund a transaction
+        // that is gone; retrying could send twice. The row stays reserved and
+        // reconciliation asks by our reference.
         this.#logger.warn(
-          `withdrawal ${reference} timed out; left reserved for reconciliation`,
+          `withdrawal ${reference}: outcome unknown (${describe(error)}); left reserved for reconciliation`,
         );
         return toView(await this.#reload(reserved.id));
       }
-      // A definite refusal — nothing was broadcast.
+      // A definite refusal, or a request that never left — nothing was broadcast.
       await this.#fail(reserved, describe(error));
       return toView(await this.#reload(reserved.id));
     }

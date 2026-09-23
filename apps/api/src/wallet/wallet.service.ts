@@ -5,6 +5,7 @@ import {
   Injectable,
   NotFoundException,
   UnprocessableEntityException,
+  ConflictException,
 } from '@nestjs/common';
 import type { Pool, PoolClient } from 'pg';
 import { CASCADE_ORDER } from '@xetral/providers';
@@ -853,6 +854,24 @@ export class WalletService {
       }
       await this.#alertOnVelocityRefusal(sender, error);
       throw error;
+    }
+
+    /*
+     * A REPLAY MUST BE THIS TRANSFER. The key is the customer's, and the
+     * ledger answers a used one with whatever entry holds it: another
+     * customer's string, or this customer's resent to somebody else or for
+     * more, came back as a success while no money moved. The recipient's leg
+     * is checked exactly and the sender's by owner — the fee is a setting and
+     * may have moved between an attempt and its retry.
+     */
+    if (
+      posted.replayed &&
+      !(
+        (await this.ledger.replayCarries(posted.entryId, recipientWallet, amount.amount)) &&
+        (await this.ledger.replayCarries(posted.entryId, senderWallet, undefined))
+      )
+    ) {
+      throw new ConflictException({ error: 'idempotency_key_reused' });
     }
 
     return {

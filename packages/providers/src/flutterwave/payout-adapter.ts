@@ -315,6 +315,8 @@ const transferResponse = z.object({
       /** `NEW`, `PENDING`, `SUCCESSFUL`, `FAILED`. */
       status: z.string().min(1),
       complete_message: z.string().nullish(),
+      /** The reference WE sent, echoed on their transfer object. */
+      reference: z.string().nullish(),
     })
     .optional(),
 });
@@ -998,18 +1000,21 @@ function receiptOf(data: {
   id: number | string;
   status: string;
   complete_message?: string | null | undefined;
+  reference?: string | null | undefined;
 }): PayoutReceipt {
   const state = data.status.trim().toUpperCase();
   const failureReason = data.complete_message ?? undefined;
-  if (state === 'SUCCESSFUL') return { providerPayoutId: String(data.id), state: 'completed' };
+  const echoed = data.reference == null ? {} : { reference: data.reference };
+  if (state === 'SUCCESSFUL') return { providerPayoutId: String(data.id), state: 'completed', ...echoed };
   if (state === 'FAILED') {
     return {
       providerPayoutId: String(data.id),
       state: 'failed',
       ...(failureReason === undefined ? {} : { failureReason }),
+      ...echoed,
     };
   }
-  return { providerPayoutId: String(data.id), state: 'sent' };
+  return { providerPayoutId: String(data.id), state: 'sent', ...echoed };
 }
 
 /**

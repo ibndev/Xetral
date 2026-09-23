@@ -3,6 +3,8 @@ import {
   ProviderRejectedError,
   ProviderTimeoutError,
   ProviderUnavailableError,
+  ProviderNotSentError,
+  neverConnected,
 } from '../ports/errors.js';
 import { signedHeaders } from './signing.js';
 
@@ -242,7 +244,7 @@ export class BitnobClient {
       // Names WHICH is missing, both at once. A deployment upgrading from the
       // v1 bearer key will usually have neither, and being told about one at
       // a time is two incidents.
-      throw new ProviderUnavailableError(
+      throw new ProviderNotSentError(
         'bitnob',
         `no Bitnob ${missing.join(' and no ')} is configured. Paste one on the ` +
           'Provider keys screen, or set BITNOB_CLIENT_ID and BITNOB_CLIENT_SECRET.',
@@ -289,6 +291,12 @@ export class BitnobClient {
             `applied is unknown, so reconcile rather than retry`,
           cause,
         );
+      }
+      // Refused or unresolvable before a byte went out is NOT SENT; a reset or
+      // anything unrecognised may have landed after the body was written, so
+      // it stays merely unavailable — the caller must not assume nothing happened.
+      if (neverConnected(cause)) {
+        throw new ProviderNotSentError(PROVIDER, `${method} ${path} could not connect`, cause);
       }
       throw new ProviderUnavailableError(PROVIDER, `${method} ${path} failed`, cause);
     } finally {

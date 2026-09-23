@@ -315,6 +315,41 @@ export class LedgerService {
    * postings — so this is a read of derived data whose source of truth is the
    * postings themselves, and `ledger_drift` exists to prove the two agree.
    */
+  /**
+   * IS A REPLAYED ENTRY THE SAME REQUEST? Does it carry this exact leg — this
+   * account, this signed amount?
+   *
+   * `post()` answers a used key with whatever entry holds it and compares
+   * nothing, which is right for a webhook (the provider's event id IS the
+   * event) and wrong for a key a CUSTOMER chose. There the key is theirs, not
+   * the platform's: a second customer sending the same string, or the same
+   * customer resending it with a different amount, gets back an entry that
+   * describes somebody else's money — "replayed", a success, and nothing
+   * moved. A caller whose key comes from a request checks the leg it meant
+   * to write before trusting the replay.
+   */
+  async replayCarries(
+    entryId: string,
+    ref: AccountRef,
+    /** Undefined matches any amount — for a leg whose size a setting decides. */
+    amountMinor: bigint | undefined,
+  ): Promise<boolean> {
+    const owner = 'ownerId' in ref ? ref.ownerId : null;
+    const found = await this.pool.query(
+      `SELECT 1
+         FROM postings p
+         JOIN accounts a ON a.id = p.account_id
+        WHERE p.journal_entry_id = $1::bigint
+          AND a.kind = $2::account_kind
+          AND a.currency = $3
+          AND a.owner_id IS NOT DISTINCT FROM $4::bigint
+          AND ($5::bigint IS NULL OR p.amount_minor = $5::bigint)
+        LIMIT 1`,
+      [entryId, ref.kind, ref.currency, owner, amountMinor === undefined ? null : amountMinor.toString()],
+    );
+    return found.rows.length > 0;
+  }
+
   async walletBalances(ownerId: string): Promise<readonly WalletBalance[]> {
     const result = await this.pool.query<{
       currency: string;

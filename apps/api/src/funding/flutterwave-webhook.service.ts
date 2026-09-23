@@ -104,7 +104,7 @@ export class FlutterwaveWebhookService {
      * `unknown`. The second is harmless, so the match is deliberately loose.
      */
     if (event.kind.startsWith('transfer')) {
-      const outcome = await this.payouts.resolveByReference(event.reference);
+      const outcome = await this.payouts.resolveByReference(event.reference, event.transactionId);
       this.#logger.log(`flutterwave transfer ${event.reference}: ${outcome}`);
       return;
     }

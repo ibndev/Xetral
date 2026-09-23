@@ -10,7 +10,7 @@ import { hashPassword } from '@xetral/identity';
 import { LedgerService, posting } from '@xetral/ledger';
 import type { AccountRef } from '@xetral/ledger';
 import { BITNOB_EVENTS } from '@xetral/providers';
-import { convertWithSpread } from '@xetral/providers';
+import { convertWithSpread, ProviderRejectedError } from '@xetral/providers';
 import type {
   FxExecution,
   FxPort,
@@ -594,6 +594,64 @@ describe('funding an existing card', () => {
     // $100 − $2.00 price − $10.00 − $15.00. The price is the term that is new:
     // issuing a card now charges one.
     expect(await balance(wallet(customer.userId))).toBe(7300n);
+  });
+
+  it('GIVES THE MONEY BACK when the issuer refuses the top-up, and refuses a retry of it', async () => {
+    /*
+     * The entry moves wallet -> card BEFORE Bitnob is asked, so the overdraft
+     * guard decides first. A definite refusal then left the money on a card
+     * that held nothing at the issuer: debited from the wallet, unspendable,
+     * and every decline against it one step closer to Bitnob terminating the
+     * card.
+     */
+    const customer = await onboard();
+    await fundWallet(customer.userId, 100_00);
+    const card = await issueCard(customer, '10.00');
+    const walletBefore = await balance(wallet(customer.userId));
+    const key = randomUUID();
+
+    cardPort.failNext = new ProviderRejectedError('bitnob', 'card limit reached', 'LIMIT');
+    const refused = await request(app.getHttpServer())
+      .post(`/v1/cards/${card.id}/fund`)
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send({ amount: '15.00', transaction_pin: PIN, idempotency_key: key })
+      .expect(422);
+    expect(refused.body.error).toBe('card_funding_failed');
+    expect(await balance(wallet(customer.userId))).toBe(walletBefore);
+    expect(await balance(cardAccount(customer.userId))).toBe(1000n);
+
+    // The same attempt again must not reach the issuer: the ledger would
+    // replay the original debit, which has already been handed back.
+    const calls = cardPort.calls.length;
+    await request(app.getHttpServer())
+      .post(`/v1/cards/${card.id}/fund`)
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send({ amount: '15.00', transaction_pin: PIN, idempotency_key: key })
+      .expect(422);
+    expect(cardPort.calls.slice(calls)).not.toContain('fund');
+    expect(await balance(wallet(customer.userId))).toBe(walletBefore);
+  });
+
+  it('refuses the same top-up key resent for a DIFFERENT amount, before the issuer is asked', async () => {
+    // A replay debits nothing; letting it reach Bitnob with a new amount would
+    // load the difference onto the card for free.
+    const customer = await onboard();
+    await fundWallet(customer.userId, 100_00);
+    const card = await issueCard(customer, '10.00');
+    const key = randomUUID();
+    const fundWith = (amount: string) =>
+      request(app.getHttpServer())
+        .post(`/v1/cards/${card.id}/fund`)
+        .set('Authorization', `Bearer ${customer.token}`)
+        .send({ amount, transaction_pin: PIN, idempotency_key: key });
+
+    await fundWith('5.00').expect(200);
+    await fundWith('5.00').expect(200); // a true retry still replays
+    const calls = cardPort.calls.length;
+    const res = await fundWith('50.00').expect(409);
+    expect(res.body.error).toBe('idempotency_key_reused');
+    expect(cardPort.calls.slice(calls)).not.toContain('fund');
+    expect(await balance(cardAccount(customer.userId))).toBe(1500n);
   });
 
   it('shows what happened on the CARD, which the wallet history cannot', async () => {
@@ -2075,6 +2133,14 @@ describe('the dollar total on the home screen', () => {
       expect(total.body.included).toEqual(expect.arrayContaining(['NGN', 'USD']));
       // Bitcoin has no published dollar price here: named, not guessed.
       expect(total.body.excluded).toContain('BTC');
+
+      // THE LINES ARE THE TOTAL, broken down — the crypto portfolio reads them,
+      // so they must sum to the headline and carry no line for an excluded one.
+      const lines = total.body.lines as { currency: string; held: string; amount_minor: string }[];
+      expect(lines.reduce((sum, l) => sum + BigInt(l.amount_minor), 0n).toString()).toBe(total.body.amount_minor);
+      expect(lines.find((l) => l.currency === 'NGN')).toMatchObject({ amount_minor: nairaInDollars.toString() });
+      expect(lines.find((l) => l.currency === 'USD')).toMatchObject({ amount_minor: '1250', held: '12.50' });
+      expect(lines.some((l) => l.currency === 'BTC')).toBe(false);
     } finally {
       if (ours !== undefined) {
         // RETIRED, NOT DELETED. 099 refuses the application role a DELETE here,
