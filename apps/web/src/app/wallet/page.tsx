@@ -77,6 +77,14 @@ const CURRENCY_NAMES: Readonly<Record<string, string>> = {
 };
 const nameOf = (code: string) => CURRENCY_NAMES[code] ?? code;
 
+/** The amount's class by length: the card is 212px and a figure is set
+ *  smaller as it grows rather than overflowing. */
+function fitClass(figure: string): string {
+  if (figure.length > 15) return 'ccy-amt smallest';
+  if (figure.length > 12) return 'ccy-amt smaller';
+  return 'ccy-amt';
+}
+
 export default function Wallet() {
   const client = useXetral();
 
@@ -278,7 +286,10 @@ export default function Wallet() {
                       <span className="ccy-name">{nameOf(b.currency)}</span>
                     </span>
                   </span>
-                  <span className="ccy-amt">
+                  {/* A FIGURE THAT DOES NOT FIT IS SET SMALLER, never cut: an
+                      eight-decimal Bitcoin balance was clipped at the card's
+                      edge, and a number half hidden is a number read wrong. */}
+                  <span className={fitClass(hidden ? MASK : formatAmount(b.spendable, b.currency))}>
                     {hidden ? `${symbolFor(b.currency)} ${MASK}` : formatAmount(b.spendable, b.currency)}
                   </span>
                   <span className="ccy-sub">Spendable</span>

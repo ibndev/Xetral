@@ -1,6 +1,6 @@
 'use client';
 
-import { entryKindLabel, formatAmount } from '@xetral/client';
+import { entryKindLabel, entryTitle, formatAmount } from '@xetral/client';
 import type { Transaction } from '@xetral/client';
 import { Icon } from '@/ui/icon';
 import { CurrencyMark } from '@/ui/currency-mark';
@@ -99,7 +99,7 @@ export function TxRow({
         </span>
       </span>
       <span className="tx-main">
-        <span className="tx-name">{entry.destination ?? entry.description}</span>
+        <span className="tx-name">{entry.destination ?? entryTitle(entry.description, entry.kind)}</span>
         <span className="tx-sub">
           {entryKindLabel(entry.kind)}
           {/*

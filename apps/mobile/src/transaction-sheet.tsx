@@ -1,5 +1,5 @@
 import { Modal, Pressable, ScrollView, Share, Text, View } from 'react-native';
-import { formatAmount, receiptText, statusWords } from '@xetral/client';
+import { entryTitle, formatAmount, receiptText, statusWords } from '@xetral/client';
 import { Icon } from '@/icon';
 import { Button, FormError, Loading } from '@/ui';
 import { useLoad, useXetral } from '@/hooks';
@@ -62,7 +62,7 @@ export function TransactionSheet({ id, onClose }: { id: string; onClose: () => v
                 </Text>
                 <Text style={styles.lead}>{statusWords(t)}</Text>
 
-                <Row label="What" value={t.description} />
+                <Row label="What" value={entryTitle(t.description, t.kind)} />
                 {t.beneficiary !== undefined && <Row label="To" value={t.beneficiary} />}
                 {t.bank_name !== undefined && (
                   <Row

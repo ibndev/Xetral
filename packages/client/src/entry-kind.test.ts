@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { ENTRY_KIND_LABELS, entryKindLabel } from './entry-kind.js';
+import { ENTRY_KIND_LABELS, entryKindLabel, entryTitle } from './entry-kind.js';
 
 /**
  * EVERY ENTRY KIND THE LEDGER CAN WRITE HAS A WORD A CUSTOMER READS.
@@ -89,5 +89,17 @@ describe('what a customer calls a transaction', () => {
     // never an identifier with an underscore in it.
     expect(entryKindLabel('some_new_kind')).toBe('Some new kind');
     expect(entryKindLabel('')).toBe('Transaction');
+  });
+});
+
+describe('the title a row is shown with', () => {
+  it('replaces a description that is only its kind with the kind’s label', () => {
+    expect(entryTitle('card funding', 'card_funding')).toBe('Card top-up');
+    expect(entryTitle('  ', 'card_funding')).toBe('Card top-up');
+  });
+
+  it('starts a written description with a capital and keeps the rest as written', () => {
+    expect(entryTitle('transfer to ***9999', 'wallet_transfer')).toBe('Transfer to ***9999');
+    expect(entryTitle('Card top-up from NGN + USD', 'card_funding')).toBe('Card top-up from NGN + USD');
   });
 });

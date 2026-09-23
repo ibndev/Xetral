@@ -287,6 +287,8 @@ export default function Home() {
                   </View>
                   <Text
                     numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.6}
                     style={{
                       color: colors.text, fontFamily: font.numBold,
                       fontSize: 22, letterSpacing: -0.6, marginTop: 16,

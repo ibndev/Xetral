@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
-import { ApiError, entryKindLabel, exponentFor, formatAmount, isValidAmount } from '@xetral/client';
+import { ApiError, entryKindLabel, entryTitle, exponentFor, formatAmount, isValidAmount } from '@xetral/client';
 import type { Card, CardActivity, CardFundingPlan, CardSecrets } from '@xetral/client';
 
 /** Refusals that mean the stored plan can no longer run — start a new one. */
@@ -1114,14 +1114,18 @@ function CardActivityList() {
                 numberOfLines={1}
                 style={{ color: colors.text, fontFamily: font.sansSemi, fontSize: 14.5 }}
               >
-                {t.description}
+                {entryTitle(t.description, t.kind)}
               </Text>
-              <Text
-                numberOfLines={1}
-                style={{ color: colors.text3, fontFamily: font.sansMedium, fontSize: 12, marginTop: 2 }}
-              >
-                {entryKindLabel(t.kind)}
-              </Text>
+              {/* The kind under the title, unless the title already IS the
+                  kind — "Card top-up" twice reads as a rendering fault. */}
+              {entryTitle(t.description, t.kind) !== entryKindLabel(t.kind) && (
+                <Text
+                  numberOfLines={1}
+                  style={{ color: colors.text3, fontFamily: font.sansMedium, fontSize: 12, marginTop: 2 }}
+                >
+                  {entryKindLabel(t.kind)}
+                </Text>
+              )}
             </View>
             <View style={{ alignItems: 'flex-end' }}>
               <Text

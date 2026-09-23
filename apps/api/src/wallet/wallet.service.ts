@@ -7,6 +7,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import type { Pool, PoolClient } from 'pg';
+import { CASCADE_ORDER } from '@xetral/providers';
 import { InsufficientFundsError, LedgerService, posting } from '@xetral/ledger';
 import type { AccountRef, LedgerIntent, WrittenEntry } from '@xetral/ledger';
 import { applyBasisPoints, CURRENCIES, fromMajor, isCurrency, subtract, toMajor } from '@xetral/shared';
@@ -148,12 +149,19 @@ export class WalletService {
     }
 
     // THEIR OWN currency first — the one they are paid in and read every day
-    // — then the rest alphabetically, so the order does not move under
-    // somebody as balances appear.
+    // — then a FIXED order, so nothing moves under somebody as balances
+    // appear. It was alphabetical, which put an empty Bitcoin wallet ahead of
+    // the dollars on every home screen; the order now is the card cascade's —
+    // dollars, dollar stablecoins, fiat, Bitcoin last — so the rail reads in
+    // the order a top-up would draw on it.
+    const rank = (c: string): number => {
+      const at = (CASCADE_ORDER as readonly string[]).indexOf(c);
+      return at === -1 ? CASCADE_ORDER.length : at;
+    };
     return [...views.values()].sort((a, b) =>
       a.currency === home ? -1
       : b.currency === home ? 1
-      : a.currency.localeCompare(b.currency),
+      : rank(a.currency) - rank(b.currency) || a.currency.localeCompare(b.currency),
     );
   }
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ApiError, entryKindLabel, exponentFor, formatAmount, isValidAmount } from '@xetral/client';
+import { ApiError, entryKindLabel, entryTitle, exponentFor, formatAmount, isValidAmount } from '@xetral/client';
 import type { Card, CardActivity, CardFundingPlan, CardSecrets } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { FormError } from '@/ui/form-error';
@@ -200,8 +200,12 @@ function CardActivityList() {
                 </span>
               </span>
               <span className="tx-main">
-                <span className="tx-name">{t.description}</span>
-                <span className="tx-sub">{entryKindLabel(t.kind)}</span>
+                <span className="tx-name">{entryTitle(t.description, t.kind)}</span>
+                {/* The kind under the title, unless the title already IS the
+                    kind — "Card top-up" twice reads as a rendering fault. */}
+                {entryTitle(t.description, t.kind) !== entryKindLabel(t.kind) && (
+                  <span className="tx-sub">{entryKindLabel(t.kind)}</span>
+                )}
               </span>
               <span className="tx-side">
                 <span className={outgoing ? 'tx-amt out' : 'tx-amt in'}>

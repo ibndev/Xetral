@@ -68,5 +68,26 @@ export function entryKindLabel(kind: string): string {
   return tidied.charAt(0).toUpperCase() + tidied.slice(1);
 }
 
+/**
+ * THE TITLE OF A ROW A CUSTOMER READS, from the entry's own description.
+ *
+ * Entries are append-only, so descriptions written before anybody chose
+ * words stay as they were: every early card top-up reads "card funding" —
+ * the entry KIND in lowercase — beside provider rows reading "Netflix". A
+ * description that is only its kind is a label nobody wrote, so the kind's
+ * label is shown instead; any other description is shown with a capital, as
+ * "transfer to ***9999" is a sentence that starts a row.
+ *
+ * One function for both apps: two copies of "what a row is called" drift,
+ * and the copy that drifts is the one on the screen a customer screenshots.
+ */
+export function entryTitle(description: string, kind: string): string {
+  const said = description.trim();
+  if (said === '' || said.toLowerCase() === kind.replace(/_/g, ' ').toLowerCase()) {
+    return entryKindLabel(kind);
+  }
+  return said.charAt(0).toUpperCase() + said.slice(1);
+}
+
 /** Every kind this table names. Read by the guard, never by a screen. */
 export const ENTRY_KIND_LABELS = LABELS;

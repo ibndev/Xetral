@@ -1,5 +1,5 @@
 import { Pressable, Text, View } from 'react-native';
-import { entryKindLabel, formatAmount } from '@xetral/client';
+import { entryKindLabel, entryTitle, formatAmount } from '@xetral/client';
 import type { Transaction } from '@xetral/client';
 import { Icon } from '@/icon';
 import { CurrencyMark } from '@/currency-mark';
@@ -111,7 +111,7 @@ export function TxRow({
           numberOfLines={1}
           style={{ color: colors.text, fontFamily: font.sansSemi, fontSize: 15 }}
         >
-          {entry.destination ?? entry.description}
+          {entry.destination ?? entryTitle(entry.description, entry.kind)}
         </Text>
         <Text
           numberOfLines={1}

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { formatAmount, receiptText, statusWords } from '@xetral/client';
+import { entryTitle, formatAmount, receiptText, statusWords } from '@xetral/client';
 import { Icon } from '@/ui/icon';
 import { useLoad, useXetral } from '@/lib/hooks';
 import { FormError } from '@/ui/form-error';
@@ -94,7 +94,7 @@ export function TransactionSheet({ id, onClose }: { id: string; onClose: () => v
 
             <div className="row">
               <span className="muted">What</span>
-              <span>{t.description}</span>
+              <span>{entryTitle(t.description, t.kind)}</span>
             </div>
             {t.beneficiary !== undefined && (
               <div className="row">

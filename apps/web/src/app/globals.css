@@ -5648,11 +5648,14 @@ html, body { overflow-x: hidden; }
   letter-spacing: -0.027em;
   font-variant-numeric: tabular-nums;
   margin-top: 16px;
-  /* A BTC balance is eight decimals. It fits at this size, and if a longer
-     one ever does not, the card must grow a scrollbar rather than let a
-     figure escape it — a number half off the screen is a number read wrong. */
+  /* A BTC balance is eight decimals and did NOT fit at this size — it was
+     clipped at the card's edge. A long figure is set smaller instead (see
+     `fitClass`); hidden overflow is only the last resort. */
   overflow: hidden;
+  white-space: nowrap;
 }
+.ccy-card .ccy-amt.smaller { font-size: 18px; }
+.ccy-card .ccy-amt.smallest { font-size: 15px; }
 .ccy-card .ccy-sub {
   display: block;
   font-size: 11.5px; font-weight: 500; color: var(--text-3); margin-top: 3px;
