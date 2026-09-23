@@ -164,16 +164,35 @@ export class NotificationWorker implements OnApplicationShutdown {
   }
 
   async #sweepLocked(): Promise<NotificationSweepReport> {
-    const due = await this.pool.query<DueRow>(
-      `SELECT id, kind::text AS kind, class::text AS class, recipient,
-              payload_sealed, attempts
-         FROM notification_outbox
-        WHERE status = 'pending' AND next_attempt_at <= now()
-        -- Security mail first. If the queue is behind, the customer locked out
-        -- of their account is served before the customer waiting on a receipt.
-        ORDER BY (class = 'security') DESC, id
-        LIMIT 100`,
+    /*
+     * CLAIMED, NOT JUST SELECTED. A row is leased — its next attempt pushed
+     * two minutes out — in the same statement that picks it, so the one other
+     * sender (`deliverNow`, the reset path's fast lane) cannot pick it too and
+     * mail a customer the same code twice. A process that dies mid-send lets
+     * the lease lapse and the next sweep tries again, which is the outbox's
+     * one rule: sending twice is better than not sending.
+     */
+    const claimed = await this.pool.query<DueRow>(
+      `UPDATE notification_outbox o
+          SET next_attempt_at = now() + interval '2 minutes'
+        WHERE o.id IN (
+          SELECT id FROM notification_outbox
+           WHERE status = 'pending' AND next_attempt_at <= now()
+           ORDER BY (class = 'security') DESC, id
+           LIMIT 100
+           FOR UPDATE SKIP LOCKED)
+       RETURNING o.id, o.kind::text AS kind, o.class::text AS class, o.recipient,
+                 o.payload_sealed, o.attempts`,
     );
+    // Security mail first. If the queue is behind, the customer locked out of
+    // their account is served before the customer waiting on a receipt.
+    const due = {
+      rows: [...claimed.rows].sort(
+        (a, b) =>
+          Number(b.class === 'security') - Number(a.class === 'security') ||
+          Number(BigInt(a.id) - BigInt(b.id)),
+      ),
+    };
 
     let sent = 0;
     let retrying = 0;
@@ -195,6 +214,37 @@ export class NotificationWorker implements OnApplicationShutdown {
     }
 
     return { claimed: due.rows.length, sent, retrying, abandoned };
+  }
+
+  /**
+   * SEND ONE MESSAGE NOW, for mail somebody is standing there waiting for.
+   *
+   * A reset code sat in the outbox until the next sweep — and on a deployment
+   * where the sweep was not running at all it sat there for ever, while the
+   * API told a locked-out customer to check their email. The row is written
+   * on the request's own transaction as before; this runs AFTER that commits,
+   * so a message still never exists without its event, and whatever this
+   * cannot send stays pending for the worker. It claims the row with the same
+   * lease the sweep takes, so the two cannot both send it.
+   *
+   * Never throws: the caller has already answered the customer.
+   */
+  async deliverNow(idempotencyKey: string): Promise<void> {
+    if (this.port === undefined || this.config.encryptionKeyring === undefined) return;
+    try {
+      const claimed = await this.pool.query<DueRow>(
+        `UPDATE notification_outbox
+            SET next_attempt_at = now() + interval '2 minutes'
+          WHERE idempotency_key = $1 AND status = 'pending' AND next_attempt_at <= now()
+        RETURNING id, kind::text AS kind, class::text AS class, recipient,
+                  payload_sealed, attempts`,
+        [idempotencyKey],
+      );
+      const row = claimed.rows[0];
+      if (row !== undefined) await this.#deliver(row);
+    } catch (error) {
+      this.#logger.error(`immediate send failed, the worker will retry: ${describe(error)}`);
+    }
   }
 
   async #deliver(row: DueRow): Promise<'sent' | 'retry' | 'abandoned'> {

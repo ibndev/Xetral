@@ -106,6 +106,14 @@ services:
       # perfectly. A default means it runs unless somebody deliberately blanks
       # it, which is the right way round for a sweep that hands money back.
       PAYOUT_RECONCILE_INTERVAL_SECONDS: '${PAYOUT_RECONCILE_INTERVAL_SECONDS:-300}'
+      # THE EMAIL OUTBOX, AND IT HAD NO DEFAULT. Every other sweep above got
+      # one after its silence cost something; this one was left to `.env`, so
+      # a deployment that never set it wrote every reset code, new-device alert
+      # and receipt to the outbox and sent none of them — while the API told a
+      # locked-out customer to check their email. Reset codes now also go out
+      # the moment they are written; this is what sends everything else, and
+      # retries what the fast lane could not.
+      NOTIFICATION_INTERVAL_SECONDS: '${NOTIFICATION_INTERVAL_SECONDS:-15}'
       METRICS_TOKEN: '${METRICS_TOKEN:-}'
     deploy:
       replicas: 1

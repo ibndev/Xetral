@@ -3557,6 +3557,19 @@ Schema: `packages/identity/sql/012_notifications.sql`. The outbox, the port
 - **`coverage.test.ts` fails the build on a template nothing enqueues.** A
   `new_device` template nobody calls is an account-takeover alert that will
   never fire.
+- **A RESET CODE IS SENT THE MOMENT IT COMMITS, and the worker is the
+  fallback.** `docker-compose.app.yml` gave every other sweep a default and
+  left `NOTIFICATION_INTERVAL_SECONDS` to `.env` — so a deployment that never
+  set it queued every reset code and sent none, while `/forgot` said "check
+  your email". It has a default now, AND the reset path calls
+  `NotificationWorker.deliverNow()` after its transaction commits. That keeps
+  "nothing sends inline": the row exists first, and whatever the fast lane
+  cannot send stays pending.
+- **BOTH SENDERS CLAIM A ROW WITH A LEASE** — `next_attempt_at` pushed two
+  minutes out in the statement that picks it — so the fast lane and a sweep
+  cannot mail one code twice. A process dying mid-send lets the lease lapse.
+- **The fast lane is not awaited**, because the reset endpoint must take as
+  long for an address with no account as for one with an account.
 
 ### Password reset — non-obvious rules
 

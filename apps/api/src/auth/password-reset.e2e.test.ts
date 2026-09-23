@@ -84,25 +84,59 @@ const login = async (identifier: string, password: string) =>
 
 /** The reset link as the customer would receive it, read out of the outbox. */
 async function codeFor(userId: string): Promise<string> {
-  const row = await pool.query<{ payload_sealed: string }>(
-    `SELECT payload_sealed FROM notification_outbox
-      WHERE user_id = $1::bigint AND kind = 'password_reset' AND status = 'pending'
-      ORDER BY id DESC LIMIT 1`,
-    [userId],
-  );
-  const sealed = row.rows[0]?.payload_sealed;
-  if (sealed === undefined) throw new Error('no reset email was queued');
-
+  /*
+   * READ THE WAY THE CUSTOMER READS IT: out of the email that was sent. The
+   * reset path now delivers the moment the row commits, and a delivered body
+   * is erased from the outbox — so the queued payload is only where the code
+   * lives if that send has not happened yet. Both are checked, for a short
+   * while, because the send is not awaited by the request.
+   */
   const keyring = config.encryptionKeyring;
   if (keyring === undefined) throw new Error('the fixture has no keyring');
-  const rendered = JSON.parse(open(sealed, keyring)) as { text: string };
 
-  // The six digits, out of the body the customer will read. Not a link: a
-  // reset is a code now, because a link needs an address this deployment may
-  // never have been told.
-  const match = /\b[0-9]{6}\b/.exec(rendered.text);
-  if (match === null) throw new Error(`no code in the email body: ${rendered.text}`);
-  return match[0];
+  for (let pass = 0; pass < 50; pass += 1) {
+    const row = await pool.query<{ id: string; payload_sealed: string | null }>(
+      `SELECT id, payload_sealed FROM notification_outbox
+        WHERE user_id = $1::bigint AND kind = 'password_reset'
+        ORDER BY id DESC LIMIT 1`,
+      [userId],
+    );
+    const found = row.rows[0];
+    if (found === undefined) throw new Error('no reset email was queued');
+
+    const delivered = mailer.sent.find((m) => m.idempotencyKey === `xetral:notification:${found.id}`);
+    const text =
+      delivered?.text ??
+      (found.payload_sealed === null
+        ? undefined
+        : (JSON.parse(open(found.payload_sealed, keyring)) as { text: string }).text);
+    if (text !== undefined) {
+      // The six digits, out of the body the customer will read. Not a link: a
+      // reset is a code now, because a link needs an address this deployment
+      // may never have been told.
+      const match = /\b[0-9]{6}\b/.exec(text);
+      if (match === null) throw new Error(`no code in the email body: ${text}`);
+      return match[0];
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error('the reset email was neither delivered nor left in the outbox');
+}
+
+/** Waits until this customer's latest reset has left `pending`, bounded. */
+async function settled(userId: string): Promise<{ status: string; attempts: number; payload_sealed: string | null }> {
+  for (let pass = 0; pass < 50; pass += 1) {
+    const row = await pool.query<{ status: string; attempts: number; payload_sealed: string | null }>(
+      `SELECT status::text AS status, attempts, payload_sealed FROM notification_outbox
+        WHERE user_id = $1::bigint AND kind = 'password_reset'
+        ORDER BY id DESC LIMIT 1`,
+      [userId],
+    );
+    const found = row.rows[0];
+    if (found !== undefined && (found.status !== 'pending' || found.attempts > 0)) return found;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error('the reset email was never attempted');
 }
 
 /** The outbox row id for this customer's most recent reset. */
@@ -155,6 +189,24 @@ describe('asking for a reset', () => {
 
     const code = await codeFor(userId);
     expect(code).toMatch(/^[0-9]{6}$/);
+  });
+
+  /*
+   * THE CODE IS SENT THE MOMENT IT IS WRITTEN, not on the next sweep. Reset
+   * codes used to wait for the outbox worker — and on a deployment where that
+   * worker was never started they waited for ever, while this endpoint told a
+   * locked-out customer to check their email. No sweep is called here.
+   */
+  it('sends the code at once, without waiting for the outbox worker', async () => {
+    const { userId, email } = await seedCustomer();
+    await request(app.getHttpServer())
+      .post('/v1/auth/password/forgot')
+      .send({ identifier: email })
+      .expect(204);
+
+    const row = await settled(userId);
+    expect(row.status).toBe('sent');
+    expect(mailer.sent.some((m) => m.to === email)).toBe(true);
   });
 
   it('answers 204 for an address with NO account', async () => {
@@ -528,12 +580,14 @@ describe('the outbox worker', () => {
 
   it('keeps a message for another attempt when the provider is down', async () => {
     const { userId, email } = await seedCustomer();
+    // Failing BEFORE the request: the reset path now tries to send at once,
+    // and that attempt is the one being tested here.
+    mailer.failWith = new ProviderUnavailableError('stub', 'upstream down');
     await request(app.getHttpServer())
       .post('/v1/auth/password/forgot')
       .send({ identifier: email })
       .expect(204);
-
-    mailer.failWith = new ProviderUnavailableError('stub', 'upstream down');
+    await settled(userId);
     /*
      * SWEPT UNTIL THIS MESSAGE HAS BEEN ATTEMPTED, not once. The row is
      * expected to stay `pending` — that is the whole assertion — so the loop
@@ -565,13 +619,12 @@ describe('the outbox worker', () => {
     // malformed address. Five more identical rejections over six hours would
     // tell nobody anything the first one did not.
     const { userId, email } = await seedCustomer();
+    mailer.failWith = new ProviderRejectedError('stub', 'domain not verified', 'invalid_from_address');
     await request(app.getHttpServer())
       .post('/v1/auth/password/forgot')
       .send({ identifier: email })
       .expect(204);
-
-    mailer.failWith = new ProviderRejectedError('stub', 'domain not verified', 'invalid_from_address');
-    await worker.sweep();
+    await settled(userId);
 
     const row = await pool.query<{ status: string; payload_sealed: string | null }>(
       `SELECT status::text AS status, payload_sealed FROM notification_outbox
@@ -638,6 +691,9 @@ describe('a staging deployment', () => {
   async function stagingWorker(allowlist: readonly string[]): Promise<{
     worker: NotificationWorker;
     mailer: StubMailer;
+    /** The staging deployment's own HTTP surface — its reset path sends at
+     *  once, so the allowlist has to hold there as well as in the sweep. */
+    server: ReturnType<INestApplication['getHttpServer']>;
     close: () => Promise<void>;
   }> {
     const stagingMailer = new StubMailer();
@@ -662,19 +718,20 @@ describe('a staging deployment', () => {
     return {
       worker: staging.get(NotificationWorker),
       mailer: stagingMailer,
+      server: staging.getHttpServer(),
       close: () => staging.close(),
     };
   }
 
   it('will not email an address that is not on the allowlist', async () => {
     const { userId, email } = await seedCustomer();
-    await request(app.getHttpServer())
-      .post('/v1/auth/password/forgot')
-      .send({ identifier: email })
-      .expect(204);
-
     const staging = await stagingWorker(['@allowed.test']);
     try {
+      await request(staging.server)
+        .post('/v1/auth/password/forgot')
+        .send({ identifier: email })
+        .expect(204);
+      await settled(userId);
       await staging.worker.sweep();
     } finally {
       await staging.close();
@@ -696,14 +753,14 @@ describe('a staging deployment', () => {
 
   it('sends nothing at all when the allowlist is empty', async () => {
     // The safe default, and the one an operator gets by omission.
-    const { email } = await seedCustomer();
-    await request(app.getHttpServer())
-      .post('/v1/auth/password/forgot')
-      .send({ identifier: email })
-      .expect(204);
-
+    const { userId, email } = await seedCustomer();
     const staging = await stagingWorker([]);
     try {
+      await request(staging.server)
+        .post('/v1/auth/password/forgot')
+        .send({ identifier: email })
+        .expect(204);
+      await settled(userId);
       await staging.worker.sweep();
     } finally {
       await staging.close();
@@ -724,13 +781,13 @@ describe('a staging deployment', () => {
       await hashPassword(PASSWORD),
     ]);
 
-    await request(app.getHttpServer())
-      .post('/v1/auth/password/forgot')
-      .send({ identifier: email })
-      .expect(204);
-
     const staging = await stagingWorker(['@allowed.test']);
     try {
+      await request(staging.server)
+        .post('/v1/auth/password/forgot')
+        .send({ identifier: email })
+        .expect(204);
+      await settled(inserted.rows[0]?.id ?? '');
       await staging.worker.sweep();
     } finally {
       await staging.close();

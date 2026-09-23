@@ -11,6 +11,7 @@ import type { PasswordResetOutcome } from '@xetral/identity';
 import { API_CONFIG, DATABASE } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
 import { NotificationService } from '../notifications/notification.service.js';
+import { NotificationWorker } from '../notifications/notification.worker.js';
 
 /**
  * Forgetting a password, and getting back in.
@@ -69,6 +70,7 @@ export class PasswordResetService {
     @Inject(DATABASE) private readonly pool: Pool,
     @Inject(API_CONFIG) private readonly config: ApiConfig,
     @Inject(NotificationService) private readonly notifications: NotificationService,
+    @Inject(NotificationWorker) private readonly worker: NotificationWorker,
   ) {}
 
   /**
@@ -142,6 +144,16 @@ export class PasswordResetService {
     } finally {
       client.release();
     }
+
+    /*
+     * AND SENT NOW, NOT ON THE NEXT SWEEP. The customer is standing at the
+     * screen waiting for six digits, and a sweep minutes away — or a worker
+     * nobody started — was the difference between a reset and a locked-out
+     * customer. Not awaited: the answer must not take longer when an account
+     * exists than when it does not, which is the timing this method already
+     * works to keep equal. Anything this cannot send the worker still will.
+     */
+    void this.worker.deliverNow(`password_reset:${issued.hash}`);
   }
 
   /**
