@@ -7,6 +7,7 @@ import { messageFor } from '@/lib/errors';
 import { AdminError } from '../access';
 import { ageSince } from '../age';
 import { AdminTitle } from '@/app/admin/nav';
+import { Kpis } from '../queue';
 
 /**
  * What is currently failing.
@@ -32,19 +33,32 @@ import { AdminTitle } from '@/app/admin/nav';
  */
 export default function Errors() {
   const admin = useAdmin();
-  const open = useLoad(() => admin.errors(), [admin]);
-  const rows = [...(open.data ?? [])].sort(
+  const open = useLoad(() => admin.errorReport(), [admin]);
+  const rows = [...(open.data?.errors ?? [])].sort(
     (a, b) => Date.parse(b.last_seen_at) - Date.parse(a.last_seen_at),
   );
 
+  const hourAgo = Date.now() - 3_600_000;
   return (
-    <div className="panel">
-      <AdminTitle>Errors</AdminTitle>
-      <p className="lead">
+    <>
+    <AdminTitle>Errors</AdminTitle>
+    <Kpis
+      items={[
+        { label: 'Open', count: open.data?.open_total ?? open.data?.errors.length, tone: 'danger' },
+        {
+          label: 'Last hour',
+          count: open.data === undefined ? undefined : rows.filter((r) => Date.parse(r.last_seen_at) > hourAgo).length,
+          tone: 'warn',
+        },
+        { label: 'Resolved · 24h', count: open.data?.resolved_24h, tone: 'ok' },
+      ]}
+    />
+    <div className="panel tbl-panel">
+      <span className="tbl-note">
         One row per fingerprint, not per occurrence. Acknowledging one does not
         delete it — anything still failing reopens itself on its next
         occurrence.
-      </p>
+      </span>
 
       <AdminError error={open.error} code={open.code} role="admin" />
       {open.loading && <p className="spinner">Loading…</p>}
@@ -74,6 +88,7 @@ export default function Errors() {
         </div>
       )}
     </div>
+    </>
   );
 }
 

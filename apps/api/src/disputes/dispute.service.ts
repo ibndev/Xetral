@@ -254,11 +254,33 @@ export class DisputeService {
    */
   async summary(): Promise<DisputeSummary> {
     const result = await this.pool.query<{ open: string; high_value: string; resolved_7d: string }>(
-      `SELECT (SELECT count(*) FROM (${QUEUE_SQL}) q)                    AS open,
-              (SELECT count(*) FROM (${QUEUE_SQL}) q WHERE q.high_value) AS high_value,
+      /*
+       * WRITTEN OUT rather than wrapping `QUEUE_SQL`: interpolating one
+       * statement into another is the shape the local SQL rule refuses, and
+       * "better written out twice than built once" is its own remedy. The
+       * high-value test is the queue's own — the customer's leg against the
+       * currency's reporting threshold.
+       */
+      `SELECT (SELECT count(*) FROM disputes_open) AS open,
+              (SELECT count(*)
+                 FROM disputes_open o
+                 JOIN journal_entries e ON e.uuid = o.entry_uuid
+                 JOIN LATERAL (
+                   SELECT abs(sum(p.amount_minor)) AS amount_minor, a.currency
+                     FROM postings p
+                     JOIN accounts a ON a.id = p.account_id
+                    WHERE p.journal_entry_id = e.id
+                      AND a.owner_type = 'user'
+                      AND a.owner_id = o.user_id
+                    GROUP BY a.currency
+                    ORDER BY sum(p.amount_minor) < 0 DESC, abs(sum(p.amount_minor)) DESC
+                    LIMIT 1
+                 ) leg ON true
+                 JOIN risk_thresholds t ON t.currency = leg.currency
+                WHERE leg.amount_minor >= t.large_value_minor) AS high_value,
               (SELECT count(*) FROM disputes
                 WHERE status IN ('accepted', 'rejected')
-                  AND resolved_at > now() - interval '7 days')           AS resolved_7d`,
+                  AND resolved_at > now() - interval '7 days') AS resolved_7d`,
     );
     const row = result.rows[0];
     return {

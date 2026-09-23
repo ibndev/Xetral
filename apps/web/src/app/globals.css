@@ -6847,3 +6847,49 @@ html[data-theme='dark'] .admin-frame {
 .admin-frame .retire-open input { flex: 1 1 160px; min-height: 36px; margin: 0; }
 .admin-frame .retire-open input[type='password'] { flex: 0 0 90px; }
 .admin-frame .tbl-panel .tbl-note + .scroll, .admin-frame .tbl-panel .tbl-note + table { margin-top: 8px; }
+
+/* The comp's status strip: an icon square, a line that says what is true, a
+   quieter line that says how we know. */
+.admin-frame .panel.status-bar { display: flex; align-items: center; gap: 14px; padding: 14px 18px; }
+.admin-frame .status-bar .status-icon {
+  display: grid; place-items: center; flex: 0 0 auto;
+  width: 36px; height: 36px; border-radius: 10px;
+  background: var(--ok-bg); color: var(--ok);
+}
+.admin-frame .status-bar.warn .status-icon { background: var(--warn-bg); color: var(--warn); }
+.admin-frame .status-bar strong { display: block; font-size: 14px; font-weight: 700; }
+.admin-frame .status-bar small { display: block; margin-top: 2px; font-size: 12px; font-weight: 500; color: var(--text-3); }
+.admin-frame td.owed { color: var(--warn); font-weight: 700; }
+.admin-frame td.paid { color: var(--ok); font-weight: 700; }
+.admin-frame .tbl-head .xselect { flex: 0 0 170px; }
+.admin-frame .sec.danger { color: var(--danger); }
+
+/* The comp's announcement form: title, message, then one row that is the
+   audience, its reach and the button. */
+.admin-frame .announce label { margin-top: 12px; }
+.admin-frame .announce-send { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; }
+.admin-frame .announce-who { flex: 1 1 320px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.admin-frame .announce-who .xselect { flex: 0 0 180px; }
+.admin-frame .quiet-text { font-size: 12.5px; font-weight: 500; color: var(--text-3); }
+
+/* Readiness as the comp lists it: a mark, the name, its state. */
+.admin-frame .pass { color: var(--ok); }
+.admin-frame .tbl-note.flush { padding: 0 4px 12px; }
+.admin-frame .checks { margin-top: 8px; }
+.admin-frame .check { border-top: 1px solid var(--line); }
+.admin-frame .check > summary {
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 0; cursor: pointer; list-style: none;
+}
+.admin-frame .check > summary::-webkit-details-marker { display: none; }
+.admin-frame .check-mark { flex: 0 0 18px; text-align: center; font-weight: 800; color: var(--text-3); }
+.admin-frame .check.ok .check-mark { color: var(--ok); }
+.admin-frame .check.blocking .check-mark { color: var(--danger); }
+.admin-frame .check.elsewhere .check-mark, .admin-frame .check.by-hand .check-mark { color: var(--warn); }
+.admin-frame .check-name { flex: 1; min-width: 0; }
+.admin-frame .check-name code { font-size: 12.5px; font-weight: 700; color: var(--text); overflow-wrap: anywhere; }
+.admin-frame .check-name small { display: block; font-size: 11.5px; color: var(--text-3); }
+.admin-frame .check-state { font-size: 12px; font-weight: 600; color: var(--text-3); white-space: nowrap; }
+.admin-frame .check.blocking .check-state { color: var(--danger); }
+.admin-frame .check.ok .check-state { color: var(--ok); }
+.admin-frame .check > .hint { margin: 0 0 12px 30px; }

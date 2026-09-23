@@ -174,7 +174,10 @@ const closeCaseSchema = z.object({
 
 const roleSchema = z.object({
   user_id: z.string().uuid(),
-  role: z.enum(['giftcard_reviewer', 'compliance', 'support', 'finance', 'admin']),
+  // Every role 005/009/018 created. `dispute_reviewer` was missing, so the
+  // one role Phase 13 tells an operator to grant could only be granted at a
+  // psql prompt — the refusal read as `invalid_request` on a correct form.
+  role: z.enum(['giftcard_reviewer', 'compliance', 'support', 'finance', 'dispute_reviewer', 'admin']),
 });
 
 const listQuery = z.object({
@@ -1629,8 +1632,13 @@ export class AdminController {
    * staying true.
    */
   @Get('errors')
-  async errorList(): Promise<{ errors: readonly Record<string, unknown>[] }> {
-    return { errors: await this.errors.open() };
+  async errorList(): Promise<{
+    errors: readonly Record<string, unknown>[];
+    open_total: number;
+    resolved_24h: number;
+  }> {
+    const [errors, counts] = await Promise.all([this.errors.open(), this.errors.counts()]);
+    return { errors, ...counts };
   }
 
   /**

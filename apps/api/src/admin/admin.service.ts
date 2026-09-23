@@ -118,7 +118,6 @@ export class AdminService {
    * append-only, so that subtraction is exact.
    */
   async #pulse(): Promise<Record<string, unknown>> {
-    const owedKinds = `('customer_wallet','customer_card','customer_pending','suspense')`;
     const [entries, money, settlements, tens, owedNow] = await Promise.all([
       this.pool.query<{ h: number; n: string }>(
         `SELECT floor(extract(epoch FROM now() - created_at) / 3600)::int AS h, COUNT(*)::text AS n
@@ -131,7 +130,9 @@ export class AdminService {
                 COALESCE(SUM(p.amount_minor) FILTER (WHERE p.amount_minor > 0), 0)::text AS volume,
                 COALESCE(SUM(p.amount_minor) FILTER (
                   WHERE a.kind IN ('revenue_fees','revenue_fx_spread')), 0)::text AS earned,
-                COALESCE(SUM(p.amount_minor) FILTER (WHERE a.kind IN ${owedKinds}), 0)::text AS owed
+                COALESCE(SUM(p.amount_minor) FILTER (
+                  WHERE a.kind IN ('customer_wallet','customer_card','customer_pending','suspense')), 0)::text
+                  AS owed
            FROM postings p JOIN accounts a ON a.id = p.account_id
           WHERE p.currency = 'NGN' AND p.created_at > now() - interval '7 days'
           GROUP BY 1`,
@@ -155,7 +156,8 @@ export class AdminService {
       this.pool.query<{ v: string }>(
         `SELECT COALESCE(SUM(b.balance_minor), 0)::text AS v
            FROM accounts a JOIN account_balances b ON b.account_id = a.id
-          WHERE a.currency = 'NGN' AND a.kind IN ${owedKinds}`,
+          WHERE a.currency = 'NGN'
+            AND a.kind IN ('customer_wallet','customer_card','customer_pending','suspense')`,
       ),
     ]);
 
@@ -325,8 +327,9 @@ export class AdminService {
       // customer rejected once and approved since is approved.
       params.push(options.kyc);
       clauses.push(
-        `(SELECT k.status::text FROM kyc_submissions k
-           WHERE k.user_id = u.id ORDER BY k.id DESC LIMIT 1) = $${params.length}`,
+        '(SELECT k.status::text FROM kyc_submissions k' +
+          ' WHERE k.user_id = u.id ORDER BY k.id DESC LIMIT 1) = $' +
+          String(params.length),
       );
     }
     if (options.before !== undefined) {
@@ -850,7 +853,7 @@ export class AdminService {
    * column that could hold the message.
    */
   async notifications(): Promise<Record<string, unknown>> {
-    const [backlog, abandoned, recent] = await Promise.all([
+    const [backlog, abandoned, recent, pace] = await Promise.all([
       this.pool.query(
         `SELECT class::text, kind::text, waiting::text, oldest, worst_attempts
            FROM notification_backlog ORDER BY class, kind`,
@@ -868,12 +871,22 @@ export class AdminService {
            FROM notification_outbox
           ORDER BY id DESC LIMIT 50`,
       ),
+      /* WHETHER A WORKER IS DRAINING IT, measured from what it DID. The API
+         process cannot see the worker's interval — it runs in another
+         container — so the honest signal is when a message last left. */
+      this.pool.query<{ sent_24h: string; last_sent_at: string | null }>(
+        `SELECT count(*) FILTER (WHERE sent_at > now() - interval '24 hours')::text AS sent_24h,
+                max(sent_at) AS last_sent_at
+           FROM notification_outbox WHERE status = 'sent'`,
+      ),
     ]);
 
     return {
       backlog: backlog.rows,
       abandoned: abandoned.rows,
       recent: recent.rows,
+      sent_24h: Number(pace.rows[0]?.sent_24h ?? 0),
+      last_sent_at: pace.rows[0]?.last_sent_at ?? null,
     };
   }
 
@@ -997,7 +1010,7 @@ export class AdminService {
    * collection explains means a path posted the money and forgot the record.
    */
   async tax(months: number): Promise<Record<string, unknown>> {
-    const [collected, revenue, payable, drift] = await Promise.all([
+    const [collected, revenue, payable, drift, positions] = await Promise.all([
       this.pool.query(
         `SELECT month, kind, currency, transactions::text,
                 collected_minor::text, base_minor::text
@@ -1015,12 +1028,37 @@ export class AdminService {
                 difference_minor::text
            FROM tax_remittance_drift`,
       ),
+      /*
+       * PER CURRENCY, WHAT CAME IN AND WHAT WENT OUT — the comp's table. Read
+       * from POSTINGS on the tax account: a credit is a collection, a debit
+       * is a remittance. Nothing else takes money out of that account, which
+       * is 032's reason `tax_remittance_drift` can read a low balance as a
+       * payment; this is the same fact counted forwards.
+       */
+      this.pool.query(
+        `SELECT a.currency,
+                COALESCE(SUM(p.amount_minor) FILTER (WHERE p.amount_minor > 0), 0)::text AS collected_minor,
+                COALESCE(-SUM(p.amount_minor) FILTER (WHERE p.amount_minor < 0), 0)::text AS remitted_minor,
+                COALESCE(-SUM(p.amount_minor) FILTER (
+                  WHERE p.amount_minor < 0 AND p.created_at > now() - interval '30 days'), 0)::text
+                  AS remitted_30d_minor,
+                -- WHAT was collected, never WHERE by currency: VAT on a dollar
+                -- fee charged by a Nigerian company is still Nigerian VAT, so
+                -- reading a jurisdiction off the currency would be wrong.
+                ARRAY(SELECT DISTINCT t.kind::text FROM tax_collections t
+                       WHERE t.currency = a.currency ORDER BY 1) AS kinds
+           FROM accounts a JOIN postings p ON p.account_id = a.id
+          WHERE a.kind = 'liability_tax_payable'
+          GROUP BY a.currency
+          ORDER BY a.currency`,
+      ),
     ]);
     return {
       collected: collected.rows,
       revenue: revenue.rows,
       payable: payable.rows,
       drift: drift.rows,
+      positions: positions.rows,
     };
   }
 
@@ -1028,8 +1066,18 @@ export class AdminService {
 
   async staff(): Promise<readonly Record<string, unknown>[]> {
     const rows = await this.pool.query(
-      `SELECT u.uuid AS user_id, u.email, r.role::text, r.granted_at,
-              g.email AS granted_by
+      /*
+       * PER GRANT, with what the comp shows per PERSON riding on each row:
+       * their name, whether a second factor is CONFIRMED (an unconfirmed
+       * enrolment protects nothing — 014), and when a device of theirs was
+       * last seen. The screen groups; the server stays one row per grant so
+       * revoking one role is still an action on one row.
+       */
+      `SELECT u.uuid AS user_id, u.email, u.full_name, r.role::text, r.granted_at,
+              g.email AS granted_by,
+              EXISTS (SELECT 1 FROM staff_totp t
+                       WHERE t.user_id = u.id AND t.confirmed_at IS NOT NULL) AS has_totp,
+              (SELECT max(d.last_seen_at) FROM devices d WHERE d.user_id = u.id) AS last_active_at
          FROM staff_roles r
          JOIN users u ON u.id = r.user_id
          LEFT JOIN users g ON g.id = r.granted_by

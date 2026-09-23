@@ -5,6 +5,7 @@ import { useAdmin, useLoad } from '@/lib/hooks';
 import type { AdminReadinessRow } from '@xetral/client';
 import { AdminError } from '../access';
 import { AdminTitle } from '@/app/admin/nav';
+import { Kpis } from '../queue';
 
 /**
  * What this deployment has not been told yet.
@@ -33,39 +34,52 @@ const FAILURE_LABEL: Record<AdminReadinessRow['failure'], string> = {
   'default-is-deliberate': 'default is deliberate',
 };
 
+type Mark = 'ok' | 'blocking' | 'elsewhere' | 'deliberate' | 'by-hand';
+
+/** What the comp's right-hand column says, and the icon beside the name. */
+function markOf(row: AdminReadinessRow): Mark {
+  if (row.state === 'set') return 'ok';
+  if (row.state === 'unset-here') return 'elsewhere';
+  if (row.state === 'not-observable') return 'by-hand';
+  return row.failure === 'default-is-deliberate' ? 'deliberate' : 'blocking';
+}
+
+const MARK_TEXT: Record<Mark, string> = {
+  ok: 'set',
+  blocking: 'unset',
+  elsewhere: 'on the worker?',
+  deliberate: 'default kept',
+  'by-hand': 'confirm by hand',
+};
+
+/**
+ * ONE CHECK PER ROW, as the comp lists them — a mark, the name, what it is
+ * for, and its state. What happens if it is missed is the whole reason the
+ * row exists, so it is one press away rather than a third column squeezing
+ * every row to four lines.
+ */
 function Rows({ rows }: { rows: readonly AdminReadinessRow[] }) {
-  /*
-   * THE COLUMNS ARE SIZED, because one of them is a paragraph.
-   *
-   * With widths left to the content, "If it is missed" — which is four lines
-   * of prose — took most of the table and squeezed "Flow" to about a hundred
-   * pixels, so a three-word phrase wrapped onto three lines beside it. A
-   * table where the narrow columns wrap and the wide one does not is one an
-   * operator reads by counting rows rather than by scanning.
-   */
   return (
-    <table className="cols-3-1-2">
-      <thead>
-        <tr>
-          <th>What</th>
-          <th>Flow</th>
-          <th>If it is missed</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((row) => (
-          <tr key={`${row.kind}:${row.name}`}>
-            <td>
-              <code>{row.name}</code>
-              <br />
-              <span className="muted">{FAILURE_LABEL[row.failure]}</span>
-            </td>
-            <td className="muted">{row.flow ?? 'the platform'}</td>
-            <td>{row.ifMissed}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <div className="checks">
+      {rows.map((row) => {
+        const mark = markOf(row);
+        return (
+          <details className={`check ${mark}`} key={`${row.kind}:${row.name}`}>
+            <summary>
+              <span className="check-mark" aria-hidden="true">
+                {mark === 'ok' ? '✓' : mark === 'blocking' ? '✕' : mark === 'deliberate' ? '•' : '!'}
+              </span>
+              <span className="check-name">
+                <code>{row.name}</code>
+                <small>{row.flow ?? 'the platform'} · {FAILURE_LABEL[row.failure]}</small>
+              </span>
+              <span className="check-state">{MARK_TEXT[mark]}{mark === 'blocking' && row.failure === 'silent' ? ' — silent' : ''}</span>
+            </summary>
+            <p className="hint">{row.ifMissed}</p>
+          </details>
+        );
+      })}
+    </div>
   );
 }
 
@@ -88,29 +102,39 @@ export default function Readiness() {
   const byHand = rows.filter((r) => r.state === 'not-observable');
   const done = rows.filter((r) => r.state === 'set');
 
+  const blocking = silent.length + otherUnset.length;
   return (
     <>
-      <div className="panel">
-        <AdminTitle>Readiness</AdminTitle>
-        <p className="lead">
-          Every prerequisite this platform has, asked of the process that answered
-          this request.
+      <AdminTitle>Readiness</AdminTitle>
+      <Kpis
+        items={[
+          {
+            label: 'Checks passing',
+            value: report.data === undefined ? undefined : (
+              <span className="pass">
+                {done.length} / {rows.length}
+              </span>
+            ),
+          },
+          { label: 'Blocking', count: report.data === undefined ? undefined : blocking, tone: 'danger' },
+          { label: 'Silent if missed', count: report.data === undefined ? undefined : silent.length, tone: 'danger' },
+        ]}
+      />
+      <AdminError error={report.error} code={report.code} role="admin" />
+      {report.loading && <p className="spinner">Loading…</p>}
+      {report.data !== undefined && (
+        /* IT ANSWERS FOR THE PROCESS THAT SERVED IT, and says so — worker
+           intervals read unset here and are correctly set on the worker. */
+        <p className="tbl-note flush">
+          Answered by <code>{report.data.instance.hostname}</code>, running as{' '}
+          <strong>{report.data.instance.environment}</strong>.
         </p>
-        <AdminError error={report.error} code={report.code} role="admin" />
-        {report.loading && <p className="spinner">Loading…</p>}
-        {report.data !== undefined && (
-          <p className="hint">
-            Answered by <code>{report.data.instance.hostname}</code>, running as{' '}
-            <strong>{report.data.instance.environment}</strong>. {done.length} of{' '}
-            {rows.length} set.
-          </p>
-        )}
-      </div>
+      )}
 
       {silent.length > 0 && (
         <div className="panel">
-          <h2 className="danger">Nothing will tell you about these</h2>
-          <p className="lead">
+          <span className="sec danger">Nothing will tell you about these</span>
+          <p className="sub">
             Not set, and their absence produces no error anywhere. This is the
             list to work through first.
           </p>
@@ -120,8 +144,8 @@ export default function Readiness() {
 
       {otherUnset.length > 0 && (
         <div className="panel">
-          <h2>Not set</h2>
-          <p className="lead">
+          <span className="sec">Not set</span>
+          <p className="sub">
             These announce themselves — at boot, or at the first request on the
             flow they configure.
           </p>
@@ -131,8 +155,8 @@ export default function Readiness() {
 
       {fine.length > 0 && (
         <div className="panel">
-          <h2>Not set, and that is the intended state</h2>
-          <p className="lead">
+          <span className="sec">Not set, and that is the intended state</span>
+          <p className="sub">
             Each has a deliberate default. Listed for completeness, not as a
             problem.
           </p>
@@ -145,8 +169,8 @@ export default function Readiness() {
 
       {elsewhere.length > 0 && (
         <div className="panel">
-          <h2>Expected to be set on another instance</h2>
-          <p className="lead">
+          <span className="sec">Expected to be set on another instance</span>
+          <p className="sub">
             Worker intervals go on <strong>exactly one</strong> instance, so their
             absence here is correct if the worker has them.{' '}
             <em>Open this screen on the worker to confirm.</em>
@@ -157,8 +181,8 @@ export default function Readiness() {
 
       {byHand.length > 0 && (
         <div className="panel">
-          <h2>Nothing here can check these</h2>
-          <p className="lead">
+          <span className="sec">Nothing here can check these</span>
+          <p className="sub">
             Things a person has to confirm — see{' '}
             <Link href="/admin/staff">Staff</Link> and{' '}
             <Link href="/admin/prices">Prices</Link>.
@@ -169,10 +193,10 @@ export default function Readiness() {
 
       {done.length > 0 && (
         <div className="panel">
-          <h2>Set</h2>
+          <span className="sec">Set</span>
           {/* Shown, not hidden: "nothing to do" and "not checked" look
               identical when the only thing on screen is an empty list. */}
-          <p className="lead">{done.length} items, nothing to do.</p>
+          <p className="sub">{done.length} items, nothing to do.</p>
           <details>
             <summary>Show them</summary>
             <Rows rows={done} />

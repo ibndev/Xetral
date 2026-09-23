@@ -1,11 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import type { AdminCredential } from '@xetral/client';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
 import { AdminError } from '../access';
 import { AdminTitle } from '@/app/admin/nav';
+import { Kpis } from '../queue';
+import { ageSince } from '../age';
 
 /**
  * Where an operator pastes a provider key.
@@ -27,32 +29,122 @@ export default function Credentials() {
   const credentials = useLoad(() => admin.credentials(), [admin]);
   const [copied, setCopied] = useState<string | undefined>();
 
-  const byProvider = new Map<string, AdminCredential[]>();
-  for (const credential of credentials.data?.slots ?? []) {
-    const list = byProvider.get(credential.provider) ?? [];
-    list.push(credential);
-    byProvider.set(credential.provider, list);
-  }
+  const [open, setOpen] = useState<string | undefined>();
+  // What is wired up first: a slot documented ahead of its adapter is read by
+  // nothing, and listing it between two live keys buries the ones that matter.
+  const slots = [...(credentials.data?.slots ?? [])].sort(
+    (a, b) => Number(b.in_use) - Number(a.in_use) || a.provider.localeCompare(b.provider),
+  );
+  const live = slots.filter((c) => c.in_use);
+  /* A key older than this is due a rotation. Ninety days is the usual policy
+     figure; it is a prompt on a dashboard, not a control. */
+  const STALE_MS = 90 * 86_400_000;
+  const stale = (c: AdminCredential): boolean =>
+    c.is_set && c.updated_at !== null && Date.now() - Date.parse(c.updated_at) > STALE_MS;
+  const loaded = credentials.data !== undefined;
 
   return (
     <>
-      <div className="panel">
-        <AdminTitle>Provider keys</AdminTitle>
-        <h2>Stored encrypted. Never shown again.</h2>
-        <p className="lead">
-          A key takes effect within seconds, with no deploy. Only its last four
-          characters are kept.
-        </p>
+      <AdminTitle>Provider keys</AdminTitle>
+      <Kpis
+        items={[
+          { label: 'Keys configured', count: loaded ? live.filter((c) => c.is_set).length : undefined },
+          { label: 'Missing', count: loaded ? live.filter((c) => !c.is_set).length : undefined, tone: 'danger' },
+          { label: 'Rotate soon', count: loaded ? live.filter(stale).length : undefined, tone: 'warn' },
+        ]}
+      />
+
+      <div className="panel tbl-panel">
+        <span className="tbl-note">
+          Stored encrypted and never shown again — only the last four characters are kept. A new
+          key takes effect within seconds, with no deploy.
+        </span>
         <AdminError error={credentials.error} code={credentials.code} role="admin" />
         {credentials.loading && <p className="spinner">Loading…</p>}
 
-        {credentials.data !== undefined && credentials.data.slots.length === 0 && (
+        {loaded && slots.length === 0 && (
           <div className="notice warn">
             <p>No credential slots are defined, so there is nowhere to paste a key.</p>
             <p className="hint">
               Apply <span className="mono">packages/ledger/sql/026_provider_credentials.seed.sql</span>{' '}
               and reload.
             </p>
+          </div>
+        )}
+
+        {slots.length > 0 && (
+          <div className="scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Provider</th>
+                  <th>Key</th>
+                  <th>Status</th>
+                  <th>Last rotated</th>
+                  <th className="r" aria-label="Action" />
+                </tr>
+              </thead>
+              <tbody>
+                {slots.map((credential) => {
+                  const id = `${credential.provider}:${credential.name}`;
+                  return (
+                    <Fragment key={id}>
+                      <tr>
+                        <td>
+                          <strong style={{ textTransform: 'capitalize' }}>{credential.provider}</strong>
+                          <div className="cell-sub">{credential.label}</div>
+                        </td>
+                        <td className="mono soft">{credential.is_set ? `••••${credential.hint ?? ''}` : '—'}</td>
+                        <td>
+                          {/* NOT CONNECTED is its own state, not "missing": a slot
+                              documented ahead of its adapter is read by nothing,
+                              and a green "Set" beside it would read as running. */}
+                          {!credential.in_use ? (
+                            <span className="badge">Not connected</span>
+                          ) : credential.is_set ? (
+                            <span className={stale(credential) ? 'badge warn' : 'badge ok'}>
+                              {stale(credential) ? 'Rotate' : 'Set'}
+                            </span>
+                          ) : (
+                            <span className="badge danger">Missing</span>
+                          )}
+                        </td>
+                        <td className={stale(credential) ? 'owed' : 'quiet'}>
+                          {credential.updated_at === null
+                            ? credential.is_set
+                              ? 'from environment'
+                              : 'never'
+                            : `${ageSince(credential.updated_at)} ago`}
+                        </td>
+                        <td className="r">
+                          <button
+                            type="button"
+                            className={credential.is_set || !credential.in_use ? 'ghost' : undefined}
+                            aria-expanded={open === id}
+                            onClick={() => setOpen(open === id ? undefined : id)}
+                          >
+                            {open === id ? 'Close' : credential.is_set ? 'Rotate' : 'Add key'}
+                          </button>
+                        </td>
+                      </tr>
+                      {open === id && (
+                        <tr className="detail">
+                          <td colSpan={5}>
+                            <Credential
+                              credential={credential}
+                              onSaved={() => {
+                                setOpen(undefined);
+                                credentials.reload();
+                              }}
+                            />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
@@ -66,8 +158,8 @@ export default function Credentials() {
       */}
       {(credentials.data?.webhooks.length ?? 0) > 0 && (
         <div className="panel">
-          <h2>Webhook URLs</h2>
-          <p className="lead">Paste these into the provider&rsquo;s dashboard.</p>
+          <span className="sec">Webhook URLs</span>
+          <p className="sub">Paste these into each provider&rsquo;s dashboard.</p>
 
           {credentials.data?.webhooks[0]?.absolute === false && (
             <div className="notice warn">
@@ -107,31 +199,6 @@ export default function Credentials() {
         </div>
       )}
 
-      {[...byProvider.entries()].map(([provider, items]) => (
-        <div className="panel" key={provider}>
-          <h2 style={{ textTransform: 'capitalize' }}>{provider}</h2>
-          {/*
-            Said once per provider rather than once per field. A slot with no
-            adapter behind it is offered so a key can be put in the right place
-            now — but a filled box on an operations dashboard reads as "this is
-            running", and an operator who believes identity checks are live
-            when they are not is worse off than one who knows they are not.
-          */}
-          {items.every((item) => !item.in_use) && (
-            <p className="hint">
-              <span className="badge warn">not yet connected</span> Stored safely and
-              read by nothing until the integration ships.
-            </p>
-          )}
-          {items.map((credential) => (
-            <Credential
-              key={`${credential.provider}:${credential.name}`}
-              credential={credential}
-              onSaved={credentials.reload}
-            />
-          ))}
-        </div>
-      ))}
     </>
   );
 }

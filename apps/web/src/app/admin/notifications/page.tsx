@@ -3,6 +3,9 @@
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { AdminError } from '../access';
 import { AdminTitle } from '@/app/admin/nav';
+import { Kpis } from '../queue';
+import { ageSince } from '../age';
+import { Icon } from '@/ui/icon';
 
 /**
  * WHETHER ANYTHING IS ACTUALLY BEING SENT.
@@ -23,6 +26,13 @@ import { AdminTitle } from '@/app/admin/nav';
  * a live bearer token, so the payload is sealed and is erased on send — the
  * API has no column to return.
  */
+/** "password_reset" → "Password reset" — what an operator calls it. */
+const kindName = (kind: string): string => kind.replace(/_/g, ' ').replace(/^./, (c: string) => c.toUpperCase());
+
+/** Five minutes: longer than any sane worker interval, short enough that a
+ *  locked-out customer is still waiting when somebody reads this. */
+const STALLED_MS = 5 * 60_000;
+
 export default function Notifications() {
   const admin = useAdmin();
   const data = useLoad(() => admin.notifications(), [admin]);
@@ -33,140 +43,163 @@ export default function Notifications() {
 
   const waiting = backlog.reduce((sum, row) => sum + Number(row.waiting), 0);
   const security = backlog.filter((row) => row.class === 'security');
+  const oldest = backlog.reduce<string | null>(
+    (min, row) => (row.oldest !== null && (min === null || row.oldest < min) ? row.oldest : min),
+    null,
+  );
+  /*
+   * STALLED MEANS SOMETHING HAS WAITED LONGER THAN A WORKER WOULD LET IT. Not
+   * "the queue is non-empty" — a busy minute has a queue — but the oldest
+   * message older than any interval anybody would set. That is the silent
+   * failure 012 names: the interval unset, rows accumulating, nothing erroring.
+   */
+  const stalled = oldest !== null && Date.now() - Date.parse(oldest) > STALLED_MS;
+  const lastSent = data.data?.last_sent_at ?? null;
 
   return (
     <>
-      <div className="panel">
-        <AdminTitle>Notifications</AdminTitle>
-        <h2>{waiting} waiting to be sent</h2>
-        <p className="lead">
-          Nothing here sends inline. A message is a row written in the same
-          transaction as the event that owed it, and a worker drains it.
-        </p>
-        <AdminError error={data.error} code={data.code} role="support" />
-        {data.loading && <p className="spinner">Loading…</p>}
+      <AdminTitle>Notifications</AdminTitle>
+      <Kpis
+        items={[
+          { label: 'Queued', count: data.data === undefined ? undefined : waiting, tone: 'warn' },
+          { label: 'Sent · 24h', count: data.data?.sent_24h, tone: 'ok' },
+          { label: 'Last sent', value: data.data === undefined ? undefined : lastSent === null ? 'never' : `${ageSince(lastSent)} ago` },
+        ]}
+      />
+      <AdminError error={data.error} code={data.code} role="support" />
+      {data.loading && <p className="spinner">Loading…</p>}
 
-        {/*
-          THE ONE THING WORTH INTERRUPTING SOMEBODY FOR. A queue of receipts is
-          an annoyance; a queue of password resets means customers are locked
-          out right now and nobody has been told. The most likely cause is not
-          a provider outage — it is that no instance has the worker interval
-          set, which fails without an error anywhere.
-        */}
-        {security.length > 0 && (
-          <div className="notice warn">
-            <p>
-              <strong>Security mail is waiting.</strong> Password resets and
-              new-device alerts are in this queue. If nothing is draining it,
-              check that exactly one instance has{' '}
-              <span className="mono">NOTIFICATION_INTERVAL_SECONDS</span> set.
-            </p>
+      {data.data !== undefined && (
+        /* THE COMP'S STATUS BAR, and what it says is measured, not configured:
+           the API cannot see the worker's interval from its own container. */
+        <div className={stalled ? 'panel status-bar warn' : 'panel status-bar'}>
+          <span className="status-icon" aria-hidden="true">
+            <Icon name={stalled ? 'alert' : 'check'} size={18} />
+          </span>
+          <span>
+            <strong>
+              {stalled
+                ? `Nothing has drained the outbox for ${ageSince(oldest ?? '')}`
+                : waiting > 0
+                  ? 'Outbox worker is draining'
+                  : 'Outbox is empty'}
+            </strong>
+            <small>
+              {stalled
+                ? security.length > 0
+                  ? 'Password resets and new-device alerts are waiting. Check that exactly one instance has NOTIFICATION_INTERVAL_SECONDS set.'
+                  : 'Check that exactly one instance has NOTIFICATION_INTERVAL_SECONDS set.'
+                : lastSent === null
+                  ? 'No message has been sent yet.'
+                  : `Last message left ${ageSince(lastSent)} ago. Nothing here sends inline — a worker drains the outbox.`}
+            </small>
+          </span>
+        </div>
+      )}
+
+      <div className="panel tbl-panel">
+        <div className="tbl-head">
+          <span className="sec">Recent</span>
+        </div>
+        {data.data !== undefined && recent.length === 0 && <p className="empty">Nothing yet.</p>}
+        {recent.length > 0 && (
+          <div className="scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Channel</th>
+                  <th>Message</th>
+                  <th>To</th>
+                  <th>Status</th>
+                  <th className="r">When</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recent.map((row) => (
+                  <tr key={row.id}>
+                    <td>Email</td>
+                    <td>
+                      <strong>{kindName(row.kind)}</strong>
+                      {row.class === 'security' && <div className="cell-sub">security</div>}
+                    </td>
+                    <td className="quiet">{row.recipient}</td>
+                    <td>
+                      <span
+                        className={`badge ${
+                          row.status === 'sent' ? 'ok' : row.status === 'abandoned' ? 'danger' : 'warn'
+                        }`}
+                      >
+                        {row.status === 'pending' ? 'Queued' : kindName(row.status)}
+                      </span>
+                    </td>
+                    <td className="r quiet nowrap">{ageSince(row.sent_at ?? row.created_at)} ago</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
 
-      <div className="panel">
-        <h2>Waiting</h2>
-        {backlog.length === 0 && <p className="empty">Nothing waiting.</p>}
-        {backlog.length > 0 && (
+      {backlog.length > 0 && (
+        <div className="panel tbl-panel">
+          <div className="tbl-head">
+            <span className="sec">Waiting, by kind</span>
+          </div>
           <div className="scroll">
             <table>
               <thead>
                 <tr>
                   <th>Kind</th>
                   <th>Class</th>
-                  <th className="right">Waiting</th>
+                  <th className="r">Waiting</th>
                   <th>Oldest</th>
-                  <th className="right">Attempts</th>
+                  <th className="r">Attempts</th>
                 </tr>
               </thead>
               <tbody>
                 {backlog.map((row) => (
                   <tr key={`${row.class}-${row.kind}`}>
-                    <td>{row.kind}</td>
+                    <td>{kindName(row.kind)}</td>
                     <td>
-                      <span className={`badge ${row.class === 'security' ? 'danger' : 'info'}`}>
-                        {row.class}
-                      </span>
+                      <span className={`badge ${row.class === 'security' ? 'danger' : 'info'}`}>{row.class}</span>
                     </td>
-                    <td className="right mono">{row.waiting}</td>
-                    {/*
-                      AGE AS WELL AS DEPTH. A queue of three that has been three
-                      since Tuesday is a queue nobody is working; a queue of
-                      forty turning over hourly is a busy morning. Alerting on
-                      depth alone gets both wrong.
-                    */}
-                    <td className="muted nowrap">
-                      {row.oldest === null ? '—' : new Date(row.oldest).toLocaleString()}
-                    </td>
-                    <td className="right mono">{row.worst_attempts}</td>
+                    <td className="r mono">{row.waiting}</td>
+                    {/* AGE AS WELL AS DEPTH — a queue of three that has been
+                        three since Tuesday is a queue nobody is working. */}
+                    <td className="quiet nowrap">{row.oldest === null ? '—' : `${ageSince(row.oldest)} ago`}</td>
+                    <td className="r mono">{row.worst_attempts}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
-      <div className="panel">
-        <h2>Given up on</h2>
-        <p className="lead">
-          Abandoned rather than retried: waiting will not make these deliverable.
-        </p>
-        {abandoned.length === 0 && <p className="empty">None.</p>}
-        {abandoned.map((row) => (
-          <div className="row" key={row.id}>
-            <span>
-              {row.kind}
-              <div className="cell-sub">{row.recipient}</div>
-            </span>
-            <span className="muted nowrap">{row.last_error ?? `${row.attempts} attempts`}</span>
+      {abandoned.length > 0 && (
+        <div className="panel tbl-panel">
+          <div className="tbl-head">
+            <span className="sec">Given up on</span>
           </div>
-        ))}
-      </div>
-
-      <div className="panel">
-        <h2>Recent</h2>
-        {recent.length === 0 && <p className="empty">Nothing yet.</p>}
-        {recent.length > 0 && (
+          <span className="tbl-note">Abandoned rather than retried: waiting will not make these deliverable.</span>
           <div className="scroll">
             <table>
-              <thead>
-                <tr>
-                  <th>Kind</th>
-                  <th>To</th>
-                  <th>State</th>
-                  <th>When</th>
-                </tr>
-              </thead>
               <tbody>
-                {recent.map((row) => (
+                {abandoned.map((row) => (
                   <tr key={row.id}>
-                    <td>{row.kind}</td>
-                    <td className="mono">{row.recipient}</td>
                     <td>
-                      <span
-                        className={`badge ${
-                          row.status === 'sent'
-                            ? 'ok'
-                            : row.status === 'abandoned'
-                              ? 'danger'
-                              : 'warn'
-                        }`}
-                      >
-                        {row.status}
-                      </span>
+                      {kindName(row.kind)}
+                      <div className="cell-sub">{row.recipient}</div>
                     </td>
-                    <td className="muted nowrap">
-                      {new Date(row.sent_at ?? row.created_at).toLocaleString()}
-                    </td>
+                    <td className="r quiet">{row.last_error ?? `${row.attempts} attempts`}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </>
   );
 }

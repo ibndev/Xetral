@@ -386,7 +386,10 @@ function OwedByCurrency({ liability }: { readonly liability: AdminOverview['liab
       <div className="ov-owed-list">
         {(liability ?? []).map((row) => {
           const total = BigInt(row.total_owed_minor);
-          const share = total <= 0n ? 0 : Number((BigInt(row.wallets_minor) * 100n) / total);
+          // A WIDTH, kept in bigint to the end: whole percent as text, so no
+          // amount ever becomes a JS number on its way to a style.
+          const wallets = BigInt(row.wallets_minor);
+          const pct = total <= 0n || wallets <= 0n ? 0n : wallets >= total ? 100n : (wallets * 100n) / total;
           return (
             <div key={row.currency}>
               <div className="ov-owed-head">
@@ -394,7 +397,7 @@ function OwedByCurrency({ liability }: { readonly liability: AdminOverview['liab
                 <span className="mono">{formatMinor(row.total_owed_minor, row.currency)}</span>
               </div>
               <div className="ov-track">
-                <span className={BAR_TONE[row.currency] ?? 'iris'} style={{ width: `${Math.min(100, Math.max(0, share))}%` }} />
+                <span className={BAR_TONE[row.currency] ?? 'iris'} style={{ width: `${pct.toString()}%` }} />
               </div>
             </div>
           );

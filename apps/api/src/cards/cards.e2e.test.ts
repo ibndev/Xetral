@@ -1863,8 +1863,10 @@ describe('the dollar total on the home screen', () => {
       expect(total.body.excluded).toContain('BTC');
     } finally {
       if (ours !== undefined) {
+        // RETIRED, NOT DELETED. 099 refuses the application role a DELETE here,
+        // and it should: a retired rate is inert, and the suite runs with the
+        // privileges production has. The delete passed only as the owner.
         await pool.query(`UPDATE fx_published_rates SET retired_at = now() WHERE id = $1`, [ours]);
-        await pool.query(`DELETE FROM fx_published_rates WHERE id = $1`, [ours]);
       }
     }
   });

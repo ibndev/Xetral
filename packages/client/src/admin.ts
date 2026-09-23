@@ -298,6 +298,11 @@ export interface AdminStaffGrant {
   readonly role: string;
   readonly granted_at: string;
   readonly granted_by: string | null;
+  /** Absent from an API that predates them. */
+  readonly full_name?: string | null;
+  /** A CONFIRMED second factor — an unconfirmed enrolment protects nothing. */
+  readonly has_totp?: boolean;
+  readonly last_active_at?: string | null;
 }
 
 export interface AdminAuditEntry {
@@ -317,6 +322,7 @@ export type StaffRole =
   | 'support'
   | 'compliance'
   | 'finance'
+  | 'dispute_reviewer'
   | 'admin';
 
 /**
@@ -348,6 +354,16 @@ export interface AdminTaxReport {
     readonly collected_minor: string;
     readonly held_minor: string;
     readonly difference_minor: string;
+  }[];
+  /** Per currency, all time: collected into the tax account and paid out of
+   *  it. Absent from an API that predates it. */
+  readonly positions?: readonly {
+    readonly currency: string;
+    /** The kinds of tax collected in this currency — `vat`, `transfer_levy`. */
+    readonly kinds: readonly string[];
+    readonly collected_minor: string;
+    readonly remitted_minor: string;
+    readonly remitted_30d_minor: string;
   }[];
 }
 
@@ -748,6 +764,10 @@ export interface AdminNotifications {
     readonly sent_at: string | null;
     readonly created_at: string;
   }[];
+  /** Absent from an API that predates them. What LEFT, which is the only
+   *  evidence the API has that a worker is running somewhere. */
+  readonly sent_24h?: number;
+  readonly last_sent_at?: string | null;
 }
 
 /**
@@ -1855,8 +1875,21 @@ export class AdminClient {
    * do with the platform's failures was dismiss them unseen.
    */
   async errors(): Promise<readonly AdminOpenError[]> {
-    const body = await this.#get<{ errors: readonly AdminOpenError[] }>('/v1/admin/errors');
-    return body.errors;
+    return (await this.errorReport()).errors;
+  }
+
+  /** The open list and the two counts over the whole table. */
+  async errorReport(): Promise<{
+    errors: readonly AdminOpenError[];
+    open_total: number | undefined;
+    resolved_24h: number | undefined;
+  }> {
+    const body = await this.#get<{
+      errors: readonly AdminOpenError[];
+      open_total?: number;
+      resolved_24h?: number;
+    }>('/v1/admin/errors');
+    return { errors: body.errors, open_total: body.open_total, resolved_24h: body.resolved_24h };
   }
 
   /**

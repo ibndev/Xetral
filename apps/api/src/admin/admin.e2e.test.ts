@@ -705,6 +705,27 @@ describe('the operations surface', () => {
     expect(res.status).toBe(403);
   });
 
+  it('can grant every role the database has, including dispute_reviewer', async () => {
+    // The grant schema listed five of six. `dispute_reviewer` — the one role
+    // an operator is told to hand out before disputes go live — answered
+    // `invalid_request` from a correct form and could only be granted by SQL.
+    const admin = await register();
+    await grant(admin, 'admin');
+    const reviewer = await register();
+
+    await request(app.getHttpServer())
+      .post('/v1/admin/staff/grant')
+      .set('Authorization', `Bearer ${admin.token}`)
+      .send({ user_id: reviewer.uuid, role: 'dispute_reviewer', transaction_pin: PIN })
+      .expect(200);
+
+    const held = await pool.query(
+      `SELECT 1 FROM staff_roles WHERE user_id = $1 AND role = 'dispute_reviewer' AND revoked_at IS NULL`,
+      [reviewer.userId],
+    );
+    expect(held.rowCount).toBe(1);
+  });
+
   it('reads roles fresh, so revoking one bites on the next request', async () => {
     const person = await register();
     await grant(person, 'support');

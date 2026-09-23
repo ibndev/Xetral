@@ -6,6 +6,7 @@ import { useAdmin, useLoad } from '@/lib/hooks';
 import { AdminError } from '../access';
 import { Select } from '@/ui/select';
 import { AdminTitle } from '@/app/admin/nav';
+import { Kpis, MoneyFigure } from '../queue';
 
 /**
  * What was collected for a revenue authority, and what is still held.
@@ -41,28 +42,74 @@ export default function Tax() {
 
   return (
     <>
-      <div className="panel">
-        <AdminTitle>Tax</AdminTitle>
-        <p className="lead">
-          What was collected on a revenue authority&rsquo;s behalf, read from the
-          ledger. It is a liability, not revenue.
-        </p>
-        <label id="tax-months">
-          Months
-          <Select
-            labelledBy="tax-months"
-            value={String(months)}
-            onChange={(value) => setMonths(Number(value))}
-            options={[
-              { value: '3', label: 'Last 3' },
-              { value: '12', label: 'Last 12' },
-              { value: '36', label: 'Last 36' },
-            ]}
-          />
-        </label>
-        <AdminError error={report.error} code={report.code} role="finance" />
-        {report.loading && <p className="spinner">Loading…</p>}
-      </div>
+      <AdminTitle>Tax</AdminTitle>
+      <Kpis
+        items={[
+          {
+            label: 'Owed onward',
+            value: report.data === undefined ? undefined : (
+              <MoneyFigure totals={report.data.payable.map((p) => ({ currency: p.currency, amount_minor: p.balance_minor }))} />
+            ),
+          },
+          {
+            label: 'Remitted · 30d',
+            value: report.data === undefined ? undefined : (
+              <MoneyFigure
+                totals={(report.data.positions ?? [])
+                  .filter((p) => BigInt(p.remitted_30d_minor) > 0n)
+                  .map((p) => ({ currency: p.currency, amount_minor: p.remitted_30d_minor }))}
+              />
+            ),
+          },
+          { label: 'Currencies held', count: report.data?.positions?.length },
+        ]}
+      />
+      <AdminError error={report.error} code={report.code} role="finance" />
+      {report.loading && <p className="spinner">Loading…</p>}
+
+      {/* THE COMP'S TABLE: per currency, what came in, what went out, what is
+          still ours to pay. "Owed" is the account BALANCE — not collected
+          minus remitted — so a path that posted tax and forgot the record
+          shows here as well as in the drift panel below. */}
+      {report.data !== undefined && (
+        <div className="panel tbl-panel">
+          {(report.data.positions ?? []).length === 0 ? (
+            <p className="empty">Nothing collected yet. VAT on fees is collected as fees are charged.</p>
+          ) : (
+            <div className="scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Tax</th>
+                    <th>Currency</th>
+                    <th className="r">Collected</th>
+                    <th className="r">Remitted</th>
+                    <th className="r">Owed</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(report.data.positions ?? []).map((row) => {
+                    const owed = report.data?.payable.find((p) => p.currency === row.currency)?.balance_minor ?? '0';
+                    return (
+                      <tr key={row.currency}>
+                        <td>
+                          <strong>{row.kinds.map((k) => KINDS[k] ?? k).join(', ') || 'Tax'}</strong>
+                        </td>
+                        <td className="quiet">{row.currency}</td>
+                        <td className="r mono soft">{formatMinor(row.collected_minor, row.currency)}</td>
+                        <td className="r mono soft">{formatMinor(row.remitted_minor, row.currency)}</td>
+                        <td className={BigInt(owed) > 0n ? 'r mono owed' : 'r mono paid'}>
+                          {formatMinor(owed, row.currency)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/*
         First, and deliberately: tax held that no collection explains means a
@@ -71,12 +118,12 @@ export default function Tax() {
         find out it is not.
       */}
       {report.data !== undefined && report.data.drift.length > 0 && (
-        <div className="panel">
-          <h2 className="danger">Unexplained tax held</h2>
-          <p className="lead">
-            More is held than any recorded collection accounts for.
-          </p>
-          <table>
+        <div className="panel tbl-panel">
+          <div className="tbl-head">
+            <span className="sec danger">Unexplained tax held</span>
+          </div>
+          <span className="tbl-note">More is held than any recorded collection accounts for.</span>
+          <div className="scroll"><table>
             <thead>
               <tr>
                 <th>Currency</th>
@@ -97,48 +144,30 @@ export default function Tax() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         </div>
       )}
 
-      <div className="panel">
-        <h2>Held, not yet remitted</h2>
-        <p className="lead">
-          From the account balance, not from the record describing it.
-        </p>
-        {report.data !== undefined && report.data.payable.length === 0 && (
-          <p className="empty">Nothing held.</p>
-        )}
-        {report.data !== undefined && report.data.payable.length > 0 && (
-          <table>
-            <thead>
-              <tr>
-                <th>Currency</th>
-                <th>Balance</th>
-              </tr>
-            </thead>
-            <tbody>
-              {report.data.payable.map((row) => (
-                <tr key={row.currency}>
-                  <td>{row.currency}</td>
-                  <td>{formatMinor(row.balance_minor, row.currency)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      <div className="panel">
-        <h2>Collected by month</h2>
-        <p className="lead">
-          A Lagos month, and a row per currency.
-        </p>
+      <div className="panel tbl-panel">
+        <div className="tbl-head">
+          <span className="sec">Collected by month</span>
+          <Select
+            labelledBy="tax-months"
+            value={String(months)}
+            onChange={(value) => setMonths(Number(value))}
+            options={[
+              { value: '3', label: 'Last 3 months' },
+              { value: '12', label: 'Last 12 months' },
+              { value: '36', label: 'Last 36 months' },
+            ]}
+          />
+        </div>
+        <span className="tbl-note" id="tax-months">A Lagos month, and a row per currency — what a return is filed from.</span>
         {report.data !== undefined && report.data.collected.length === 0 && (
-          <p className="empty">Nothing collected yet.</p>
+          <p className="empty">Nothing collected in this window.</p>
         )}
         {report.data !== undefined && report.data.collected.length > 0 && (
-          <table>
+          <div className="scroll"><table>
             <thead>
               <tr>
                 <th>Month</th>
@@ -161,20 +190,20 @@ export default function Tax() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         )}
       </div>
 
-      <div className="panel">
-        <h2>Revenue by month</h2>
-        <p className="lead">
-          Read from postings, with the tax part of each fee shown alongside.
-        </p>
+      <div className="panel tbl-panel">
+        <div className="tbl-head">
+          <span className="sec">Revenue by month</span>
+        </div>
+        <span className="tbl-note">Read from postings, with the tax part of each fee shown alongside.</span>
         {report.data !== undefined && report.data.revenue.length === 0 && (
           <p className="empty">No revenue yet.</p>
         )}
         {report.data !== undefined && report.data.revenue.length > 0 && (
-          <table>
+          <div className="scroll"><table>
             <thead>
               <tr>
                 <th>Month</th>
@@ -193,7 +222,7 @@ export default function Tax() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         )}
       </div>
     </>

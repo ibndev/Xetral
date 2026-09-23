@@ -7,6 +7,7 @@ import { messageFor } from '@/lib/errors';
 import { Select } from '@/ui/select';
 import { AdminError } from '../access';
 import { AdminTitle } from '@/app/admin/nav';
+import { ageSince } from '../age';
 
 /**
  * TELLING CUSTOMERS SOMETHING, ON THE DEVICE THEY ALREADY CARRY.
@@ -93,161 +94,147 @@ export default function Broadcasts() {
 
   return (
     <>
-      <div className="panel">
-        <AdminTitle>Announcements</AdminTitle>
-        <p className="lead">
-          A notification on every customer’s phone. Only customers who have
-          opted in to product news are included — security and transaction
-          messages are unaffected and are sent by the flows that owe them.
+      <AdminTitle>Announcements</AdminTitle>
+      <div className="panel announce">
+        <span className="sec">New announcement</span>
+        <p className="sub">
+          To every customer who has opted in to product news. Security and transaction messages are
+          sent by the flows that owe them, never from here.
         </p>
 
         <label>
-          Who
-          <Select
-            value={country}
-            onChange={setCountry}
-            options={[
-              { value: '', label: 'Every country' },
-              ...(countries.data?.countries ?? []).map((row) => ({
-                value: row.code,
-                label: row.name,
-              })),
-            ]}
-          />
-        </label>
-
-        {/*
-          The estimate, before the button. `customers` beside `devices` is what
-          says whether a small number is few people or few handsets.
-        */}
-        <div className="row">
-          <span className="muted">Will reach</span>
-          <span>
-            {audience === undefined
-              ? '—'
-              : `${audience.devices} device${audience.devices === 1 ? '' : 's'} · ` +
-                `${audience.customers} customer${audience.customers === 1 ? '' : 's'}`}
-          </span>
-        </div>
-
-        <label>
-          Title
+          <span>Title</span>
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             maxLength={80}
             placeholder="Scheduled maintenance"
           />
-          <span className="hint">
-            {80 - title.length} characters left. Phones truncate long titles on
-            a lock screen.
-          </span>
+          <span className="hint">{80 - title.length} left — phones truncate long titles on a lock screen.</span>
         </label>
 
         <label>
-          Message
+          <span>Message</span>
           <textarea
             value={body}
             onChange={(e) => setBody(e.target.value)}
             maxLength={240}
             rows={3}
-            placeholder="Xetral will be briefly unavailable tonight from 11pm."
+            placeholder="Kept short — push copy carries no amount, ever."
           />
           <span className="hint">
-            {240 - body.length} characters left. No balances or amounts — a
-            notification is read off a lock screen by anybody holding the phone.
+            {240 - body.length} left. No balances or amounts — a notification is read off a lock
+            screen by anybody holding the phone.
           </span>
         </label>
 
-        <label>
-          Transaction PIN
+        {/* THE COMP'S SEND ROW: who, how many that is, and the button — the
+            estimate sits BESIDE the audience it describes, before anything is
+            pressed. `customers` beside `devices` is what says whether a small
+            number is few people or few handsets. */}
+        <div className="announce-send">
+          <span className="announce-who">
+            <span className="tbl-inline">Audience</span>
+            <Select
+              value={country}
+              onChange={setCountry}
+              options={[
+                { value: '', label: 'All customers' },
+                ...(countries.data?.countries ?? []).map((row) => ({ value: row.code, label: row.name })),
+              ]}
+            />
+            <span className="quiet-text">
+              {audience === undefined
+                ? ''
+                : `${audience.devices} device${audience.devices === 1 ? '' : 's'} · ` +
+                  `${audience.customers} customer${audience.customers === 1 ? '' : 's'}`}
+            </span>
+          </span>
           <input
+            className="tbl-pin"
             type="password"
             inputMode="numeric"
             autoComplete="off"
+            aria-label="Transaction PIN"
+            placeholder="PIN"
             value={pin}
             onChange={(e) => setPin(e.target.value)}
           />
-        </label>
+          <button
+            type="button"
+            disabled={busy || tooShort || pin === '' || (audience?.devices ?? 0) === 0}
+            onClick={() => void send()}
+          >
+            {busy ? 'Queueing…' : 'Send announcement'}
+          </button>
+        </div>
 
-        <button
-          type="button"
-          disabled={busy || tooShort || pin === '' || (audience?.devices ?? 0) === 0}
-          onClick={() => void send()}
-        >
-          {busy ? 'Queueing…' : 'Send announcement'}
-        </button>
-
-        {/*
-          Said on the page rather than in a tooltip, which does not exist on a
-          touch screen — the lesson the rate-generation button records.
-        */}
+        {/* Said on the page rather than in a tooltip, which does not exist on
+            a touch screen — the lesson the rate-generation button records. */}
         {(audience?.devices ?? 0) === 0 && (
           <p className="hint">
-            Nobody to tell: no customer in this audience has both the app
-            installed and product news switched on.
+            Nobody to tell: no customer in this audience has both the app installed and product news
+            switched on.
           </p>
         )}
-
         {error !== undefined && <p className="error">{error}</p>}
         {report !== undefined && <p className="ok">{report}</p>}
       </div>
 
-      <div className="panel">
-        <h2>Sent</h2>
+      <div className="panel tbl-panel">
+        <div className="tbl-head">
+          <span className="sec">Sent</span>
+        </div>
         <AdminError error={history.error} code={history.code} role="support" />
         {history.loading && <p className="spinner">Loading…</p>}
+        {history.data !== undefined && history.data.length === 0 && <p className="empty">Nothing sent yet.</p>}
 
-        <div className="scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>When</th>
-                <th>Announcement</th>
-                <th>Who</th>
-                <th className="right">Devices</th>
-                <th className="right">Delivered</th>
-                <th className="right">Skipped</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(history.data ?? []).map((row: AdminBroadcast) => (
-                <tr key={row.uuid}>
-                  <td>{new Date(row.created_at).toLocaleString()}</td>
-                  <td>
-                    <strong>{row.title}</strong>
-                    <br />
-                    <span className="muted">{row.body}</span>
-                  </td>
-                  <td>{row.country ?? 'Everywhere'}</td>
-                  <td className="right">
-                    {/*
-                      Queued is a real state and not a zero. `sent_at IS NULL`
-                      is the whole state machine, and a row that reads "0
-                      devices" where it should read "not sent yet" is how a
-                      worker nobody started looks like a broadcast nobody
-                      could receive.
-                    */}
-                    {row.sent_at === null ? 'queued' : row.devices}
-                  </td>
-                  <td className="right">
-                    {row.sent_at === null
-                      ? '—'
-                      : `${row.accepted}${row.rejected > 0 ? ` (${row.rejected} failed)` : ''}`}
-                  </td>
-                  <td className="right">{row.sent_at === null ? '—' : row.without_consent}</td>
+        {(history.data?.length ?? 0) > 0 && (
+          <div className="scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Title</th>
+                  <th>Audience</th>
+                  <th className="r">Reach</th>
+                  <th className="r">Skipped</th>
+                  <th className="r">When</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <p className="hint">
-          <strong>Skipped</strong> counts customers with the app installed who
-          have not opted in to product news. If announcements stay “queued”, no
-          instance has <code>PUSH_BROADCAST_INTERVAL_SECONDS</code> set — the
-          row is written and nothing is ever sent, and nothing errors.
-        </p>
+              </thead>
+              <tbody>
+                {(history.data ?? []).map((row: AdminBroadcast) => (
+                  <tr key={row.uuid}>
+                    <td>
+                      <strong>{row.title}</strong>
+                      <div className="cell-sub">{row.body}</div>
+                    </td>
+                    <td className="quiet">{row.country ?? 'All customers'}</td>
+                    {/* QUEUED IS A REAL STATE AND NOT A ZERO. `sent_at IS NULL`
+                        is the whole state machine, and "0" where it should
+                        read "not sent yet" is how a worker nobody started
+                        looks like a broadcast nobody could receive. */}
+                    <td className="r mono">
+                      {row.sent_at === null ? (
+                        <span className="badge warn">queued</span>
+                      ) : (
+                        <>
+                          {row.accepted}
+                          {row.rejected > 0 && <span className="cell-sub">{row.rejected} failed</span>}
+                        </>
+                      )}
+                    </td>
+                    <td className="r mono quiet">{row.sent_at === null ? '—' : row.without_consent}</td>
+                    <td className="r quiet nowrap">{ageSince(row.created_at)} ago</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <span className="tbl-note">
+          Skipped counts customers with the app installed who have not opted in to product news. If
+          one stays queued, no instance has PUSH_BROADCAST_INTERVAL_SECONDS set — nothing errors.
+        </span>
       </div>
     </>
   );

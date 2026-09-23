@@ -175,6 +175,21 @@ export class ErrorRecorder {
     return result.rows as Record<string, unknown>[];
   }
 
+  /**
+   * The comp's figures: every open fingerprint (the list is capped, the count
+   * is not) and how many were acknowledged in the last day — which is what
+   * says the list is being worked rather than merely long.
+   */
+  async counts(): Promise<{ open_total: number; resolved_24h: number }> {
+    const result = await this.pool.query<{ open_total: string; resolved_24h: string }>(
+      `SELECT (SELECT count(*) FROM errors_open)::text AS open_total,
+              (SELECT count(*) FROM error_events
+                WHERE resolved_at > now() - interval '24 hours')::text AS resolved_24h`,
+    );
+    const row = result.rows[0];
+    return { open_total: Number(row?.open_total ?? 0), resolved_24h: Number(row?.resolved_24h ?? 0) };
+  }
+
   /** Marks a fingerprint dealt with. A recurrence reopens it — see
    *  `record_error`, which clears `resolved_at` on every new occurrence. */
   async resolve(fingerprint: string): Promise<boolean> {

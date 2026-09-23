@@ -1,12 +1,14 @@
 'use client';
 
-import { useState } from 'react';
-import type { StaffRole } from '@xetral/client';
+import { Fragment, useState } from 'react';
+import type { AdminStaffGrant, StaffRole } from '@xetral/client';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
 import { AdminError } from '../access';
 import { Select } from '@/ui/select';
 import { AdminTitle } from '@/app/admin/nav';
+import { Kpis } from '../queue';
+import { ageSince } from '../age';
 
 /**
  * Who can do what.
@@ -25,56 +27,136 @@ const ROLES: readonly { role: StaffRole; can: string }[] = [
   { role: 'compliance', can: 'Review identity documents. Freeze, unfreeze and close accounts.' },
   { role: 'finance', can: 'Move suspense money to a customer. Change fees, ceilings and limits.' },
   { role: 'giftcard_reviewer', can: 'Approve gift card payouts, reveal a code, claw one back.' },
+  { role: 'dispute_reviewer', can: 'Answer customer disputes, and refund one that is upheld.' },
   { role: 'admin', can: 'Grant and revoke roles. Read the audit log.' },
 ];
+
+/** The comp's order: the widest role first, so "Admin" reads before "Support". */
+const RANK: readonly string[] = ['admin', 'finance', 'compliance', 'dispute_reviewer', 'giftcard_reviewer', 'support'];
+const roleName = (role: string): string =>
+  role.replace(/_/g, ' ').replace(/^./, (c: string) => c.toUpperCase());
+
+interface Person {
+  readonly userId: string;
+  readonly email: string;
+  readonly name: string | null;
+  readonly roles: readonly StaffRole[];
+  readonly hasTotp: boolean | undefined;
+  readonly lastActive: string | null | undefined;
+}
+
+/** One row per PERSON, which is what the comp lists and what an operator
+ *  means by "who has access" — the API stays one row per grant. */
+function people(grants: readonly AdminStaffGrant[]): Person[] {
+  const by = new Map<string, Person>();
+  for (const g of grants) {
+    const was = by.get(g.user_id);
+    by.set(g.user_id, {
+      userId: g.user_id,
+      email: g.email,
+      name: g.full_name ?? null,
+      roles: [...(was?.roles ?? []), g.role as StaffRole].sort((a, b) => RANK.indexOf(a) - RANK.indexOf(b)),
+      hasTotp: g.has_totp,
+      lastActive: g.last_active_at,
+    });
+  }
+  return [...by.values()].sort((a, b) => RANK.indexOf(a.roles[0] ?? '') - RANK.indexOf(b.roles[0] ?? ''));
+}
 
 export default function Staff() {
   const admin = useAdmin();
   const staff = useLoad(() => admin.staff(), [admin]);
+  const [open, setOpen] = useState<string | undefined>();
+  const rows = people(staff.data ?? []);
+  const loaded = staff.data !== undefined;
 
   return (
     <>
-      <div className="panel">
-        <AdminTitle>Staff</AdminTitle>
-        <h2>{staff.data?.length ?? 0} active grant(s)</h2>
+      <AdminTitle>Staff</AdminTitle>
+      <Kpis
+        items={[
+          { label: 'Operators', count: loaded ? rows.length : undefined },
+          { label: 'Without 2FA', count: loaded ? rows.filter((p) => p.hasTotp === false).length : undefined, tone: 'danger' },
+          { label: 'Admin', count: loaded ? rows.filter((p) => p.roles.includes('admin')).length : undefined },
+        ]}
+      />
 
+      <div className="panel tbl-panel">
         <AdminError error={staff.error} code={staff.code} role="admin" />
         {staff.loading && <p className="spinner">Loading…</p>}
-        {staff.data !== undefined && staff.data.length === 0 && (
-          <p className="empty">Nobody has a role.</p>
-        )}
+        {loaded && rows.length === 0 && <p className="empty">Nobody has a role.</p>}
 
-        {staff.data !== undefined && staff.data.length > 0 && (
+        {rows.length > 0 && (
           <div className="scroll">
             <table>
               <thead>
                 <tr>
-                  <th>Person</th>
+                  <th>Name</th>
                   <th>Role</th>
-                  <th>Granted</th>
-                  <th>By</th>
-                  <th />
+                  <th>2FA</th>
+                  <th>Last active</th>
+                  <th className="r" aria-label="Action" />
                 </tr>
               </thead>
               <tbody>
-                {staff.data.map((grant) => (
-                  <tr key={`${grant.user_id}:${grant.role}`}>
-                    <td>{grant.email}</td>
-                    <td>
-                      <span className="badge">{grant.role}</span>
-                    </td>
-                    <td className="muted nowrap">
-                      {new Date(grant.granted_at).toLocaleDateString()}
-                    </td>
-                    <td className="muted">{grant.granted_by ?? 'system'}</td>
-                    <td className="right">
-                      <Revoke
-                        userId={grant.user_id}
-                        role={grant.role as StaffRole}
-                        onDone={staff.reload}
-                      />
-                    </td>
-                  </tr>
+                {rows.map((person) => (
+                  <Fragment key={person.userId}>
+                    <tr>
+                      <td>
+                        <strong>{person.name ?? person.email}</strong>
+                        {person.name !== null && <div className="cell-sub">{person.email}</div>}
+                      </td>
+                      <td>
+                        <strong>{roleName(person.roles[0] ?? '')}</strong>
+                        {person.roles.length > 1 && (
+                          <div className="cell-sub">+ {person.roles.slice(1).map(roleName).join(', ')}</div>
+                        )}
+                      </td>
+                      <td>
+                        {person.hasTotp === undefined ? (
+                          <span className="muted">—</span>
+                        ) : (
+                          <span className={person.hasTotp ? 'badge ok' : 'badge danger'}>
+                            {person.hasTotp ? 'On' : 'Off'}
+                          </span>
+                        )}
+                      </td>
+                      <td className="quiet">
+                        {person.lastActive == null ? 'never' : `${ageSince(person.lastActive)} ago`}
+                      </td>
+                      <td className="r">
+                        <button
+                          type="button"
+                          className="ghost"
+                          aria-expanded={open === person.userId}
+                          onClick={() => setOpen(open === person.userId ? undefined : person.userId)}
+                        >
+                          {open === person.userId ? 'Close' : 'Manage'}
+                        </button>
+                      </td>
+                    </tr>
+                    {open === person.userId && (
+                      <tr className="detail">
+                        <td colSpan={5}>
+                          {/* A person without a confirmed factor is refused on
+                              every staff route, reads included (014) — they
+                              enrol from their own Your authenticator screen. */}
+                          {person.hasTotp === false && (
+                            <p className="hint">
+                              No second factor yet: every operations screen refuses them until
+                              they enrol on Your authenticator.
+                            </p>
+                          )}
+                          {person.roles.map((role) => (
+                            <div className="row" key={role}>
+                              <span>{roleName(role)}</span>
+                              <Revoke userId={person.userId} role={role} onDone={staff.reload} />
+                            </div>
+                          ))}
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
@@ -82,23 +164,21 @@ export default function Staff() {
         )}
       </div>
 
-      <Grant onGranted={staff.reload} />
+      <div className="grid two">
+        <Grant onGranted={staff.reload} />
 
-      <div className="panel">
-        <h2>What each role can do</h2>
-        {ROLES.map((entry) => (
-          <div className="row" key={entry.role}>
-            <span>
-              <span className="badge">{entry.role}</span>
-            </span>
-            <span className="muted" style={{ textAlign: 'right' }}>
-              {entry.can}
-            </span>
-          </div>
-        ))}
-        <p className="hint">
-          Grant the narrowest role that does the job.
-        </p>
+        <div className="panel">
+          <span className="sec">What each role can do</span>
+          {ROLES.map((entry) => (
+            <div className="row" key={entry.role}>
+              <span className="badge">{roleName(entry.role)}</span>
+              <span className="muted" style={{ textAlign: 'right' }}>
+                {entry.can}
+              </span>
+            </div>
+          ))}
+          <p className="hint">Grant the narrowest role that does the job.</p>
+        </div>
       </div>
     </>
   );
@@ -194,7 +274,7 @@ function Grant({ onGranted }: { onGranted: () => void }) {
         })();
       }}
     >
-      <h2>Grant a role</h2>
+      <span className="sec">Grant a role</span>
 
       <div className="field-row two">
         <label>
@@ -216,7 +296,7 @@ function Grant({ onGranted }: { onGranted: () => void }) {
             labelledBy="staff-role"
             value={role}
             onChange={(value) => setRole(value as StaffRole)}
-            options={ROLES.map((entry) => ({ value: entry.role, label: entry.role }))}
+            options={ROLES.map((entry) => ({ value: entry.role, label: roleName(entry.role) }))}
           />
         </label>
       </div>
