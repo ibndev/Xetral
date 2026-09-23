@@ -29,6 +29,19 @@ export interface UserSummary {
   readonly status: string;
   readonly kyc_status: string | null;
   readonly created_at: string;
+  readonly country: string | null;
+  /** The spendable wallet in the customer's OWN currency, minor units as
+   *  text. One currency per row — summing kobo with cents is not a balance. */
+  readonly balance_minor: string;
+  readonly balance_currency: string;
+}
+
+/** The four figures over the comp's customer table. */
+export interface UserTotals {
+  readonly total: string;
+  readonly new_24h: string;
+  readonly kyc_pending: string;
+  readonly frozen: string;
 }
 
 
@@ -52,7 +65,7 @@ export class AdminService {
    * dashboard nobody opens.
    */
   async overview(): Promise<Record<string, unknown>> {
-    const [queues, liability, recent] = await Promise.all([
+    const [queues, liability, recent, pulse] = await Promise.all([
       this.pool.query(`SELECT queue, waiting, oldest FROM admin_work_queue`),
       this.pool.query(
         `SELECT currency, wallets_minor::text, pending_minor::text, cards_minor::text,
@@ -64,9 +77,11 @@ export class AdminService {
                 COUNT(*) FILTER (WHERE created_at > now() - interval '1 hour')   AS entries_1h
            FROM journal_entries`,
       ),
+      this.#pulse(),
     ]);
 
     return {
+      pulse,
       queues: queues.rows,
       liability: liability.rows.map((row) => ({
         ...row,
@@ -78,6 +93,125 @@ export class AdminService {
         }),
       })),
       activity: recent.rows[0] ?? {},
+    };
+  }
+
+  /**
+   * THE FIGURES THE OVERVIEW'S TILES AND CHART ARE DRAWN FROM.
+   *
+   * Every one is read off POSTINGS, never off a counter something keeps — the
+   * rule the metrics endpoint follows, for its reason: a counter is a second
+   * copy of the ledger, and the copy is what drifts.
+   *
+   * ONE SCAN PER MEASURE, grouped by hour, and the days are summed here. The
+   * first version asked a subquery per bucket — thirty-odd scans of
+   * `postings` on every open of the landing page, which is how a dashboard
+   * takes the database down while watching it.
+   *
+   * NAIRA ONLY for the money tiles, and the tiles say so by their symbol.
+   * Adding kobo to cents to make one "total" is the mistake the balance
+   * invariant exists to refuse; the per-currency table below them is where
+   * every other currency is read.
+   *
+   * WHAT "OWED" A DAY AGO WAS is computed, not remembered: the balance now,
+   * less everything posted to those accounts since. The ledger is
+   * append-only, so that subtraction is exact.
+   */
+  async #pulse(): Promise<Record<string, unknown>> {
+    const owedKinds = `('customer_wallet','customer_card','customer_pending','suspense')`;
+    const [entries, money, settlements, tens, owedNow] = await Promise.all([
+      this.pool.query<{ h: number; n: string }>(
+        `SELECT floor(extract(epoch FROM now() - created_at) / 3600)::int AS h, COUNT(*)::text AS n
+           FROM journal_entries
+          WHERE created_at > now() - interval '7 days'
+          GROUP BY 1`,
+      ),
+      this.pool.query<{ h: number; volume: string; earned: string; owed: string }>(
+        `SELECT floor(extract(epoch FROM now() - p.created_at) / 3600)::int AS h,
+                COALESCE(SUM(p.amount_minor) FILTER (WHERE p.amount_minor > 0), 0)::text AS volume,
+                COALESCE(SUM(p.amount_minor) FILTER (
+                  WHERE a.kind IN ('revenue_fees','revenue_fx_spread')), 0)::text AS earned,
+                COALESCE(SUM(p.amount_minor) FILTER (WHERE a.kind IN ${owedKinds}), 0)::text AS owed
+           FROM postings p JOIN accounts a ON a.id = p.account_id
+          WHERE p.currency = 'NGN' AND p.created_at > now() - interval '7 days'
+          GROUP BY 1`,
+      ),
+      /* A SETTLEMENT is an entry that touches a provider's float: money
+         crossing the platform's edge, in or out. Every other entry moves
+         money between accounts that are already ours. */
+      this.pool.query<{ h: number; n: string }>(
+        `SELECT floor(extract(epoch FROM now() - p.created_at) / 3600)::int AS h,
+                COUNT(DISTINCT p.journal_entry_id)::text AS n
+           FROM postings p JOIN accounts a ON a.id = p.account_id
+          WHERE a.kind = 'provider_float' AND p.created_at > now() - interval '24 hours'
+          GROUP BY 1`,
+      ),
+      this.pool.query<{ t: number; n: string }>(
+        `SELECT floor(extract(epoch FROM now() - created_at) / 600)::int AS t, COUNT(*)::text AS n
+           FROM journal_entries
+          WHERE created_at > now() - interval '1 hour'
+          GROUP BY 1`,
+      ),
+      this.pool.query<{ v: string }>(
+        `SELECT COALESCE(SUM(b.balance_minor), 0)::text AS v
+           FROM accounts a JOIN account_balances b ON b.account_id = a.id
+          WHERE a.currency = 'NGN' AND a.kind IN ${owedKinds}`,
+      ),
+    ]);
+
+    // Hour 0 is the most recent. Arrays below run OLDEST FIRST, the order a
+    // chart draws them in.
+    const hourly = (rows: readonly { h: number; n: string }[], hours: number): number[] => {
+      const out = new Array<number>(hours).fill(0);
+      for (const r of rows) if (r.h >= 0 && r.h < hours) out[hours - 1 - r.h] = Number(r.n);
+      return out;
+    };
+    const perDay = (pick: (row: (typeof money.rows)[number]) => string): bigint[] => {
+      const out = new Array<bigint>(7).fill(0n);
+      for (const r of money.rows) {
+        const d = Math.floor(r.h / 24);
+        if (d >= 0 && d < 7) out[6 - d] = (out[6 - d] as bigint) + BigInt(pick(r));
+      }
+      return out;
+    };
+    const entriesHourly = hourly(entries.rows, 168);
+    const entriesDaily = [0, 1, 2, 3, 4, 5, 6].map((d) =>
+      entriesHourly.slice(d * 24, d * 24 + 24).reduce((a, b) => a + b, 0),
+    );
+    const tenMinutes = new Array<number>(6).fill(0);
+    for (const r of tens.rows) if (r.t >= 0 && r.t < 6) tenMinutes[5 - r.t] = Number(r.n);
+
+    // What was owed at the END of each day: now, less what was posted after.
+    const owedMoves = perDay((r) => r.owed);
+    const owedNowMinor = BigInt(owedNow.rows[0]?.v ?? '0');
+    const owedDaily: bigint[] = [];
+    let after = 0n;
+    for (let d = 6; d >= 0; d -= 1) {
+      owedDaily[d] = owedNowMinor - after;
+      after += owedMoves[d] as bigint;
+    }
+    const lastDay = money.rows.filter((r) => r.h < 24);
+    const sum = (pick: (row: (typeof money.rows)[number]) => string, rows = lastDay): bigint =>
+      rows.reduce((a, r) => a + BigInt(pick(r)), 0n);
+    const prevDay = money.rows.filter((r) => r.h >= 24 && r.h < 48);
+
+    return {
+      currency: 'NGN',
+      owed_now_minor: owedNowMinor.toString(),
+      owed_24h_ago_minor: (owedNowMinor - sum((r) => r.owed)).toString(),
+      owed_daily_minor: owedDaily.map(String),
+      entries_24h: entriesHourly.slice(144).reduce((a, b) => a + b, 0),
+      entries_prev_24h: entriesHourly.slice(120, 144).reduce((a, b) => a + b, 0),
+      entries_daily: entriesDaily,
+      volume_24h_minor: sum((r) => r.volume).toString(),
+      volume_prev_24h_minor: sum((r) => r.volume, prevDay).toString(),
+      volume_daily_minor: perDay((r) => r.volume).map(String),
+      earnings_24h_minor: sum((r) => r.earned).toString(),
+      earnings_prev_24h_minor: sum((r) => r.earned, prevDay).toString(),
+      earnings_daily_minor: perDay((r) => r.earned).map(String),
+      hourly_entries: entriesHourly.slice(144),
+      hourly_settlements: hourly(settlements.rows, 24),
+      last_hour_by_ten_minutes: tenMinutes,
     };
   }
 
@@ -122,9 +256,28 @@ export class AdminService {
 
   /* -------------------------------- users ------------------------------ */
 
+  /**
+   * Counts over the whole customer table, not over the page being shown — a
+   * "Total customers" figure that meant "rows on this screen" would read 50
+   * on a platform of fifty thousand.
+   */
+  async userTotals(): Promise<UserTotals> {
+    const found = await this.pool.query<UserTotals>(
+      `SELECT count(*)::text AS total,
+              count(*) FILTER (WHERE created_at > now() - interval '24 hours')::text AS new_24h,
+              count(*) FILTER (WHERE status = 'frozen')::text AS frozen,
+              (SELECT count(DISTINCT user_id) FROM kyc_submissions WHERE status = 'pending')::text
+                AS kyc_pending
+         FROM users`,
+    );
+    return found.rows[0] ?? { total: '0', new_24h: '0', kyc_pending: '0', frozen: '0' };
+  }
+
   async users(options: {
     readonly search?: string;
     readonly status?: string;
+    readonly kyc?: 'approved' | 'pending' | 'rejected' | 'none';
+    readonly country?: string;
     readonly limit: number;
     readonly before?: string;
   }): Promise<readonly UserSummary[]> {
@@ -160,6 +313,21 @@ export class AdminService {
     if (options.status !== undefined) {
       params.push(options.status);
       clauses.push(`u.status = $${params.length}`);
+    }
+    if (options.country !== undefined) {
+      params.push(options.country);
+      clauses.push(`u.country = $${params.length}`);
+    }
+    if (options.kyc === 'none') {
+      clauses.push(`NOT EXISTS (SELECT 1 FROM kyc_submissions k WHERE k.user_id = u.id)`);
+    } else if (options.kyc !== undefined) {
+      // The LATEST submission's status, the same one the column shows — a
+      // customer rejected once and approved since is approved.
+      params.push(options.kyc);
+      clauses.push(
+        `(SELECT k.status::text FROM kyc_submissions k
+           WHERE k.user_id = u.id ORDER BY k.id DESC LIMIT 1) = $${params.length}`,
+      );
     }
     if (options.before !== undefined) {
       params.push(options.before);
@@ -210,8 +378,18 @@ export class AdminService {
                 WHERE k.user_id = u.id AND k.status IN ('approved','pending')
                 ORDER BY k.id DESC LIMIT 1) AS verified_name,
               (SELECT k.status::text FROM kyc_submissions k
-                WHERE k.user_id = u.id ORDER BY k.id DESC LIMIT 1) AS kyc_status
+                WHERE k.user_id = u.id ORDER BY k.id DESC LIMIT 1) AS kyc_status,
+              u.country,
+              -- THE CUSTOMER'S OWN CURRENCY, and NGN for an account opened
+              -- before 040 — 050's claim about history, not a guess.
+              COALESCE(c.currency, 'NGN') AS balance_currency,
+              COALESCE((SELECT b.balance_minor FROM accounts a
+                          JOIN account_balances b ON b.account_id = a.id
+                         WHERE a.kind = 'customer_wallet' AND a.owner_type = 'user'
+                           AND a.owner_id = u.id
+                           AND a.currency = COALESCE(c.currency, 'NGN')), 0)::text AS balance_minor
          FROM users u
+         LEFT JOIN countries c ON c.code = u.country
         ${clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : ''}
         ORDER BY u.id DESC
         LIMIT $${params.length}`,

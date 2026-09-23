@@ -1,13 +1,17 @@
 'use client';
 
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
+import { formatMinor } from '@xetral/client';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
 import { AdminError } from '../access';
+import { ageSince } from '../age';
+import { Kpis, MoneyFigure } from '../queue';
 import { AdminTitle } from '@/app/admin/nav';
 
 /**
- * Money that arrived and that we could not say belonged to anyone.
+ * Money that arrived and that we could not say belonged to anyone — the
+ * comp's screen: three figures, then one table with Attribute on each row.
  *
  * The deposit webhook posts to `suspense` rather than dropping the event,
  * because the money arrived whatever we can work out about it — and dropping
@@ -20,69 +24,143 @@ import { AdminTitle } from '@/app/admin/nav';
  * true statement made later. Editing the first would erase the fact that we
  * ever did not know, which is exactly what an auditor would want to see.
  */
+
+interface SuspenseDeposit {
+  readonly deposit_uuid: string;
+  readonly provider: string;
+  readonly provider_reference: string;
+  readonly amount_minor: string;
+  readonly currency: string;
+  readonly sender_name: string | null;
+  readonly sender_bank: string | null;
+  readonly suspense_reason: string | null;
+  readonly created_at: string;
+  readonly unresolved_for: string;
+}
+
+const PROVIDER_NAMES: Readonly<Record<string, string>> = {
+  flutterwave: 'Flutterwave',
+  paystack: 'Paystack',
+  bitnob: 'Bitnob',
+};
+
+/** Totals per currency — never summed across them. */
+function held(rows: readonly SuspenseDeposit[]): { currency: string; amount_minor: string }[] {
+  const by = new Map<string, bigint>();
+  for (const row of rows) by.set(row.currency, (by.get(row.currency) ?? 0n) + BigInt(row.amount_minor));
+  return [...by.entries()]
+    .sort((a, b) => (a[1] === b[1] ? 0 : a[1] > b[1] ? -1 : 1))
+    .map(([currency, amount]) => ({ currency, amount_minor: amount.toString() }));
+}
+
 export default function Suspense() {
   const admin = useAdmin();
   const deposits = useLoad(() => admin.suspense(), [admin]);
+  const [open, setOpen] = useState<string | undefined>();
+  const rows: readonly SuspenseDeposit[] = deposits.data ?? [];
+  const oldest = rows.reduce<string | undefined>(
+    (min, row) => (min === undefined || row.created_at < min ? row.created_at : min),
+    undefined,
+  );
 
   return (
     <>
-      <div className="panel">
-        <AdminTitle>Suspense</AdminTitle>
-        <h2>{deposits.data?.length ?? 0} unattributed deposit(s)</h2>
-        <p className="lead">
-          Money that arrived and has not reached anybody yet.
-        </p>
+      <AdminTitle>Suspense</AdminTitle>
+      <Kpis
+        items={[
+          { label: 'Unattributed credits', count: deposits.data === undefined ? undefined : rows.length, tone: 'warn' },
+          { label: 'Held in suspense', value: deposits.data === undefined ? undefined : <MoneyFigure totals={held(rows)} /> },
+          { label: 'Oldest', value: deposits.data === undefined ? undefined : oldest === undefined ? '—' : ageSince(oldest) },
+        ]}
+      />
+
+      <div className="panel tbl-panel">
         <AdminError error={deposits.error} code={deposits.code} role="finance" />
         {deposits.loading && <p className="spinner">Loading…</p>}
-        {deposits.data !== undefined && deposits.data.length === 0 && (
+        {!deposits.loading && deposits.error === undefined && rows.length === 0 && (
           <p className="empty">Nothing in suspense.</p>
         )}
-      </div>
 
-      {deposits.data?.map((deposit) => (
-        <Deposit key={deposit.deposit_uuid} deposit={deposit} onResolved={deposits.reload} />
-      ))}
+        {rows.length > 0 && (
+          <div className="scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Reference</th>
+                  <th>Provider</th>
+                  <th className="r">Amount</th>
+                  <th>Received</th>
+                  <th className="r" aria-label="Action" />
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((deposit) => (
+                  <Fragment key={deposit.deposit_uuid}>
+                    <tr>
+                      <td className="ref">{deposit.provider_reference}</td>
+                      <td>
+                        {PROVIDER_NAMES[deposit.provider] ?? deposit.provider}
+                        <div className="cell-sub">{deposit.suspense_reason ?? 'no matching account'}</div>
+                      </td>
+                      <td className="r mono soft">{formatMinor(deposit.amount_minor, deposit.currency)}</td>
+                      <td className="quiet">{ageSince(deposit.created_at)} ago</td>
+                      <td className="r">
+                        <button
+                          type="button"
+                          className={open === deposit.deposit_uuid ? 'ghost' : undefined}
+                          aria-expanded={open === deposit.deposit_uuid}
+                          onClick={() =>
+                            setOpen(open === deposit.deposit_uuid ? undefined : deposit.deposit_uuid)
+                          }
+                        >
+                          {open === deposit.deposit_uuid ? 'Close' : 'Attribute'}
+                        </button>
+                      </td>
+                    </tr>
+                    {open === deposit.deposit_uuid && (
+                      <tr className="detail">
+                        <td colSpan={5}>
+                          <Attribute
+                            deposit={deposit}
+                            onDone={() => {
+                              setOpen(undefined);
+                              deposits.reload();
+                            }}
+                          />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </>
   );
 }
 
-function Deposit({
-  deposit,
-  onResolved,
-}: {
-  deposit: {
-    deposit_uuid: string;
-    provider: string;
-    provider_reference: string;
-    amount_minor: string;
-    currency: string;
-    sender_name: string | null;
-    sender_bank: string | null;
-    suspense_reason: string | null;
-    created_at: string;
-    unresolved_for: string;
-  };
-  onResolved: () => void;
-}) {
+function Attribute({ deposit, onDone }: { readonly deposit: SuspenseDeposit; readonly onDone: () => void }) {
   const admin = useAdmin();
   const [userId, setUserId] = useState('');
   const [reason, setReason] = useState('');
   const [pin, setPin] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
+  const ready = userId.trim() !== '' && reason.trim().length >= 3 && pin !== '' && !busy;
 
   return (
     <form
-      className="panel"
+      className="review-grid"
       onSubmit={(event) => {
         event.preventDefault();
         setBusy(true);
         setError(undefined);
         void (async () => {
           try {
-            await admin.attributeDeposit(deposit.deposit_uuid, userId, reason, pin);
-            setPin('');
-            onResolved();
+            await admin.attributeDeposit(deposit.deposit_uuid, userId.trim(), reason.trim(), pin);
+            onDone();
           } catch (cause) {
             setError(messageFor(cause));
           } finally {
@@ -91,72 +169,58 @@ function Deposit({
         })();
       }}
     >
-      <div className="balance">
-        <div>
-          <div className="amount" style={{ fontSize: 22 }}>
-            {deposit.amount_minor} <span className="muted">{deposit.currency} minor units</span>
-          </div>
-          <div className="pending">
-            from {deposit.sender_name ?? 'an unnamed sender'}
-            {deposit.sender_bank !== null && ` · ${deposit.sender_bank}`}
-          </div>
+      <dl className="facts">
+        <dt>From</dt>
+        <dd>
+          {deposit.sender_name ?? 'an unnamed sender'}
+          {deposit.sender_bank !== null && ` · ${deposit.sender_bank}`}
+        </dd>
+        <dt>Why it is here</dt>
+        <dd>{deposit.suspense_reason ?? 'no matching account'}</dd>
+        <dt>Arrived</dt>
+        <dd>{new Date(deposit.created_at).toLocaleString('en-GB')}</dd>
+        <dt>Held for</dt>
+        <dd>{deposit.unresolved_for}</dd>
+      </dl>
+
+      <div>
+        <div className="field-row two">
+          <label>
+            <span>Customer id</span>
+            <input
+              className="mono"
+              placeholder="from their Customers page"
+              value={userId}
+              onChange={(e) => setUserId(e.target.value)}
+            />
+          </label>
+          <label>
+            <span>Transaction PIN</span>
+            <input
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
+              value={pin}
+              onChange={(e) => setPin(e.target.value)}
+            />
+          </label>
         </div>
-        <span className="badge warn">held {deposit.unresolved_for}</span>
-      </div>
-
-      <div className="row">
-        <span className="muted">Provider reference</span>
-        <span className="mono">{deposit.provider_reference}</span>
-      </div>
-      <div className="row">
-        <span className="muted">Why it is here</span>
-        <span>{deposit.suspense_reason ?? 'no matching account'}</span>
-      </div>
-      <div className="row">
-        <span className="muted">Arrived</span>
-        <span>{new Date(deposit.created_at).toLocaleString()}</span>
-      </div>
-
-      <div className="field-row two" style={{ marginTop: 14 }}>
         <label>
-          Give it to which customer
-          <input
-            className="mono"
-            placeholder="customer id"
-            value={userId}
-            onChange={(e) => setUserId(e.target.value)}
-            required
-          />
-          <span className="hint">Find it on the customer&apos;s page.</span>
-        </label>
-
-        <label>
-          Your transaction PIN
-          <input
-            type="password"
-            inputMode="numeric"
-            autoComplete="off"
-            value={pin}
-            onChange={(e) => setPin(e.target.value)}
-            required
+          <span>What you checked</span>
+          <textarea
+            rows={2}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="The record somebody reads if it turns out to be wrong."
           />
         </label>
+        <div className="actions">
+          <button type="submit" className="small" disabled={!ready}>
+            {busy ? 'Crediting…' : `Credit ${formatMinor(deposit.amount_minor, deposit.currency)}`}
+          </button>
+        </div>
+        {error !== undefined && <p className="error">{error}</p>}
       </div>
-
-      <label>
-        Why this customer
-        <textarea value={reason} onChange={(e) => setReason(e.target.value)} required minLength={3} />
-        <span className="hint">
-          What you checked. This is the record somebody reads if it turns out to
-          be wrong.
-        </span>
-      </label>
-
-      <button type="submit" disabled={busy}>
-        {busy ? 'Working…' : 'Credit this customer'}
-      </button>
-
-      {error !== undefined && <p className="error">{error}</p>}
     </form>
   );
 }

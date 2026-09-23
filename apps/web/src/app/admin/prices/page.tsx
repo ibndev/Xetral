@@ -81,6 +81,12 @@ export default function Prices() {
    * numbers the sweep already returns and nobody was reading.
    */
   const [report, setReport] = useState<string | undefined>();
+  /* WHICH PUBLISH FORM IS OPEN. The comp puts "Publish spread" in the table's
+     own header and the form opens there — three forms laid out at rest were
+     most of this page, above the tables an operator came to read. */
+  const [publishing, setPublishing] = useState<'fx' | 'rate' | 'giftcard' | undefined>();
+  const toggle = (which: 'fx' | 'rate' | 'giftcard'): void =>
+    setPublishing((was) => (was === which ? undefined : which));
 
   /**
    * Refresh every corridor from the feed, and SAY WHAT HAPPENED.
@@ -149,8 +155,9 @@ export default function Prices() {
     <>
       <div className="panel">
         <AdminTitle>Prices</AdminTitle>
-        <p className="lead">
-          Every FX spread and gift card rate a customer can be quoted. Prices are
+        <span className="sec">Prices</span>
+        <p className="sub">
+          Every FX spread and gift-card rate a customer can be quoted. Prices are
           never edited — retire one and publish its replacement.
         </p>
         <AdminError error={prices.error} code={prices.code} role="finance" />
@@ -167,8 +174,8 @@ export default function Prices() {
 
         {prices.data !== undefined && prices.data.unattributed.length > 0 && (
           <>
-            <h2>Published without an author</h2>
-            <p className="lead">
+            <span className="sec">Published without an author</span>
+            <p className="sub">
               Written at a database prompt, so nobody is recorded as setting them.
               Retire and republish to put a name on one.
             </p>
@@ -213,21 +220,25 @@ export default function Prices() {
         rates table is last because it is the longest and the one an operator
         reads rather than acts on.
       */}
-      <PublishFx busy={busy} onPublish={act} />
-
-      <div className="panel">
-        <h2>FX spreads</h2>
-        <p className="lead">
-          Each direction is priced separately: publishing NGN→USD does not publish
-          USD→NGN.
-        </p>
+      <div className="panel tbl-panel">
+        <div className="tbl-head">
+          <span className="sec">FX spreads</span>
+          <button type="button" className={publishing === 'fx' ? 'ghost' : undefined} onClick={() => toggle('fx')}>
+            {publishing === 'fx' ? 'Close' : 'Publish spread'}
+          </button>
+        </div>
+        {publishing === 'fx' && <PublishFx busy={busy} onPublish={act} />}
+        <span className="tbl-note">
+          Each direction is priced separately: publishing NGN→USD does not publish USD→NGN.
+        </span>
+        <div className="scroll">
         <table>
           <thead>
             <tr>
               <th>Pair</th>
               <th>Spread</th>
               <th>Quoted at</th>
-              <th>Minimum</th>
+              <th className="r">Minimum</th>
               <th>Published by</th>
               <th />
             </tr>
@@ -263,7 +274,7 @@ export default function Prices() {
                     </span>
                   )}
                 </td>
-                <td>{formatMinor(row.min_base_minor, row.base_currency)}</td>
+                <td className="r mono soft">{formatMinor(row.min_base_minor, row.base_currency)}</td>
                 <td>{row.published_by ?? <em>at a prompt</em>}</td>
                 {/*
                   RETIRE WHILE LIVE, DELETE ONCE RETIRED — and this is the
@@ -298,55 +309,9 @@ export default function Prices() {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
 
-      <PublishFxRate busy={busy} onPublish={act} />
-
-      <PublishRate busy={busy} onPublish={act} />
-
-      <div className="panel">
-        <h2>Gift card rates</h2>
-        <p className="lead">
-          Rates are banded by face value. Two live bands for one card may not
-          overlap.
-        </p>
-        <table>
-          <thead>
-            <tr>
-              <th>Card</th>
-              <th>Band</th>
-              <th>Rate</th>
-              <th>Published by</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {prices.data?.rate_cards.map((row) => (
-              <tr key={row.uuid} className={row.retired_at !== null ? 'muted' : undefined}>
-                <td>
-                  {row.brand} {row.country} {row.card_type}
-                </td>
-                <td>
-                  {formatMinor(row.min_face_minor, row.face_currency)} &ndash;{' '}
-                  {formatMinor(row.max_face_minor, row.face_currency)}
-                </td>
-                <td>
-                  {formatMinor(row.payout_rate_minor, row.payout_currency)} per{' '}
-                  {row.face_currency}
-                </td>
-                <td>{row.published_by ?? <em>at a prompt</em>}</td>
-                <td>
-                  {row.retired_at === null ? (
-                    <Retire uuid={row.uuid} kind="giftcard" busy={busy} onRetire={act} />
-                  ) : (
-                    <span className="badge">retired</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
       {/*
         WHAT A CURRENCY IS WORTH, which nothing could set before.
 
@@ -362,10 +327,14 @@ export default function Prices() {
         the swap settles out of our own float in both currencies rather than
         through a provider.
       */}
-      <div className="panel">
-        <div className="section-head">
-          <h2>Exchange rates</h2>
+      <div className="panel tbl-panel">
+        <div className="tbl-head">
+          <span className="sec">Exchange rates</span>
+          <button type="button" className="ghost" onClick={() => toggle('rate')}>
+            {publishing === 'rate' ? 'Close' : 'Publish by hand'}
+          </button>
         </div>
+        {publishing === 'rate' && <PublishFxRate busy={busy} onPublish={act} />}
         {/*
           GENERATE IS BACK, AND ITS REMOVAL WAS A REGRESSION RATHER THAN A
           DECISION.
@@ -382,8 +351,8 @@ export default function Prices() {
           a tooltip does not exist on a touch screen, which is what "the button
           is not clickable and does nothing" was the first time.
         */}
-        <div className="stack">
-          <label htmlFor="fx-refresh-pin">Transaction PIN</label>
+        <div className="tbl-tools">
+          <label htmlFor="fx-refresh-pin" className="tbl-inline">Transaction PIN</label>
           <input
             id="fx-refresh-pin"
             type="password"
@@ -392,6 +361,7 @@ export default function Prices() {
             value={pin}
             onChange={(e) => setPin(e.target.value)}
             placeholder="••••"
+            className="tbl-pin"
           />
           <button type="button" onClick={() => void generate()} disabled={busy || pin === ''}>
             {busy ? 'Generating…' : 'Generate latest exchange rate'}
@@ -400,9 +370,9 @@ export default function Prices() {
           {/* WHAT IT DID, because with no ExchangeRate-API key every base
               fails, nothing publishes, the table reloads unchanged and the
               screen would otherwise say nothing at all. */}
-          {report !== undefined && <p className="hint">{report}</p>}
         </div>
-        <p className="lead">
+        {report !== undefined && <p className="tbl-note">{report}</p>}
+        <p className="tbl-note">
           What we sell a currency for, in the direction stated. A pair with a
           rate here is one we quote ourselves; a pair with none is quoted by
           the provider. Rates marked automatic are refreshed from
@@ -501,6 +471,56 @@ export default function Prices() {
           </div>
         )}
       </div>
+      <div className="panel tbl-panel">
+        <div className="tbl-head">
+          <span className="sec">Gift-card rates</span>
+          <button type="button" className={publishing === 'giftcard' ? 'ghost' : undefined} onClick={() => toggle('giftcard')}>
+            {publishing === 'giftcard' ? 'Close' : 'Publish rate'}
+          </button>
+        </div>
+        {publishing === 'giftcard' && <PublishRate busy={busy} onPublish={act} />}
+        <span className="tbl-note">
+          Banded by face value. Two live bands for one card may not overlap.
+        </span>
+        <div className="scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Card</th>
+              <th>Band</th>
+              <th>Rate</th>
+              <th>Published by</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {prices.data?.rate_cards.map((row) => (
+              <tr key={row.uuid} className={row.retired_at !== null ? 'muted' : undefined}>
+                <td>
+                  {row.brand} {row.country} {row.card_type}
+                </td>
+                <td>
+                  {formatMinor(row.min_face_minor, row.face_currency)} &ndash;{' '}
+                  {formatMinor(row.max_face_minor, row.face_currency)}
+                </td>
+                <td>
+                  {formatMinor(row.payout_rate_minor, row.payout_currency)} per{' '}
+                  {row.face_currency}
+                </td>
+                <td>{row.published_by ?? <em>at a prompt</em>}</td>
+                <td>
+                  {row.retired_at === null ? (
+                    <Retire uuid={row.uuid} kind="giftcard" busy={busy} onRetire={act} />
+                  ) : (
+                    <span className="badge">retired</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        </div>
+      </div>
 
     </>
   );
@@ -522,7 +542,7 @@ function PublishFx({
 
   return (
     <form
-      className="panel"
+      className="tbl-form"
       onSubmit={(event) => {
         event.preventDefault();
         void onPublish(() =>
@@ -538,7 +558,6 @@ function PublishFx({
         );
       }}
     >
-      <h2>Publish an FX spread</h2>
       <div className="field-row two">
         <label>
           From
@@ -622,7 +641,7 @@ function PublishRate({
 
   return (
     <form
-      className="panel"
+      className="tbl-form"
       onSubmit={(event) => {
         event.preventDefault();
         void onPublish(() =>
@@ -642,7 +661,6 @@ function PublishRate({
         );
       }}
     >
-      <h2>Publish a gift card rate</h2>
       <div className="field-row two">
         <label>
           Brand
@@ -855,10 +873,15 @@ function Retire({
   onRetire: (work: () => Promise<unknown>) => Promise<void>;
 }) {
   const admin = useAdmin();
+  const [open, setOpen] = useState(false);
   const [reason, setReason] = useState('');
   const [pin, setPin] = useState('');
 
   /*
+   * ONE BUTTON AT REST, as the comp draws it. The reason and PIN boxes were
+   * laid out in every live row, so a table of three spreads was mostly empty
+   * inputs; pressing Retire opens them, beside the row they act on.
+   *
    * BOTH FIELDS ARE HERE, AND THAT IS THE FIX.
    *
    * This button is disabled until a reason of at least ten characters AND a
@@ -873,8 +896,16 @@ function Retire({
    */
   const ready = reason.trim().length >= 10 && pin !== '';
 
+  if (!open) {
+    return (
+      <button type="button" className="ghost" onClick={() => setOpen(true)}>
+        Retire
+      </button>
+    );
+  }
+
   return (
-    <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+    <span className="retire-open">
       <input
         value={reason}
         onChange={(e) => setReason(e.target.value)}
@@ -898,6 +929,9 @@ function Retire({
         }}
       >
         Retire
+      </button>
+      <button type="button" className="ghost small" onClick={() => setOpen(false)}>
+        Cancel
       </button>
       {/* WHY IT IS GREY, ON THE PAGE. A disabled control whose reason is not
           written down is a broken control to whoever is looking at it. */}
@@ -942,7 +976,7 @@ function PublishFxRate({
 
   return (
     <form
-      className="panel"
+      className="tbl-form"
       onSubmit={(event) => {
         event.preventDefault();
         void onPublish(() =>
@@ -953,8 +987,7 @@ function PublishFxRate({
         );
       }}
     >
-      <h2>Publish an exchange rate</h2>
-      <p className="lead">
+      <p className="hint">
         Set what a currency is worth where no provider quotes the pair. A rate
         here makes us the counterparty: the swap settles out of our own float
         in both currencies.

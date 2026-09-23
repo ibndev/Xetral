@@ -29,7 +29,7 @@ export interface Kpi {
 
 export function Kpis({ items }: { readonly items: readonly Kpi[] }) {
   return (
-    <div className="stats three">
+    <div className={items.length === 4 ? 'stats four' : 'stats three'}>
       {items.map((item) => {
         const shown = item.value ?? item.count;
         const toned = item.tone !== undefined && item.count !== undefined && item.count > 0;

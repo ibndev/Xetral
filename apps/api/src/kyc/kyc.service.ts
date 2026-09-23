@@ -189,6 +189,17 @@ export class KycService {
 
   /* ------------------------------ review ------------------------------- */
 
+  /** How many a reviewer has approved in the last day — the comp's third
+   *  figure, and the one that says the queue is being WORKED, not just full. */
+  async approvedSince(hours: number): Promise<number> {
+    const found = await this.pool.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM kyc_submissions
+        WHERE status = 'approved' AND reviewed_at > now() - make_interval(hours => $1)`,
+      [hours],
+    );
+    return Number(found.rows[0]?.n ?? 0);
+  }
+
   async queue(limit: number): Promise<readonly Record<string, unknown>[]> {
     const rows = await this.pool.query(
       // `uuid AS id`, because every other view this service returns calls it
@@ -197,7 +208,7 @@ export class KycService {
       // request went to a path that matched no route — a queue that listed
       // submissions perfectly and could not review any of them.
       `SELECT k.uuid AS id, k.full_name, k.bvn_last4, k.phone, k.address,
-              k.date_of_birth, k.created_at, u.email
+              k.date_of_birth, k.created_at, u.email, u.country
          FROM kyc_submissions k JOIN users u ON u.id = k.user_id
         WHERE k.status = 'pending'
         ORDER BY k.created_at

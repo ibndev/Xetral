@@ -5,6 +5,7 @@ import type { AdminCountry } from '@xetral/client';
 import { FormError } from '@/ui/form-error';
 import { Icon } from '@/ui/icon';
 import { Select } from '@/ui/select';
+import { CountryMark } from '@/ui/currency-mark';
 import { useAdmin, useLoad, useSubmit } from '@/lib/hooks';
 import { AdminTitle } from '@/app/admin/nav';
 
@@ -31,7 +32,8 @@ export default function Countries() {
     <>
       <div className="panel">
         <AdminTitle>Countries</AdminTitle>
-        <p className="lead">Where somebody can open an account.</p>
+        <span className="sec">Countries</span>
+        <p className="sub">Where somebody can open an account.</p>
 
         {state.loading && <p className="spinner">Loading…</p>}
         <FormError error={state.error} code={state.code} />
@@ -54,10 +56,11 @@ function Row({ country, onChange }: { country: AdminCountry; onChange: () => voi
   const { busy, error, code, run } = useSubmit();
 
   return (
-    <div className="row">
-      <span>
-        <span className="mono">{country.code}</span> {country.name}{' '}
-        <span className="muted">+{country.dial_code} · {country.currency}</span>
+    <div className="country-row">
+      <CountryMark country={country.code} size={22} />
+      <span className="country-name">
+        <strong>{country.name}</strong>{' '}
+        <span className="mono muted">+{country.dial_code} · {country.currency}</span>
         {!country.enabled && <> <span className="badge warn">closed</span></>}
         {/*
           The refusal in full. The database names which ceiling or threshold
@@ -69,7 +72,7 @@ function Row({ country, onChange }: { country: AdminCountry; onChange: () => voi
       </span>
       <button
         type="button"
-        className={country.enabled ? 'ghost small' : 'small'}
+        className={country.enabled ? 'ghost' : undefined}
         disabled={busy}
         onClick={() =>
           void run(async () => {
@@ -115,8 +118,8 @@ function Add({
         });
       }}
     >
-      <h2>Add a country</h2>
-      <p className="lead">It is added closed. Opening it is a separate decision.</p>
+      <span className="sec">Add a country</span>
+      <p className="sub">It is added closed. Opening it is a separate decision.</p>
 
       <div className="field-row two">
         <label>

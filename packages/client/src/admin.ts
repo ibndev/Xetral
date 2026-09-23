@@ -16,7 +16,36 @@ import { ApiError, toApiError } from './errors.js';
  * is the real control. This is the second, cheaper one.
  */
 
+/**
+ * What the Overview's tiles and throughput chart are drawn from.
+ *
+ * Money is naira, in minor units, as strings — the tiles format it with
+ * `compactMinor`, never by parsing it into a number. Arrays run oldest first.
+ */
+export interface AdminPulse {
+  readonly currency: 'NGN';
+  readonly owed_now_minor: string;
+  readonly owed_24h_ago_minor: string;
+  readonly owed_daily_minor: readonly string[];
+  readonly entries_24h: number;
+  readonly entries_prev_24h: number;
+  readonly entries_daily: readonly number[];
+  readonly volume_24h_minor: string;
+  readonly volume_prev_24h_minor: string;
+  readonly volume_daily_minor: readonly string[];
+  readonly earnings_24h_minor: string;
+  readonly earnings_prev_24h_minor: string;
+  readonly earnings_daily_minor: readonly string[];
+  /** Twenty-four hourly counts, the last one ending now. */
+  readonly hourly_entries: readonly number[];
+  /** Entries that touched a provider's float — money crossing our edge. */
+  readonly hourly_settlements: readonly number[];
+  readonly last_hour_by_ten_minutes: readonly number[];
+}
+
 export interface AdminOverview {
+  /** Absent from an API older than the Overview's tiles. */
+  readonly pulse?: AdminPulse;
   readonly queues: readonly {
     readonly queue: string;
     readonly waiting: string;
@@ -58,6 +87,20 @@ export interface AdminUser {
   readonly verified_name: string | null;
   readonly phone: string | null;
   readonly handle: string | null;
+  readonly country: string | null;
+  /** The numeric row id, and only ever a paging cursor: `before=` takes it. */
+  readonly row_id: string;
+  /** The wallet in the customer's own currency, minor units as text. */
+  readonly balance_minor: string;
+  readonly balance_currency: string;
+}
+
+/** Counts over the whole customer table, for the tiles above the list. */
+export interface AdminUserTotals {
+  readonly total: string;
+  readonly new_24h: string;
+  readonly kyc_pending: string;
+  readonly frozen: string;
 }
 
 /**
@@ -246,6 +289,7 @@ export interface AdminKycSubmission {
   readonly phone: string;
   readonly address: string;
   readonly created_at: string;
+  readonly country: string | null;
 }
 
 export interface AdminStaffGrant {
@@ -631,8 +675,22 @@ export interface AdminPublishedPair {
   readonly spread_basis_points: number;
 }
 
+/** Revenue in a recent window, per currency, from postings. */
+export interface AdminRecentEarnings {
+  readonly currency: string;
+  readonly fees_24h_minor: string;
+  readonly fx_spread_24h_minor: string;
+  readonly fees_7d_minor: string;
+  readonly fx_spread_7d_minor: string;
+  /** Fees plus spread per Lagos day, oldest first, today last. */
+  readonly daily_minor: readonly string[];
+  readonly previous_7d_minor: string;
+}
+
 export interface AdminEarnings {
   readonly lines: readonly AdminEarningsLine[];
+  /** Absent from an API that predates it. */
+  readonly recent?: readonly AdminRecentEarnings[];
   /** 0 means every transfer is free, which is the shipped default. */
   readonly transfer_fee_basis_points: number;
   /** Empty means no conversion can happen at all — an unpublished pair is
@@ -939,20 +997,36 @@ export class AdminClient {
   async users(query: {
     search?: string;
     status?: string;
+    kyc?: string;
+    country?: string;
     limit?: number;
     before?: string;
   } = {}): Promise<readonly AdminUser[]> {
+    return (await this.customers(query)).users;
+  }
+
+  /** The list AND the totals over the whole table, in one request. */
+  async customers(query: {
+    search?: string;
+    status?: string;
+    kyc?: string;
+    country?: string;
+    limit?: number;
+    before?: string;
+  } = {}): Promise<{ users: readonly AdminUser[]; totals: AdminUserTotals | undefined }> {
     const params = new URLSearchParams();
     if (query.search !== undefined && query.search !== '') params.set('search', query.search);
     if (query.status !== undefined) params.set('status', query.status);
+    if (query.kyc !== undefined) params.set('kyc', query.kyc);
+    if (query.country !== undefined) params.set('country', query.country);
     if (query.limit !== undefined) params.set('limit', String(query.limit));
     if (query.before !== undefined) params.set('before', query.before);
 
     const suffix = params.toString();
-    const body = await this.#get<{ users: AdminUser[] }>(
+    const body = await this.#get<{ users: AdminUser[]; totals?: AdminUserTotals }>(
       `/v1/admin/users${suffix === '' ? '' : `?${suffix}`}`,
     );
-    return body.users;
+    return { users: body.users, totals: body.totals };
   }
 
   async user(id: string): Promise<AdminUserDetail> {
@@ -982,8 +1056,13 @@ export class AdminClient {
   /* --------------------------------- kyc ------------------------------- */
 
   async kycQueue(): Promise<readonly AdminKycSubmission[]> {
-    const body = await this.#get<{ queue: AdminKycSubmission[] }>('/v1/admin/kyc');
-    return body.queue;
+    return (await this.kycReview()).queue;
+  }
+
+  /** The queue and how many were approved in the last day, in one request. */
+  async kycReview(): Promise<{ queue: readonly AdminKycSubmission[]; approved_24h: number | undefined }> {
+    const body = await this.#get<{ queue: AdminKycSubmission[]; approved_24h?: number }>('/v1/admin/kyc');
+    return { queue: body.queue, approved_24h: body.approved_24h };
   }
 
   /**

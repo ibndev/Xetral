@@ -6511,3 +6511,339 @@ html, body { overflow-x: hidden; }
 @media (max-width: 480px) {
   .route-main .segmented button { padding: 6px 11px; }
 }
+
+/*
+ * THE OPERATIONS SURFACE HAS ITS OWN LIGHT GROUND, and it was wearing the
+ * customer app's.
+ *
+ * The two comps disagree on purpose. `app.html` puts recessed grey cards on a
+ * white page — a phone screen of wells cut into paper. `admin.html` puts WHITE
+ * panels on a grey ground (#EEF0F5), with a white sidebar and a hairline round
+ * every panel: a dashboard of tiles resting on a desk. This file only ever
+ * had the first, so in light every operations screen read inverted — grey
+ * boxes on white — and nothing on the page looked like the comp it was built
+ * from, which is what "the admin mockup is not there" was.
+ *
+ * Scoped to `.admin-frame` and to light only; dark already matches the admin
+ * comp's own dark palette, apart from its slightly quieter hairlines.
+ */
+html:not([data-theme='dark']) .admin-frame {
+  --bg:        #EEF0F5;
+  --surface:   #FFFFFF;
+  --surface-2: #EEF1F7;
+  --field:     #EEF1F7;
+  --edge:      #E7EAF0;
+  --line:      #EAEDF3;
+  background: var(--bg);
+}
+html[data-theme='dark'] .admin-frame {
+  --edge: #1C1D23;
+  --line: #17181D;
+  background: var(--bg);
+}
+/* A tile is a PANEL on this surface, as the comp's `.panel.kpi` is — not the
+   customer app's recessed well. */
+.admin-frame .stat { background: var(--surface); }
+
+/* The comp's status pill, with its dot. */
+.badge.dotted { gap: 7px; align-items: center; font-weight: 700; }
+.badge.dotted::before {
+  content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor;
+}
+.admin-frame .appbar .badge.dotted { margin-left: 12px; }
+.admin-clock {
+  display: none;
+  margin-right: 8px;
+  font-size: 12.5px; font-weight: 600; color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+@media (min-width: 1000px) { .admin-clock { display: inline; } }
+
+/* ═══════════════════ the overview, as the admin comp draws it ═══════════════════ */
+
+.kgrid { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 16px; }
+@media (min-width: 1100px) { .kgrid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.admin-frame .panel.kpi { padding: 16px; margin: 0; }
+.klab { font-size: 11.5px; font-weight: 600; color: var(--text-3); }
+.kval {
+  margin-top: 8px;
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-size: 23px; font-weight: 700; letter-spacing: -0.022em;
+}
+.kval .unit { color: var(--text-3); font-size: 15px; }
+.kfoot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; }
+.kchg { font-size: 11px; font-weight: 600; color: var(--text-3); }
+.kchg.up { color: var(--ok); }
+.kchg.down { color: var(--danger); }
+.spark { flex: none; }
+.spark polyline { stroke: var(--iris); }
+.spark.info polyline { stroke: var(--info); }
+.spark.warn polyline { stroke: var(--warn); }
+.spark.ok polyline { stroke: var(--ok); }
+
+.ov-grid { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); margin-bottom: 16px; }
+@media (min-width: 1000px) { .ov-grid { grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr); } }
+.ov-side { display: flex; flex-direction: column; gap: 16px; }
+.ov-pair { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); margin-bottom: 16px; }
+@media (min-width: 1000px) { .ov-pair { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+.admin-frame .ov-grid .panel, .admin-frame .ov-pair .panel, .admin-frame .ov-side .panel { margin: 0; }
+
+.ov-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.ov-note, .ov-legend { font-size: 11px; font-weight: 600; color: var(--text-3); }
+.ov-legend { display: flex; gap: 12px; }
+.ov-legend .iris { color: var(--iris); }
+.ov-legend .info { color: var(--info); }
+
+.admin-frame .panel.ov-chart { padding: 18px 18px 8px; display: flex; flex-direction: column; }
+.ov-chart svg { width: 100%; height: 210px; display: block; }
+.ov-chart .grid { stroke: var(--line); }
+.ov-chart .ln { fill: none; stroke-width: 2.4; stroke-linecap: round; }
+.ov-chart .ln.iris { stroke: var(--iris); }
+.ov-chart .ln.info { stroke: var(--info); stroke-width: 2; }
+.ov-axis {
+  display: flex; justify-content: space-between;
+  padding: 6px 2px 4px;
+  font-size: 10.5px; font-weight: 500; color: var(--text-3); font-variant-numeric: tabular-nums;
+}
+
+.admin-frame .panel.ov-drift { padding: 18px; flex: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; align-content: center; }
+.ov-shield {
+  width: 40px; height: 40px; border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--ok-bg); color: var(--ok);
+}
+.ov-shield.danger { background: var(--danger-bg); color: var(--danger); }
+.ov-big { display: block; font-size: 24px; font-weight: 800; line-height: 1.1; }
+.ov-cap { display: block; font-size: 12px; font-weight: 600; color: var(--text-3); }
+.ov-drift p { flex-basis: 100%; margin: 6px 0 0; font-size: 12.5px; font-weight: 500; color: var(--text-3); }
+
+.admin-frame .panel.ov-hour { padding: 18px; flex: 1; display: flex; flex-direction: column; justify-content: center; }
+.ov-hour .kval { font-size: 26px; }
+.ov-bars { display: flex; gap: 3px; align-items: flex-end; height: 28px; margin-top: 10px; }
+.ov-bars span { flex: 1; border-radius: 2px; background: var(--surface-2); }
+.ov-bars span.near { background: var(--iris-edge); }
+.ov-bars span.now { background: var(--iris); }
+
+.admin-frame .panel.ov-needs, .admin-frame .panel.ov-owed { padding: 16px 18px; }
+.ov-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 0; border-bottom: 1px solid var(--line);
+}
+.ov-row:last-of-type { border-bottom: none; }
+.ov-row .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); flex: none; }
+.ov-row .dot.warn { background: var(--warn); }
+.ov-row .dot.danger { background: var(--danger); }
+.ov-row .name { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; color: var(--text); }
+.ov-row.idle .name, .ov-row.idle .n { color: var(--text-2); }
+.ov-row .n { font-family: var(--font-mono); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ov-row .age { width: 92px; text-align: right; font-size: 11.5px; font-weight: 500; color: var(--text-3); }
+.ov-empty { margin: 8px 0 0; font-size: 13px; color: var(--text-3); }
+.admin-frame button.ov-more {
+  margin-top: 8px; padding: 0; min-height: 0;
+  background: transparent; color: var(--iris); font-size: 12px; font-weight: 700;
+}
+.admin-frame button.ov-more:hover:where(:not(:disabled)) { background: transparent; color: var(--iris-text); }
+
+.ov-owed-list { display: flex; flex-direction: column; gap: 13px; margin-top: 4px; }
+.ov-owed-head { display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 12px; font-weight: 600; }
+.ov-owed-head .mono { color: var(--text-2); font-family: var(--font-mono); }
+.ov-track { height: 7px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+.ov-track span { display: block; height: 100%; background: var(--iris); }
+.ov-track span.info { background: var(--info); }
+.ov-track span.ok { background: var(--ok); }
+.ov-track span.warn { background: var(--warn); }
+
+.admin-frame .panel.ov-providers {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px 20px;
+  padding: 12px 18px; margin: 0;
+  color: var(--text); text-decoration: none;
+}
+.ov-providers .lab { font-size: 12.5px; font-weight: 700; color: var(--text-2); }
+.ov-providers .prov { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; }
+.ov-providers .prov .mono { color: var(--text-3); font-family: var(--font-mono); }
+.ov-providers .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); }
+.ov-providers .dot.ok { background: var(--ok); }
+.ov-providers .dot.warn { background: var(--warn); }
+
+/* The comp's count beside a sidebar entry: a soft pill pushed to the right
+   edge, amber for work waiting and red where a clock or money is running. */
+.admin-side a .side-badge {
+  margin-left: auto;
+  min-width: 20px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--warn-bg);
+  color: var(--warn);
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.admin-side a .side-badge.danger {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+/* Who is signed in — the comp's footer chip. */
+.admin-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: var(--s-2);
+  padding: var(--s-3) 12px 2px;
+  border-top: 1px solid var(--line);
+}
+.admin-chip .avatar {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  background: var(--iris-tint);
+  color: var(--iris-text);
+  font-size: 12px;
+  font-weight: 700;
+  flex: 0 0 auto;
+}
+.admin-chip strong { display: block; font-size: 13px; color: var(--text); }
+.admin-chip small { display: block; font-size: 11.5px; color: var(--text-3); }
+
+/* The comp's four-figure row (Customers): two across on a laptop's narrow
+   end, four once there is room. */
+.stats.four { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+@media (min-width: 1100px) { .stats.four { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+
+/* The comp's search row over a table: a filled field with a lens, then the
+   filters as quiet buttons. */
+.admin-frame .tbl-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 14px 18px;
+}
+.admin-frame .tbl-search {
+  flex: 1 1 260px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 13px;
+  border-radius: 11px;
+  background: var(--surface-2);
+  color: var(--text-3);
+}
+.admin-frame .tbl-search input {
+  flex: 1;
+  min-height: 42px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  font-size: 13.5px;
+  font-weight: 500;
+}
+.admin-frame .tbl-tools .xselect { flex: 0 0 150px; }
+.admin-frame .tbl-tools .xselect-trigger { min-height: 38px; }
+/* Who a row is: initials in a disc, a name, the address under it. */
+.admin-frame .who { display: flex; align-items: center; gap: 10px; }
+.admin-frame .who .avatar {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  background: var(--iris-tint);
+  color: var(--iris-text);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+.admin-frame .who a, .admin-frame .who strong { display: block; color: var(--text); font-weight: 600; }
+.admin-frame .who small { display: block; font-size: 11px; font-weight: 500; color: var(--text-3); }
+.admin-frame .tbl-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-3);
+}
+.admin-frame .tbl-foot .acts { display: flex; gap: 8px; }
+
+/* What a reviewer reads before deciding: label and value in two columns. */
+.admin-frame dl.facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px 16px;
+  margin: 0;
+  font-size: 13px;
+}
+.admin-frame dl.facts dt { color: var(--text-3); font-weight: 500; }
+.admin-frame dl.facts dd { margin: 0; color: var(--text); font-weight: 600; }
+.ov-chart .ln.ok { stroke: var(--ok); }
+.admin-frame .ov-chart { margin-bottom: 16px; }
+
+/* Settings as the comp lists them: one row per control, a hairline between. */
+.admin-frame .panel.set-list { padding: 6px 0; }
+.admin-frame .set-top { padding-bottom: 14px; }
+.admin-frame .set-top .tbl-note { padding: 0 0 12px; }
+.admin-frame .set-row { border-bottom: 1px solid var(--line); }
+.admin-frame .set-row:last-child { border-bottom: none; }
+.admin-frame .set-head { display: flex; align-items: center; gap: 14px; padding: 16px 18px; }
+.admin-frame .set-name { flex: 1; min-width: 0; }
+.admin-frame .set-name strong { display: block; font-size: 14px; font-weight: 700; color: var(--text); }
+.admin-frame .set-name small { display: block; margin-top: 2px; font-size: 12px; font-weight: 500; color: var(--text-3); }
+.admin-frame .set-value { font-size: 13px; font-weight: 600; color: var(--text-2); white-space: nowrap; max-width: 30ch; overflow: hidden; text-overflow: ellipsis; }
+.admin-frame .set-edit { padding: 0 18px 16px; }
+.admin-frame .set-edit .field-row.two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: end; }
+.admin-frame .set-row.open { background: var(--surface-2); }
+/* The comp's switch: a 44×26 track with a 20px knob. */
+.admin-frame button.switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 44px;
+  height: 26px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--line);
+}
+.admin-frame button.switch::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--text-3);
+  transition: transform 0.15s ease;
+}
+.admin-frame button.switch.on { background: var(--iris); }
+.admin-frame button.switch.on::after { transform: translateX(18px); background: #fff; }
+@media (prefers-reduced-motion: reduce) { .admin-frame button.switch::after { transition: none; } }
+
+/* Countries, as the comp lists them: flag, name, code and currency, one
+   control. */
+.admin-frame .panel .sub { margin: 5px 0 6px; font-size: 13px; font-weight: 500; color: var(--text-3); }
+.admin-frame .country-row { display: flex; align-items: center; gap: 13px; padding: 15px 0; border-bottom: 1px solid var(--line); }
+.admin-frame .country-row:last-child { border-bottom: none; }
+.admin-frame .country-name { flex: 1; min-width: 0; }
+.admin-frame .country-name strong { font-size: 14px; font-weight: 700; }
+
+/* A table panel's own header — its name and the action that adds a row. */
+.admin-frame .tbl-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 15px 18px 8px; }
+.admin-frame .tbl-head .sec { margin: 0; }
+/* A publish form opened inside the table it writes into. */
+.admin-frame .tbl-form { margin: 4px 18px 12px; padding: 16px; border-radius: 12px; background: var(--surface-2); }
+.admin-frame .tbl-form > label:first-child, .admin-frame .tbl-form .field-row:first-child label { margin-top: 0; }
+.admin-frame .tbl-inline { margin: 0; font-size: 12.5px; font-weight: 600; color: var(--text-2); }
+.admin-frame input.tbl-pin { flex: 0 0 110px; width: 110px; min-height: 38px; margin: 0; }
+.admin-frame .tbl-tools .hint { margin: 0; }
+.admin-frame .retire-open { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
+.admin-frame .retire-open input { flex: 1 1 160px; min-height: 36px; margin: 0; }
+.admin-frame .retire-open input[type='password'] { flex: 0 0 90px; }
+.admin-frame .tbl-panel .tbl-note + .scroll, .admin-frame .tbl-panel .tbl-note + table { margin-top: 8px; }

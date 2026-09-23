@@ -47,8 +47,27 @@ export interface PublishedPair {
   readonly spread_basis_points: number;
 }
 
+/**
+ * What was earned RECENTLY, per currency. The balances above are lifetime
+ * totals, which answer "what have we made" and not "are we making anything";
+ * the second is what somebody opening this screen on a Monday is asking.
+ * Read from POSTINGS in the window, never from a counter.
+ */
+export interface RecentEarnings {
+  readonly currency: string;
+  readonly fees_24h_minor: string;
+  readonly fx_spread_24h_minor: string;
+  readonly fees_7d_minor: string;
+  readonly fx_spread_7d_minor: string;
+  /** Fees plus spread per day, OLDEST FIRST, seven entries, today last. */
+  readonly daily_minor: readonly string[];
+  /** The seven days before those, summed, so a change can be stated. */
+  readonly previous_7d_minor: string;
+}
+
 export interface EarningsReport {
   readonly lines: readonly EarningsLine[];
+  readonly recent: readonly RecentEarnings[];
   /** Basis points. 0 means every transfer is free, which is the shipped
    *  default and a decision an operator has to make rather than inherit. */
   readonly transfer_fee_basis_points: number;
@@ -65,12 +84,81 @@ export class EarningsService {
   ) {}
 
   async report(): Promise<EarningsReport> {
-    const [lines, fee, pairs] = await Promise.all([
+    const [lines, fee, pairs, recent] = await Promise.all([
       this.#lines(),
       this.settings.transferFeeBasisPoints(),
       this.#pairs(),
+      this.#recent(),
     ]);
-    return { lines, transfer_fee_basis_points: fee, published_pairs: pairs };
+    return { lines, recent, transfer_fee_basis_points: fee, published_pairs: pairs };
+  }
+
+  /**
+   * Fourteen days of revenue postings, bucketed by day in Lagos — the same
+   * "today" the daily ceiling uses, so a figure here and a limit there cannot
+   * disagree about when a day ended.
+   */
+  async #recent(): Promise<readonly RecentEarnings[]> {
+    const rows = await this.pool.query<{
+      currency: string;
+      d: number;
+      fees: string;
+      fx: string;
+      fees_24h: string;
+      fx_24h: string;
+    }>(
+      `SELECT p.currency,
+              ((now() AT TIME ZONE 'Africa/Lagos')::date
+                 - (p.created_at AT TIME ZONE 'Africa/Lagos')::date)::int AS d,
+              COALESCE(SUM(p.amount_minor) FILTER (WHERE a.kind = 'revenue_fees'), 0)::text AS fees,
+              COALESCE(SUM(p.amount_minor) FILTER (WHERE a.kind = 'revenue_fx_spread'), 0)::text AS fx,
+              COALESCE(SUM(p.amount_minor) FILTER (
+                WHERE a.kind = 'revenue_fees' AND p.created_at > now() - interval '24 hours'), 0)::text
+                AS fees_24h,
+              COALESCE(SUM(p.amount_minor) FILTER (
+                WHERE a.kind = 'revenue_fx_spread' AND p.created_at > now() - interval '24 hours'), 0)::text
+                AS fx_24h
+         FROM postings p JOIN accounts a ON a.id = p.account_id
+        WHERE a.kind IN ('revenue_fees', 'revenue_fx_spread')
+          AND p.created_at > now() - interval '15 days'
+        GROUP BY 1, 2`,
+    );
+    const by = new Map<
+      string,
+      { fees24: bigint; fx24: bigint; fees7: bigint; fx7: bigint; daily: bigint[]; prev: bigint }
+    >();
+    for (const row of rows.rows) {
+      const at = by.get(row.currency) ?? {
+        fees24: 0n, fx24: 0n, fees7: 0n, fx7: 0n, daily: new Array<bigint>(7).fill(0n), prev: 0n,
+      };
+      at.fees24 += BigInt(row.fees_24h);
+      at.fx24 += BigInt(row.fx_24h);
+      const both = BigInt(row.fees) + BigInt(row.fx);
+      if (row.d >= 0 && row.d < 7) {
+        at.fees7 += BigInt(row.fees);
+        at.fx7 += BigInt(row.fx);
+        at.daily[6 - row.d] = (at.daily[6 - row.d] ?? 0n) + both;
+      } else if (row.d >= 7 && row.d < 14) {
+        at.prev += both;
+      }
+      by.set(row.currency, at);
+    }
+    return [...by.entries()]
+      .map(([currency, v]) => ({
+        currency,
+        fees_24h_minor: v.fees24.toString(),
+        fx_spread_24h_minor: v.fx24.toString(),
+        fees_7d_minor: v.fees7.toString(),
+        fx_spread_7d_minor: v.fx7.toString(),
+        daily_minor: v.daily.map((x) => x.toString()),
+        previous_7d_minor: v.prev.toString(),
+      }))
+      // The currency that earned most this week leads — it is the headline.
+      .sort((a, b) => {
+        const x = BigInt(a.fees_7d_minor) + BigInt(a.fx_spread_7d_minor);
+        const y = BigInt(b.fees_7d_minor) + BigInt(b.fx_spread_7d_minor);
+        return x === y ? a.currency.localeCompare(b.currency) : x > y ? -1 : 1;
+      });
   }
 
   /**

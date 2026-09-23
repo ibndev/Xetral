@@ -180,6 +180,8 @@ const roleSchema = z.object({
 const listQuery = z.object({
   search: z.string().trim().max(160).optional(),
   status: z.enum(['active', 'frozen', 'closed']).optional(),
+  kyc: z.enum(['approved', 'pending', 'rejected', 'none']).optional(),
+  country: z.string().regex(/^[A-Z]{2}$/).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
   before: z.string().regex(/^[0-9]+$/).optional(),
 });
@@ -466,18 +468,24 @@ export class AdminController {
   /* -------------------------------- users ------------------------------ */
 
   @Get('users')
-  async users(@Query() query: unknown): Promise<{ users: readonly unknown[] }> {
+  async users(
+    @Query() query: unknown,
+  ): Promise<{ users: readonly unknown[]; totals: unknown }> {
     const parsed = listQuery.safeParse(query);
     if (!parsed.success) throw invalid(parsed.error.issues);
-    const { search, status, limit, before } = parsed.data;
-    return {
-      users: await this.admin.users({
+    const { search, status, kyc, country, limit, before } = parsed.data;
+    const [users, totals] = await Promise.all([
+      this.admin.users({
         limit,
         ...(search === undefined ? {} : { search }),
         ...(status === undefined ? {} : { status }),
+        ...(kyc === undefined ? {} : { kyc }),
+        ...(country === undefined ? {} : { country }),
         ...(before === undefined ? {} : { before }),
       }),
-    };
+      this.admin.userTotals(),
+    ]);
+    return { users, totals };
   }
 
   @Get('users/:id')
@@ -547,8 +555,9 @@ export class AdminController {
   /* -------------------------------- kyc -------------------------------- */
 
   @Get('kyc')
-  async kycQueue(): Promise<{ queue: readonly unknown[] }> {
-    return { queue: await this.kyc.queue(100) };
+  async kycQueue(): Promise<{ queue: readonly unknown[]; approved_24h: number }> {
+    const [queue, approved24h] = await Promise.all([this.kyc.queue(100), this.kyc.approvedSince(24)]);
+    return { queue, approved_24h: approved24h };
   }
 
   @Post('kyc/:id/review')

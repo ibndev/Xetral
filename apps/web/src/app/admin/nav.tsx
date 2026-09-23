@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { createContext, useContext, useEffect, useLayoutEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { resetXetral, xetral } from '@/lib/session';
+import { useAdmin } from '@/lib/hooks';
 import { Logo } from '@/ui/logo';
 import { Icon } from '@/ui/icon';
 import { ThemeToggle } from '@/ui/theme-toggle';
@@ -170,6 +171,123 @@ function screenName(pathname: string): string {
  */
 const TitleContext = createContext<((name: string | undefined) => void) | undefined>(undefined);
 
+/**
+ * WHAT SITS BESIDE THE TITLE. The comp puts the Overview's "All ledgers
+ * balanced" pill in the top bar, next to the screen's name — the one place an
+ * operator's eye lands first. A screen declares it the way it declares its
+ * title, so the bar stays one component.
+ */
+const StatusContext = createContext<((node: ReactNode) => void) | undefined>(undefined);
+
+export function AdminStatus({ children }: { readonly children: ReactNode }) {
+  const set = useContext(StatusContext);
+  useLayoutEffect(() => {
+    set?.(children);
+    return () => set?.(undefined);
+  }, [set, children]);
+  return null;
+}
+
+/** "Sat 20 Sep · 03:34 UTC" — UTC, because an operations team is not in one
+ *  timezone and every timestamp the database records is UTC. */
+function useUtcClock(): string {
+  const [now, setNow] = useState<string>('');
+  useEffect(() => {
+    const tick = () => {
+      const d = new Date();
+      const day = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+      const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
+      // en-GB spells September "Sept"; the comp, and every other date on
+      // this surface, says "Sep".
+      setNow(`${day.replace(',', '').replace('Sept', 'Sep')} · ${time} UTC`);
+    };
+    tick();
+    const id = setInterval(tick, 30_000);
+    return () => clearInterval(id);
+  }, []);
+  return now;
+}
+
+/**
+ * WHICH QUEUES A SIDEBAR ENTRY OWNS. The comp puts a count beside Identity,
+ * Compliance and Suspense — the entries an operator opens because something is
+ * waiting there. Read from the same `admin_work_queue` the overview lists, so
+ * the badge and the "Needs a person" row cannot disagree.
+ */
+const QUEUE_ENTRY: Readonly<Record<string, string>> = {
+  kyc: '/admin/kyc',
+  bvn_collisions: '/admin/kyc',
+  risk_signals: '/admin/risk',
+  risk_cases: '/admin/risk',
+  suspense: '/admin/suspense',
+  giftcard_review: '/admin/giftcards',
+  data_requests: '/admin/data-requests',
+  disputes: '/admin/disputes',
+  bank_payouts_stuck: '/admin/recovery',
+  errors: '/admin/errors',
+};
+/** A count here is a regulatory clock or money in limbo, so it is red. */
+const URGENT_ENTRY = new Set(['/admin/risk', '/admin/recovery']);
+
+interface Badge { readonly count: number; readonly urgent: boolean }
+
+function useQueueBadges(): ReadonlyMap<string, Badge> {
+  const admin = useAdmin();
+  const [badges, setBadges] = useState<ReadonlyMap<string, Badge>>(new Map());
+  useEffect(() => {
+    let live = true;
+    const load = () =>
+      admin
+        .overview()
+        .then((o) => {
+          if (!live) return;
+          const next = new Map<string, Badge>();
+          for (const q of o.queues) {
+            const href = QUEUE_ENTRY[q.queue];
+            const n = Number(q.waiting);
+            if (href === undefined || !(n > 0)) continue;
+            next.set(href, { count: (next.get(href)?.count ?? 0) + n, urgent: URGENT_ENTRY.has(href) });
+          }
+          setBadges(next);
+        })
+        // A badge is a courtesy. A staff member without the overview's role
+        // still gets a working sidebar, just an unannotated one.
+        .catch(() => undefined);
+    void load();
+    const id = setInterval(load, 60_000);
+    return () => {
+      live = false;
+      clearInterval(id);
+    };
+  }, [admin]);
+  return badges;
+}
+
+/** Who is signed in, as the comp's footer chip draws it: initials, a name, a role. */
+function useStaffChip(): { initials: string; name: string; role: string } | undefined {
+  const admin = useAdmin();
+  const [chip, setChip] = useState<{ initials: string; name: string; role: string }>();
+  useEffect(() => {
+    let live = true;
+    Promise.all([xetral().client.currentSession(), admin.myRoles().catch(() => [] as readonly string[])])
+      .then(([s, roles]) => {
+        if (!live) return;
+        const name = s.full_name ?? s.first_name ?? 'Staff';
+        const parts = name.trim().split(/\s+/);
+        const initials = ((parts[0]?.[0] ?? '') + (parts.length > 1 ? parts[parts.length - 1]?.[0] ?? '' : '')).toUpperCase();
+        const short = parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1]?.[0] ?? ''}.` : name;
+        const top = roles.includes('admin') ? 'admin' : roles[0];
+        const role = top === undefined ? 'Staff' : top.replace(/_/g, ' ').replace(/^./, (c: string) => c.toUpperCase());
+        setChip({ initials: initials || 'X', name: short, role });
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [admin]);
+  return chip;
+}
+
 export function AdminTitle({ children }: { readonly children: string }) {
   const set = useContext(TitleContext);
   useLayoutEffect(() => {
@@ -185,6 +303,10 @@ export function AdminShell({ children }: { readonly children: ReactNode }) {
   const [open, setOpen] = useState(false);
   /* What the SCREEN calls itself, when that is not its sidebar entry. */
   const [declared, setDeclared] = useState<string | undefined>(undefined);
+  const [status, setStatus] = useState<ReactNode>(undefined);
+  const clock = useUtcClock();
+  const badges = useQueueBadges();
+  const chip = useStaffChip();
 
   // Navigating closes the drawer. Without this a tap on a narrow screen
   // renders the new page behind a sheet that is still covering it, which reads
@@ -234,6 +356,11 @@ export function AdminShell({ children }: { readonly children: ReactNode }) {
                 >
                   <Icon name={item.icon} size={17} />
                   {item.label}
+                  {badges.get(item.href) !== undefined && (
+                    <span className={badges.get(item.href)?.urgent ? 'side-badge danger' : 'side-badge'}>
+                      {badges.get(item.href)!.count > 99 ? '99+' : badges.get(item.href)!.count}
+                    </span>
+                  )}
                 </Link>
               ))}
             </div>
@@ -249,6 +376,15 @@ export function AdminShell({ children }: { readonly children: ReactNode }) {
             <Icon name="logout" size={17} />
             Sign out
           </button>
+          {chip !== undefined && (
+            <div className="admin-chip">
+              <span className="avatar" aria-hidden="true">{chip.initials}</span>
+              <span>
+                <strong>{chip.name}</strong>
+                <small>{chip.role}</small>
+              </span>
+            </div>
+          )}
         </div>
       </nav>
 
@@ -264,6 +400,7 @@ export function AdminShell({ children }: { readonly children: ReactNode }) {
       )}
 
       <TitleContext.Provider value={setDeclared}>
+      <StatusContext.Provider value={setStatus}>
       <div className="admin-main">
         <header className="appbar">
           <button
@@ -283,7 +420,9 @@ export function AdminShell({ children }: { readonly children: ReactNode }) {
               is named. Hidden where the compact brand is showing, because two
               of them do not fit on a handset. */}
           <h1 className="admin-title">{declared ?? screenName(pathname)}</h1>
+          {status}
           <span className="spacer" />
+          <span className="admin-clock">{clock}</span>
           {/*
             THE SAME TOGGLE THE CUSTOMER APP USES, not a second one.
 
@@ -297,16 +436,19 @@ export function AdminShell({ children }: { readonly children: ReactNode }) {
             the pre-paint bootstrap.
           */}
           <ThemeToggle />
-          <Link href="/wallet" className="btn ghost small admin-wide-only">
-            My wallet
+          {/* THE COMP'S BELL, and where it goes is the queue of messages the
+              platform owed somebody — the surface an operator checks when a
+              customer says an email never came. My wallet and Sign out are in
+              the sidebar, where the comp puts them; they were ALSO here on a
+              laptop, two copies of two links. */}
+          <Link href="/admin/notifications" className="icon-btn" aria-label="Notifications">
+            <Icon name="bell" size={19} />
           </Link>
-          <button type="button" className="ghost small admin-wide-only" onClick={signOut}>
-            Sign out
-          </button>
         </header>
 
         <main className="shell wide">{children}</main>
       </div>
+      </StatusContext.Provider>
       </TitleContext.Provider>
     </div>
   );
