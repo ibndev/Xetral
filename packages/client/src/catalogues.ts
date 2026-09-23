@@ -329,3 +329,22 @@ export const ACTIVITY_FILTERS = [
     kinds: ['giftcard_purchase', 'giftcard_hold_release'],
   },
 ] as const satisfies readonly ActivityFilter[];
+
+/**
+ * THE PAIR A CONVERT SCREEN OPENS ON, from a link that named one — Buy and
+ * Sell on the crypto screen — or the default.
+ *
+ * A query string is whatever somebody typed, so a code outside
+ * `TRANSFER_CURRENCIES`, or the same currency on both sides, is ignored
+ * rather than trusted. Both apps read it from here so the two screens cannot
+ * open the same link on different pairs.
+ */
+export function convertPreset(
+  from: string | null | undefined,
+  to: string | null | undefined,
+): { readonly from: string; readonly to: string } {
+  const allowed: readonly string[] = TRANSFER_CURRENCIES;
+  const f = from !== null && from !== undefined && allowed.includes(from) ? from : 'NGN';
+  const t = to !== null && to !== undefined && allowed.includes(to) && to !== f ? to : f === 'USD' ? 'NGN' : 'USD';
+  return { from: f, to: t };
+}

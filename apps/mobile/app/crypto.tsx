@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Text, TextInput, View } from 'react-native';
-import { CRYPTO_ASSETS, CRYPTO_PAIRS, currencyName, formatAmount } from '@xetral/client';
+import { useRouter } from 'expo-router';
+import { CRYPTO_PAIRS, cryptoPortfolio, currencyName, formatAmount, formatMinor, formatQuantity } from '@xetral/client';
 import type { CryptoAddress, CryptoQuote, Withdrawal } from '@xetral/client';
 import { Shell } from '@/shell';
 import { Eyebrow } from '@/acct-card';
@@ -23,64 +24,108 @@ import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/hooks';
 import { font, space, useStyles, useTheme } from '@/theme';
 
 /**
- * WHAT THE CUSTOMER ACTUALLY HOLDS, at the top of the screen — the comp's
- * LIST without its arithmetic. The web's `Holdings` is the same component in
- * the other rendering system, to the same figures.
+ * WHAT THE CUSTOMER HOLDS AND WHAT IT IS WORTH — the comp's portfolio card,
+ * Buy and Sell, then the holdings list. The web's `Portfolio` is the same
+ * component in the other rendering system, and both read `cryptoPortfolio`
+ * so they cannot disagree about one coin.
  *
- * Zero rows are shown, because an asset missing from the list is
- * indistinguishable from one that failed to load — and the customer who has
- * never held USDC is exactly the one who needs to see that the address
- * exists.
+ * The dollar figures are `/v1/wallets/total`'s own lines — what a conversion
+ * would pay at the published rate and spread. An asset with no published
+ * price is named, never valued at a guess. The comp's "+4.2% today" is not
+ * drawn: a daily move needs yesterday's price, which this platform does not
+ * keep, so the line says what the figure is instead.
  */
-function Holdings() {
+function Portfolio({ home }: { readonly home: string }) {
   const client = useXetral();
   const colors = useTheme();
+  const router = useRouter();
   const balances = useLoad(() => client.balances(), [client]);
-  const held = new Map((balances.data ?? []).map((b) => [b.currency, b]));
+  const total = useLoad(() => client.dollarTotal(), [client]);
+  const p = cryptoPortfolio(total.data, balances.data);
+  const num = {
+    fontVariant: ['tabular-nums'] as ('tabular-nums')[],
+    color: colors.text,
+  };
 
   return (
     <>
+      <View
+        style={{
+          borderRadius: 20,
+          padding: 20,
+          backgroundColor: colors.cardGrad1,
+          borderWidth: 1,
+          borderColor: colors.iris,
+          marginTop: space.md,
+        }}
+      >
+        <Text style={{ color: colors.irisText, fontFamily: font.sansMedium, fontSize: 12.5 }}>Portfolio value</Text>
+        <Text
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.6}
+          style={{ ...num, fontFamily: font.numBold, fontSize: 32, letterSpacing: -1, marginTop: 6 }}
+        >
+          {total.data !== undefined ? formatMinor(p.totalMinor, 'USD') : total.error !== undefined ? '—' : '…'}
+        </Text>
+        <Text style={{ color: colors.text3, fontFamily: font.sansSemi, fontSize: 12.5, marginTop: 8 }}>
+          {total.error !== undefined
+            ? 'Prices are unavailable right now'
+            : p.unpriced.length > 0
+              ? `In dollars, at today’s rate · not counted: ${p.unpriced.join(', ')}`
+              : 'In dollars, at today’s rate'}
+        </Text>
+      </View>
+      <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
+        <View style={{ flex: 1 }}>
+          <Button label="Buy" onPress={() => router.push(`/fx?from=${home}&to=USDT`)} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Button quiet label="Sell" onPress={() => router.push(`/fx?from=${p.largest ?? 'USDT'}&to=${home}`)} />
+        </View>
+      </View>
+
       <Eyebrow>Holdings</Eyebrow>
       {balances.loading && <Loading />}
-      {CRYPTO_ASSETS.map((asset) => (
+      {p.rows.map((row, index) => (
         <View
-          key={asset}
+          key={row.asset}
           style={{
             flexDirection: 'row', alignItems: 'center', gap: 13,
             paddingVertical: 12,
-            borderTopWidth: 1, borderTopColor: colors.line,
+            borderTopWidth: index === 0 ? 0 : 1, borderTopColor: colors.line,
           }}
         >
           <View
             style={{
-              width: 44, height: 44, borderRadius: 999,
+              width: 42, height: 42, borderRadius: 999,
               alignItems: 'center', justifyContent: 'center',
               backgroundColor: colors.surface2,
             }}
           >
-            <CurrencyMark currency={asset} size={26} />
+            <CurrencyMark currency={row.asset} size={26} />
           </View>
           <View style={{ flex: 1, minWidth: 0 }}>
+            <Text numberOfLines={1} style={{ color: colors.text, fontFamily: font.sansSemi, fontSize: 15 }}>
+              {currencyName(row.asset)}
+            </Text>
             <Text
               numberOfLines={1}
-              style={{ color: colors.text, fontFamily: font.sansSemi, fontSize: 15 }}
+              style={{ color: colors.text3, fontFamily: font.sansMedium, fontSize: 12, marginTop: 2 }}
             >
-              {currencyName(asset)}
-            </Text>
-            <Text style={{ color: colors.text3, fontFamily: font.sansMedium, fontSize: 12.5, marginTop: 2 }}>
-              {asset}
+              {formatQuantity(row.held, row.asset)}
             </Text>
           </View>
-          <Text
-            style={{
-              fontFamily: font.numSemi, fontSize: 14.5,
-              letterSpacing: -0.3,
-              fontVariant: ['tabular-nums'] as ('tabular-nums')[],
-              color: colors.text,
-            }}
-          >
-            {formatAmount(held.get(asset)?.spendable ?? '0', asset)}
-          </Text>
+          <View style={{ alignItems: 'flex-end' }}>
+            <Text style={{ ...num, fontFamily: font.sansBold, fontSize: 14 }}>
+              {row.valueMinor !== undefined ? formatMinor(row.valueMinor, 'USD') : '—'}
+            </Text>
+            {row.valueMinor === undefined && (
+              <Text style={{ color: colors.text3, fontFamily: font.sansSemi, fontSize: 11.5, marginTop: 2 }}>
+                No price yet
+              </Text>
+            )}
+          </View>
         </View>
       ))}
     </>
@@ -102,6 +147,7 @@ export default function Crypto() {
   const styles = useStyles();
   const colors = useTheme();
   const withdrawals = useLoad(() => client.withdrawals(), [client]);
+  const session = useLoad(() => client.currentSession(), [client]);
 
   const [pair, setPair] = useState(0);
   const chosen = PAIRS[pair] ?? PAIRS[0];
@@ -124,19 +170,7 @@ export default function Crypto() {
       way back to the list it was opened from.
     */
     <Shell back="/more" title="Crypto">
-      <Text style={styles.lead}>Receive and send stablecoins and Bitcoin.</Text>
-
-      {/*
-        HOLDINGS FIRST, which is the comp's order and the question somebody
-        opens this screen with.
-
-        AND NOT THE COMP'S PORTFOLIO CARD. That draws a total in dollars and a
-        percentage move per asset, which needs a price feed this platform does
-        not have — nothing anywhere quotes BTC in USD. A total assembled from
-        a rate nobody published would be a figure on a screen with no source.
-        What is real is the BALANCE.
-      */}
-      <Holdings />
+      <Portfolio home={session.data?.home_currency ?? 'NGN'} />
 
       <Panel title="Asset and network">
         {/*

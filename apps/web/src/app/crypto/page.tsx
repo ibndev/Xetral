@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { CRYPTO_ASSETS, CRYPTO_PAIRS, formatAmount, currencyName } from '@xetral/client';
+import Link from 'next/link';
+import { CRYPTO_PAIRS, cryptoPortfolio, formatAmount, formatMinor, formatQuantity, currencyName } from '@xetral/client';
 import type { CryptoAddress, CryptoQuote } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { Select } from '@/ui/select';
@@ -13,45 +14,82 @@ import { VerifyPrompt } from '@/ui/verify-prompt';
 import { Toast } from '@/ui/toast';
 
 /**
- * WHAT THE CUSTOMER ACTUALLY HOLDS, at the top of the screen.
+ * WHAT THE CUSTOMER ACTUALLY HOLDS, and what it is worth — the comp's
+ * portfolio card, then its holdings list.
  *
- * The comp opens Crypto with a portfolio: a total in dollars, a percentage
- * move for the day and one per asset. Every one of those needs a price feed,
- * and this platform has none — `fx_published_rates` prices the corridors an
- * operator publishes and nothing anywhere quotes BTC in USD. A total
- * assembled from a rate nobody published would be a figure on a screen with
- * no source.
+ * THE DOLLAR FIGURES ARE `/v1/wallets/total`'s OWN LINES, not a second
+ * calculation here. That route prices every balance at what a conversion
+ * would actually pay — the published rate, the published spread, rounded
+ * down — so the portfolio value and the home screen's headline are the same
+ * arithmetic and cannot disagree about one coin.
  *
- * So this takes the comp's LIST and not its arithmetic: the mark, the name,
- * the balance. Zero rows are shown, because an asset missing from the list is
- * indistinguishable from one that failed to load — and the customer who has
- * never held USDC is exactly the one who needs to see that the address exists.
+ * AN UNPRICED ASSET IS NAMED, NEVER VALUED AT A GUESS. BTC has no dollar
+ * price until an operator publishes one; its row then says "No price yet"
+ * and the card says what was left out, because a total that silently skipped
+ * a balance reads as money gone.
+ *
+ * AND THE COMP'S "+4.2% today" IS NOT DRAWN. A daily move needs yesterday's
+ * price, which this platform does not keep — `fx_published_rates` holds the
+ * price in force, not a history of them. A percentage with no source is the
+ * "+₦150,000 this week" chip in a second place. The line says what the
+ * figure IS instead: dollars, at today's rate.
+ *
+ * The arithmetic is `cryptoPortfolio` in `@xetral/client`, shared with the
+ * phone. Zero rows are shown, because an asset missing from the list is
+ * indistinguishable from one that failed to load.
  */
-function Holdings() {
+function Portfolio({ home }: { readonly home: string }) {
   const client = useXetral();
   const balances = useLoad(() => client.balances(), [client]);
-  const held = new Map((balances.data ?? []).map((b) => [b.currency, b]));
+  const total = useLoad(() => client.dollarTotal(), [client]);
+  const p = cryptoPortfolio(total.data, balances.data);
+  /* Buy pays from the customer's own money; Sell lands there. A home currency
+     is fiat by construction, so the pair is never crypto into crypto. */
+  const fiat = home;
 
   return (
     <>
-      <span className="eyebrow" style={{ paddingTop: 0 }}>Holdings</span>
+      <div className="portfolio-card">
+        <span className="portfolio-label">Portfolio value</span>
+        <div className="portfolio-value">
+          {total.data !== undefined ? formatMinor(p.totalMinor, 'USD') : total.error !== undefined ? '—' : '…'}
+        </div>
+        <span className="portfolio-note">
+          {total.error !== undefined
+            ? 'Prices are unavailable right now'
+            : p.unpriced.length > 0
+              ? `In dollars, at today’s rate · not counted: ${p.unpriced.join(', ')}`
+              : 'In dollars, at today’s rate'}
+        </span>
+      </div>
+      <div className="portfolio-actions">
+        <Link className="btn" href={`/fx?from=${fiat}&to=USDT`}>
+          Buy
+        </Link>
+        <Link className="btn quiet" href={`/fx?from=${p.largest ?? 'USDT'}&to=${fiat}`}>
+          Sell
+        </Link>
+      </div>
+
+      <span className="eyebrow">Holdings</span>
       {balances.loading && <p className="spinner">Loading…</p>}
       <div>
-        {CRYPTO_ASSETS.map((asset) => (
-          <div className="tx-row" key={asset} style={{ cursor: 'default' }}>
+        {p.rows.map((row) => (
+          <div className="tx-row" key={row.asset} style={{ cursor: 'default' }}>
             <span className="tx-mark">
               <span className="avatar">
-                <CurrencyMark currency={asset} size={26} />
+                <CurrencyMark currency={row.asset} size={26} />
               </span>
             </span>
             <span className="tx-main">
-              <span className="tx-name">{currencyName(asset)}</span>
-              <span className="tx-sub">{asset}</span>
+              <span className="tx-name">{currencyName(row.asset)}</span>
+              <span className="tx-sub">{formatQuantity(row.held, row.asset)}</span>
             </span>
             <span className="tx-side">
               <span className="tx-amt">
-                {formatAmount(held.get(asset)?.spendable ?? '0', asset)}
+                {row.valueMinor !== undefined ? formatMinor(row.valueMinor, 'USD') : '—'}
               </span>
+              {row.valueMinor === undefined && <span className="tx-time">No price yet</span>}
             </span>
           </div>
         ))}
@@ -89,6 +127,7 @@ const ASSETS = CRYPTO_PAIRS;
 export default function Crypto() {
   const client = useXetral();
   const withdrawals = useLoad(() => client.withdrawals(), [client]);
+  const session = useLoad(() => client.currentSession(), [client]);
 
   // The address request is what trips the identity gate first, so its refusal
   // is the one that decides whether this whole screen is usable. Shown as an
@@ -109,19 +148,7 @@ export default function Crypto() {
       was opened from.
     */
     <Shell back="/more" title="Crypto">
-      {/*
-        HOLDINGS FIRST, which is the comp's order and the question somebody
-        opens this screen with.
-
-        AND NOT THE COMP'S PORTFOLIO CARD. That draws a total in dollars and a
-        percentage move per asset, which needs a price feed this platform does
-        not have — `fx_published_rates` prices the corridors an operator
-        publishes, and nothing anywhere quotes BTC in USD. A total assembled
-        from a rate nobody published would be a number on a screen with no
-        source, which is the "+₦150,000 this week" chip in a second place.
-        What is real is the BALANCE, and that is what this shows.
-      */}
-      <Holdings />
+      <Portfolio home={session.data?.home_currency ?? 'NGN'} />
       <Receive />
       <Send onSent={withdrawals.reload} />
 

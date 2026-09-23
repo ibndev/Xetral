@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { compactMinor, exponentFor, formatAmount, formatMinor, isValidAmount, parseAmount } from './money.js';
+import { compactMinor, exponentFor, formatAmount, formatMinor, formatQuantity, isValidAmount, parseAmount } from './money.js';
 
 describe('formatting without a float', () => {
   it('groups a large naira balance exactly', () => {
@@ -163,5 +163,18 @@ describe('compactMinor', () => {
 
   it('refuses a figure that is not minor units', () => {
     expect(() => compactMinor('1.5', 'NGN')).toThrow(RangeError);
+  });
+});
+
+describe('formatQuantity', () => {
+  it('writes a holding as the comp does, the code after the number', () => {
+    expect(formatQuantity('15.000000', 'USDT')).toBe('15 USDT');
+    expect(formatQuantity('0.01040000', 'BTC')).toBe('0.0104 BTC');
+    expect(formatQuantity('0.00000000', 'BTC')).toBe('0 BTC');
+    expect(formatQuantity('1250000.500000', 'USDC')).toBe('1,250,000.5 USDC');
+  });
+  it('drops only trailing zeros, never a significant digit', () => {
+    expect(formatQuantity('0.00000001', 'BTC')).toBe('0.00000001 BTC');
+    expect(formatQuantity('10.100000', 'USDT')).toBe('10.1 USDT');
   });
 });

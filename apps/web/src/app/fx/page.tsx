@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
-import { formatAmount, groupTyped, TRANSFER_CURRENCIES } from '@xetral/client';
+import { Suspense, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { convertPreset, formatAmount, groupTyped, TRANSFER_CURRENCIES } from '@xetral/client';
 import type { FxQuote } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { Select } from '@/ui/select';
@@ -33,9 +34,19 @@ const CURRENCIES = TRANSFER_CURRENCIES;
  * hold.
  */
 export default function Fx() {
+  // `useSearchParams` needs a boundary, or Next refuses to prerender the page.
+  return (
+    <Suspense fallback={null}>
+      <Convert />
+    </Suspense>
+  );
+}
+
+function Convert() {
   const client = useXetral();
-  const [from, setFrom] = useState<string>('NGN');
-  const [to, setTo] = useState<string>('USD');
+  const params = useSearchParams();
+  const [from, setFrom] = useState<string>(() => convertPreset(params?.get('from'), params?.get('to')).from);
+  const [to, setTo] = useState<string>(() => convertPreset(params?.get('from'), params?.get('to')).to);
   const [amount, setAmount] = useState('');
   const [quote, setQuote] = useState<FxQuote | undefined>();
   const attempt = useIdempotencyKey();

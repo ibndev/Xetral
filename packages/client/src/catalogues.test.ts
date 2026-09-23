@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { sendableFor, TRANSFER_CURRENCIES } from './catalogues.js';
+import { convertPreset, sendableFor, TRANSFER_CURRENCIES } from './catalogues.js';
 
 /**
  * What a customer is OFFERED when they send.
@@ -53,5 +53,20 @@ describe('sendableFor', () => {
     const offered = sendableFor('NGN', ['NGN']);
     expect(offered.indexOf('USD')).toBeLessThan(offered.indexOf('USDT'));
     expect(offered.indexOf('USDT')).toBeLessThan(offered.indexOf('USDC'));
+  });
+});
+
+describe('convertPreset', () => {
+  it('opens on the pair a link names', () => {
+    expect(convertPreset('NGN', 'USDT')).toEqual({ from: 'NGN', to: 'USDT' });
+    expect(convertPreset('BTC', 'GHS')).toEqual({ from: 'BTC', to: 'GHS' });
+  });
+  it('falls back to naira into dollars with no link', () => {
+    expect(convertPreset(null, undefined)).toEqual({ from: 'NGN', to: 'USD' });
+  });
+  it('ignores a code the API would refuse, and never pairs a currency with itself', () => {
+    expect(convertPreset('DOGE', 'USD')).toEqual({ from: 'NGN', to: 'USD' });
+    expect(convertPreset('USD', 'USD')).toEqual({ from: 'USD', to: 'NGN' });
+    expect(convertPreset('USDT', 'usdt')).toEqual({ from: 'USDT', to: 'USD' });
   });
 });

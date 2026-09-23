@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
-import { formatAmount, groupTyped, TRANSFER_CURRENCIES } from '@xetral/client';
+import { useLocalSearchParams } from 'expo-router';
+import { convertPreset, formatAmount, groupTyped, TRANSFER_CURRENCIES } from '@xetral/client';
 import type { FxQuote, FxTrade } from '@xetral/client';
 import { Shell } from '@/shell';
 import {
@@ -101,8 +102,10 @@ export default function Fx() {
     fontVariant: ['tabular-nums'] as ('tabular-nums')[],
   } as const;
 
-  const [from, setFrom] = useState('NGN');
-  const [to, setTo] = useState('USD');
+  // Buy and Sell on the crypto screen open this on a pair.
+  const params = useLocalSearchParams<{ from?: string; to?: string }>();
+  const [from, setFrom] = useState(() => convertPreset(params.from, params.to).from);
+  const [to, setTo] = useState(() => convertPreset(params.from, params.to).to);
   const [amount, setAmount] = useState('');
   const [quote, setQuote] = useState<FxQuote | undefined>();
 

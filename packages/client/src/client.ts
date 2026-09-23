@@ -807,6 +807,18 @@ export interface DollarTotal {
   readonly amount_minor: string;
   readonly included: readonly string[];
   readonly excluded: readonly string[];
+  /** Each counted balance in dollars, summing to `amount_minor`. Absent from
+   *  an API older than the crypto portfolio card. */
+  readonly lines?: readonly DollarLine[];
+}
+
+export interface DollarLine {
+  readonly currency: string;
+  /** The balance, major units, in its own currency. */
+  readonly held: string;
+  /** Its value in dollars, major units. */
+  readonly amount: string;
+  readonly amount_minor: string;
 }
 
 export class XetralClient {

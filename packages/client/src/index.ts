@@ -11,3 +11,4 @@ export * from './momo-networks.js';
 export * from './receipt.js';
 export * from './entry-kind.js';
 export * from './amount-entry.js';
+export * from './portfolio.js';

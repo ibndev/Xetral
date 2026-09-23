@@ -109,6 +109,29 @@ export function formatAmount(amount: string, currency: string): string {
 }
 
 /**
+ * A HOLDING AS A QUANTITY — "15 USDT", "0.0104 BTC" — which is how the comp's
+ * holdings list writes a coin balance: the code after the number, and the
+ * trailing zeros of the precision dropped.
+ *
+ * `formatAmount` is right for a PRICE and wrong here. "₮15.000000" states six
+ * decimals of precision nobody asked about and a symbol most customers do not
+ * recognise, on a line whose job is "how many do I have". Only zeros at the
+ * END of the fraction go, so no significant digit is ever lost — and, as
+ * everywhere in this file, no float is involved.
+ */
+export function formatQuantity(amount: string, currency: string): string {
+  const { negative, whole, fraction } = parseAmount(amount);
+  let grouped = '';
+  for (let i = 0; i < whole.length; i += 1) {
+    if (i > 0 && (whole.length - i) % 3 === 0) grouped += ',';
+    grouped += whole[i];
+  }
+  const kept = fraction.replace(/0+$/, '');
+  const body = kept === '' ? grouped : `${grouped}.${kept}`;
+  return `${negative && body !== '0' ? '-' : ''}${body} ${currency}`;
+}
+
+/**
  * Is this a well-formed amount for this currency?
  *
  * Used to validate input BEFORE sending, so a customer is told about a third
@@ -127,11 +150,20 @@ export function isValidAmount(input: string, exponent: number): boolean {
   return /[1-9]/.test(trimmed);
 }
 
-/** Decimal places per currency, mirroring the server's registry. Kept small
- *  and explicit rather than imported, so a client bundle does not pull in the
- *  whole money package to format a label. */
+/**
+ * Decimal places per currency, mirroring the server's registry. Kept small
+ * and explicit rather than imported, so a client bundle does not pull in the
+ * whole money package to format a label.
+ *
+ * AND BOUND TO THAT REGISTRY BY TEST, because drift here is not cosmetic.
+ * USDC (038) and CAD (055) were never added, so `exponentFor` fell back to 2:
+ * `formatMinor` rendered a 2.5 USDC holding as 25,000.00 USDC — ten thousand
+ * times what the customer held — and the amount keypad refused a USDC amount
+ * past its second decimal. `money-registry.test.ts` reads the server's
+ * registry and fails the build on any currency missing or different here.
+ */
 export const EXPONENTS: Record<string, number> = {
-  NGN: 2, USD: 2, GBP: 2, EUR: 2, GHS: 2, KES: 2, JPY: 0, USDT: 6, BTC: 8,
+  NGN: 2, USD: 2, GBP: 2, EUR: 2, GHS: 2, KES: 2, CAD: 2, JPY: 0, USDT: 6, USDC: 6, BTC: 8,
 };
 
 export function exponentFor(currency: string): number {

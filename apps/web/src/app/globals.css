@@ -6932,3 +6932,40 @@ html[data-theme='dark'] .admin-frame {
 .card-source-text { display: grid; gap: 2px; }
 .card-source-label { font-size: 12px; font-weight: 600; color: var(--text-3); }
 .card-source strong { font-size: 14px; }
+
+/* ---------------------------------------------------------------------------
+ * The crypto portfolio — the comp's card: gradient, iris hairline, a figure
+ * at 800/32, and Buy and Sell as a pair of equal buttons beneath it.
+ *
+ * The note under the figure says what it IS ("in dollars, at today's rate")
+ * where the comp draws a daily percentage — a move needs yesterday's price,
+ * and this platform keeps only the price in force.
+ * ------------------------------------------------------------------------- */
+.portfolio-card {
+  border-radius: 20px;
+  padding: 20px;
+  background: linear-gradient(150deg, var(--card-grad-1), var(--card-grad-2));
+  border: 1px solid var(--iris);
+}
+.portfolio-label { display: block; font-size: 12.5px; font-weight: 500; color: var(--iris-text); }
+.portfolio-value {
+  margin-top: 6px;
+  font-family: var(--font-num);
+  font-size: 32px; font-weight: 800;
+  letter-spacing: -1px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.portfolio-note { display: block; margin-top: 8px; font-size: 12.5px; font-weight: 600; color: var(--text-3); }
+.portfolio-actions { display: flex; gap: 10px; margin-top: 14px; }
+.portfolio-actions .btn { flex: 1; border-radius: 14px; font-size: 14px; }
+/* Sell is the quiet half of the pair: surface, hairline, ink — restated in
+   every state so the generic hover cannot paint it iris. */
+.portfolio-actions .btn.quiet,
+.portfolio-actions .btn.quiet:hover:where(:not(:disabled)) {
+  background: var(--surface-2);
+  border-color: var(--edge);
+  color: var(--text);
+}
+.shell > .portfolio-actions + .eyebrow { margin-top: 22px; }
