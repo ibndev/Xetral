@@ -1,3 +1,4 @@
+import type { IconName } from './icons.js';
 /**
  * What an entry kind is called, in a customer's words.
  *
@@ -91,3 +92,55 @@ export function entryTitle(description: string, kind: string): string {
 
 /** Every kind this table names. Read by the guard, never by a screen. */
 export const ENTRY_KIND_LABELS = LABELS;
+
+/**
+ * THE MARK A ROW WEARS — an icon and a tone per entry kind, one table for
+ * both apps.
+ *
+ * Every row drew the same grey arrow, so a card payment, a bill, a currency
+ * exchange and a bank transfer were one shape in one colour down the whole
+ * Activity screen, and the list read as a column of identical rows the eye
+ * had to read word by word. The comp draws what the row IS; this is that,
+ * from `kind`, the entry's own closed enum — never from its description.
+ *
+ * The TONE is category, not direction: whether money came or went is already
+ * the amount's colour, and a green icon beside a red amount would say two
+ * things at once. Money that arrives is the one exception, because "money in"
+ * is the category.
+ */
+export type EntryTone = 'iris' | 'ok' | 'warn' | 'info' | 'neutral';
+export interface EntryMark {
+  readonly icon: IconName;
+  readonly tone: EntryTone;
+}
+
+const MARKS: Readonly<Record<string, EntryMark>> = {
+  wallet_funding: { icon: 'download', tone: 'ok' },
+  wallet_withdrawal: { icon: 'bank', tone: 'info' },
+  card_creation: { icon: 'card', tone: 'iris' },
+  card_funding: { icon: 'card', tone: 'iris' },
+  card_authorization: { icon: 'card', tone: 'iris' },
+  card_settlement: { icon: 'card', tone: 'iris' },
+  card_auth_expiry: { icon: 'card', tone: 'iris' },
+  card_refund: { icon: 'card', tone: 'ok' },
+  card_termination: { icon: 'card', tone: 'neutral' },
+  fx_trade: { icon: 'swap', tone: 'info' },
+  bill_payment: { icon: 'receipt', tone: 'warn' },
+  esim_purchase: { icon: 'sim', tone: 'warn' },
+  number_purchase: { icon: 'phone', tone: 'warn' },
+  crypto_deposit: { icon: 'bitcoin', tone: 'ok' },
+  crypto_withdrawal: { icon: 'bitcoin', tone: 'warn' },
+  fee: { icon: 'receipt', tone: 'neutral' },
+  reversal: { icon: 'swap', tone: 'neutral' },
+  adjustment: { icon: 'info', tone: 'neutral' },
+  giftcard_purchase: { icon: 'gift', tone: 'warn' },
+  giftcard_hold_release: { icon: 'gift', tone: 'ok' },
+  dispute_refund: { icon: 'shield', tone: 'ok' },
+};
+
+export function entryMark(kind: string, outgoing: boolean): EntryMark {
+  if (kind === 'wallet_transfer') {
+    return outgoing ? { icon: 'send', tone: 'iris' } : { icon: 'download', tone: 'ok' };
+  }
+  return MARKS[kind] ?? (outgoing ? { icon: 'arrowUpRight', tone: 'neutral' } : { icon: 'download', tone: 'ok' });
+}

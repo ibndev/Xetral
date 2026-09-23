@@ -3,9 +3,15 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 /**
- * NO CONTAINER OR FIELD DRAWS A VISIBLE OUTLINE IN THE LIGHT THEME.
+ * CONTAINER EDGES COME FROM ONE TOKEN, IN BOTH THEMES.
  *
- * WHAT THIS IS ABOUT. In light, a container is already a shade DARKER than the
+ * HISTORY, because the first case below now asserts the opposite of what it
+ * was written for: light USED to draw no outlines, for the reason that
+ * follows, and moved to white cards with a hairline on a tinted ground when
+ * that recessed look was judged dull. The other three cases are unchanged —
+ * a box border still comes from `--edge`, never from a divider token.
+ *
+ * WHAT THIS WAS ABOUT. In light, a container is already a shade DARKER than the
  * ground, and darker-than-its-surroundings is what the eye reads as a recess —
  * the cue an input has always used. The hairline drawn on top of it was a
  * second cue for the same fact, and two cues read as an OUTLINE: a screen of
@@ -58,14 +64,28 @@ function rules(): readonly { selector: string; body: string }[] {
   }));
 }
 
-describe('the light theme draws no outlines', () => {
-  it('defines --edge, --edge-strong and --edge-hover as TRANSPARENT in light', () => {
-    // The bare `:root` block, which is the light palette. This app always
-    // stamps `data-theme`, so there is no third media-keyed state to cover.
+describe('container edges in both themes', () => {
+  it('gives light a HAIRLINE now that a card is white on a tinted ground', () => {
+    /*
+     * THE RULE ABOVE WAS REVERSED, deliberately. It held while a container
+     * was a grey recess on a white page — two cues for one fact read as an
+     * outline. The light theme is now a soft cool ground with PAPER-WHITE
+     * cards resting on it (the product owner found the recessed look dull),
+     * and a white card on a near-white ground with no edge is a card with no
+     * edge at all. So the tokens are real colours, and what this guards is
+     * that they stay real AND that the ground and the card stay different —
+     * the pair that makes a card visible.
+     */
     const light = CSS.slice(CSS.indexOf(':root'), CSS.indexOf("[data-theme='dark']"));
     for (const token of ['--edge', '--edge-strong', '--edge-hover']) {
-      expect(new RegExp(`${token}:\\s*transparent;`).test(light), `${token} in light`).toBe(true);
+      expect(new RegExp(`${token}:\\s*transparent;`).test(light), `${token} in light`).toBe(false);
+      expect(new RegExp(`${token}:\\s*#[0-9A-Fa-f]{6};`).test(light), `${token} in light`).toBe(true);
     }
+    const bg = /--bg:\s*(#[0-9A-Fa-f]{6});/.exec(light)?.[1];
+    const surface = /--surface:\s*(#[0-9A-Fa-f]{6});/.exec(light)?.[1];
+    expect(surface?.toUpperCase()).toBe('#FFFFFF');
+    expect(bg).toBeDefined();
+    expect(bg?.toUpperCase()).not.toBe(surface?.toUpperCase());
   });
 
   it('gives dark a real border, so the edge does not vanish where the fill cannot separate', () => {

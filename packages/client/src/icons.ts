@@ -18,7 +18,7 @@
 
 export type IconName =
   | 'home' | 'card' | 'activity' | 'grid' | 'menu' | 'bell' | 'search'
-  | 'send' | 'plus' | 'minus' | 'swap' | 'download'
+  | 'send' | 'plus' | 'minus' | 'swap' | 'swapVertical' | 'download'
   | 'wallet' | 'bitcoin' | 'sim' | 'receipt' | 'gift' | 'globe' | 'zap'
   | 'shield' | 'lock' | 'user' | 'settings' | 'logout'
   | 'chevronRight' | 'chevronDown' | 'chevronLeft' | 'arrowRight' | 'arrowUpRight'
@@ -37,6 +37,9 @@ export const ICON_PATHS: Readonly<Record<IconName, string>> = {
   plus:        'M12 5.5v13M5.5 12h13',
   minus:       'M5.5 12h13',
   swap:        'M7 4.5 3.5 8 7 11.5M3.5 8h13M17 12.5l3.5 3.5L17 19.5M20.5 16h-13',
+  // The same exchange turned upright — the comp's control between Convert's
+  // From and To panels, which are stacked rather than side by side.
+  swapVertical: 'M4.5 7 8 3.5 11.5 7M8 3.5v13M12.5 17l3.5 3.5 3.5-3.5M16 20.5v-13',
   download:    'M12 3.5v12M7.5 11l4.5 4.5 4.5-4.5M4 20.5h16',
   wallet:      'M3 7.5A2 2 0 0 1 5 5.5h12a2 2 0 0 1 2 2M3 7.5v11a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-9H5a2 2 0 0 1-2-2ZM16.5 14.5h1.5',
   bitcoin:     'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM9.5 7.5h4a2.2 2.2 0 0 1 0 4.5h-4V7.5Zm0 4.5h4.5a2.2 2.2 0 0 1 0 4.5H9.5V12ZM11 5.5v2M11 16.5v2',

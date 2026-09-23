@@ -72,7 +72,7 @@ describe('the stylesheet', () => {
   });
 });
 
-describe('the light theme draws no outlines', () => {
+describe('container edges come from the edge token', () => {
   /*
    * The phone's half of the same rule the web's `light-edges.test.ts` keeps.
    *
@@ -86,9 +86,14 @@ describe('the light theme draws no outlines', () => {
    * with `colors.line` looks right on the theme most people build in and puts
    * one outlined box among a screen of recessed ones on the other.
    */
-  it('makes the container and field edges transparent in light and real in dark', () => {
-    expect(light.edge).toBe('transparent');
-    expect(light.edgeStrong).toBe('transparent');
+  it('gives light a real hairline now that a card is white on a soft ground, and dark its line', () => {
+    // REVERSED deliberately, with the web (`light-edges.test.ts`): the grey
+    // recess on white read as dull, and a white card on a near-white ground
+    // with no edge has no edge at all. The ground and the card must differ.
+    expect(light.edge).not.toBe('transparent');
+    expect(light.edgeStrong).not.toBe('transparent');
+    expect(light.surface).toBe('#FFFFFF');
+    expect(light.bg).not.toBe(light.surface);
     // NOT transparent. A dark container that lost its border would be a shade
     // of near-black on black with nothing marking where it ends.
     expect(dark.edge).toBe(dark.line);
@@ -104,8 +109,8 @@ describe('the light theme draws no outlines', () => {
 
   it('draws the shared card and input from the edge, not from the line', () => {
     const styles = stylesFor(light);
-    expect(styles.card.borderColor).toBe('transparent');
-    expect(styles.input.borderColor).toBe('transparent');
+    expect(styles.card.borderColor).toBe(light.edge);
+    expect(styles.input.borderColor).toBe(light.edgeStrong);
     // And they still HAVE a border, so dark gets one from the same rule rather
     // than needing a second copy of the component style.
     expect(styles.card.borderWidth).toBe(1);

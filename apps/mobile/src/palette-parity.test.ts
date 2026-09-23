@@ -41,6 +41,10 @@ const TOKENS: Record<string, string> = {
   line: '--line',
   lineStrong: '--line-strong',
   field: '--field',
+  // A real hairline in light since the soft-ground pass, so it is a colour
+  // both platforms must agree on rather than a shared 'transparent'.
+  edge: '--edge',
+  edgeStrong: '--edge-strong',
   text: '--text',
   text2: '--text-2',
   text3: '--text-3',

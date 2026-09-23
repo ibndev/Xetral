@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { ENTRY_KIND_LABELS, entryKindLabel, entryTitle } from './entry-kind.js';
+import { ENTRY_KIND_LABELS, entryKindLabel, entryMark, entryTitle } from './entry-kind.js';
 
 /**
  * EVERY ENTRY KIND THE LEDGER CAN WRITE HAS A WORD A CUSTOMER READS.
@@ -101,5 +101,24 @@ describe('the title a row is shown with', () => {
   it('starts a written description with a capital and keeps the rest as written', () => {
     expect(entryTitle('transfer to ***9999', 'wallet_transfer')).toBe('Transfer to ***9999');
     expect(entryTitle('Card top-up from NGN + USD', 'card_funding')).toBe('Card top-up from NGN + USD');
+  });
+});
+
+describe('entryMark', () => {
+  it('gives every labelled kind its own mark, from the kind and not the words', () => {
+    for (const kind of Object.keys(ENTRY_KIND_LABELS)) {
+      expect(entryMark(kind, true).icon, kind).toBeDefined();
+    }
+    expect(entryMark('fx_trade', true)).toEqual({ icon: 'swap', tone: 'info' });
+    expect(entryMark('bill_payment', true).icon).toBe('receipt');
+    expect(entryMark('wallet_withdrawal', true).icon).toBe('bank');
+  });
+  it('tells a transfer sent from one received', () => {
+    expect(entryMark('wallet_transfer', true)).toEqual({ icon: 'send', tone: 'iris' });
+    expect(entryMark('wallet_transfer', false)).toEqual({ icon: 'download', tone: 'ok' });
+  });
+  it('falls back by direction for a kind it has never seen', () => {
+    expect(entryMark('something_new', true).icon).toBe('arrowUpRight');
+    expect(entryMark('something_new', false).tone).toBe('ok');
   });
 });

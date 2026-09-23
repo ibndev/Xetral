@@ -97,73 +97,51 @@
 
   /* Surfaces.
 
-     THE PAGE IS PURE WHITE AND EVERY CONTAINER ON IT IS RECESSED INTO IT.
+     A SOFT COOL GROUND, AND WHITE CARDS THAT SIT ON IT — the fourth
+     position this file has taken, and the reason it moved is recorded
+     because the previous three each had one.
 
-     This file has now argued both directions, so the reasoning is worth
-     keeping. The first version made page and card the same white and let a
-     hairline separate them — which gives the eye nothing to group by, so a
-     screen of stacked cards reads as one sheet with lines ruled across it.
-     The second inverted it: off-white ground, paper-white containers. That
-     grouped correctly and it made every container read as a piece of paper
-     LYING ON the page, which with a shadow under it is a floating card.
+     The third made the page pure white and every container a recess one
+     shade darker, with no edge and no shadow. It grouped correctly and it
+     was DULL: one grey on one white, everywhere, so a card, a tile, a field,
+     a back button and a quiet button were the same flat swatch and nothing
+     on a screen was more important than anything else. The product owner's
+     verdict was "boring, not beautiful, not professional", and it was right —
+     that is the look of a wireframe, not of Revolut or Lemfi.
 
-     The third, and the one here, keeps the grouping and drops the lift. The
-     ground is white; a container is a shade DARKER than the ground and has
-     no shadow at all. Darker-than-its-surroundings is what the eye reads as
-     a recess — the same cue an input has always used — so a card, a panel
-     and a text field are all obviously the same kind of thing: somewhere to
-     put something, cut into the page rather than resting on it.
+     So the page is a very light cool tint, a container is PAPER WHITE with a
+     hairline and a low, soft shadow, and the eye reads that as a card resting
+     on a desk — the vocabulary every serious fintech app in light uses. The
+     shadow is small on purpose: it separates, it does not float. What
+     genuinely floats (a sheet, a menu) still uses `--surface-raised` and the
+     larger shadows below.
 
-     A shadow is therefore reserved for what genuinely floats above the page
-     and would otherwise be unreadable against it: a dropdown, a sheet, a
-     modal. Those use `--surface-raised`, which goes the other way — LIGHTER
-     than the ground — because that is the honest cue for something in front.
+     A FIELD IS A WELL INSIDE A CARD, with a visible edge: the complaint
+     before the third position was that inputs could not be seen on white,
+     and an outline plus a tint is the answer that survives both.
 
-     Dark keeps its own logic: on black, a container lifts by a few points of
-     lightness because black swallows both a shadow and a darker fill. */
-  --bg:           #FFFFFF;   /* the page, behind everything */
-  --surface:      #F1F3F9;   /* cards, inputs, panels — recessed */
-  --surface-2:    #E4E8F0;   /* a well INSIDE a container, one step deeper */
-  /*
-   * A FIELD IS DEEPER THAN A CARD, and that separation is what took the place
-   * of the border.
-   *
-   * When the outline came off, a field and the card it sits in were the SAME
-   * fill, so the only thing marking where you could type was a hairline that
-   * was no longer drawn — reported as "the input fields are not visible on the
-   * white theme". A card is one step down from the page; a field is one step
-   * down from the card, which is the ordinary recess cue doing the work the
-   * border used to, rather than a second border in disguise.
-   */
-  --field:        #E4E8F0;   /* a text input, deeper than the card holding it */
+     Dark keeps its own logic entirely: on black, a container lifts by a few
+     points of lightness and a hairline finishes the edge. */
+  --bg:           #F4F6FB;   /* the page, behind everything */
+  --surface:      #FFFFFF;   /* cards, panels, tiles — resting on the page */
+  --surface-2:    #F1F3F9;   /* a well INSIDE a card, one step deeper */
+  --field:        #FFFFFF;   /* a text input: white with a visible edge, on the page or in a card */
   --surface-raised: #FFFFFF; /* only what floats: menus, sheets, modals */
-  --line:         #E7EAF0;
+  --line:         #EBEEF4;
   --line-strong:  #D5D9E2;
 
-  /* THE OUTLINE ROUND A CONTAINER OR A FIELD — TRANSPARENT IN LIGHT, and that
-     is the whole of this token's reason to exist.
+  /* The outline round a container or a field. A hairline in light now,
+     because a white card on a near-white ground needs its edge finished;
+     `--edge-hover` is one step stronger so a pointer over a field says so. */
+  --edge:         #E6E9F1;
+  --edge-strong:  #D9DEE8;
+  --edge-hover:   #CDD4E1;
 
-     A container here is already a shade DARKER than the ground, and that is
-     what the eye reads as a recess. The hairline on top of it was a second
-     cue saying the same thing, and two cues for one fact read as an outline:
-     a screen of stacked cards looked like boxes drawn on a page rather than
-     wells cut into it, and a text field at rest was a ruled rectangle waiting
-     for input it had not been given.
-
-     DARK KEEPS ITS BORDERS, because on black there is no darker fill to use:
-     a container lifts by a few points of lightness and the line is what
-     finishes the edge.
-
-     `--line` is deliberately NOT what changed. Dividers — a table's rules, a
-     section head, an `hr` — are structure rather than outline, and they
-     separate things that would otherwise run together in either theme.
-
-     `--edge-hover` exists so a field at rest and a field under the pointer
-     are the same in light. Hover is not focus; a border appearing under the
-     mouse is the outline coming back on the one screen somebody is reading. */
-  --edge:         transparent;
-  --edge-strong:  transparent;
-  --edge-hover:   transparent;
+  /* A CARD'S SHADOW. Two layers: a 1px contact line that grounds it, and a
+     wide, faint, negatively spread wash that lifts it without a visible
+     drop. Dark sets both to none — black swallows a shadow. */
+  --card-shadow:    0 1px 2px rgba(16, 24, 40, .04), 0 6px 18px -8px rgba(16, 24, 40, .10);
+  --card-shadow-sm: 0 1px 2px rgba(16, 24, 40, .05);
 
   /* Text */
   --text:         #0D1B3E;
@@ -388,6 +366,8 @@
      a shadow, which black swallows. */
   --bg:           #000000;
   --surface:      #0C0D10;
+  --card-shadow:    none;
+  --card-shadow-sm: none;
   --surface-2:    #141519;
   /* On black a field lifts rather than recesses, for the reason every other
      container does: black swallows a darker fill. It keeps its border too. */
@@ -3095,7 +3075,11 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
      it is now what the whole app does, so this rule exists only to give the
      field a taller target and a softer edge than a form field elsewhere. */
   background: var(--field);
-  border: 1px solid transparent;
+  /* A REAL EDGE NOW. Borderless worked while the page was white and the
+     field a tinted recess; on the soft light ground a tinted field is the
+     ground's own colour and the email box simply vanished. White with the
+     strong hairline is the field every other form in the app now draws. */
+  border: 1px solid var(--edge-strong);
   border-radius: var(--r);
   min-height: 54px;
   font-size: 16px;
@@ -3103,6 +3087,13 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0; }
 }
 @media (hover: hover) {
   .auth-card .field input:hover:where(:not(:focus)) { border-color: var(--edge-hover); }
+}
+/* The dial-code affix draws the edge itself, round the code AND the number,
+   so the number field inside it must not draw a second box within the first. */
+.auth-card .input-affix.dial input,
+.auth-card .input-affix.dial input:focus {
+  border-color: transparent;
+  box-shadow: none;
 }
 .auth-card .field input:focus,
 .auth-card .input-affix input:focus {
@@ -6969,3 +6960,130 @@ html[data-theme='dark'] .admin-frame {
   color: var(--text);
 }
 .shell > .portfolio-actions + .eyebrow { margin-top: 22px; }
+
+/* ---------------------------------------------------------------------------
+ * THE LIGHT THEME, SECOND PASS — cards that rest on the page, and a hero.
+ *
+ * Every container that was a flat grey recess now takes `--card-shadow`,
+ * which is `none` in dark and inside the operations dashboard (it has its
+ * own comp and its own light palette). Controls that sit DIRECTLY on the
+ * page — a back button, a quiet button, a filter chip, a search field, a
+ * segmented control — were `--surface-2` on white; on the new ground that
+ * grey would vanish, so they are white with a hairline instead.
+ * ------------------------------------------------------------------------- */
+html:not([data-theme='dark']) .admin-frame {
+  --card-shadow: none;
+  --card-shadow-sm: none;
+}
+
+.card, .panel, .tile, .ccy-card, .cv-panel, .sent-card, .legal-rows,
+.balance-card, .acct-card, .portfolio-card {
+  box-shadow: var(--card-shadow);
+}
+
+html:not([data-theme='dark']) .app-frame :is(
+  .page-head .back, .btn.quiet, button.quiet, .chip:not(.on), .segmented,
+  .search-field, .card-act:not(.on) .card-act-ico, .auth-tile,
+  .card-source, .fund-plan
+) {
+  background: var(--surface);
+  border-color: var(--edge);
+  box-shadow: var(--card-shadow-sm);
+}
+html:not([data-theme='dark']) .app-frame :is(.btn.quiet, button.quiet):hover:where(:not(:disabled)) {
+  background: var(--surface-2);
+}
+/* A list-row avatar on the page ground: white with a hairline, where the
+   old grey fill was the ground's own colour. */
+html:not([data-theme='dark']) .app-frame .tx-row .avatar:not(:is(.tone-ok, .tone-warn, .tone-info, .tone-iris)) {
+  background: var(--surface);
+  border: 1px solid var(--edge);
+}
+
+/* THE QUICK ACTIONS. Send stays the one filled iris thing on the screen; the
+   other three were grey squares and read as disabled. White, a hairline, a
+   soft shadow and an iris glyph make them four buttons of one family with
+   one of them clearly first. */
+html:not([data-theme='dark']) .act .act-ico {
+  background: var(--surface);
+  border-color: var(--edge);
+  color: var(--iris-text);
+  box-shadow: var(--card-shadow);
+}
+html:not([data-theme='dark']) .act.primary .act-ico {
+  background: var(--iris);
+  border-color: var(--iris);
+  color: var(--on-iris);
+  box-shadow: 0 10px 22px -10px rgba(91, 71, 224, .75);
+}
+
+/* The tab bar is paper, like the cards, rather than the tinted ground. */
+html:not([data-theme='dark']) .tabbar {
+  background: color-mix(in srgb, #FFFFFF 92%, transparent);
+  border-top-color: var(--edge);
+  box-shadow: 0 -6px 20px -14px rgba(16, 24, 40, .18);
+}
+
+/* ── THE TOTAL BALANCE, as a hero ────────────────────────────────────────
+ *
+ * In dark the figure sits on black under a soft iris glow, and that works:
+ * the glow is the only light on the screen. In light the same glow on a pale
+ * ground was a smudge, and the one number the app exists for looked like any
+ * other line of text. So in light the total is a CARD: a deep iris gradient,
+ * white type, the chip in frosted glass. It is the one saturated surface on
+ * the home screen, which is exactly the weight that number should carry.
+ * The dark theme is untouched — `.hero` there is just a wrapper.
+ */
+.hero { position: relative; }
+.balance-unavailable { color: var(--text-3); }
+html:not([data-theme='dark']) .hero {
+  margin-top: 6px;
+  padding: 18px 20px 20px;
+  border-radius: 24px;
+  overflow: hidden;
+  color: #FFFFFF;
+  background:
+    radial-gradient(120% 140% at 100% 0%, rgba(255, 255, 255, .20) 0%, transparent 46%),
+    radial-gradient(90% 120% at 0% 100%, rgba(40, 20, 120, .35) 0%, transparent 60%),
+    linear-gradient(135deg, #4B3BD4 0%, #6D5AE6 52%, #8F7CFF 100%);
+  box-shadow: 0 20px 40px -22px rgba(75, 59, 212, .75);
+}
+/* Two faint rings, top right: texture, not decoration you read. */
+html:not([data-theme='dark']) .hero::after {
+  content: '';
+  position: absolute;
+  top: -70px; right: -60px;
+  width: 220px; height: 220px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, .16);
+  box-shadow: 0 0 0 28px rgba(255, 255, 255, .05);
+  pointer-events: none;
+}
+html:not([data-theme='dark']) .glow-wrap > .glow { display: none; }
+html:not([data-theme='dark']) .hero .balance-head .balance-label { color: rgba(255, 255, 255, .82); }
+html:not([data-theme='dark']) .hero .balance-value { color: #FFFFFF; }
+html:not([data-theme='dark']) .hero .balance-value .minor { color: rgba(255, 255, 255, .62); }
+html:not([data-theme='dark']) .hero .balance-unavailable { color: rgba(255, 255, 255, .7); }
+html:not([data-theme='dark']) .hero .icon-btn,
+html:not([data-theme='dark']) .hero .icon-btn:hover,
+html:not([data-theme='dark']) .hero .icon-btn:active,
+html:not([data-theme='dark']) .hero .icon-btn:focus { background: transparent; color: rgba(255, 255, 255, .85); }
+html:not([data-theme='dark']) .hero .delta-chip {
+  background: rgba(255, 255, 255, .16);
+  border-color: rgba(255, 255, 255, .24);
+  color: #FFFFFF;
+  backdrop-filter: blur(6px);
+}
+html:not([data-theme='dark']) .hero .skeleton { background: rgba(255, 255, 255, .22); }
+
+/* ── A ROW'S MARK: what it is, as a shape and a tone ─────────────────────
+ * One grey arrow on every row made a card payment, a bill and an exchange
+ * the same object. `entryMark()` in `@xetral/client` names the icon and the
+ * tone from the entry's kind; these paint the tone. Stated after
+ * `.tx-row .avatar` and at higher specificity so the neutral list fill never
+ * wins over a category. */
+.tx-row .avatar.tone-ok      { background: var(--ok-bg);    color: var(--ok);        border-color: transparent; }
+.tx-row .avatar.tone-warn    { background: var(--warn-bg);  color: var(--warn);      border-color: transparent; }
+.tx-row .avatar.tone-info    { background: var(--info-bg);  color: var(--info);      border-color: transparent; }
+.tx-row .avatar.tone-iris    { background: var(--iris-tint); color: var(--iris-text); border-color: transparent; }
+.tx-row .avatar.tone-neutral { color: var(--text-2); }

@@ -2632,6 +2632,40 @@ Schema: `packages/ledger/sql/078_card_funding_cascade.sql`. Planner in
 - **A holding is written as a quantity** — `formatQuantity`, "15 USDT",
   trailing zeros dropped and nothing else — where a price uses `formatAmount`.
 
+### The home headline, and the light theme — non-obvious rules
+
+`apps/web/src/app/wallet/page.tsx`, `apps/mobile/app/wallet.tsx`, the light
+tokens at the top of `globals.css` and `theme.ts`.
+
+- **"TOTAL BALANCE" IS THE TOTAL AND NOTHING ELSE.** It fell back to the
+  SELECTED wallet whenever `/v1/wallets/total` could not price, so tapping a
+  currency card turned the headline into that currency — a figure that is not
+  a total, under a label saying it is. The dollar WALLET is not the total
+  either; it is one of the balances the total adds up. Unpriceable says so
+  ("Your total cannot be priced right now"); it never borrows a card's figure.
+- **ONE CURRENCY THAT CANNOT BE PRICED CANNOT FAIL THE TOTAL.** `dollarTotal()`
+  catches per currency and names it in `excluded`, the same as an unpublished
+  pair — a read error on one wallet was the usual way the fallback fired.
+- **PENDING IS ON ITS OWN CARD**, not in the headline's chip row. A chip that
+  followed the selected card made the total look as if it followed it too.
+- **THE LIGHT THEME IS A SOFT COOL GROUND WITH WHITE CARDS RESTING ON IT**, the
+  fourth position `globals.css` has taken. The grey-recess-on-white before it
+  grouped correctly and was judged dull — one grey on one white everywhere.
+  `--card-shadow` is `none` in dark and inside `.admin-frame`, which keeps its
+  own comp and palette. A control sitting DIRECTLY on the page (back button,
+  quiet button, chip, search, segmented) is white with a hairline, because a
+  grey well is the new ground's own colour; the phone's `onGround()` is the same
+  rule. `light-edges.test.ts` and `theme.test.ts` now assert the reversal.
+- **A FIELD IS WHITE WITH A VISIBLE EDGE**, on the page and in a card. A tinted
+  borderless field was invisible on the tinted ground — the sign-in email box
+  disappeared first.
+- **THE TOTAL IS A GRADIENT HERO IN LIGHT ONLY.** In dark the glow is the only
+  light on black and works; on the pale ground it was a smudge. The phone draws
+  it with react-native-svg, which it already ships for the flags.
+- **A ROW WEARS WHAT IT IS.** `entryMark(kind, outgoing)` in `@xetral/client`
+  names an icon and a tone per entry kind for both apps. The tone is CATEGORY,
+  not direction — direction is already the amount's colour.
+
 ### Metrics — non-obvious rules
 
 `apps/api/src/observability/metrics.{service,controller}.ts`, at `GET /metrics`.

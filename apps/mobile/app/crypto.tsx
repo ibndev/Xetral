@@ -21,7 +21,7 @@ import {
 import { Select } from '@/select';
 import { Icon } from '@/icon';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/hooks';
-import { font, space, useStyles, useTheme } from '@/theme';
+import { font, space, useStyles, useTheme, onGround, cardShadow } from '@/theme';
 
 /**
  * WHAT THE CUSTOMER HOLDS AND WHAT IT IS WORTH — the comp's portfolio card,
@@ -57,6 +57,7 @@ function Portfolio({ home }: { readonly home: string }) {
           borderWidth: 1,
           borderColor: colors.iris,
           marginTop: space.md,
+          ...cardShadow(colors),
         }}
       >
         <Text style={{ color: colors.irisText, fontFamily: font.sansMedium, fontSize: 12.5 }}>Portfolio value</Text>
@@ -100,7 +101,7 @@ function Portfolio({ home }: { readonly home: string }) {
             style={{
               width: 42, height: 42, borderRadius: 999,
               alignItems: 'center', justifyContent: 'center',
-              backgroundColor: colors.surface2,
+              ...onGround(colors),
             }}
           >
             <CurrencyMark currency={row.asset} size={26} />

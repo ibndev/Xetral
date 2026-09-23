@@ -1,9 +1,21 @@
 import { Pressable, Text, View } from 'react-native';
-import { entryKindLabel, entryTitle, formatAmount } from '@xetral/client';
-import type { Transaction } from '@xetral/client';
+import { entryKindLabel, entryMark, entryTitle, formatAmount } from '@xetral/client';
+import type { EntryTone, Transaction } from '@xetral/client';
 import { Icon } from '@/icon';
 import { CurrencyMark } from '@/currency-mark';
 import { font, useTheme } from '@/theme';
+import type { Palette } from '@/theme';
+
+/** A row mark's tone as a fill and a glyph colour — the web's `.tone-*`. */
+function toneOf(tone: EntryTone, c: Palette): { readonly bg: string; readonly fg: string } {
+  switch (tone) {
+    case 'ok': return { bg: c.okBg, fg: c.ok };
+    case 'warn': return { bg: c.warnBg, fg: c.warn };
+    case 'info': return { bg: c.infoBg, fg: c.info };
+    case 'iris': return { bg: c.irisTint, fg: c.irisText };
+    default: return { bg: c.surface2, fg: c.text2 };
+  }
+}
 
 /**
  * A TRANSACTION ROW, ONCE, FOR EVERY SCREEN THAT DRAWS ONE.
@@ -78,6 +90,8 @@ export function TxRow({
   const colors = useTheme();
   const outgoing = entry.amount.trim().startsWith('-');
   const when = new Date(entry.occurred_at);
+  // What the row IS — a card, a bill, an exchange — as a shape and a tone.
+  const mark = entryMark(entry.kind, outgoing);
   return (
     <Pressable
       accessibilityRole="button"
@@ -94,10 +108,10 @@ export function TxRow({
           style={{
             width: 44, height: 44, borderRadius: 999,
             alignItems: 'center', justifyContent: 'center',
-            backgroundColor: colors.surface2,
+            backgroundColor: toneOf(mark.tone, colors).bg,
           }}
         >
-          <Icon name={outgoing ? 'arrowUpRight' : 'download'} size={19} color={colors.text2} />
+          <Icon name={mark.icon} size={19} color={toneOf(mark.tone, colors).fg} />
         </View>
         {/* The currency rides ON the avatar rather than beside it, so a row is
             two columns and not three — read at a glance without a label

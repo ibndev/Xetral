@@ -8,7 +8,7 @@ import type { ApiErrorCode } from '@xetral/client';
 import { Icon } from '@/icon';
 import type { IconName } from '@/icon';
 import { apiUrl } from '@/session';
-import { font, radius, space, useStyles, useTheme } from '@/theme';
+import { font, radius, space, useStyles, useTheme, onGround } from '@/theme';
 
 /**
  * The small pieces every screen repeats, so they repeat identically.
@@ -309,7 +309,7 @@ export function Segmented<T extends string>({
         padding: 4,
         gap: 2,
         borderRadius: radius.pill,
-        backgroundColor: colors.surface2,
+        ...onGround(colors),
       }}
     >
       {options.map((option) => {
@@ -403,7 +403,7 @@ export function Empty({ icon, title, hint }: {
           width: 46,
           height: 46,
           borderRadius: 14,
-          backgroundColor: colors.surface2,
+          ...onGround(colors),
           alignItems: 'center',
           justifyContent: 'center',
         }}
@@ -542,7 +542,7 @@ export function AmountCard({
         padding: space.md,
         marginTop: space.md,
         borderRadius: radius.md,
-        backgroundColor: colors.surface2,
+        ...onGround(colors),
         borderColor: invalid ? colors.danger : colors.edge,
         borderWidth: 1,
       }}

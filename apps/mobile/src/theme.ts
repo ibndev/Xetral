@@ -99,15 +99,19 @@ export const light: Palette = {
    * sheet. Everything else is flat and darker. See the long note in
    * `globals.css` for why this file has now argued the question twice.
    */
-  bg: '#FFFFFF',
-  surface: '#F1F3F9',
-  surface2: '#E4E8F0',
+  // A SOFT COOL GROUND AND WHITE CARDS RESTING ON IT — the web's fourth
+  // position, for its reasons (see `globals.css`): the grey-recess look it
+  // replaces was judged dull, one grey on one white everywhere.
+  // `palette-parity.test.ts` keeps these equal to the web's.
+  bg: '#F4F6FB',
+  surface: '#FFFFFF',
+  surface2: '#F1F3F9',
   surfaceRaised: '#FFFFFF',
-  field: '#E4E8F0',
-  line: '#E7EAF0',
+  field: '#FFFFFF',
+  line: '#EBEEF4',
   lineStrong: '#D5D9E2',
-  edge: 'transparent',
-  edgeStrong: 'transparent',
+  edge: '#E6E9F1',
+  edgeStrong: '#D9DEE8',
   // `--ink`, the same near-black navy the primary button uses on light.
   accentButton: '#0D1B3E',
   accentButtonEdge: 'transparent',
@@ -455,6 +459,44 @@ export function useStyles(): ReturnType<typeof buildSheet> {
   return stylesFor(useTheme());
 }
 
+/**
+ * A CARD'S RESTING SHADOW, in light only — the web's `--card-shadow`. A white
+ * card on the soft ground needs a contact line and a faint lift to read as a
+ * card; on black a shadow is swallowed, so dark gets nothing. Android's
+ * `elevation` is kept at 1: anything higher is the heavy drop shadow the
+ * design refuses.
+ */
+export function cardShadow(colors: Palette) {
+  if (colors.bg === '#000000') return {};
+  return Platform.select({
+    ios: {
+      shadowColor: '#101828',
+      shadowOpacity: 0.07,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 4 },
+    },
+    android: { elevation: 1 },
+    default: {},
+  }) ?? {};
+}
+
+/**
+ * A CONTROL OR WELL SITTING DIRECTLY ON THE PAGE — a segmented control, an
+ * icon badge, a small panel. It was `surface2`, one grey on white; on the
+ * soft light ground that grey is the ground's own colour and vanishes. So in
+ * light it is white with a hairline and the resting shadow (the web's
+ * `.app-frame` rule for the same controls), and dark keeps its well.
+ */
+export function onGround(colors: Palette) {
+  if (colors.bg === '#000000') return { backgroundColor: colors.surface2 };
+  return {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.edge,
+    ...cardShadow(colors),
+  };
+}
+
 function buildSheet(colors: Palette) {
   return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
@@ -466,9 +508,10 @@ function buildSheet(colors: Palette) {
      container, which is the raised look the design does not want. */
   card: {
     backgroundColor: colors.surface,
-    // Transparent in light — see `edge` on the palette. The fill is what makes
-    // this a card; the border only has work to do on black.
+    // A hairline in both themes now: a white card on the soft light ground
+    // needs its edge finished, and on black the line is what separates it.
     borderColor: colors.edge,
+    ...cardShadow(colors),
     borderWidth: 1,
     borderRadius: radius.lg,
     padding: space.lg,

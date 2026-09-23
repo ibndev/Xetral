@@ -206,7 +206,7 @@ export default function Fx() {
             backgroundColor: colors.iris,
           }}
         >
-          <Icon name="swap" size={20} color={colors.onIris} />
+          <Icon name="swapVertical" size={20} color={colors.onIris} />
         </Pressable>
 
         <View style={panel}>

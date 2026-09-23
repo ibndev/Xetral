@@ -13,7 +13,7 @@ import { Button, Done, Field, FormError, Loading, Panel, VerifyPrompt } from '@/
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/hooks';
 import { Select } from '@/select';
 import { CurrencyMark } from '@/currency-mark';
-import { font, radius, space, useStyles, useTheme } from '@/theme';
+import { font, radius, space, useStyles, useTheme, onGround } from '@/theme';
 
 /**
  * Virtual USD cards, on the phone.
@@ -519,7 +519,7 @@ function CardRow({
       </View>
 
       {card.base_currency !== undefined && card.status !== 'terminated' && (
-        <View style={[{ padding: 12, borderRadius: radius.md, gap: 6 }, { backgroundColor: colors.surface2, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}>
+        <View style={[{ padding: 12, borderRadius: radius.md, gap: 6 }, { ...onGround(colors), flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}>
           <View style={{ gap: 2, flexShrink: 1 }}>
             <Text style={{ color: colors.text3, fontFamily: font.sansSemi, fontSize: 12 }}>Tops up from</Text>
             <Text style={{ color: colors.text, fontFamily: font.sansBold, fontSize: 14 }}>
@@ -655,7 +655,7 @@ function CardRow({
           )}
 
           {pending === 'fund' && planned !== undefined && planned.covered && (
-            <View style={[{ padding: 12, borderRadius: radius.md, gap: 6 }, { backgroundColor: colors.surface2 }]}>
+            <View style={[{ padding: 12, borderRadius: radius.md, gap: 6 }, onGround(colors)]}>
               <Text style={{ color: colors.text3, fontFamily: font.sansSemi, fontSize: 12 }}>Paid from</Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
                 {planned.legs.map((leg, index) => (
@@ -961,9 +961,7 @@ function Benefit({
           borderRadius: 22,
           alignItems: 'center',
           justifyContent: 'center',
-          backgroundColor: colors.surface2,
-          borderWidth: 1,
-          borderColor: colors.edge,
+          ...onGround(colors),
         }}
       >
         <Icon name={icon} size={20} color={colors.text2} />
@@ -1104,10 +1102,11 @@ function CardActivityList() {
               style={{
                 width: 42, height: 42, borderRadius: 12,
                 alignItems: 'center', justifyContent: 'center',
-                backgroundColor: colors.surface2,
+                // The card tone, as the web's rows wear it (`entryMark`).
+                backgroundColor: outgoing ? colors.irisTint : colors.okBg,
               }}
             >
-              <Icon name={outgoing ? 'card' : 'download'} size={19} color={colors.text2} />
+              <Icon name={outgoing ? 'card' : 'download'} size={19} color={outgoing ? colors.irisText : colors.ok} />
             </View>
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text

@@ -195,7 +195,7 @@ function Convert() {
               setQuote(undefined);
             }}
           >
-            <Icon name="swap" size={20} />
+            <Icon name="swapVertical" size={20} />
           </button>
 
           <div className="cv-panel to">

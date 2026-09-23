@@ -1,6 +1,6 @@
 'use client';
 
-import { entryKindLabel, entryTitle, formatAmount } from '@xetral/client';
+import { entryKindLabel, entryMark, entryTitle, formatAmount } from '@xetral/client';
 import type { Transaction } from '@xetral/client';
 import { Icon } from '@/ui/icon';
 import { CurrencyMark } from '@/ui/currency-mark';
@@ -85,11 +85,13 @@ export function TxRow({
 }) {
   const outgoing = entry.amount.trim().startsWith('-');
   const when = new Date(entry.occurred_at);
+  // What the row IS — a card, a bill, an exchange — as a shape and a tone.
+  const mark = entryMark(entry.kind, outgoing);
   return (
     <button type="button" className="tx-row" onClick={() => onOpen(entry.id)}>
       <span className="tx-mark">
-        <span className="avatar">
-          <Icon name={outgoing ? 'arrowUpRight' : 'download'} size={19} />
+        <span className={`avatar tone-${mark.tone}`}>
+          <Icon name={mark.icon} size={19} />
         </span>
         {/* The currency rides ON the avatar rather than beside it, so a row is
             three columns and not four — and is read at a glance without a
