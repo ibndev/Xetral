@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
+import Svg, { Circle, Defs, LinearGradient, RadialGradient, Rect, Stop } from 'react-native-svg';
 import { Link } from 'expo-router';
 import { formatAmount, symbolFor } from '@xetral/client';
 import type { Balance, Transaction } from '@xetral/client';
@@ -11,7 +12,7 @@ import { CurrencyMark } from '@/currency-mark';
 import { TxList } from '@/tx-list';
 import { TransactionSheet } from '@/transaction-sheet';
 import { useLoad, useRemembered, useXetral } from '@/hooks';
-import { font, radius, space, useTheme } from '@/theme';
+import { cardShadow, font, radius, space, useTheme } from '@/theme';
 import { BALANCE_VISIBILITY } from '@/preferences';
 
 /** A fixed mask. As many dots as the amount has digits would be a picture of
@@ -108,19 +109,23 @@ export default function Home() {
   /*
    * THE HEADLINE IS IN DOLLARS — the web's reasoning, and the same request:
    * the card spends in dollars, so one figure answers "what can I spend"
-   * whatever the customer is paid in. Priced as a conversion would pay, and
-   * falling back to the selected balance if pricing is unavailable.
+   * whatever the customer is paid in. Priced as a conversion would pay.
+   *
+   * IT IS THE TOTAL AND NOTHING ELSE. It fell back to the SELECTED wallet
+   * when pricing failed, so tapping a currency card appeared to turn "Total
+   * balance" into that currency. The dollar WALLET is not the total either —
+   * it is one of the balances the total adds up. Unpriceable says so.
    */
   const dollars = useLoad(() => client.dollarTotal(), [client]);
-  const headline =
-    dollars.data !== undefined
-      ? { amount: dollars.data.amount, currency: 'USD' }
-      : { amount: active?.spendable ?? '0.00', currency };
+  const headline = dollars.data;
 
   const history = useLoad(
     () => client.transactions(currency).catch(() => ({ entries: [], nextCursor: null })),
     [client, currency],
   );
+
+  // The light theme draws the total as a gradient card; dark keeps the glow.
+  const hero = colors.bg !== '#000000';
 
   const tone = {
     amber: { bg: colors.warnBg, fg: colors.warn },
@@ -142,19 +147,40 @@ export default function Home() {
         later sibling and therefore above it.
       */}
       <View style={{ paddingHorizontal: GUTTER }}>
-        <View
-          pointerEvents="none"
-          style={{
-            position: 'absolute',
-            top: -110, left: '18%',
-            width: 300, height: 300, borderRadius: 999,
-            backgroundColor: colors.glow,
-            opacity: 0.9,
-          }}
-        />
+        {!hero && (
+          <View
+            pointerEvents="none"
+            style={{
+              position: 'absolute',
+              top: -110, left: '18%',
+              width: 300, height: 300, borderRadius: 999,
+              backgroundColor: colors.glow,
+              opacity: 0.9,
+            }}
+          />
+        )}
 
+        {/*
+          THE TOTAL, AS A HERO — in light. The glow is the only light on a
+          black screen and works there; on the pale ground it was a smudge and
+          the one number the app exists for looked like any other line. So in
+          light the total is a card: a deep iris gradient, white type, the chip
+          in frosted glass — the web's `.hero`, drawn with react-native-svg
+          because React Native has no gradient of its own.
+        */}
+        <View
+          style={
+            hero
+              ? {
+                  marginTop: 6, paddingHorizontal: 20, paddingTop: 18, paddingBottom: 20,
+                  borderRadius: 24, overflow: 'hidden',
+                }
+              : undefined
+          }
+        >
+        {hero && <HeroGround />}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingTop: 4 }}>
-          <Text style={{ color: colors.text2, fontFamily: font.sansSemi, fontSize: 13 }}>
+          <Text style={{ color: hero ? 'rgba(255,255,255,0.82)' : colors.text2, fontFamily: font.sansSemi, fontSize: 13 }}>
             Total balance
           </Text>
           {/*
@@ -174,7 +200,7 @@ export default function Home() {
             hitSlop={8}
             style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }}
           >
-            <Icon name={hidden ? 'eyeOff' : 'eye'} size={18} color={colors.text2} />
+            <Icon name={hidden ? 'eyeOff' : 'eye'} size={18} color={hero ? 'rgba(255,255,255,0.85)' : colors.text2} />
           </Pressable>
         </View>
 
@@ -191,13 +217,16 @@ export default function Home() {
         */}
         <Figure
           text={
-            balances.loading || dollars.loading
+            dollars.loading
               ? ' '
-              : hidden
-                ? `${symbolFor(headline.currency)} ${MASK}`
-                : formatAmount(headline.amount, headline.currency)
+              : headline === undefined
+                ? '—'
+                : hidden
+                  ? `$ ${MASK}`
+                  : formatAmount(headline.amount, 'USD')
           }
-          split={!hidden && !balances.loading && !dollars.loading}
+          split={!hidden && !dollars.loading && headline !== undefined}
+          onHero={hero}
         />
 
         {/*
@@ -214,20 +243,20 @@ export default function Home() {
           no published dollar price is NAMED, because a total that quietly
           skipped one reads as money gone. Pending money stays beside it.
         */}
-        {!hidden && (dollars.data !== undefined || (active !== undefined && !isZero(active.pending))) && (
+        {/* Pending money is on its own currency's card below: a chip here
+            that followed the selected card made the total look as if it did. */}
+        {!hidden && !dollars.loading && (
           <View style={{ marginTop: 11, flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            {dollars.data !== undefined && (
-              <Chip icon="swap">
-                {dollars.data.excluded.length === 0
-                  ? 'In dollars, at today’s rate'
-                  : `In dollars · not counted: ${dollars.data.excluded.join(', ')}`}
-              </Chip>
-            )}
-            {active !== undefined && !isZero(active.pending) && (
-              <Chip icon="clock">{`${formatAmount(active.pending, currency)} pending`}</Chip>
-            )}
+            <Chip icon="swap" onHero={hero}>
+              {headline === undefined
+                ? 'Your total cannot be priced right now'
+                : headline.excluded.length === 0
+                  ? 'All your wallets, in dollars at today’s rate'
+                  : `In dollars · not counted: ${headline.excluded.join(', ')}`}
+            </Chip>
           </View>
         )}
+        </View>
       </View>
 
       {/*
@@ -235,9 +264,8 @@ export default function Home() {
 
         A picker says which currency the figure above is in; the rail shows
         what is in every one of them at once, which is what somebody holding
-        four currencies opens this screen to see. Tapping a card moves the big
-        figure — so the rail is the selector as well, and there is still
-        exactly one control for one decision.
+        four currencies opens this screen to see. Tapping a card chooses whose
+        activity is listed below; the total above never moves.
 
         IT BLEEDS TO THE SCREEN EDGE by exactly `GUTTER` and puts the same
         inset back inside, so the first card lines up with the balance above
@@ -269,6 +297,7 @@ export default function Home() {
                     backgroundColor: on ? colors.cardGrad1 : colors.surface,
                     borderWidth: 1,
                     borderColor: on ? colors.iris : colors.edge,
+                    ...cardShadow(colors),
                   }}
                 >
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
@@ -300,9 +329,12 @@ export default function Home() {
                     {hidden ? `${symbolFor(b.currency)} ${MASK}` : formatAmount(b.spendable, b.currency)}
                   </Text>
                   <Text
+                    numberOfLines={1}
                     style={{ color: colors.text3, fontFamily: font.sansMedium, fontSize: 11.5, marginTop: 3 }}
                   >
-                    Spendable
+                    {!hidden && !isZero(b.pending)
+                      ? `Spendable · ${formatAmount(b.pending, b.currency)} pending`
+                      : 'Spendable'}
                   </Text>
                 </Pressable>
               );
@@ -351,6 +383,7 @@ export default function Home() {
                   borderRadius: 14,
                   borderWidth: 1, borderColor: colors.edge,
                   backgroundColor: colors.surface,
+                  ...cardShadow(colors),
                 }}
               >
                 <View
@@ -435,11 +468,13 @@ export default function Home() {
  * baseline — two sibling views would each lay out their own box and the
  * decimals would sit a pixel off the digits beside them.
  */
-function Figure({ text, split }: { readonly text: string; readonly split: boolean }) {
+function Figure({
+  text, split, onHero,
+}: { readonly text: string; readonly split: boolean; readonly onHero?: boolean }) {
   const colors = useTheme();
   const at = split ? text.lastIndexOf('.') : -1;
   const base = {
-    color: colors.text,
+    color: onHero === true ? '#FFFFFF' : colors.text,
     fontFamily: font.numBold,
     fontSize: 40,
     letterSpacing: -1.6,
@@ -455,7 +490,7 @@ function Figure({ text, split }: { readonly text: string; readonly split: boolea
   return (
     <Text style={base} numberOfLines={1}>
       {text.slice(0, at)}
-      <Text style={{ color: colors.text3 }}>{text.slice(at)}</Text>
+      <Text style={{ color: onHero === true ? 'rgba(255,255,255,0.62)' : colors.text3 }}>{text.slice(at)}</Text>
     </Text>
   );
 }
@@ -496,6 +531,7 @@ function Action({
   readonly label: string; readonly primary?: boolean;
 }) {
   const colors = useTheme();
+  const light = colors.bg !== '#000000';
   return (
     <Link href={href as never} asChild>
       <Pressable
@@ -511,12 +547,19 @@ function Action({
             // had it right.
             width: 54, height: 54, borderRadius: 18,
             alignItems: 'center', justifyContent: 'center',
-            backgroundColor: primary === true ? colors.iris : colors.surface2,
+            // White with an iris glyph in light, where the grey squares read
+            // as disabled; the web's `.act` rules. Dark keeps its well.
+            backgroundColor: primary === true ? colors.iris : light ? colors.surface : colors.surface2,
             borderWidth: 1,
             borderColor: primary === true ? colors.iris : colors.edge,
+            ...cardShadow(colors),
           }}
         >
-          <Icon name={icon} size={22} color={primary === true ? colors.onIris : colors.text} />
+          <Icon
+            name={icon}
+            size={22}
+            color={primary === true ? colors.onIris : light ? colors.irisText : colors.text}
+          />
         </View>
         <Text
           style={{
@@ -532,20 +575,60 @@ function Action({
 }
 
 /** The comp's iris chip under the headline: a tint, a hairline, 12px text. */
-function Chip({ icon, children }: { readonly icon: IconName; readonly children: string }) {
+function Chip({
+  icon, children, onHero,
+}: { readonly icon: IconName; readonly children: string; readonly onHero?: boolean }) {
   const colors = useTheme();
+  // On the hero the chip is frosted glass over the gradient, not iris on iris.
+  const fg = onHero === true ? '#FFFFFF' : colors.irisText;
   return (
     <View
       style={{
         flexDirection: 'row', alignItems: 'center', gap: 5,
         paddingVertical: 4, paddingHorizontal: 10,
         borderRadius: radius.pill,
-        backgroundColor: colors.irisTint,
-        borderWidth: 1, borderColor: colors.irisEdge,
+        backgroundColor: onHero === true ? 'rgba(255,255,255,0.16)' : colors.irisTint,
+        borderWidth: 1, borderColor: onHero === true ? 'rgba(255,255,255,0.24)' : colors.irisEdge,
       }}
     >
-      <Icon name={icon} size={13} color={colors.irisText} />
-      <Text style={{ color: colors.irisText, fontFamily: font.sansSemi, fontSize: 12 }}>{children}</Text>
+      <Icon name={icon} size={13} color={fg} />
+      <Text style={{ color: fg, fontFamily: font.sansSemi, fontSize: 12 }}>{children}</Text>
+    </View>
+  );
+}
+
+/**
+ * The hero's ground: the web's three layers — a 135° iris gradient, a white
+ * highlight top right, a deeper wash bottom left — plus two faint rings.
+ * Absolutely filled behind the hero's content and inert to touch.
+ */
+function HeroGround() {
+  return (
+    <View pointerEvents="none" style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}>
+      <Svg width="100%" height="100%" preserveAspectRatio="none">
+        <Defs>
+          <LinearGradient id="heroFill" x1="0" y1="0" x2="1" y2="1">
+            <Stop offset="0" stopColor="#4B3BD4" />
+            <Stop offset="0.52" stopColor="#6D5AE6" />
+            <Stop offset="1" stopColor="#8F7CFF" />
+          </LinearGradient>
+          <RadialGradient id="heroShine" cx="1" cy="0" r="0.9">
+            <Stop offset="0" stopColor="#FFFFFF" stopOpacity="0.2" />
+            <Stop offset="1" stopColor="#FFFFFF" stopOpacity="0" />
+          </RadialGradient>
+          <RadialGradient id="heroDeep" cx="0" cy="1" r="0.8">
+            <Stop offset="0" stopColor="#281478" stopOpacity="0.35" />
+            <Stop offset="1" stopColor="#281478" stopOpacity="0" />
+          </RadialGradient>
+        </Defs>
+        <Rect x="0" y="0" width="100%" height="100%" fill="url(#heroFill)" />
+        <Rect x="0" y="0" width="100%" height="100%" fill="url(#heroShine)" />
+        <Rect x="0" y="0" width="100%" height="100%" fill="url(#heroDeep)" />
+      </Svg>
+      <Svg width={260} height={220} style={{ position: 'absolute', top: -70, right: -60 }}>
+        <Circle cx={150} cy={110} r={110} stroke="rgba(255,255,255,0.16)" strokeWidth={1} fill="none" />
+        <Circle cx={150} cy={110} r={124} stroke="rgba(255,255,255,0.05)" strokeWidth={28} fill="none" />
+      </Svg>
     </View>
   );
 }

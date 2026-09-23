@@ -198,7 +198,20 @@ export class FxService {
         continue;
       }
       const from = balance.currency;
-      const priced = await this.#dollarsFor(money(balance.spendableMinor, from), from);
+      /*
+       * ONE CURRENCY THAT CANNOT BE PRICED MUST NOT TAKE THE TOTAL WITH IT.
+       * A failed read here used to fail the whole request, and both apps then
+       * fell back to showing whichever wallet was selected in the headline's
+       * place — so the "total" became the tapped currency. That currency is
+       * now left out and NAMED, exactly as an unpublished pair is.
+       */
+      let priced: bigint | undefined;
+      try {
+        priced = await this.#dollarsFor(money(balance.spendableMinor, from), from);
+      } catch (error) {
+        this.#logger.warn(`could not price ${from} for the dollar total: ${describe(error)}`);
+        priced = undefined;
+      }
       if (priced === undefined) {
         excluded.push(from);
       } else {

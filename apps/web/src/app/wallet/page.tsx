@@ -148,12 +148,17 @@ export default function Wallet() {
   const assets = balances.data ?? [];
   const active = assets.find((b) => b.currency === preferred) ?? assets[0];
   const currency = active?.currency ?? 'NGN';
-  /* The dollar total when it priced; otherwise the selected balance, which
-     is what this line showed before and is always true. */
-  const headline =
-    dollars.data !== undefined
-      ? { amount: dollars.data.amount, currency: 'USD' }
-      : { amount: active?.spendable ?? '0.00', currency };
+  /*
+   * THE HEADLINE IS THE TOTAL AND NOTHING ELSE.
+   *
+   * It fell back to the SELECTED wallet whenever the total could not be
+   * priced, so tapping a currency card appeared to change "Total balance" to
+   * that currency — a figure that is not a total at all, under a label that
+   * says it is. The dollar WALLET is a different number too: it is one of the
+   * balances the total adds up. So the headline is the total in dollars, or
+   * it says plainly that it cannot be shown; it is never borrowed from a card.
+   */
+  const headline = dollars.data;
 
   const history = useLoad(
     () => client.transactions(currency).catch(() => ({ entries: [], nextCursor: null })),
@@ -183,6 +188,7 @@ export default function Wallet() {
       <section className="glow-wrap animate-in">
         <span className="glow" aria-hidden="true" />
 
+        <div className="hero">
         <div className="balance-head">
           <span className="balance-label" id="balance-currency-label">Total balance</span>
           {/*
@@ -205,53 +211,39 @@ export default function Wallet() {
         {/* Keyed on the state so React replaces the node and the figure
             cross-fades instead of snapping between dots and digits. */}
         <div className="balance-value fade-in" key={hidden ? 'masked' : 'shown'}>
-          {balances.loading || dollars.loading ? (
+          {dollars.loading ? (
             <span className="skeleton" style={{ display: 'block', width: 210, height: 42 }} />
+          ) : headline === undefined ? (
+            <span className="balance-unavailable">—</span>
           ) : hidden ? (
-            `${symbolFor(headline.currency)} ${MASK}`
+            `$ ${MASK}`
           ) : (
-            <Figure amount={headline.amount} currency={headline.currency} />
+            <Figure amount={headline.amount} currency="USD" />
           )}
         </div>
 
         {/*
-          THE CHIP SAYS WHAT IS PENDING, WHICH IS THE ONE THING HERE THAT IS
-          TRUE.
-
-          The mockup puts a "+₦150,000 this week" chip in this slot. There is
-          no figure behind it: `/v1/wallets` answers a spendable and a pending
-          balance, and a week's inflow would have to be summed from ONE PAGE
-          of history — which is however many entries that page happens to hold
-          and not a week. A plausible number in the place a customer reads
-          their money is the one thing this screen must not invent, so the
-          slot carries money that is genuinely held instead, and is absent
-          when there is none.
+          WHAT THE HEADLINE IS, said in the comp's chip slot. The figure moves
+          with the rate while the money stays in the currency it arrived in,
+          and a balance with no published dollar price is NAMED, because a
+          total that quietly skipped one reads as money gone. Pending money is
+          on its own currency's card, not here: a chip that changed with the
+          selected card made the headline look as if it changed with it.
         */}
-        {/*
-          WHAT THE HEADLINE IS, said in the comp's chip slot. "Approximately"
-          is the honest word: the figure moves with the rate while the money
-          stays in the currency it arrived in. A balance with no published
-          dollar price is NAMED, because a total that quietly skipped one
-          reads as money gone.
-        */}
-        {!hidden && (dollars.data !== undefined || (active !== undefined && !isZero(active.pending))) && (
+        {!hidden && !dollars.loading && (
           <div className="balance-chips">
-            {dollars.data !== undefined && (
-              <span className="delta-chip">
-                <Icon name="swap" size={13} />
-                {dollars.data.excluded.length === 0
-                  ? 'In dollars, at today’s rate'
-                  : `In dollars · not counted: ${dollars.data.excluded.join(', ')}`}
-              </span>
-            )}
-            {active !== undefined && !isZero(active.pending) && (
-              <span className="delta-chip">
-                <Icon name="clock" size={13} />
-                {formatAmount(active.pending, currency)} pending
-              </span>
-            )}
+            <span className="delta-chip">
+              <Icon name="swap" size={13} />
+              {headline === undefined
+                ? 'Your total cannot be priced right now'
+                : headline.excluded.length === 0
+                  ? 'All your wallets, in dollars at today’s rate'
+                  : `In dollars · not counted: ${headline.excluded.join(', ')}`}
+            </span>
           </div>
         )}
+
+        </div>
 
         {/*
           THE RAIL REPLACED A DROPDOWN, and it answers a different question.
@@ -259,8 +251,7 @@ export default function Wallet() {
           A `<select>` says which currency the figure above is in; the rail
           shows what is in every one of them at once, which is what somebody
           holding four currencies opens this screen to see. Tapping a card
-          moves the big figure — so the rail is the selector as well, and
-          there is still exactly one control for one decision.
+          chooses whose activity is listed below; the total above never moves.
         */}
         <div className="ccy-rail" role="tablist" aria-label="Currencies">
           {balances.loading
@@ -292,7 +283,11 @@ export default function Wallet() {
                   <span className={fitClass(hidden ? MASK : formatAmount(b.spendable, b.currency))}>
                     {hidden ? `${symbolFor(b.currency)} ${MASK}` : formatAmount(b.spendable, b.currency)}
                   </span>
-                  <span className="ccy-sub">Spendable</span>
+                  <span className="ccy-sub">
+                    {!hidden && !isZero(b.pending)
+                      ? `Spendable · ${formatAmount(b.pending, b.currency)} pending`
+                      : 'Spendable'}
+                  </span>
                 </button>
               ))}
         </div>
