@@ -1796,6 +1796,220 @@ describe('a dollar card paid for from another balance', () => {
   });
 });
 
+describe('topping up a card from whichever wallets can pay', () => {
+  /*
+   * THE CASCADE. Bitnob approves a spend against the card's OWN balance, so
+   * the choosing happens on the way onto the card: the card's currency first,
+   * then its base currency, then the platform order — and only the wallets it
+   * reaches are converted, each by the least that covers what is still owed.
+   */
+  async function fundNaira(userId: string, minor: bigint): Promise<void> {
+    await ledger.post({
+      idempotencyKey: `cards-cascade-ngn:${randomUUID()}`,
+      kind: 'wallet_funding',
+      occurredAt: new Date(),
+      description: 'test funding',
+      metadata: {},
+      postings: [
+        posting({ kind: 'customer_wallet', ownerId: userId, currency: 'NGN' }, ngn(minor)),
+        posting({ kind: 'provider_float', currency: 'NGN' }, ngn(-minor)),
+      ],
+    });
+  }
+  const naira = (userId: string): AccountRef => ({ kind: 'customer_wallet', ownerId: userId, currency: 'NGN' });
+  const dollars = (minor: bigint): string => `${minor / 100n}.${String(minor % 100n).padStart(2, '0')}`;
+
+  async function plan(cardUuid: string, key: string) {
+    const rows = await pool.query<{
+      currency: string;
+      debit_minor: string;
+      delivers_minor: string;
+      converted: boolean;
+      spread_basis_points: number;
+      fx_trade_uuid: string | null;
+      topup_entry_uuid: string | null;
+    }>(
+      `SELECT currency, debit_minor::text, delivers_minor::text, converted, spread_basis_points,
+              fx_trade_uuid, topup_entry_uuid
+         FROM card_topup_funding WHERE card_uuid = $1 AND topup_key = $2 ORDER BY seq`,
+      [cardUuid, key],
+    );
+    return rows.rows;
+  }
+
+  it('pays from dollars first and converts nothing when dollars cover it', async () => {
+    const customer = await onboard();
+    await fundWallet(customer.userId, 10_000);
+    const card = await issueCard(customer, '0.00');
+    await fundNaira(customer.userId, 5_000_000n);
+    const swapsBefore = fxPort.conversions.length;
+    const cardBefore = await balance(cardAccount(customer.userId));
+    const key = randomUUID();
+
+    await request(app.getHttpServer())
+      .post(`/v1/cards/${card.id}/fund`)
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send({ amount: '20.00', transaction_pin: PIN, idempotency_key: key })
+      .expect(200);
+
+    expect((await balance(cardAccount(customer.userId))) - cardBefore).toBe(2_000n);
+    expect(await balance(naira(customer.userId))).toBe(5_000_000n);
+    expect(fxPort.conversions.length).toBe(swapsBefore);
+    const legs = await plan(card.id, key);
+    expect(legs).toEqual([
+      expect.objectContaining({ currency: 'USD', debit_minor: '2000', converted: false, spread_basis_points: 0 }),
+    ]);
+    expect(legs[0]?.topup_entry_uuid).not.toBeNull();
+  });
+
+  it('uses every dollar there is, converts only the shortfall, and records the rate', async () => {
+    const customer = await onboard();
+    await fundWallet(customer.userId, 10_000);
+    const card = await issueCard(customer, '0.00');
+    await fundNaira(customer.userId, 10_000_000n); // ₦100,000
+    const held = await balance(wallet(customer.userId));
+    const cardBefore = await balance(cardAccount(customer.userId));
+    const swapsBefore = fxPort.conversions.length;
+    const key = randomUUID();
+    const need = held + 2_500n; // every dollar, and $25 more
+
+    const res = await request(app.getHttpServer())
+      .post(`/v1/cards/${card.id}/fund`)
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send({ amount: dollars(need), transaction_pin: PIN, idempotency_key: key });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+
+    const legs = await plan(card.id, key);
+    expect(legs.map((l) => l.currency)).toEqual(['USD', 'NGN']);
+    const [usdLeg, ngnLeg] = legs;
+    expect(usdLeg).toMatchObject({ debit_minor: held.toString(), converted: false, spread_basis_points: 0 });
+    expect(ngnLeg).toMatchObject({ converted: true, spread_basis_points: 150 });
+    expect(BigInt(ngnLeg!.delivers_minor)).toBeGreaterThanOrEqual(2_500n);
+    // The conversion that ran is attributed, with its own executed rate.
+    expect(ngnLeg!.fx_trade_uuid).not.toBeNull();
+
+    expect((await balance(cardAccount(customer.userId))) - cardBefore).toBe(need);
+    expect(await balance(naira(customer.userId))).toBe(10_000_000n - BigInt(ngnLeg!.debit_minor));
+    // Anything the rounding delivered beyond the need is the customer's, in dollars.
+    expect(await balance(wallet(customer.userId))).toBe(BigInt(ngnLeg!.delivers_minor) - 2_500n);
+    expect(fxPort.conversions.length - swapsBefore).toBe(1);
+
+    // A retry runs the SAME plan: no second conversion, no second top-up.
+    await request(app.getHttpServer())
+      .post(`/v1/cards/${card.id}/fund`)
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send({ amount: dollars(need), transaction_pin: PIN, idempotency_key: key })
+      .expect(200);
+    expect(fxPort.conversions.length - swapsBefore).toBe(1);
+    expect((await balance(cardAccount(customer.userId))) - cardBefore).toBe(need);
+  });
+
+  it('shows the plan before the top-up, and the top-up follows it', async () => {
+    const customer = await onboard();
+    await fundWallet(customer.userId, 10_000);
+    const card = await issueCard(customer, '0.00');
+    await fundNaira(customer.userId, 10_000_000n);
+    const held = await balance(wallet(customer.userId));
+    const need = held + 1_000n;
+
+    const preview = await request(app.getHttpServer())
+      .get(`/v1/cards/${card.id}/funding-plan`)
+      .query({ amount: dollars(need) })
+      .set('Authorization', `Bearer ${customer.token}`)
+      .expect(200);
+    expect(preview.body.covered).toBe(true);
+    expect(preview.body.legs.map((l: { currency: string }) => l.currency)).toEqual(['USD', 'NGN']);
+
+    const key = randomUUID();
+    await request(app.getHttpServer())
+      .post(`/v1/cards/${card.id}/fund`)
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send({ amount: dollars(need), transaction_pin: PIN, idempotency_key: key })
+      .expect(200);
+    const legs = await plan(card.id, key);
+    expect(legs[1]?.debit_minor).toBe(
+      (BigInt(preview.body.legs[1].debit.replace('.', '')) ).toString(),
+    );
+  });
+
+  it('refuses when every wallet together is short, and moves and records nothing', async () => {
+    const customer = await onboard();
+    await fundWallet(customer.userId, 10_000);
+    const card = await issueCard(customer, '0.00');
+    await fundNaira(customer.userId, 200_000n); // ₦2,000
+    const swapsBefore = fxPort.conversions.length;
+    const key = randomUUID();
+
+    const res = await request(app.getHttpServer())
+      .post(`/v1/cards/${card.id}/fund`)
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send({ amount: '5000.00', transaction_pin: PIN, idempotency_key: key });
+    expect(res.status).toBe(422);
+    // No figure: the refusal must not say how much there was.
+    expect(res.body).toEqual({ error: 'insufficient_funds' });
+    expect(await balance(naira(customer.userId))).toBe(200_000n);
+    expect(fxPort.conversions.length).toBe(swapsBefore);
+    expect(await plan(card.id, key)).toEqual([]);
+  });
+
+  it('keeps a base currency per card, set once, following home until chosen', async () => {
+    const customer = await onboard();
+    await fundWallet(customer.userId, 10_000);
+    const card = await issueCard(customer, '0.00');
+
+    const before = await request(app.getHttpServer())
+      .get(`/v1/cards/${card.id}`)
+      .set('Authorization', `Bearer ${customer.token}`)
+      .expect(200);
+    // No country on this account: the platform's historic home, not chosen.
+    expect(before.body).toMatchObject({ base_currency: 'NGN', base_currency_chosen: false });
+
+    const chosen = await request(app.getHttpServer())
+      .post(`/v1/cards/${card.id}/base-currency`)
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send({ currency: 'USDT' })
+      .expect(200);
+    expect(chosen.body).toMatchObject({ base_currency: 'USDT', base_currency_chosen: true });
+
+    await request(app.getHttpServer())
+      .post(`/v1/cards/${card.id}/base-currency`)
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send({ currency: 'NAIRA' })
+      .expect(400);
+
+    const reset = await request(app.getHttpServer())
+      .post(`/v1/cards/${card.id}/base-currency`)
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send({ currency: null })
+      .expect(200);
+    expect(reset.body).toMatchObject({ base_currency: 'NGN', base_currency_chosen: false });
+  });
+
+  it('never lets anybody else set a card’s base currency', async () => {
+    const owner = await onboard();
+    await fundWallet(owner.userId, 10_000);
+    const card = await issueCard(owner, '0.00');
+    const stranger = await onboard();
+    const res = await request(app.getHttpServer())
+      .post(`/v1/cards/${card.id}/base-currency`)
+      .set('Authorization', `Bearer ${stranger.token}`)
+      .send({ currency: 'USD' });
+    expect(res.status).toBe(404);
+  });
+
+  it('has no way to spend the total balance: it is a figure, not an account', async () => {
+    const customer = await onboard();
+    await fundWallet(customer.userId, 10_000);
+    const before = await balance(wallet(customer.userId));
+    const attempt = await request(app.getHttpServer())
+      .post('/v1/wallets/total')
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send({ amount: '1.00', transaction_pin: PIN });
+    expect(attempt.status).toBeGreaterThanOrEqual(400);
+    expect(await balance(wallet(customer.userId))).toBe(before);
+  });
+});
+
 describe('the dollar total on the home screen', () => {
   /*
    * PRICED AS A CONVERSION WOULD PAY, FROM PUBLISHED RATES ONLY, and a

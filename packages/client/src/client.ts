@@ -451,6 +451,35 @@ export interface Card {
   /** The finish. Always present from the API; optional here so an older
    *  response cannot fail to parse into this type. */
   readonly colour?: string;
+  /**
+   * The wallet a top-up draws on after the card's own currency, and whether
+   * the customer chose it (false means it follows their home currency).
+   * Absent from an API that predates it.
+   */
+  readonly base_currency?: string;
+  readonly base_currency_chosen?: boolean;
+}
+
+/**
+ * Which wallets a top-up of a given size would draw on — the card currency's
+ * own wallet first, then the card's base currency, then the platform order.
+ * Computed by the SERVER, so web and mobile show the same plan the top-up
+ * then follows; no client decides the order.
+ */
+export interface CardFundingPlan {
+  readonly amount: string;
+  readonly currency: string;
+  readonly covered: boolean;
+  readonly legs: readonly {
+    readonly currency: string;
+    /** Taken from that wallet, major units of its own currency. */
+    readonly debit: string;
+    /** What it becomes on the card, major units of the card's currency. */
+    readonly delivers: string;
+    readonly converted: boolean;
+    readonly spread_basis_points: number;
+  }[];
+  readonly surplus: string;
 }
 
 /**
@@ -1647,12 +1676,25 @@ export class XetralClient {
     return this.#post(`/v1/cards/${encodeURIComponent(id)}/label`, { label });
   }
 
+  /** How a top-up of `amount` (the card's currency) would be paid. Reads only. */
+  async cardFundingPlan(id: string, amount: string): Promise<CardFundingPlan> {
+    return this.#get(
+      `/v1/cards/${encodeURIComponent(id)}/funding-plan?amount=${encodeURIComponent(amount)}`,
+    );
+  }
+
+  /** Set once per card; `null` follows the customer's home currency again. */
+  async setCardBaseCurrency(id: string, currency: string | null): Promise<Card> {
+    return this.#post(`/v1/cards/${encodeURIComponent(id)}/base-currency`, { currency });
+  }
+
   /**
-   * Top a card up. `from` names the balance that pays — naira, cedis — and
-   * the server converts on the way, at the price the convert screen quotes;
-   * omitted, the dollar wallet pays, as it always did. `amount` is in the
-   * currency that PAYS, and `minReceived` is the fewest dollars the customer
-   * accepts onto the card.
+   * Top a card up. Omit `from` — the ordinary case — and `amount` is in the
+   * CARD'S currency and the server's cascade decides which wallets pay: the
+   * card currency's own wallet, then the card's base currency, then the
+   * platform order, converting only what it taps. `from` names one wallet and
+   * only that one, `amount` then in that wallet's currency, and `minReceived`
+   * is the fewest dollars the customer accepts onto the card.
    */
   async fundCard(
     id: string,

@@ -14,11 +14,13 @@ import type { Pool, PoolClient } from 'pg';
 import { InsufficientFundsError, LedgerService, posting } from '@xetral/ledger';
 import type { AccountRef, WrittenEntry } from '@xetral/ledger';
 import {
+  cascadeOrder,
+  planCover,
   ProviderRejectedError,
   ProviderTimeoutError,
   ProviderUnavailableError,
 } from '@xetral/providers';
-import type { CardPort, VirtualCard } from '@xetral/providers';
+import type { CardPort, CoverPlan, CoverSource, VirtualCard } from '@xetral/providers';
 import { fromMajor, isCurrency, subtract, toMajor } from '@xetral/shared';
 import type { Currency, Money } from '@xetral/shared';
 import { CARD_PORT, DATABASE, LEDGER } from '../tokens.js';
@@ -72,6 +74,28 @@ export interface CardActivityView {
   readonly status: string;
 }
 
+/**
+ * How a top-up of a given size would be paid, before it is.
+ *
+ * What the Add money sheet shows under the amount — "₦20,000 and $3.00" — so
+ * the customer sees which wallets a top-up will draw on without being asked
+ * to choose one. Major units as strings, like every amount here.
+ */
+export interface CardFundingPlanView {
+  readonly amount: string;
+  readonly currency: string;
+  readonly covered: boolean;
+  readonly legs: readonly {
+    readonly currency: string;
+    readonly debit: string;
+    readonly delivers: string;
+    readonly converted: boolean;
+    readonly spread_basis_points: number;
+  }[];
+  /** Converted beyond the need, landing in the customer's own dollar wallet. */
+  readonly surplus: string;
+}
+
 export interface CardSecretsView {
   readonly pan: string;
   readonly cvv: string;
@@ -104,6 +128,13 @@ export interface CardView {
    * digits — a card nobody has named is not a card with a blank name.
    */
   readonly label: string | null;
+  /**
+   * The wallet a top-up draws on after the card's own currency, as the
+   * customer chose it, and what it is in effect — their home currency when
+   * they never chose. Set once per card; never asked per top-up.
+   */
+  readonly base_currency?: string;
+  readonly base_currency_chosen?: boolean;
   /**
    * Why the card is frozen, when it is. Absent on a live card.
    *
@@ -345,6 +376,166 @@ export class CardService {
     return this.#toView(next);
   }
 
+  /**
+   * Choose which wallet a card draws on after its own currency.
+   *
+   * NO PIN, deliberately: this moves nothing. Every top-up it affects takes
+   * the PIN on its own request, and the cascade only ever takes the
+   * customer's own money onto the customer's own card. `null` goes back to
+   * following their home currency.
+   */
+  async setBaseCurrency(userUuid: string, cardUuid: string, currency: string | null): Promise<CardView> {
+    const { row } = await this.#ownedCard(userUuid, cardUuid);
+    if (currency !== null && !isCurrency(currency)) {
+      throw new BadRequestException({ error: 'invalid_request', fields: ['currency'] });
+    }
+    if (row.status === 'terminated') {
+      throw new UnprocessableEntityException({ error: 'card_terminated' });
+    }
+    await this.pool.query(`UPDATE cards SET base_currency = $2 WHERE id = $1::bigint`, [row.id, currency]);
+    return this.#toView({ ...row });
+  }
+
+  /** What a top-up of `amount` would draw on, without moving anything. */
+  async fundingPlan(userUuid: string, cardUuid: string, amount: string): Promise<CardFundingPlanView> {
+    const { userId, row } = await this.#ownedCard(userUuid, cardUuid);
+    const need = this.#parseAmount(amount);
+    const plan = await this.#planFor(userId, row, need.amount);
+    return planView(need.amount, plan);
+  }
+
+  /**
+   * THE CASCADE, as a plan: the card's own currency first, then its base
+   * currency, then the platform order — each wallet priced exactly as
+   * `convert()` would price it today.
+   */
+  async #planFor(userId: string, row: CardRow, needMinor: bigint): Promise<CoverPlan> {
+    if (!isCurrency(row.currency)) throw new UnprocessableEntityException({ error: 'not_convertible' });
+    const target = row.currency;
+    const base = await this.#baseCurrency(row);
+    const held = new Map(
+      (await this.ledger.walletBalances(userId)).map((b) => [b.currency, b.spendableMinor] as const),
+    );
+    const sources: CoverSource[] = [];
+    for (const currency of cascadeOrder(target, base?.effective)) {
+      const spendable = held.get(currency) ?? 0n;
+      if (spendable <= 0n) continue;
+      if (currency === target) {
+        sources.push({ currency, spendableMinor: spendable });
+        continue;
+      }
+      // Priced only when the plan could reach it — a quote per wallet held
+      // would ask a provider about balances the top-up never touches.
+      const pricing = await this.fx.coverPricing(currency, target);
+      sources.push(pricing === undefined ? { currency, spendableMinor: spendable } : { currency, spendableMinor: spendable, pricing });
+    }
+    return planCover(needMinor, target, sources);
+  }
+
+  /**
+   * A top-up with no named source: the cascade.
+   *
+   * THE PLAN IS WRITTEN FIRST AND READ BACK, keyed by the attempt, so a retry
+   * runs the same plan rather than a new one against balances the first
+   * attempt already changed. Every conversion lands in the customer's OWN
+   * dollar wallet under a key derived from the attempt's, and then ONE top-up
+   * moves exactly the amount asked for onto the card — the shape the single
+   * named-wallet top-up already had, extended to several wallets.
+   *
+   * A plan that cannot be carried out any more — a rate moved past its floor,
+   * a balance spent elsewhere — fails loudly with the conversion's own
+   * refusal. The client starts a new attempt, which plans again from what is
+   * there now; anything already converted is in the dollar wallet and is
+   * simply the first thing the new plan uses.
+   */
+  async #fundByCascade(
+    userUuid: string,
+    userId: string,
+    row: CardRow,
+    input: { amount: string; idempotencyKey: string },
+  ): Promise<CardView> {
+    const need = this.#parseAmount(input.amount);
+    let legs = await this.#storedPlan(row.id, input.idempotencyKey);
+    if (legs.length === 0) {
+      const plan = await this.#planFor(userId, row, need.amount);
+      // No figure: an insufficient-funds answer that said how much there was
+      // would be a balance oracle — the rule the ledger service follows.
+      if (!plan.covered) throw new UnprocessableEntityException({ error: 'insufficient_funds' });
+      await this.#storePlan(row, userId, input.idempotencyKey, plan);
+      legs = await this.#storedPlan(row.id, input.idempotencyKey);
+    }
+
+    const target = row.currency;
+    if (!isCurrency(target)) throw new UnprocessableEntityException({ error: 'not_convertible' });
+    for (const leg of legs) {
+      if (!leg.converted || !isCurrency(leg.currency)) continue;
+      await this.fx.convert(userUuid, {
+        from: leg.currency,
+        to: target,
+        amount: toMajor({ amount: BigInt(leg.debit_minor), currency: leg.currency }),
+        idempotency_key: `card-fx:${input.idempotencyKey}:${leg.currency}`,
+        // The plan's figure is the floor: landing less than it would leave
+        // the top-up short in a way the customer never saw.
+        min_received: toMajor({ amount: BigInt(leg.delivers_minor), currency: 'USD' }),
+      });
+    }
+
+    const tapped = legs.filter((l) => l.converted).map((l) => l.currency);
+    return this.#loadCard(
+      userUuid,
+      userId,
+      row,
+      need,
+      input.idempotencyKey,
+      tapped.length === 0 ? 'Card top-up' : `Card top-up from ${[...tapped, ...(legs.some((l) => !l.converted) ? ['USD'] : [])].join(' + ')}`,
+    );
+  }
+
+  async #storedPlan(
+    cardId: string,
+    key: string,
+  ): Promise<readonly { currency: string; debit_minor: string; delivers_minor: string; converted: boolean }[]> {
+    const found = await this.pool.query<{
+      currency: string;
+      debit_minor: string;
+      delivers_minor: string;
+      converted: boolean;
+    }>(
+      `SELECT currency, debit_minor::text, delivers_minor::text, converted
+         FROM card_topup_sources WHERE card_id = $1::bigint AND topup_key = $2 ORDER BY seq`,
+      [cardId, key],
+    );
+    return found.rows;
+  }
+
+  async #storePlan(row: CardRow, userId: string, key: string, plan: CoverPlan & { covered: true }): Promise<void> {
+    let seq = 0;
+    for (const leg of plan.legs) {
+      await this.pool.query(
+        `INSERT INTO card_topup_sources
+           (card_id, user_id, topup_key, seq, currency, target_currency, debit_minor,
+            delivers_minor, converted, spread_basis_points, applied_numerator, applied_denominator)
+         VALUES ($1::bigint, $2::bigint, $3, $4, $5, $6, $7::bigint, $8::bigint, $9, $10, $11::bigint, $12::bigint)
+         ON CONFLICT DO NOTHING`,
+        [
+          row.id,
+          userId,
+          key,
+          seq,
+          leg.currency,
+          row.currency,
+          leg.debitMinor.toString(),
+          leg.deliversMinor.toString(),
+          leg.converted,
+          leg.spreadBasisPoints,
+          leg.appliedNumerator.toString(),
+          leg.appliedDenominator.toString(),
+        ],
+      );
+      seq += 1;
+    }
+  }
+
   async fund(
     userUuid: string,
     cardUuid: string,
@@ -359,6 +550,13 @@ export class CardService {
     await this.settings.assertServiceEnabled('cards');
     const { userId, row } = await this.#ownedCard(userUuid, cardUuid);
     this.#assertUsable(row);
+
+    // NO WALLET NAMED IS THE ORDINARY CASE NOW: the cascade chooses, in the
+    // card's fixed order, and the customer is never asked per top-up. A named
+    // `from` is kept for a client that wants one wallet and only that one.
+    if (input.from === undefined) {
+      return this.#fundByCascade(userUuid, userId, row, input);
+    }
 
     /*
      * PAYING FROM NAIRA OR CEDIS IS A CONVERSION, THEN THE SAME TOP-UP.
@@ -400,24 +598,36 @@ export class CardService {
     }
 
     const amount = this.#parseAmount(dollars);
+    return this.#loadCard(
+      userUuid,
+      userId,
+      row,
+      amount,
+      input.idempotencyKey,
+      paidFrom === undefined ? 'Card top-up' : `Card top-up from ${paidFrom}`,
+    );
+  }
 
+  /** Dollars from the customer's wallet onto the card, then Bitnob. */
+  async #loadCard(
+    userUuid: string,
+    userId: string,
+    row: CardRow,
+    amount: Money<'USD'>,
+    idempotencyKey: string,
+    description: string,
+  ): Promise<CardView> {
     // The ledger entry goes FIRST here, unlike issuing. Moving wallet -> card
     // is what the overdraft guard protects: if the customer cannot afford it,
     // nothing should be sent to Bitnob at all. The provider call is what might
     // then fail, and a funded card account with no provider top-up is
     // recoverable by reconciliation; the reverse is money out the door.
-    await this.#postCardFunding(
-      userId,
-      amount,
-      `card-fund:${input.idempotencyKey}`,
-      row.uuid,
-      paidFrom === undefined ? 'Card top-up' : `Card top-up from ${paidFrom}`,
-    );
+    await this.#postCardFunding(userId, amount, `card-fund:${idempotencyKey}`, row.uuid, description);
 
     const outcome = await this.cards.fund({
       providerCardId: row.provider_card_id,
       amount,
-      idempotencyKey: input.idempotencyKey,
+      idempotencyKey,
     });
 
     if (outcome.state === 'pending') {
@@ -428,7 +638,7 @@ export class CardService {
       );
     }
 
-    return this.get(userUuid, cardUuid);
+    return this.get(userUuid, row.uuid);
   }
 
   /**
@@ -1149,8 +1359,44 @@ export class CardService {
       label: row.label,
       colour: row.colour,
       balance: toMajor({ amount: balance, currency: 'USD' }),
+      ...(await this.#baseView(row)),
       ...(await this.#freezeContext(row)),
     };
+  }
+
+  async #baseView(row: CardRow): Promise<Pick<CardView, 'base_currency' | 'base_currency_chosen'>> {
+    const base = await this.#baseCurrency(row);
+    if (base === undefined) return {};
+    return { base_currency: base.effective, base_currency_chosen: base.chosen };
+  }
+
+  /**
+   * The card's base currency: the one chosen, or the customer's home
+   * currency. Its OWN query, allowed to fail: on a database behind 078 the
+   * column does not exist, and that must cost this field rather than every
+   * card screen — the lesson `describeSession` records about 040.
+   */
+  async #baseCurrency(row: CardRow): Promise<{ effective: Currency; chosen: boolean } | undefined> {
+    try {
+      const found = await this.pool.query<{ base_currency: string | null; home: string | null }>(
+        `SELECT c.base_currency,
+                (SELECT co.currency FROM users u JOIN countries co ON co.code = u.country
+                  WHERE u.id = c.user_id) AS home
+           FROM cards c WHERE c.id = $1::bigint`,
+        [row.id],
+      );
+      const r = found.rows[0];
+      if (r === undefined) return undefined;
+      if (r.base_currency !== null && isCurrency(r.base_currency)) {
+        return { effective: r.base_currency, chosen: true };
+      }
+      // NGN for an account with no country: 050's claim about history — such
+      // an account can only have been opened while this was Nigeria alone.
+      const home = r.home !== null && isCurrency(r.home) ? r.home : 'NGN';
+      return { effective: home, chosen: false };
+    } catch {
+      return undefined;
+    }
   }
 
   /** The live freeze on a card, if there is one, shaped for the client. */
@@ -1277,4 +1523,24 @@ function isUniqueViolation(error: unknown): boolean {
     'code' in error &&
     (error as { code: unknown }).code === '23505'
   );
+}
+
+function planView(needMinor: bigint, plan: CoverPlan): CardFundingPlanView {
+  const dollars = (minor: bigint): string => toMajor({ amount: minor, currency: 'USD' });
+  if (!plan.covered) {
+    return { amount: dollars(needMinor), currency: 'USD', covered: false, legs: [], surplus: '0.00' };
+  }
+  return {
+    amount: dollars(needMinor),
+    currency: 'USD',
+    covered: true,
+    legs: plan.legs.map((leg) => ({
+      currency: leg.currency,
+      debit: toMajor({ amount: leg.debitMinor, currency: leg.currency }),
+      delivers: dollars(leg.deliversMinor),
+      converted: leg.converted,
+      spread_basis_points: leg.spreadBasisPoints,
+    })),
+    surplus: dollars(plan.surplusMinor),
+  };
 }

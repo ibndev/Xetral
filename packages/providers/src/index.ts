@@ -10,6 +10,7 @@ export * from './ports/reference-rate.js';
 export * from './ports/balances.js';
 export * from './ports/payout.js';
 export * from './fx/rate-math.js';
+export * from './fx/cover-plan.js';
 export * from './crypto/address.js';
 export * from './bitnob/amounts.js';
 export * from './bitnob/balance-adapter.js';

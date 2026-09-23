@@ -58,8 +58,26 @@ export const nameCardSchema = z.object({
   label: z.union([z.string().trim().min(1).max(40), z.null()]),
 });
 
+/**
+ * The wallet a card draws on after its own currency — set once, never per
+ * top-up. `null` goes back to following the customer's home currency.
+ */
+export const baseCurrencySchema = z
+  .object({ currency: z.union([z.enum(CONVERTIBLE), z.null()]) })
+  .strict();
+
+/** A top-up the customer is about to make, in the CARD'S currency. */
+export const fundingPlanQuery = z.object({
+  amount: z.string().trim().min(1).max(32),
+});
+
 export const fundCardSchema = z.object({
-  /** Major units of `from` — the currency the money LEAVES in. */
+  /**
+   * Major units. With `from`, of that currency — the money LEAVES in it.
+   * Without it, of the CARD'S currency, and the cascade decides which of the
+   * customer's wallets pay: the card's own currency first, then its base
+   * currency, then the platform order.
+   */
   amount: z.string().trim().min(1).max(32),
   transaction_pin: z.string().min(1).max(32),
   idempotency_key: z.string().trim().min(8).max(128),

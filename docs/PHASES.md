@@ -32,6 +32,7 @@ shipped, that is called out explicitly.
 | 21 — The code the transfer actually sent | ✅ | Transfers via API to be enabled |
 | 22 — The gate that was red by design | ✅ | |
 | 23 — Naira accounts on Flutterwave, and a switch for who carries what | ✅ | Flutterwave NGN static accounts to be enabled |
+| 24 — A card paid for from whichever wallets can | ✅ | a Bitnob authorization hook, for per-spend attribution |
 
 All eleven phases are built, a **pre-deployment audit** (Phase 12) closed what
 building them phase by phase had left between the phases, and **Phase 13** is
@@ -2457,3 +2458,38 @@ is not already set; and decide on `/admin/providers` whether naira account
 numbers stay on Flutterwave (verified customers only) or go back to Paystack
 (tier 1 accounts for unverified customers).
 
+
+
+---
+
+## Phase 24 — A card paid for from whichever wallets can ✅
+
+The product owner asked for card spends to cascade across a customer's
+wallets — the transaction's currency first, then a fixed order — with FX and a
+fee only on the balances tapped, and asked first whether Bitnob does this
+itself.
+
+| File | What it is |
+|---|---|
+| `packages/providers/src/fx/cover-plan.ts` | the planner, pure and tested |
+| `packages/ledger/sql/078_card_funding_cascade.sql` | a base currency per card, the stored plan, the view |
+| `apps/api/src/cards/card.service.ts` | plan, store, convert, top up |
+| `apps/web/src/app/cards/page.tsx`, `apps/mobile/app/cards.tsx` | the plan shown, the base currency set once |
+
+1. **BITNOB DOES NOT, and the spend is the wrong moment.** Their card is
+   prepaid USD, approved against its own balance before we hear of it; a $0
+   card declines with money in the wallets, and four such declines terminate
+   it. So the cascade is ours and runs on the way onto the card.
+2. **ONE ORDER, NEVER ASKED.** Card currency, then the card's base currency,
+   then the platform order. The Add money sheet asks for dollars and shows
+   the server's plan; the per-top-up "Pay from" picker is gone from both apps.
+3. **THE PLAN IS WRITTEN BEFORE IT RUNS**, so a retry follows the same plan
+   rather than one computed from balances the first attempt changed.
+4. **Found on the way:** `dispute_reviewer` could not be granted from the
+   dashboard, and a card e2e deleted a rate as the owner that the application
+   role is refused.
+
+**Before this goes live, an operator must:** apply **078** and re-apply
+**099** (it grants the new table and makes it append-only for the app role),
+and publish an FX spread for every currency customers should be able to top
+up from — an unpublished pair is skipped by the cascade, never guessed.

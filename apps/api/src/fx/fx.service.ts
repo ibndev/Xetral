@@ -13,7 +13,7 @@ import type { Pool } from 'pg';
 import { InsufficientFundsError, LedgerService, posting } from '@xetral/ledger';
 import type { PostingIntent } from '@xetral/ledger';
 import { convertWithSpread, displayRate, ProviderTimeoutError } from '@xetral/providers';
-import type { FxPort, FxRate } from '@xetral/providers';
+import type { CoverPricing, FxPort, FxRate } from '@xetral/providers';
 import { exponentOf, fromMajor, isCurrency, money, toMajor,
   widenedSpread,
 } from '@xetral/shared';
@@ -204,6 +204,37 @@ export class FxService {
     } catch {
       // A rate that cannot price this amount prices nothing here — left out
       // and named, exactly like an unpublished pair.
+      return undefined;
+    }
+  }
+
+  /**
+   * WHAT CONVERTING `from` INTO `to` COSTS TODAY — the rate `convert()` would
+   * use, the spread it would charge (widening included) and the pair's
+   * minimum — or undefined when this pair cannot be converted right now.
+   *
+   * For the card top-up cascade, which has to plan before it converts. It
+   * reads exactly what `convert()` reads, so a plan and its execution cannot
+   * disagree about the price; and it answers undefined rather than throwing
+   * for an unpublished pair, a provider that cannot quote, or FX switched
+   * off, because each of those means "skip this wallet", not "fail the
+   * top-up".
+   */
+  async coverPricing(from: Currency, to: Currency): Promise<CoverPricing | undefined> {
+    if (from === to) return undefined;
+    try {
+      await this.settings.assertServiceEnabled('fx');
+      const policy = await this.#policy(from, to);
+      const { rate } = await this.#rateFor(from, to);
+      return {
+        rate,
+        spreadBasisPoints: await this.#effectiveSpread(from, to, policy),
+        minBaseMinor: BigInt(policy.min_base_minor),
+      };
+    } catch (error: unknown) {
+      this.#logger.debug(
+        `no cover pricing for ${from}->${to}: ${error instanceof Error ? error.message : String(error)}`,
+      );
       return undefined;
     }
   }

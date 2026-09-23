@@ -227,6 +227,11 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // Issuing and funding move money onto a card.
       .authenticated('POST', '/v1/cards', { pin: true })
       .authenticated('POST', '/v1/cards/:id/fund', { pin: true })
+      // What a top-up would draw on, and which wallet a card draws on after
+      // its own currency. NO PIN on either: one reads, the other moves
+      // nothing — every top-up it shapes takes the PIN on its own request.
+      .authenticated('GET', '/v1/cards/:id/funding-plan', { pin: false })
+      .authenticated('POST', '/v1/cards/:id/base-currency', { pin: false })
       // Naming a card takes NO PIN. Nothing moves, and it is the customer's
       // own note on their own list — asking for the secret that authorises
       // payments in order to write one trains people to type it for things

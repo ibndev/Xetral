@@ -2537,6 +2537,46 @@ Service in `apps/api/src/countries/`, screen at `/admin/countries`.
 - **THE SCREEN SENDS THE QUOTE AS THE FLOOR** (`min_received`), stamped with
   the amount it priced, and the button waits for one.
 
+### A card paid for from whichever wallets can — non-obvious rules
+
+Schema: `packages/ledger/sql/078_card_funding_cascade.sql`. Planner in
+`packages/providers/src/fx/cover-plan.ts`, executed by `CardService.fund()`.
+
+- **BITNOB DOES NOT CASCADE, AND CANNOT BE ASKED TO.** A Bitnob card is a
+  prepaid USD card and every authorization is approved against the CARD'S OWN
+  balance before we hear of it — at $0 it declines even while the wallets
+  hold money, and four insufficient-funds declines in a row cost a penalty and
+  terminate the card. The webhooks notify; nothing found in their docs is a
+  request we answer to fund a spend. So the cascade is OURS, and it runs on
+  the way ONTO the card. If Bitnob ever offers an authorization decision hook,
+  the same planner runs there unchanged; nothing in it knows which moment it is.
+- **THE ORDER IS FIXED AND NEVER ASKED PER TOP-UP**: the card currency's own
+  wallet, then the card's `base_currency` (set once; NULL follows the
+  customer's home currency), then `CASCADE_ORDER` — dollar stablecoins before
+  fiat, Bitcoin last.
+- **ONLY WHAT IS TAPPED IS CONVERTED, AND BY THE LEAST THAT COVERS.**
+  `leastToDeliver` finds the fewest source units that survive the spread and
+  both round-downs; a wallet the plan does not reach is not touched. A leg in
+  the card's own currency converts nothing and is charged nothing, by CHECK.
+- **THE PLAN IS STORED BEFORE ANYTHING MOVES, keyed by the attempt**, and the
+  executor reads it back. A retry re-planned against balances the first
+  attempt already changed would record a different story from what happened.
+  Every conversion lands in the customer's OWN dollar wallet under
+  `card-fx:<key>:<currency>`, then ONE top-up moves exactly the asked amount.
+- **A REFUSAL STARTS A NEW ATTEMPT; A TIMEOUT DOES NOT.** `rate_moved`,
+  `insufficient_funds`, `below_minimum` mean the stored plan cannot run, so
+  both apps rotate the idempotency key and the next plan starts from what is
+  there now. A timeout may have moved money; only its own key replays it.
+- **A PLAN IS NOT A PRE-CHECK.** It reads balances to choose an order; every
+  conversion still meets the overdraft guard, the pair minimum and the
+  rate-moved floor. `insufficient_funds` carries no figure.
+- **THE TOTAL BALANCE IS A FIGURE, NOT AN ACCOUNT.** `/v1/wallets/total` is a
+  GET over `dollarTotal()`; there is no account kind, route or posting that
+  could debit it, and the e2e asserts a POST there moves nothing.
+- **THE RECORD IS PER TOP-UP.** `card_topup_funding` joins each leg to the
+  trade that executed (with its own rate) and the top-up entry. Attributing a
+  single card SPEND to wallets would need the issuer to fund at authorization.
+
 ### Metrics — non-obvious rules
 
 `apps/api/src/observability/metrics.{service,controller}.ts`, at `GET /metrics`.
@@ -4105,6 +4145,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/074_consent_republish.s
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/075_privacy_republish.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/076_account_route.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/077_privacy_republish.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/078_card_funding_cascade.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -4180,6 +4221,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/074_consent_republish.t
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/075_privacy_republish.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/076_account_route.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/077_privacy_republish.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/078_card_funding_cascade.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

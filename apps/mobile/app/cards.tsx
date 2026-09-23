@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
-import { entryKindLabel, exponentFor, formatAmount, isValidAmount } from '@xetral/client';
-import type { Card, CardActivity, CardSecrets } from '@xetral/client';
+import { ApiError, entryKindLabel, exponentFor, formatAmount, isValidAmount } from '@xetral/client';
+import type { Card, CardActivity, CardFundingPlan, CardSecrets } from '@xetral/client';
+
+/** Refusals that mean the stored plan can no longer run — start a new one. */
+const REPLAN: ReadonlySet<string> = new Set(['rate_moved', 'insufficient_funds', 'below_minimum', 'pair_not_supported']);
 import { Logo } from '@/logo';
 import { Shell } from '@/shell';
 import { Icon } from '@/icon';
@@ -394,36 +397,34 @@ function CardRow({
   const [amount, setAmount] = useState('');
   const funding = useIdempotencyKey();
   /*
-   * WHICH BALANCE PAYS — the web's reasoning: a customer paid in naira or
-   * cedis tops up the dollar card straight from that balance, converted on
-   * the way at the convert screen's own price, with no second screen first.
+   * WHICH WALLETS PAY IS THE SERVER'S DECISION — the web's rule exactly: the
+   * sheet asks for dollars, shows the server's plan for that figure, and the
+   * top-up follows it. The customer is never asked which balance to use.
+   * Stamped with the amount it is for, and shown only on a match.
    */
-  const wallets = useLoad(() => client.balances(), [client]);
-  const payers = (wallets.data ?? []).filter((b) => !/^-?0(\.0+)?$/.test(b.spendable));
-  const [from, setFrom] = useState<string | undefined>(undefined);
-  const payer = from ?? payers[0]?.currency ?? card.currency;
-  const converting = payer !== card.currency;
-  /* Stamped with the amount it is a quote FOR, and shown only on a match —
-     a quote kept past the figure that produced it describes an amount the
-     customer already replaced. */
-  const [quote, setQuote] = useState<{ forAmount: string; forFrom: string; receives: string }>();
+  const [plan, setPlan] = useState<{ forAmount: string; plan: CardFundingPlan }>();
   useEffect(() => {
-    if (!converting || !isValidAmount(amount, exponentFor(payer)) || /^0*(\.0*)?$/.test(amount)) {
-      return;
-    }
+    if (!isValidAmount(amount, exponentFor(card.currency)) || /^0*(\.0*)?$/.test(amount)) return;
     const asked = amount;
     const timer = setTimeout(() => {
       client
-        .fxQuote(payer, card.currency, asked)
-        .then((q) => setQuote({ forAmount: asked, forFrom: payer, receives: q.receives }))
-        .catch(() => setQuote(undefined));
-    }, 350);
+        .cardFundingPlan(card.id, asked)
+        .then((p) => setPlan({ forAmount: asked, plan: p }))
+        .catch(() => setPlan(undefined));
+    }, 300);
     return () => clearTimeout(timer);
-  }, [client, converting, amount, payer, card.currency]);
-  const quoted =
-    quote !== undefined && quote.forAmount === amount && quote.forFrom === payer
-      ? quote.receives
-      : undefined;
+  }, [client, amount, card.id, card.currency]);
+  const planned = plan !== undefined && plan.forAmount === amount ? plan.plan : undefined;
+  const converting = planned?.legs.some((leg) => leg.converted) ?? false;
+  /* The card's base currency, set once — the web's options exactly. */
+  const [choosingBase, setChoosingBase] = useState(false);
+  const wallets = useLoad(() => client.balances(), [client]);
+  const baseOptions = [
+    { value: '', label: 'My home currency' },
+    ...(wallets.data ?? [])
+      .filter((b) => b.currency !== card.currency)
+      .map((b) => ({ value: b.currency, label: `${b.currency} balance`, hint: `${formatAmount(b.spendable, b.currency)} now` })),
+  ];
   /*
    * WHICH ACTION THE PIN IS FOR.
    *
@@ -516,6 +517,39 @@ function CardRow({
           </Text>
         </View>
       </View>
+
+      {card.base_currency !== undefined && card.status !== 'terminated' && (
+        <View style={[{ padding: 12, borderRadius: radius.md, gap: 6 }, { backgroundColor: colors.surface2, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}>
+          <View style={{ gap: 2, flexShrink: 1 }}>
+            <Text style={{ color: colors.text3, fontFamily: font.sansSemi, fontSize: 12 }}>Tops up from</Text>
+            <Text style={{ color: colors.text, fontFamily: font.sansBold, fontSize: 14 }}>
+              {card.currency}, then {card.base_currency}
+              {card.base_currency_chosen === false ? ' · your home currency' : ''}
+            </Text>
+          </View>
+          <Pressable accessibilityRole="button" onPress={() => setChoosingBase((was) => !was)} hitSlop={8}>
+            <Text style={{ color: colors.link, fontFamily: font.sansSemi, fontSize: 14 }}>
+              {choosingBase ? 'Done' : 'Change'}
+            </Text>
+          </Pressable>
+        </View>
+      )}
+      {choosingBase && (
+        <Select
+          label={`After ${card.currency}, draw on`}
+          value={card.base_currency_chosen === true ? (card.base_currency ?? '') : ''}
+          onChange={(next) =>
+            void run(async () => {
+              await client.setCardBaseCurrency(card.id, next === '' ? null : next);
+              setChoosingBase(false);
+              onChange();
+              return 'Saved. Every top-up follows this order.';
+            })
+          }
+          options={baseOptions}
+          renderMark={(value) => (value === '' ? null : <CurrencyMark currency={value} size={20} />)}
+        />
+      )}
 
       {naming ? (
         <>
@@ -610,39 +644,41 @@ function CardRow({
                 : 'Show card details'}
           </Text>
 
-          {pending === 'fund' && payers.length > 1 && (
-            <Select
-              label="Pay from"
-              value={payer}
-              onChange={(next) => {
-                setFrom(next);
-                setQuote(undefined);
-              }}
-              options={payers.map((b) => ({
-                value: b.currency,
-                label: `${b.currency} balance`,
-                hint: `${formatAmount(b.spendable, b.currency)} available`,
-              }))}
-              renderMark={(value) => <CurrencyMark currency={value} size={20} />}
+          {pending === 'fund' && (
+            <Field
+              label={`Amount (${card.currency})`}
+              inputMode="decimal"
+              placeholder="25.00"
+              value={amount}
+              onChangeText={setAmount}
             />
           )}
 
-          {pending === 'fund' && (
-            <Field
-              label={`Amount (${payer})`}
-              inputMode="decimal"
-              placeholder={converting ? '10000' : '25.00'}
-              value={amount}
-              onChangeText={setAmount}
-              {...(converting
-                ? {
-                    hint:
-                      quoted !== undefined
-                        ? `Adds ${formatAmount(quoted, card.currency)} to this card, converted at today’s rate.`
-                        : 'Converted to dollars on the way — no separate step.',
-                  }
-                : {})}
-            />
+          {pending === 'fund' && planned !== undefined && planned.covered && (
+            <View style={[{ padding: 12, borderRadius: radius.md, gap: 6 }, { backgroundColor: colors.surface2 }]}>
+              <Text style={{ color: colors.text3, fontFamily: font.sansSemi, fontSize: 12 }}>Paid from</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
+                {planned.legs.map((leg, index) => (
+                  <View key={leg.currency} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    {index > 0 && <Text style={{ color: colors.text3, fontFamily: font.sansSemi }}>+</Text>}
+                    <CurrencyMark currency={leg.currency} size={16} />
+                    <Text style={{ color: colors.text, fontFamily: font.sansBold, fontSize: 14 }}>
+                      {formatAmount(leg.debit, leg.currency)}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+              {converting && (
+                <Text style={styles.hint}>
+                  Converted to dollars at today’s rate on the way. Your other balances are not touched.
+                </Text>
+              )}
+            </View>
+          )}
+          {pending === 'fund' && planned !== undefined && !planned.covered && (
+            <Text style={[styles.hint, { color: colors.danger }]}>
+              Your balances together don’t cover {formatAmount(planned.amount, card.currency)}.
+            </Text>
           )}
 
           <Field
@@ -666,20 +702,20 @@ function CardRow({
             busy={busy}
             disabled={
               pin === '' ||
-              (pending === 'fund' && (amount === '' || (converting && quoted === undefined)))
+              (pending === 'fund' && (planned === undefined || !planned.covered))
             }
             onPress={() =>
               void run(async () => {
                 if (pending === 'fund') {
-                  // The quoted dollars go up as the floor: rates move between
-                  // the figure shown and the tap.
-                  await client.fundCard(card.id, {
-                    amount,
-                    pin,
-                    idempotencyKey: funding.key,
-                    ...(converting ? { from: payer } : {}),
-                    ...(converting && quoted !== undefined ? { minReceived: quoted } : {}),
-                  });
+                  // No wallet named: the server's cascade pays. A REFUSAL
+                  // starts a new attempt (the next plan uses what is there
+                  // now); a timeout does not — only its own key can replay it.
+                  try {
+                    await client.fundCard(card.id, { amount, pin, idempotencyKey: funding.key });
+                  } catch (cause) {
+                    if (cause instanceof ApiError && REPLAN.has(cause.code)) funding.next();
+                    throw cause;
+                  }
                   // A NEW key after a success: this form is now available for
                   // a genuinely different top-up, and reusing the old one
                   // would have the server replay the first and report success

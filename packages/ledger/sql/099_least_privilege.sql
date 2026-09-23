@@ -92,6 +92,11 @@ DECLARE
         -- retention window; taking the grant away as well means the
         -- application cannot even attempt one, at any age.
         'sign_in_events',
+        -- Which wallets paid for a card top-up, and at what rate. A plan
+        -- records a decision already taken; 078's trigger refuses the edit
+        -- for the owner too, and the grant goes so the application cannot
+        -- even attempt one.
+        'card_topup_sources',
         -- Who replaced a provider credential and when. It holds no secret,
         -- and it is the row somebody reads when asking how a key changed
         -- during an incident.

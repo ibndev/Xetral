@@ -13,11 +13,13 @@ import {
 import type { Request } from 'express';
 import type { AuthenticatedRequest } from '../auth/auth.guard.js';
 import { CardService } from './card.service.js';
-import type { CardActivityView, CardSecretsView, CardView } from './card.service.js';
+import type { CardActivityView, CardFundingPlanView, CardSecretsView, CardView } from './card.service.js';
 import { CardWebhookService } from './webhook.service.js';
 import type { WebhookOutcome } from './webhook.service.js';
 import {
+  baseCurrencySchema,
   fundCardSchema,
+  fundingPlanQuery,
   issueCardSchema,
   nameCardSchema,
   reissueCardSchema,
@@ -106,6 +108,35 @@ export class CardController {
     if (!parsed.success) throw invalidRequest(parsed.error.issues);
 
     return this.cards.name(subjectOf(request), id, parsed.data.label);
+  }
+
+  /**
+   * Which wallets a top-up of this size would draw on, before it is made.
+   * Reads only; the plan that executes is made again, and stored, when the
+   * customer presses the button.
+   */
+  @Get(':id/funding-plan')
+  async fundingPlan(
+    @Req() request: AuthenticatedRequest,
+    @Param('id', uuidOr404('card_not_found')) id: string,
+    @Query() query: unknown,
+  ): Promise<CardFundingPlanView> {
+    const parsed = fundingPlanQuery.safeParse(query);
+    if (!parsed.success) throw invalidRequest(parsed.error.issues);
+    return this.cards.fundingPlan(subjectOf(request), id, parsed.data.amount);
+  }
+
+  /** The wallet this card draws on after its own currency. */
+  @Post(':id/base-currency')
+  @HttpCode(200)
+  async baseCurrency(
+    @Req() request: AuthenticatedRequest,
+    @Param('id', uuidOr404('card_not_found')) id: string,
+    @Body() body: unknown,
+  ): Promise<CardView> {
+    const parsed = baseCurrencySchema.safeParse(body);
+    if (!parsed.success) throw invalidRequest(parsed.error.issues);
+    return this.cards.setBaseCurrency(subjectOf(request), id, parsed.data.currency);
   }
 
   @Post(':id/fund')

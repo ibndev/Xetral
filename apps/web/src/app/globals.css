@@ -6893,3 +6893,39 @@ html[data-theme='dark'] .admin-frame {
 .admin-frame .check.blocking .check-state { color: var(--danger); }
 .admin-frame .check.ok .check-state { color: var(--ok); }
 .admin-frame .check > .hint { margin: 0 0 12px 30px; }
+
+/* A card's top-up, as the server plans it: which balances pay, in a row. */
+.fund-plan {
+  display: grid;
+  gap: 6px;
+  margin: var(--s-2) 0 var(--s-3);
+  padding: 12px 14px;
+  border-radius: var(--r);
+  background: var(--surface-2);
+}
+.fund-plan-label { font-size: 12px; font-weight: 600; color: var(--text-3); }
+.fund-plan-legs { display: flex; flex-wrap: wrap; gap: 8px; }
+.fund-plan-leg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.fund-plan-leg + .fund-plan-leg::before { content: '+'; margin-right: 2px; color: var(--text-3); font-weight: 600; }
+.fund-plan .hint { margin: 0; }
+/* The card's base currency, set once. */
+.card-source {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: var(--s-3);
+  padding: 12px 14px;
+  border-radius: var(--r);
+  background: var(--surface-2);
+}
+.card-source-text { display: grid; gap: 2px; }
+.card-source-label { font-size: 12px; font-weight: 600; color: var(--text-3); }
+.card-source strong { font-size: 14px; }

@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { entryKindLabel, exponentFor, formatAmount, isValidAmount } from '@xetral/client';
-import type { Card, CardActivity, CardSecrets } from '@xetral/client';
+import { ApiError, entryKindLabel, exponentFor, formatAmount, isValidAmount } from '@xetral/client';
+import type { Card, CardActivity, CardFundingPlan, CardSecrets } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { FormError } from '@/ui/form-error';
 import { Icon } from '@/ui/icon';
@@ -22,6 +22,9 @@ import { CurrencyMark } from '@/ui/currency-mark';
  */
 /** A major-unit string that is zero, however many decimals it carries. */
 const isZero = (amount: string) => /^-?0(\.0+)?$/.test(amount);
+
+/** Refusals that mean the stored plan can no longer run — start a new one. */
+const REPLAN: ReadonlySet<string> = new Set(['rate_moved', 'insufficient_funds', 'below_minimum', 'pair_not_supported']);
 
 export default function Cards() {
   const client = useXetral();
@@ -342,39 +345,31 @@ function CardRow({
   const funding = useIdempotencyKey();
   const [amount, setAmount] = useState('');
   /*
-   * WHICH BALANCE PAYS. A customer paid in naira or cedis should not have to
-   * visit the convert screen before they can use a dollar card — the top-up
-   * converts on the way, at the convert screen's own price. Offered: every
-   * balance with money in it, the card's own currency included. Defaults to
-   * the first, which the API orders home-currency first.
+   * WHICH WALLETS PAY IS THE SERVER'S DECISION, and the customer is never
+   * asked per top-up. Bitnob approves a spend against the card's own dollar
+   * balance, so the choosing happens on the way onto the card: dollars first,
+   * then the card's base currency, then the platform order — converting only
+   * what is tapped. The sheet asks for DOLLARS and shows the plan the server
+   * will follow, so web and phone cannot disagree about the rule.
+   *
+   * THE PLAN IS STAMPED WITH THE AMOUNT IT IS FOR, and rendered only on a
+   * match: a plan kept past the figure that produced it describes a top-up the
+   * customer already replaced.
    */
-  const wallets = useLoad(() => client.balances(), [client]);
-  const payers = (wallets.data ?? []).filter((b) => !isZero(b.spendable));
-  const [from, setFrom] = useState<string | undefined>(undefined);
-  const payer = from ?? payers[0]?.currency ?? card.currency;
-  const converting = payer !== card.currency;
-  /*
-   * WHAT LANDS ON THE CARD, quoted as the customer types — and STAMPED WITH
-   * THE AMOUNT IT IS A QUOTE FOR. A quote kept past the amount that produced
-   * it shows the arithmetic for a figure the customer already replaced; it is
-   * rendered only when the stamp matches what is in the box now.
-   */
-  const [quote, setQuote] = useState<{ forAmount: string; forFrom: string; receives: string }>();
+  const [plan, setPlan] = useState<{ forAmount: string; plan: CardFundingPlan }>();
   useEffect(() => {
-    if (!converting || !isValidAmount(amount, exponentFor(payer)) || isZero(amount)) return;
+    if (!isValidAmount(amount, exponentFor(card.currency)) || isZero(amount)) return;
     const asked = amount;
     const timer = setTimeout(() => {
       client
-        .fxQuote(payer, card.currency, asked)
-        .then((q) => setQuote({ forAmount: asked, forFrom: payer, receives: q.receives }))
-        .catch(() => setQuote(undefined));
-    }, 350);
+        .cardFundingPlan(card.id, asked)
+        .then((p) => setPlan({ forAmount: asked, plan: p }))
+        .catch(() => setPlan(undefined));
+    }, 300);
     return () => clearTimeout(timer);
-  }, [client, converting, amount, payer, card.currency]);
-  const quoted =
-    quote !== undefined && quote.forAmount === amount && quote.forFrom === payer
-      ? quote.receives
-      : undefined;
+  }, [client, amount, card.id, card.currency]);
+  const planned = plan !== undefined && plan.forAmount === amount ? plan.plan : undefined;
+  const converting = planned?.legs.some((leg) => leg.converted) ?? false;
   /*
    * WHICH ACTION THE PIN IS FOR — and the reason this is one state rather than
    * a bare `open` flag.
@@ -413,6 +408,19 @@ function CardRow({
    */
   const [naming, setNaming] = useState(false);
   const [label, setLabel] = useState(card.label ?? '');
+  /*
+   * THE CARD'S BASE CURRENCY — set once, here, and never asked per top-up.
+   * The options are the balances the customer holds plus "my home currency",
+   * which follows their country if it changes rather than freezing today's.
+   */
+  const [choosingBase, setChoosingBase] = useState(false);
+  const wallets = useLoad(() => client.balances(), [client]);
+  const baseOptions = [
+    { value: '', label: 'My home currency' },
+    ...(wallets.data ?? [])
+      .filter((b) => b.currency !== card.currency)
+      .map((b) => ({ value: b.currency, label: `${b.currency} balance`, hint: `${formatAmount(b.spendable, b.currency)} now` })),
+  ];
   /**
    * The revealed number, held ONLY while it is on screen.
    *
@@ -496,6 +504,46 @@ function CardRow({
           <span className="card-stat-value">{formatAmount(card.balance, card.currency)}</span>
         </div>
       </div>
+
+      {card.base_currency !== undefined && card.status !== 'terminated' && (
+        <div className="card-source">
+          <span className="card-source-text">
+            <span className="card-source-label">Tops up from</span>
+            <strong>
+              {card.currency}, then {card.base_currency}
+              {card.base_currency_chosen === false && <span className="muted"> · your home currency</span>}
+            </strong>
+          </span>
+          <button type="button" className="btn link" onClick={() => setChoosingBase((was) => !was)}>
+            {choosingBase ? 'Done' : 'Change'}
+          </button>
+        </div>
+      )}
+      {choosingBase && (
+        <div className="field">
+          <label className="field-label" id={`base-${card.id}`}>
+            After {card.currency}, draw on
+          </label>
+          <Select
+            labelledBy={`base-${card.id}`}
+            value={card.base_currency_chosen === true ? (card.base_currency ?? '') : ''}
+            onChange={(value) =>
+              void run(async () => {
+                await client.setCardBaseCurrency(card.id, value === '' ? null : value);
+                setChoosingBase(false);
+                onChange();
+                return 'Saved. Every top-up follows this order.';
+              })
+            }
+            options={baseOptions}
+            renderMark={(value) => (value === '' ? null : <CurrencyMark currency={value} size={20} />)}
+          />
+          <span className="hint">
+            A top-up uses your {card.currency} first, then this, then your other balances — converting
+            only what it needs.
+          </span>
+        </div>
+      )}
 
       {naming && (
         <div>
@@ -646,44 +694,43 @@ function CardRow({
 
           {pending === 'fund' && (
             <>
-              {payers.length > 1 && (
-                <div className="field">
-                  <label className="field-label" id={`pay-from-${card.id}`}>
-                    Pay from
-                  </label>
-                  <Select
-                    labelledBy={`pay-from-${card.id}`}
-                    value={payer}
-                    onChange={(value) => {
-                      setFrom(value);
-                      setQuote(undefined);
-                    }}
-                    options={payers.map((b) => ({
-                      value: b.currency,
-                      label: `${b.currency} balance`,
-                      hint: `${formatAmount(b.spendable, b.currency)} available`,
-                    }))}
-                    renderMark={(value) => <CurrencyMark currency={value} size={20} />}
-                  />
-                </div>
-              )}
               <label>
-                Amount ({payer})
+                Amount ({card.currency})
                 <input
                   inputMode="decimal"
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
-                  placeholder={converting ? '10000' : '25.00'}
+                  placeholder="25.00"
                   autoFocus
                 />
-                {converting && (
-                  <span className="hint">
-                    {quoted !== undefined
-                      ? `Adds ${formatAmount(quoted, card.currency)} to this card, converted at today’s rate.`
-                      : 'Converted to dollars on the way — no separate step.'}
-                  </span>
-                )}
               </label>
+              {/* WHAT PAYS, before the PIN: the server's plan for this exact
+                  figure. A conversion is named as one, with its rate built in;
+                  a dollar leg is just dollars. */}
+              {planned !== undefined && planned.covered && (
+                <div className="fund-plan" aria-live="polite">
+                  <span className="fund-plan-label">Paid from</span>
+                  <span className="fund-plan-legs">
+                    {planned.legs.map((leg) => (
+                      <span className="fund-plan-leg" key={leg.currency}>
+                        <CurrencyMark currency={leg.currency} size={16} />
+                        {formatAmount(leg.debit, leg.currency)}
+                      </span>
+                    ))}
+                  </span>
+                  {converting && (
+                    <span className="hint">
+                      Converted to dollars at today&rsquo;s rate on the way. Your other balances are
+                      not touched.
+                    </span>
+                  )}
+                </div>
+              )}
+              {planned !== undefined && !planned.covered && (
+                <p className="form-error" role="alert">
+                  Your balances together don&rsquo;t cover {formatAmount(planned.amount, card.currency)}.
+                </p>
+              )}
             </>
           )}
 
@@ -707,21 +754,23 @@ function CardRow({
             disabled={
               busy ||
               pin === '' ||
-              (pending === 'fund' && (amount === '' || (converting && quoted === undefined)))
+              (pending === 'fund' && (planned === undefined || !planned.covered))
             }
             onClick={() =>
               void run(async () => {
                 if (pending === 'fund') {
-                  // The quoted dollars go up as the FLOOR: rates move between the
-                  // figure shown and the tap, and landing materially less than
-                  // the customer read is taking the difference on a technicality.
-                  await client.fundCard(card.id, {
-                    amount,
-                    pin,
-                    idempotencyKey: funding.key,
-                    ...(converting ? { from: payer } : {}),
-                    ...(converting && quoted !== undefined ? { minReceived: quoted } : {}),
-                  });
+                  // No wallet named: the server's cascade pays, following the
+                  // plan shown above. A REFUSAL starts a new attempt — the
+                  // next plan is made from what is there now, and anything
+                  // already converted is simply in the dollar wallet. A
+                  // timeout does NOT: that attempt may have moved money, and
+                  // only its own key can replay it safely.
+                  try {
+                    await client.fundCard(card.id, { amount, pin, idempotencyKey: funding.key });
+                  } catch (cause) {
+                    if (cause instanceof ApiError && REPLAN.has(cause.code)) funding.next();
+                    throw cause;
+                  }
                   // A NEW key after a success: this form is now available for a
                   // genuinely different top-up, and reusing the old one would
                   // have the server replay the first and report success for
