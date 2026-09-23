@@ -102,6 +102,15 @@ export interface AdminUserDetail {
 /** Mirrors `SettingView` on the server, field for field. It did not, once:
  *  `value_type`/`min_value`/`max_value` here against `type`/`min`/`max` there
  *  rendered every bound as "min undefined" and every boolean as a text box. */
+/** One kind of money in one currency, and the company carrying it. */
+export interface AdminRoute {
+  readonly operation: 'account' | 'collect' | 'payout';
+  readonly currency: string;
+  /** Null for a currency the platform is open in that nothing serves. */
+  readonly provider: string | null;
+  readonly options: readonly string[];
+}
+
 /**
  * A provider credential slot, and whether it is filled.
  *
@@ -1095,6 +1104,29 @@ export class AdminClient {
    */
   async providerHealth(): Promise<AdminProviderHealth> {
     return this.#get<AdminProviderHealth>('/v1/admin/providers');
+  }
+
+  /**
+   * Which company carries which money, per currency — and what else could.
+   *
+   * `account` is who opens a dedicated account number, `collect` a checkout,
+   * `payout` money leaving. `options` is what THIS deployment could switch to:
+   * a rail with no adapter for the operation is never offered, because the
+   * switch would fall back from it and the screen would show the wrong one.
+   */
+  async routes(): Promise<{ readonly routes: readonly AdminRoute[] }> {
+    return this.#get<{ readonly routes: readonly AdminRoute[] }>('/v1/admin/routes');
+  }
+
+  /** Move one kind of money to another company. Nobody already served moves. */
+  async setRoute(
+    route: { readonly operation: AdminRoute['operation']; readonly currency: string; readonly provider: string },
+    pin: string,
+  ): Promise<{ readonly was: string | null; readonly now: string }> {
+    return this.#post<{ readonly was: string | null; readonly now: string }>('/v1/admin/routes', {
+      ...route,
+      transaction_pin: pin,
+    });
   }
 
   /* ------------------------------- readiness ---------------------------- */

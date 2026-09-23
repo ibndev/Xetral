@@ -820,6 +820,68 @@ and `058_payment_links.sql` (the slug the link is made of).
   "there". That is the same failure this method's comment already recorded
   about `handle` and 039, one migration later.
 
+### Naira account numbers on Flutterwave, and a switch for who carries what — non-obvious rules
+
+Schema: `packages/ledger/sql/076_account_route.sql`, `077_privacy_republish.sql`.
+Adapter in `packages/providers/src/flutterwave/funding-adapter.ts`, deposits in
+`apps/api/src/funding/flutterwave-deposit.service.ts`, switch at
+`/admin/providers` (`GET`/`POST /v1/admin/routes`).
+
+- **`account` IS ITS OWN ROUTE, NOT `collect`.** Opening a dedicated account
+  read the checkout route, so moving naira account numbers meant moving every
+  naira payment link with them. `account` decides where it has a row and
+  `collect` answers where it has none — which is how GHS and KES still work
+  with no row at all.
+- **ON FLUTTERWAVE A NAIRA ACCOUNT NEEDS A BVN.** Their live environment will
+  not open `is_permanent` without one, so an unverified customer is refused
+  with `kyc_required` BEFORE anything is sent. That reverses Phase 15's "funding
+  without KYC" for naira; pointing the row at `paystack` is how to get it back.
+- **`FundingCustomer.bvn` IS A FUNCTION, and that is the privacy rule as a
+  type.** A field would unseal every verified BVN for every adapter on every
+  request; a function unseals it when one adapter asks, from an APPROVED
+  submission only.
+- **THE NOTICE HAD TO CHANGE WITH IT.** It said in bold that only Dojah gets a
+  BVN. 077 republishes it, and its hash now covers what the page RENDERS
+  (`processors.ts`, `company.ts`, `retention-table.ts`) — the page-only hash
+  let the recipient list change under an unchanged version. `legal-content.test.ts`
+  fails on a BVN recipient the page's own prose does not name.
+- **A DEPOSIT INTO A PERMANENT ACCOUNT ARRIVES AS `charge.completed`, on the
+  checkout URL.** Before this it went to the link settler and was dropped. The
+  reference only decides whether to ASK; the deposit is re-read by Flutterwave's
+  TRANSACTION ID, because every payment into one account shares its `tx_ref`.
+  One their API does not yet call successful is a 500, so they retry.
+- **`provider_customer_ref` IS THE `tx_ref` for a Flutterwave account, not the
+  email.** An email is shared with every checkout the same person paid; 076
+  rebuilds the reference for older rows from `xetral-va-<user>-<currency>`.
+- **THE LIST IS RE-FILTERED ON OUR SIDE.** A server that ignored `tx_ref=`
+  would return every transaction on the integration, each credited to
+  whichever account was being swept. The e2e stub ignores the filter on purpose.
+- **THE SWEEP WAS BROKEN THREE WAYS, and all three were silent.** It swept only
+  the switch's FALLBACK rail's accounts; it handed Paystack an account id where
+  Paystack's list takes a CUSTOMER code; and it posted every deposit as NGN.
+  It also now reads the ceiling from settings, as the webhook does, and applies
+  it to naira only.
+- **PAYSTACK'S SWEEP WAS A DOUBLE CREDIT waiting for the right key.** Its list
+  is per customer, and a customer is an email — so it holds the same person's
+  checkout top-ups, credited under `paystack:link:<ref>`. Posted again under
+  `paystack:<ref>` that is a second credit. Only `dedicated_nuban` is returned now.
+- **THE SWITCH OFFERS ONLY WHAT THE SWITCH COULD USE.** The funding and payout
+  switches fall back, loudly and only in a log, from a rail with no adapter —
+  so a toggle able to select one would show the new rail while the old one
+  kept serving. Changing a route is `admin` with a PIN and the elevation window,
+  audited as `route.change` with before and after.
+- **A WALLET PAYOUT ROUTED TO BITNOB SENDS BITNOB'S CODE OR NOTHING.** Their
+  payout adapter only ever knew bank codes, so a cedi or shilling payout moved
+  to Bitnob would have sent our unsourced `MTN` or `MPS` into the irreversible
+  call. It now matches the network by NAME in Bitnob's own list
+  (`NETWORK_NAME_HINTS`, shared with Flutterwave in `ports/mobile-money.ts`)
+  and REFUSES before a quote when nothing matches — unlike Flutterwave, which
+  falls back to our code when its list cannot be read. A wallet lookup there
+  answers `name_unavailable`: their account lookup is documented for banks.
+- **THE PIN KEY IS `transaction_pin`.** The first version of the client sent
+  `pin`, and the guard answered `transaction_pin_required` beside a box the
+  operator had filled. Found by driving the real screen, not by a test.
+
 ### Which provider serves which currency — non-obvious rules
 
 Schema: `packages/ledger/sql/059_provider_routing.sql`. Router in
@@ -4041,6 +4103,8 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/072_activate_account_gh
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/073_platform_float.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/074_consent_republish.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/075_privacy_republish.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/076_account_route.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/077_privacy_republish.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -4114,6 +4178,8 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/072_activate_account_gh
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/073_platform_float.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/074_consent_republish.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/075_privacy_republish.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/076_account_route.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/077_privacy_republish.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

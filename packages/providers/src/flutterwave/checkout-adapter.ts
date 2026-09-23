@@ -265,7 +265,7 @@ function majorText(amountMinor: bigint, currency: string): string {
  * is unrecoverable — the rule `parseMicro` records for Bitnob, one provider
  * on. `fromMajor` takes a string for exactly this reason.
  */
-function minorFromMajor(amount: unknown, currency: string): bigint {
+export function minorFromMajor(amount: unknown, currency: string): bigint {
   if (!isCurrency(currency)) {
     throw new ProviderContractError(PROVIDER, `not a currency this platform knows: ${currency}`);
   }

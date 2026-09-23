@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { Currency } from '@xetral/shared';
-import { ProviderContractError } from '../ports/errors.js';
+import { ProviderContractError, ProviderRejectedError } from '../ports/errors.js';
+import { NETWORK_NAME_HINTS, isOurNetworkCode } from '../ports/mobile-money.js';
 import type { BitnobClient } from './client.js';
 import type {
   BeneficiaryLookup,
@@ -147,6 +148,21 @@ export class BitnobPayoutAdapter implements PayoutPort {
     bankCode: string,
     accountNumber: string,
   ): Promise<BeneficiaryLookup> {
+    /*
+     * A WALLET HAS NO NAME ENQUIRY HERE THAT ANYBODY HAS SEEN DOCUMENTED.
+     * Bitnob's account lookup is published for BANK accounts; asked about a
+     * wallet under one of our network codes it would answer "not found",
+     * which reads to the customer as their own number being wrong. 043's
+     * `name_unavailable` is the true answer, and the send screen already
+     * asks for a label on it — the Kenya path, for the same reason.
+     */
+    if (isOurNetworkCode(bankCode)) {
+      throw new ProviderRejectedError(
+        PROVIDER,
+        'Bitnob publishes no name enquiry for a mobile money wallet',
+        'name_unavailable',
+      );
+    }
     const payload = await this.#client.request(
       'GET',
       BITNOB_PAYOUT_ENDPOINTS.accountLookup(country, bankCode, accountNumber),
@@ -176,6 +192,10 @@ export class BitnobPayoutAdapter implements PayoutPort {
      * cannot say: `ProviderTimeoutError` propagates untouched, the caller
      * settles nothing and reverses nothing, and reconciliation asks later.
      */
+    // RESOLVED BEFORE ANYTHING IS PRICED, so a wallet Bitnob cannot name is
+    // refused while nothing has been sent — never after `finalize`.
+    const bankCode = await this.#railCode(request.country, request.bankCode);
+
     const quotePayload = await this.#client.request(
       'POST',
       BITNOB_PAYOUT_ENDPOINTS.quote,
@@ -208,7 +228,7 @@ export class BitnobPayoutAdapter implements PayoutPort {
         // and not on the quote — a quote is a price, not a payment.
         beneficiary: {
           account_number: request.accountNumber,
-          bank_code: request.bankCode,
+          bank_code: bankCode,
           // THE NAME THE BANK GAVE US, carried through from the lookup. The
           // sender's own text would make the confirmation screen a formality.
           account_name: request.accountName,
@@ -228,6 +248,36 @@ export class BitnobPayoutAdapter implements PayoutPort {
     );
 
     return this.#toReceipt(finalPayload);
+  }
+
+  /**
+   * THE CODE BITNOB ITSELF USES for the institution being paid.
+   *
+   * A bank picked from Bitnob's own list already carries their code and is
+   * returned untouched. A mobile money network arrives under OUR code —
+   * `MTN`, `MPS` — which no Bitnob document produces, and this is the one
+   * call that cannot be recalled. So their catalogue for the country is read
+   * and matched by NAME, and THEIR code is sent; where nothing matches the
+   * payout is REFUSED before a quote exists. Flutterwave falls back to our
+   * code when its list cannot be read; this does not, because a guess that
+   * happens to be accepted pays somebody we cannot name.
+   */
+  async #railCode(country: string, bankCode: string): Promise<string> {
+    if (!isOurNetworkCode(bankCode)) return bankCode;
+    const wanted = bankCode.toUpperCase();
+    const hints = NETWORK_NAME_HINTS[wanted] ?? [];
+    const listed = await this.banks(country);
+    const match =
+      listed.find((b) => b.code.toUpperCase() === wanted) ??
+      listed.find((b) => hints.some((h) => b.name.toUpperCase().includes(h)));
+    if (match === undefined) {
+      throw new ProviderRejectedError(
+        PROVIDER,
+        `Bitnob lists no ${wanted} wallet rail for ${country}`,
+        'unsupported_destination',
+      );
+    }
+    return match.code;
   }
 
   async status(providerPayoutId: string): Promise<PayoutReceipt> {

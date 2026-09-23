@@ -348,6 +348,17 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // widest role: the person taking the call about a card that will not
       // work is the one who needs to know Bitnob has been timing out.
       .staff('GET', '/v1/admin/providers', { pin: false, role: 'support' })
+      /*
+       * WHICH COMPANY CARRIES WHICH MONEY — naira account numbers, checkouts,
+       * payouts, per currency. Reading it is `support` for the reason the
+       * health read is. CHANGING it is `admin` with a PIN: it decides where
+       * the next customer's account number is opened and which rail pays out
+       * money that cannot be recalled, and it is exactly the change an
+       * operator makes under pressure during an incident — the argument for
+       * a switch rather than a release, and for the switch being guarded.
+       */
+      .staff('GET', '/v1/admin/routes', { pin: false, role: 'support' })
+      .staff('POST', '/v1/admin/routes', { pin: true, role: 'admin' })
       /* The caller's own roles, so a screen can hide what they may not use.
          `support` is the widest staff role: everybody needs their own. */
       .staff('GET', '/v1/admin/me', { pin: false, role: 'support' })

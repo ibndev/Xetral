@@ -195,6 +195,9 @@ const API_ERROR_CODES = [
    * names our integration and belongs in the log.
    */
   'payout_provider_unavailable',
+  /* A route change naming a company this deployment cannot use for that kind
+     of money. Staff-only; the refusal carries the options that WOULD work. */
+  'provider_not_available',
   /*
    * `insufficient_platform_liquidity` — OUR float, not the customer's balance.
    *

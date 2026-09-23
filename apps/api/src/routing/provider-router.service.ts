@@ -2,8 +2,20 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { Pool } from 'pg';
 import { DATABASE } from '../tokens.js';
 
-/** What a route can be about. Money in, or money out. */
-export type RoutedOperation = 'collect' | 'payout';
+/**
+ * What a route can be about.
+ *
+ * `collect` is a checkout — money a payer pushes through a hosted page.
+ * `payout` is money leaving. `account` is WHO OPENS A DEDICATED ACCOUNT
+ * NUMBER, and it is its own operation because it is its own decision: moving
+ * naira account numbers to Flutterwave must not also move every naira payment
+ * link, which is what re-pointing `collect` would do. Where no `account` row
+ * exists the `collect` route answers, which is how every account was opened
+ * before 076.
+ */
+export type RoutedOperation = 'collect' | 'payout' | 'account';
+
+export const ROUTED_OPERATIONS: readonly RoutedOperation[] = ['account', 'collect', 'payout'];
 
 interface Cached {
   readonly provider: string | undefined;
@@ -93,9 +105,23 @@ export class ProviderRouterService {
       currency: string;
       provider: string | null;
       status: string;
-    }>(`SELECT operation, currency, provider, status
-          FROM provider_route_coverage
-         ORDER BY operation, currency`);
+    }>(
+      /*
+       * THE COVERAGE VIEW, AND EVERY ROUTE IT DOES NOT MENTION. The view is
+       * driven off the currencies the platform is OPEN in and lists `collect`
+       * and `payout` only, so an `account` route — or one for a corridor not
+       * yet opened — would be a row in force that the operations screen never
+       * showed. A screen that hides a route is a screen an operator trusts
+       * about the wrong thing.
+       */
+      `SELECT operation, currency, provider, status FROM provider_route_coverage
+       UNION ALL
+       SELECT r.operation, r.currency, r.provider, 'ok'
+         FROM provider_routes r
+        WHERE NOT EXISTS (SELECT 1 FROM provider_route_coverage c
+                           WHERE c.operation = r.operation AND c.currency = r.currency)
+        ORDER BY 1, 2`,
+    );
     return found.rows;
   }
 
@@ -111,16 +137,17 @@ export class ProviderRouterService {
     readonly operation: RoutedOperation;
     readonly currency: string;
     readonly provider: string;
-    readonly byUserId: number;
+    /** The acting staff member's UUID — `claims.sub`, never the numeric id. */
+    readonly byUserUuid: string;
   }): Promise<void> {
     await this.pool.query(
       `INSERT INTO provider_routes (operation, currency, provider, updated_by)
-       VALUES ($1, $2, $3, $4)
+       VALUES ($1, $2, $3, (SELECT id FROM users WHERE uuid = $4::uuid))
        ON CONFLICT (operation, currency) DO UPDATE
           SET provider = EXCLUDED.provider,
               updated_at = now(),
               updated_by = EXCLUDED.updated_by`,
-      [options.operation, options.currency, options.provider, options.byUserId],
+      [options.operation, options.currency, options.provider, options.byUserUuid],
     );
     this.#cache.delete(`${options.operation}:${options.currency}`);
   }

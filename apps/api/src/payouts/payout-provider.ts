@@ -89,6 +89,11 @@ export class SwitchingPayoutPort implements PayoutPort {
     this.#currencyOf = options.currencyOf ?? (async () => undefined);
   }
 
+  /** Which rails this deployment can pay out through, for the dashboard. */
+  get providers(): readonly string[] {
+    return [...this.#adapters.keys()];
+  }
+
   /**
    * Which rail serves payouts to this COUNTRY.
    *

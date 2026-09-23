@@ -2,6 +2,7 @@ export * from './ports/card.js';
 export * from './ports/errors.js';
 export * from './ports/fulfilment.js';
 export * from './ports/funding.js';
+export * from './ports/mobile-money.js';
 export * from './ports/crypto.js';
 export * from './ports/fx.js';
 export * from './ports/notification.js';

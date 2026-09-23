@@ -86,6 +86,40 @@ export interface FundingCustomer {
    * everybody's.
    */
   readonly providerCustomerId: string | undefined;
+  /**
+   * THE BVN, FETCHED ONLY IF THE RAIL ASKS FOR IT.
+   *
+   * A function rather than a field, and that shape is the privacy rule
+   * written as a type. Flutterwave will not open a PERMANENT naira account in
+   * production without a BVN; Paystack opens one from a name and an email. A
+   * field would put every verified customer's BVN in memory on every request
+   * to every adapter — including the ones that never send it — and the first
+   * log line that serialised a request would carry it. As a function, the BVN
+   * is unsealed at the moment one adapter decides it needs it and at no other.
+   *
+   * Resolves to undefined when the customer has no APPROVED identity. A
+   * pending submission is somebody's claim, not a verified BVN, and sending an
+   * unreviewed one to a bank is how an account is opened in a stranger's name.
+   */
+  readonly bvn?: () => Promise<string | undefined>;
+}
+
+/**
+ * Where an adapter should look for an account's deposits.
+ *
+ * TWO IDS, BECAUSE THE RAILS KEY DEPOSITS ON DIFFERENT THINGS, and the sweep
+ * handed every adapter the ACCOUNT id. Paystack's transaction list is a
+ * CUSTOMER-level query and its adapter says so in its own header — so it was
+ * being asked about a customer whose code was a dedicated-account id, which
+ * either finds nothing (a sweep that runs, reports nothing and finds nothing:
+ * exactly what a rail with no lost webhooks looks like) or, filtered loosely,
+ * finds somebody else's money. Naming both lets each adapter take the one it
+ * means, and a type rather than a comment is what stops the next caller
+ * guessing.
+ */
+export interface DepositLookup {
+  readonly providerAccountId: string;
+  readonly providerCustomerRef: string | undefined;
 }
 
 export interface CreateVirtualAccountRequest {
@@ -115,7 +149,7 @@ export interface FundingPort {
    * nothing, and no amount of waiting fixes it — so the answer has to be to
    * ASK, the same shape as `FulfilmentPort.status()`.
    */
-  listDeposits(providerAccountId: string): Promise<readonly ProviderDeposit[]>;
+  listDeposits(account: DepositLookup): Promise<readonly ProviderDeposit[]>;
 }
 
 export interface ProviderDeposit {
@@ -127,4 +161,40 @@ export interface ProviderDeposit {
   readonly senderBank: string | undefined;
   readonly senderAccount: string | undefined;
   readonly occurredAt: Date;
+}
+
+/**
+ * A deposit the RAIL has confirmed, read back by its own id.
+ *
+ * For a rail whose webhook is not signed over the body — Flutterwave returns a
+ * shared secret verbatim — the event is a doorbell and says nothing anybody
+ * may act on. This is what the platform acts on instead: the provider's own
+ * answer to "what is transaction N", asked by us.
+ */
+export interface VerifiedDeposit extends ProviderDeposit {
+  /**
+   * The reference the ACCOUNT was opened under, which is how a deposit is
+   * tied to one customer. Ours, sent at creation and echoed back on every
+   * payment into that account.
+   */
+  readonly accountReference: string | undefined;
+  /** How the money moved, as the rail names it — a bank transfer, a card. */
+  readonly channel: string | undefined;
+}
+
+/**
+ * An OPTIONAL capability, for the same reason `supportsVerification()` is on
+ * the fulfilment port: a rail whose deposit webhooks are signed has nothing to
+ * re-read, and a method that throws on two adapters is a reason for a caller
+ * to catch and ignore it.
+ */
+export interface DepositVerifier {
+  /** Undefined when the rail says it did not succeed or does not know it. */
+  verifyDeposit(providerReference: string): Promise<VerifiedDeposit | undefined>;
+}
+
+export function supportsDepositVerification(
+  port: FundingPort,
+): port is FundingPort & DepositVerifier {
+  return typeof (port as Partial<DepositVerifier>).verifyDeposit === 'function';
 }

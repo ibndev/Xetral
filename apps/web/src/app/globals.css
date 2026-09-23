@@ -6455,3 +6455,59 @@ html, body { overflow-x: hidden; }
 
 /* The headline's chips: what the figure is, then anything pending. */
 .balance-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 11px; }
+
+/*
+ * PROVIDERS, as the comp draws it: a card per company — its state as a
+ * pill, then three figures — and under them the switches that decide which
+ * company carries which money. "Carries" is read from the route table, so a
+ * card cannot keep saying "NGN bank" after naira accounts have moved.
+ */
+.rail-cards { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 760px) { .rail-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; } }
+.admin-frame .panel.rail-card { padding: 18px; margin: 0; }
+.rail-card.degraded { border-color: var(--warn); }
+.rail-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.rail-card-head .badge { gap: 7px; align-items: center; }
+.rail-card-head .badge .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.badge.quiet { display: inline-flex; margin: 0; background: var(--surface-2); color: var(--text-3); }
+.rail-figs { display: flex; flex-wrap: wrap; gap: 14px 26px; margin-top: 16px; }
+.rail-figs > span { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.rail-figs .k { font-size: 11px; font-weight: 600; color: var(--text-3); }
+.rail-figs .v { font-size: 18px; font-weight: 700; font-family: var(--font-grotesk); font-variant-numeric: tabular-nums; }
+.rail-figs .v.ok { color: var(--ok); }
+.rail-figs .v.warn { color: var(--warn); }
+.rail-figs .v.text { font-family: inherit; font-size: 14px; line-height: 1.35; padding-top: 3px; }
+
+.admin-frame .panel.route-panel { padding: 6px 0; }
+.route-panel .panel-row-head { padding: 12px 18px 0; }
+.route-panel .route-lead { margin: 6px 18px 4px; max-width: 640px; font-size: 13px; color: var(--text-3); line-height: 1.5; }
+.route-panel .route-done { margin: 8px 18px 0; font-size: 13px; font-weight: 600; color: var(--ok); }
+.route-panel > .error { padding: 8px 18px; }
+.route-group { border-top: 1px solid var(--line); margin-top: 10px; }
+.route-group-head { display: flex; flex-direction: column; gap: 3px; padding: 14px 18px 4px; }
+.route-group-head .name { font-size: 14px; font-weight: 700; }
+.route-group-head .sub { font-size: 12.5px; font-weight: 500; color: var(--text-3); line-height: 1.5; max-width: 640px; }
+.route-row { padding: 8px 18px; }
+.route-main { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 42px; }
+.route-ccy { display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 600; color: var(--text-2); }
+.route-main .segmented button.chosen,
+.route-main .segmented button.chosen:hover:where(:not(:disabled)) {
+  background: transparent; color: var(--text);
+  box-shadow: inset 0 0 0 1.5px var(--iris);
+}
+.route-main .segmented { flex: none; }
+.route-main .segmented button { min-height: 34px; padding: 6px 14px; font-size: 13px; }
+.route-only { flex: none; font-size: 13.5px; font-weight: 600; color: var(--text-2); }
+.route-row .hint.danger { margin: 8px 0 0; color: var(--danger); }
+.route-confirm {
+  margin-top: 12px; padding: 12px 14px;
+  border-radius: 12px; background: var(--surface-2);
+}
+.route-confirm p { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text-2); }
+.route-confirm-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+.route-confirm-row input { width: 96px; min-height: 38px; margin: 0; background: var(--bg); }
+.route-confirm-row button { min-height: 38px; }
+.route-confirm .error { margin: 8px 0 0; }
+@media (max-width: 480px) {
+  .route-main .segmented button { padding: 6px 11px; }
+}

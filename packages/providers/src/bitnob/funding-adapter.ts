@@ -3,6 +3,7 @@ import type { Currency } from '@xetral/shared';
 import { ProviderContractError, ProviderRejectedError } from '../ports/errors.js';
 import { BITNOB_ENDPOINTS, type BitnobClient } from './client.js';
 import type {
+  DepositLookup,
   CreateVirtualAccountRequest,
   FundingPort,
   ProviderDeposit,
@@ -158,10 +159,11 @@ export class BitnobFundingAdapter implements FundingPort {
     return this.#toAccount(payload);
   }
 
-  async listDeposits(providerAccountId: string): Promise<readonly ProviderDeposit[]> {
+  /** Keyed on the ACCOUNT: Bitnob lists transactions per virtual account. */
+  async listDeposits(account: DepositLookup): Promise<readonly ProviderDeposit[]> {
     const payload = await this.#client.request(
       'GET',
-      BITNOB_FUNDING_ENDPOINTS.listDeposits(providerAccountId),
+      BITNOB_FUNDING_ENDPOINTS.listDeposits(account.providerAccountId),
     );
 
     const parsed = depositListResponse.safeParse(payload);

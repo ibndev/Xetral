@@ -11,6 +11,7 @@ import { ProviderTimeoutError } from '@xetral/providers';
 import type {
   CreateVirtualAccountRequest,
   FundingPort,
+  DepositLookup,
   ProviderDeposit,
   VirtualAccount,
 } from '@xetral/providers';
@@ -128,8 +129,8 @@ class FakeFundingPort implements FundingPort {
     };
   }
 
-  async listDeposits(providerAccountId: string): Promise<readonly ProviderDeposit[]> {
-    return this.deposits.get(providerAccountId) ?? [];
+  async listDeposits(account: DepositLookup): Promise<readonly ProviderDeposit[]> {
+    return this.deposits.get(account.providerAccountId) ?? [];
   }
 }
 

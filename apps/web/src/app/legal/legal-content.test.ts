@@ -218,4 +218,28 @@ describe('the notice names exactly the companies that receive something', () => 
       ).not.toMatch(/not sent to any of them|No provider is given them/i);
     }
   });
+
+  it('names, in its own words, every company a BVN reaches', () => {
+    /*
+     * "Only Dojah is given your Bank Verification Number" was the absolute
+     * 075 retired, one company wider — and it went false the day naira
+     * account numbers moved to Flutterwave, which will not open a permanent
+     * account without one. The table carries the fact; the sentence a
+     * customer actually reads is prose in the page, and prose is what drifts.
+     * So every processor whose entry says it receives a BVN must be named in
+     * the privacy page's own text, not only in the rows rendered from data.
+     */
+    const [, privacy] = PAGES.find(([page]) => page === 'privacy') ?? ['', ''];
+    const bvnRecipients = PROCESSORS.filter((p) =>
+      /Bank Verification Number/.test(p.receives),
+    );
+    expect(bvnRecipients.length).toBeGreaterThan(0);
+    for (const p of bvnRecipients) {
+      const shortName = p.name.split(' ')[0] as string;
+      expect(privacy, `${p.name} receives a BVN and the page never says so`).toContain(
+        shortName,
+      );
+    }
+    expect(privacy).not.toMatch(/Only Dojah is given/);
+  });
 });

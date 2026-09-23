@@ -71,6 +71,11 @@ export type AdminAction =
   /* Deleting a retired published rate. On 064's must-say-why list: a retired
      rate can be republished, a deleted one cannot be recovered. */
   | 'price.delete'
+  /* A kind of money moved to another company — naira account numbers,
+     checkouts or payouts, per currency. Recorded with who it was before and
+     after, because "which rail was serving at 14:02" is the first question
+     anybody reading a failed payout asks. */
+  | 'route.change'
   | 'push.broadcast';
 
 export interface AuditEntry {
@@ -92,7 +97,8 @@ export interface AuditEntry {
     | 'dispute'
     | 'data_request'
     | 'broadcast'
-    | 'price';
+    | 'price'
+    | 'provider_route';
   readonly subjectId: string;
   readonly detail?: Record<string, unknown>;
   readonly reason?: string;

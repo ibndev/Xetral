@@ -28,7 +28,12 @@ import type { Pool } from 'pg';
 export async function approveKyc(
   pool: Pool,
   userId: string,
-  options: { readonly fullName?: string; readonly tier?: number } = {},
+  options: {
+    readonly fullName?: string;
+    readonly tier?: number;
+    /** A REAL sealed BVN, for a suite whose rail unseals one. */
+    readonly bvnSealed?: string;
+  } = {},
 ): Promise<void> {
   // A reviewer who is NOT the customer. `kyc_nobody_reviews_their_own` is a
   // CHECK, so a fixture reusing the customer's own id is refused — correctly,
@@ -45,9 +50,15 @@ export async function approveKyc(
        (user_id, full_name, date_of_birth, phone, bvn_sealed, bvn_last4,
         bvn_fingerprint, address, status, reviewed_by, reviewed_at)
      VALUES ($1::bigint, $2, '1990-01-01', '+2348031234567',
-             'v1:fixture-sealed-bvn', '1234', $3, '1 Test Street, Lagos',
+             $5, '1234', $3, '1 Test Street, Lagos',
              'approved', $4::bigint, now())`,
-    [userId, options.fullName ?? 'Ada Obi', fingerprint, reviewer.rows[0]?.id],
+    [
+      userId,
+      options.fullName ?? 'Ada Obi',
+      fingerprint,
+      reviewer.rows[0]?.id,
+      options.bvnSealed ?? 'v1:fixture-sealed-bvn',
+    ],
   );
 
   await pool.query(

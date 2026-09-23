@@ -31,6 +31,7 @@ shipped, that is called out explicitly.
 | 20 — The transfer nobody heard back about | ✅ | Flutterwave float to go live |
 | 21 — The code the transfer actually sent | ✅ | Transfers via API to be enabled |
 | 22 — The gate that was red by design | ✅ | |
+| 23 — Naira accounts on Flutterwave, and a switch for who carries what | ✅ | Flutterwave NGN static accounts to be enabled |
 
 All eleven phases are built, a **pre-deployment audit** (Phase 12) closed what
 building them phase by phase had left between the phases, and **Phase 13** is
@@ -2419,3 +2420,40 @@ ruleset and about an alert that fires on every declined card.
 
 **An operator need do nothing for this one.** It changes no schema, no
 setting and no provider.
+
+---
+
+## Phase 23 — Naira accounts on Flutterwave, and a switch for who carries what ✅
+
+The product owner's decision: naira account numbers open on Flutterwave by
+default, Bitnob is the alternative, and whoever is on call picks between them
+from the dashboard rather than in a release. Doing that exposed four faults
+that had nothing to do with Flutterwave, and each was silent.
+
+| File | What it is |
+|---|---|
+| `packages/ledger/sql/076_account_route.sql` | `account` as a route of its own |
+| `packages/ledger/sql/077_privacy_republish.sql` | the notice, now naming Flutterwave as a BVN recipient |
+| `apps/api/src/funding/flutterwave-deposit.service.ts` | a deposit into an account, credited on Flutterwave's answer |
+| `apps/api/src/routing/provider-routes.service.ts` | the route table as the dashboard reads and changes it |
+| `apps/web/src/app/admin/providers/page.tsx` | the comp's provider cards, and the switches |
+
+1. **Moving account numbers would have moved every naira checkout too**,
+   because both read `collect`. `account` is its own operation now.
+2. **A Flutterwave permanent account needs a BVN**, so it is a verified
+   customer's product there — refused with `kyc_required` before anything is
+   sent — and the privacy notice that said only Dojah receives one was
+   republished before the first one left.
+3. **Deposits into a Flutterwave account had nowhere to go.** They arrive as
+   `charge.completed` on the checkout URL and were dropped by the link settler.
+4. **The deposit sweep looked at the wrong accounts, asked Paystack the wrong
+   question and posted every currency as naira** — and Paystack's list, once
+   asked correctly, would have re-credited checkout top-ups under a second key.
+
+**Before this goes live, an operator must:** apply **076** and **077**; ask
+Flutterwave to enable NGN static virtual accounts on the live business; give
+them the `/v1/webhooks/flutterwave/deposits` URL for `charge.completed` if it
+is not already set; and decide on `/admin/providers` whether naira account
+numbers stay on Flutterwave (verified customers only) or go back to Paystack
+(tier 1 accounts for unverified customers).
+

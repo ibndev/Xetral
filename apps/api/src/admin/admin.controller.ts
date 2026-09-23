@@ -17,6 +17,8 @@ import type { AuthenticatedRequest } from '../auth/auth.guard.js';
 import { AdminService } from './admin.service.js';
 import { StaffService } from '../auth/staff.service.js';
 import { PushService } from '../push/push.service.js';
+import { ProviderRoutesService } from '../routing/provider-routes.service.js';
+import type { RouteRow } from '../routing/provider-routes.service.js';
 import { AuditService } from './audit.service.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { ConsentService } from '../consent/consent.service.js';
@@ -106,6 +108,13 @@ const recoverySchema = z
 
 const settingSchema = z.object({
   value: z.string().trim().min(1).max(500),
+});
+
+/** A route change. `transaction_pin` rides in the same body and is read by the guard. */
+const routeSchema = z.object({
+  operation: z.enum(['account', 'collect', 'payout']),
+  currency: z.string().trim().regex(/^[A-Za-z]{3,4}$/),
+  provider: z.string().trim().min(1).max(40),
 });
 
 /**
@@ -302,6 +311,7 @@ export class AdminController {
     @Inject(RecoveryService) private readonly recovery: RecoveryService,
     @Inject(StaffService) private readonly staffRoles: StaffService,
     @Inject(PushService) private readonly push: PushService,
+    @Inject(ProviderRoutesService) private readonly providerRoutes: ProviderRoutesService,
   ) {}
 
   /**
@@ -1365,6 +1375,49 @@ export class AdminController {
    * which is what makes "quiet because nothing is wrong" distinguishable from
    * "quiet because nothing is being called".
    */
+  /** Which company carries which money, and what else could. */
+  @Get('routes')
+  async routes(): Promise<{ routes: readonly RouteRow[] }> {
+    return { routes: await this.providerRoutes.list() };
+  }
+
+  /**
+   * Move one kind of money, in one currency, to another company.
+   *
+   * SWITCHING MOVES NOBODY: an account number already issued keeps receiving
+   * at the company that issued it, and a payout in flight settles on the rail
+   * recorded on its row. What changes is who serves the NEXT request — which
+   * is what makes this safe to flip during an incident.
+   */
+  @Post('routes')
+  @HttpCode(200)
+  async setRoute(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: unknown,
+  ): Promise<{ was: string | null; now: string }> {
+    const parsed = routeSchema.safeParse(body);
+    if (!parsed.success) throw invalid(parsed.error.issues);
+
+    const actor = claims(request).sub;
+    const changed = await this.providerRoutes.set({
+      operation: parsed.data.operation,
+      currency: parsed.data.currency,
+      provider: parsed.data.provider,
+      byUserUuid: actor,
+    });
+
+    const ip = ipOf(request);
+    await this.audit.record({
+      actorId: actor,
+      action: 'route.change',
+      subjectType: 'provider_route',
+      subjectId: `${parsed.data.operation}:${parsed.data.currency.toUpperCase()}`,
+      detail: { was: changed.was, now: changed.now },
+      ...(ip === undefined ? {} : { ip }),
+    });
+    return changed;
+  }
+
   @Get('providers')
   async providers(): Promise<{
     degraded: readonly unknown[];

@@ -35,6 +35,35 @@ const PAGES: Readonly<Record<string, string>> = {
   privacy: join(HERE, '../app/legal/privacy/page.tsx'),
 };
 
+/**
+ * THE WORDS A CUSTOMER READS ARE NOT ALL IN THE PAGE FILE.
+ *
+ * The privacy notice renders its list of recipients from `processors.ts`, so
+ * hashing `page.tsx` alone meant that list could be rewritten — a new company
+ * given a customer's BVN — under a version that stayed the same, with this
+ * test green. What is hashed is now every file whose text the notice renders,
+ * in a fixed order, so a change to any of them needs a new version.
+ *
+ * The TERMS are still the page alone, deliberately and for now: widening
+ * their hash would change it without changing a word, and republishing them
+ * asks every customer to agree again to the same text. Their next real
+ * republish adopts the wider hash.
+ */
+const RENDERS_FROM: Readonly<Record<string, readonly string[]>> = {
+  terms: [],
+  privacy: [
+    join(HERE, 'processors.ts'),
+    join(HERE, 'company.ts'),
+    join(HERE, 'retention-table.ts'),
+  ],
+};
+
+function documentHash(kind: string, page: string): string {
+  const hash = createHash('sha256').update(readFileSync(page));
+  for (const file of RENDERS_FROM[kind] ?? []) hash.update(readFileSync(file));
+  return hash.digest('hex');
+}
+
 /** The hash seeded for a kind, out of the INSERT. */
 function seededHash(kind: string): string | undefined {
   const match = new RegExp(`\\('${kind}',\\s*'[0-9-]+',\\s*\\n?\\s*'([0-9a-f]{64})'`).exec(SEED);
@@ -56,8 +85,7 @@ describe('every published consent document is the one that was hashed', () => {
 
   for (const [kind, path] of Object.entries(PAGES)) {
     it(`${kind} has not changed since it was published`, () => {
-      const hash = createHash('sha256').update(readFileSync(path)).digest('hex');
-      expect(seededHash(kind)).toBe(hash);
+      expect(seededHash(kind)).toBe(documentHash(kind, path));
     });
 
     it(`${kind} quotes the version it is published under`, () => {

@@ -2,11 +2,12 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { OnApplicationShutdown } from '@nestjs/common';
 import type { Pool } from 'pg';
 import { LedgerService, posting } from '@xetral/ledger';
-import type { FundingPort } from '@xetral/providers';
+import type { DepositLookup, FundingPort, ProviderDeposit } from '@xetral/providers';
 import { assertWithinCeiling, DepositCeilingError } from '@xetral/providers';
 import { money } from '@xetral/shared';
 import { API_CONFIG, DATABASE, FUNDING_PORT, LEDGER } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
+import { SettingsService } from '../settings/settings.service.js';
 
 /**
  * Finding deposits whose webhook never arrived.
@@ -41,6 +42,7 @@ export class DepositReconciliationService implements OnApplicationShutdown {
     @Inject(LEDGER) private readonly ledger: LedgerService,
     @Inject(FUNDING_PORT) private readonly port: FundingPort,
     @Inject(API_CONFIG) private readonly config: ApiConfig,
+    @Inject(SettingsService) private readonly settings: SettingsService,
   ) {}
 
   start(): void {
@@ -87,27 +89,41 @@ export class DepositReconciliationService implements OnApplicationShutdown {
   }
 
   async #sweepLocked(): Promise<DepositSweepReport> {
-    const accounts = await this.pool.query<{
-      id: string;
-      user_id: string;
-      provider_account_id: string;
-    }>(
-      `SELECT id, user_id, provider_account_id FROM virtual_accounts
-        WHERE status = 'active' AND provider = $1
+    /*
+     * EVERY RAIL'S ACCOUNTS, NOT JUST THE DEFAULT'S.
+     *
+     * This read `WHERE provider = port.provider` — and `port.provider` on the
+     * switch is the configured FALLBACK. So once a single account had been
+     * opened anywhere else, its lost webhooks were never looked for: the
+     * sweep ran, reported nothing and found nothing, which is exactly what a
+     * rail with no lost webhooks looks like. The moment naira account numbers
+     * move to Flutterwave that would have been every new account on the
+     * platform.
+     */
+    const accounts = await this.pool.query<SweptAccount>(
+      `SELECT id, user_id, provider, provider_account_id, provider_customer_ref, currency
+         FROM virtual_accounts
+        WHERE status = 'active'
         ORDER BY id LIMIT 500`,
-      [this.port.provider],
     );
 
     let credited = 0;
     let failed = 0;
+    let checked = 0;
 
     for (const account of accounts.rows) {
+      // A single-rail deployment can only ask its own rail; an account issued
+      // by another is one this build cannot read, and is skipped rather than
+      // asked about at a provider that never heard of it.
+      if (!this.#canAsk(account.provider)) continue;
+      checked += 1;
       try {
         credited += await this.#reconcile(account);
       } catch (error) {
         failed += 1;
         this.#logger.warn(
-          `could not re-check account ${account.provider_account_id}: ${describe(error)}`,
+          `could not re-check ${account.provider} account ${account.provider_account_id}: ` +
+            describe(error),
         );
       }
     }
@@ -117,53 +133,93 @@ export class DepositReconciliationService implements OnApplicationShutdown {
         `credited ${credited} deposit(s) whose webhook never arrived — check webhook delivery`,
       );
     }
-    return { accountsChecked: accounts.rows.length, credited, failed };
+    return { accountsChecked: checked, credited, failed };
   }
 
-  async #reconcile(account: {
-    id: string;
-    user_id: string;
-    provider_account_id: string;
-  }): Promise<number> {
-    const seen = await this.port.listDeposits(account.provider_account_id);
+  #canAsk(provider: string): boolean {
+    const switching = this.port as { providers?: readonly string[] };
+    if (switching.providers !== undefined) return switching.providers.includes(provider);
+    return this.port.provider === provider;
+  }
+
+  async #list(account: SweptAccount): Promise<readonly ProviderDeposit[]> {
+    const lookup = {
+      providerAccountId: account.provider_account_id,
+      // Paystack keys its transaction list on the CUSTOMER and Flutterwave on
+      // the reference the account was opened under. Passing only the account
+      // id — what this did — asked Paystack about a customer that does not
+      // exist.
+      providerCustomerRef: account.provider_customer_ref ?? undefined,
+    };
+    const switching = this.port as FundingPort & {
+      listDeposits(account: DepositLookup, provider?: string): Promise<readonly ProviderDeposit[]>;
+    };
+    return switching.listDeposits(lookup, account.provider);
+  }
+
+  async #reconcile(account: SweptAccount): Promise<number> {
+    const seen = await this.#list(account);
     let credited = 0;
 
     for (const deposit of seen) {
       const known = await this.pool.query(
         `SELECT 1 FROM deposits WHERE provider = $1 AND provider_reference = $2`,
-        [this.port.provider, deposit.providerReference],
+        [account.provider, deposit.providerReference],
       );
       if (known.rowCount !== 0) continue;
 
-      try {
-        assertWithinCeiling(deposit.amountMinor, this.config.depositCeilingKobo);
-      } catch (error) {
-        if (error instanceof DepositCeilingError) {
-          // Same rule as the webhook path: above the ceiling is a decision for
-          // a person. The sweep will keep finding it until one is made, which
-          // is the correct amount of nagging.
-          this.#logger.error(
-            `deposit ${deposit.providerReference} found by reconciliation is above the ` +
-              `ceiling and was NOT credited: ${error.message}`,
-          );
-          continue;
-        }
-        throw error;
+      /*
+       * THE ACCOUNT'S OWN CURRENCY, never naira by assumption. This posted
+       * every deposit as NGN — so a cedi account's 500 would have become 500
+       * kobo in a naira wallet, the kobo-and-cents mistake with a customer's
+       * balance on the end of it. A deposit that disagrees with its account is
+       * left for the webhook path, which holds it in suspense with the reason.
+       */
+      if (deposit.currency !== account.currency) {
+        this.#logger.error(
+          `deposit ${deposit.providerReference} is ${deposit.currency} on a ` +
+            `${account.currency} account and was NOT credited by the sweep`,
+        );
+        continue;
       }
 
-      const amount = money(deposit.amountMinor, 'NGN');
+      // The ceiling is published in kobo and says something about naira only
+      // — and it is read from SETTINGS, as the webhook reads it, so raising it
+      // for one expected transfer is not undone by the sweep.
+      if (deposit.currency === 'NGN') {
+        try {
+          assertWithinCeiling(deposit.amountMinor, await this.settings.depositCeilingKobo());
+        } catch (error) {
+          if (error instanceof DepositCeilingError) {
+            // Same rule as the webhook path: above the ceiling is a decision
+            // for a person. The sweep will keep finding it until one is made,
+            // which is the correct amount of nagging.
+            this.#logger.error(
+              `deposit ${deposit.providerReference} found by reconciliation is above the ` +
+                `ceiling and was NOT credited: ${error.message}`,
+            );
+            continue;
+          }
+          throw error;
+        }
+      }
+
+      const currency = deposit.currency;
       const posted = await this.ledger.post({
         // The SAME key the webhook would have used, so if the webhook arrives
         // late the ledger recognises it as a replay rather than crediting
         // twice. That shared derivation is the whole reason this is safe.
-        idempotencyKey: `${this.port.provider}:${deposit.providerReference}`,
+        idempotencyKey: `${account.provider}:${deposit.providerReference}`,
         kind: 'wallet_funding',
         occurredAt: deposit.occurredAt,
-        description: 'NGN deposit found by reconciliation',
+        description: `${currency} deposit found by reconciliation`,
         metadata: { provider_reference: deposit.providerReference, source: 'reconciliation' },
         postings: [
-          posting({ kind: 'customer_wallet', ownerId: account.user_id, currency: 'NGN' }, amount),
-          posting({ kind: 'provider_float', currency: 'NGN' }, money(-deposit.amountMinor, 'NGN')),
+          posting(
+            { kind: 'customer_wallet', ownerId: account.user_id, currency },
+            money(deposit.amountMinor, currency),
+          ),
+          posting({ kind: 'provider_float', currency }, money(-deposit.amountMinor, currency)),
         ],
       });
 
@@ -171,14 +227,15 @@ export class DepositReconciliationService implements OnApplicationShutdown {
         `INSERT INTO deposits
            (provider, provider_reference, user_id, virtual_account_id, amount_minor,
             currency, sender_name, sender_bank, sender_account, status, entry_id)
-         VALUES ($1, $2, $3::bigint, $4::bigint, $5::bigint, 'NGN', $6, $7, $8, 'credited', $9::bigint)
+         VALUES ($1, $2, $3::bigint, $4::bigint, $5::bigint, $6, $7, $8, $9, 'credited', $10::bigint)
          ON CONFLICT (provider, provider_reference) DO NOTHING`,
         [
-          this.port.provider,
+          account.provider,
           deposit.providerReference,
           account.user_id,
           account.id,
           deposit.amountMinor.toString(),
+          currency,
           deposit.senderName ?? null,
           deposit.senderBank ?? null,
           deposit.senderAccount ?? null,
@@ -191,6 +248,15 @@ export class DepositReconciliationService implements OnApplicationShutdown {
 
     return credited;
   }
+}
+
+interface SweptAccount {
+  readonly id: string;
+  readonly user_id: string;
+  readonly provider: string;
+  readonly provider_account_id: string;
+  readonly provider_customer_ref: string | null;
+  readonly currency: string;
 }
 
 function describe(error: unknown): string {

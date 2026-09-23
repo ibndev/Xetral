@@ -6,6 +6,7 @@ import {
 } from '../ports/errors.js';
 import { PAYSTACK_ENDPOINTS, isStaleCustomerRefusal, type PaystackClient } from './client.js';
 import type {
+  DepositLookup,
   CreateVirtualAccountRequest,
   FundingPort,
   ProviderDeposit,
@@ -102,6 +103,7 @@ const transactionListResponse = z.object({
     z.object({
       id: z.union([z.string(), z.number()]),
       reference: z.string().min(1),
+      channel: z.string().nullish(),
       /** Left `unknown` and narrowed by `depositToKobo`. A `z.number()` here
        *  would accept a value JSON.parse has already rounded and hand it on
        *  looking valid — and this one becomes a customer's balance. */
@@ -306,10 +308,20 @@ export class PaystackFundingAdapter implements FundingPort {
    * not accepted there. `providerAccountId` is therefore the customer code for
    * this adapter, which is stated here rather than assumed at the call site.
    */
-  async listDeposits(providerAccountId: string): Promise<readonly ProviderDeposit[]> {
+  async listDeposits(account: DepositLookup): Promise<readonly ProviderDeposit[]> {
+    /*
+     * THE CUSTOMER CODE, NEVER THE ACCOUNT ID. The sweep used to pass the
+     * dedicated-account id here, so every Paystack account was re-checked
+     * against a customer that does not exist. An account opened before 044
+     * recorded a code has nothing to ask about, and saying so is the honest
+     * answer rather than a query on the wrong key.
+     */
+    const customerCode = account.providerCustomerRef;
+    if (customerCode === undefined || customerCode === '') return [];
+
     const payload = await this.#client.request(
       'GET',
-      PAYSTACK_ENDPOINTS.transactions(providerAccountId),
+      PAYSTACK_ENDPOINTS.transactions(customerCode),
     );
 
     const parsed = transactionListResponse.safeParse(payload);
@@ -321,7 +333,18 @@ export class PaystackFundingAdapter implements FundingPort {
       );
     }
 
-    return parsed.data.data.map((row) => ({
+    /*
+     * ONLY MONEY THAT CAME INTO THE DEDICATED ACCOUNT.
+     *
+     * Paystack keys a customer on an EMAIL ADDRESS, so this list also holds
+     * every card and bank checkout the same person paid — including topping
+     * up their own wallet through their payment link, which is credited under
+     * `paystack:link:<reference>`. Posted again here under
+     * `paystack:<reference>` it is a DIFFERENT idempotency key, and the same
+     * money is credited twice. The webhook has refused anything but
+     * `dedicated_nuban` since 044; the sweep now asks the same question.
+     */
+    return parsed.data.data.filter((row) => row.channel === 'dedicated_nuban').map((row) => ({
       // THEIR reference, which is also what the webhook carries — so a late
       // delivery and this sweep produce the SAME ledger idempotency key and
       // the second one is a replay rather than a second credit. 013's

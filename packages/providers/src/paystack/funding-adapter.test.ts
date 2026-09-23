@@ -376,6 +376,7 @@ describe('reading deposits back for reconciliation', () => {
           {
             id: 1,
             reference: 'ps_ref_001',
+            channel: 'dedicated_nuban',
             amount: 500_000,
             currency: 'NGN',
             status: 'success',
@@ -386,7 +387,7 @@ describe('reading deposits back for reconciliation', () => {
       },
     ]);
 
-    const deposits = await adapter.listDeposits('CUS_abc');
+    const deposits = await adapter.listDeposits(lookup);
 
     expect(calls[0]?.path).toBe('/transaction?customer=CUS_abc&status=success');
     expect(deposits[0]?.providerReference).toBe('ps_ref_001');
@@ -398,8 +399,44 @@ describe('reading deposits back for reconciliation', () => {
     // This number becomes somebody's balance. By the time a decimal is a JS
     // number the precision is already gone.
     const { adapter } = adapterWith([
-      { status: true, data: [{ id: 1, reference: 'r', amount: 5000.5, currency: 'NGN' }] },
+      {
+        status: true,
+        data: [
+          { id: 1, reference: 'r', channel: 'dedicated_nuban', amount: 5000.5, currency: 'NGN' },
+        ],
+      },
     ]);
-    await expect(adapter.listDeposits('CUS_abc')).rejects.toThrow();
+    await expect(adapter.listDeposits(lookup)).rejects.toThrow();
+  });
+
+  it('leaves out a checkout the same customer paid, which is credited elsewhere', async () => {
+    // Paystack keys a customer on an email address, so a card top-up through
+    // the customer's own payment link is on this list too — and it has
+    // already been credited under `paystack:link:<reference>`. Returning it
+    // here would credit the same money a second time under another key.
+    const { adapter } = adapterWith([
+      {
+        status: true,
+        data: [
+          { id: 1, reference: 'card', channel: 'card', amount: 100_000, currency: 'NGN' },
+          { id: 2, reference: 'bank', channel: 'bank', amount: 100_000, currency: 'NGN' },
+          { id: 3, reference: 'nuban', channel: 'dedicated_nuban', amount: 100_000, currency: 'NGN' },
+        ],
+      },
+    ]);
+    const deposits = await adapter.listDeposits(lookup);
+    expect(deposits.map((d) => d.providerReference)).toEqual(['nuban']);
+  });
+
+  it('asks about the CUSTOMER, and asks nothing without one', async () => {
+    const { adapter, calls } = adapterWith([]);
+    const deposits = await adapter.listDeposits({
+      providerAccountId: '12345',
+      providerCustomerRef: undefined,
+    });
+    expect(deposits).toEqual([]);
+    expect(calls).toHaveLength(0);
   });
 });
+
+const lookup = { providerAccountId: '12345', providerCustomerRef: 'CUS_abc' } as const;

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { isCurrency, money, toMajor } from '@xetral/shared';
 import type { Currency } from '@xetral/shared';
+import { NETWORK_NAME_HINTS } from '../ports/mobile-money.js';
 import { ProviderContractError, ProviderRejectedError } from '../ports/errors.js';
 import type {
   BeneficiaryLookup,
@@ -132,17 +133,8 @@ const RESOLVE_TELCO_ALIASES: Readonly<Record<string, readonly string[]>> = {
  * sent verbatim. That is why searching for several is safe here where
  * guessing one would not be.
  */
-const NETWORK_NAME_HINTS: Readonly<Record<string, readonly string[]>> = {
-  MTN: ['MTN'],
-  /* Vodafone Ghana is Telecel now, and their surfaces disagree about it. */
-  VOD: ['VODAFONE', 'TELECEL', 'VOD'],
-  /* AirtelTigo, from the Airtel and Tigo merger. */
-  ATL: ['AIRTELTIGO', 'TIGO', 'AIRTEL', 'ATL'],
-  /* M-PESA is Safaricom's, and their catalogue may name either. The hyphen is
-     not assumed: `MPESA` is matched as well, because a name is matched by
-     CONTAINMENT and "M-PESA" does not contain "MPESA". */
-  MPS: ['M-PESA', 'MPESA', 'SAFARICOM', 'MPS'],
-};
+/* The table itself lives in `ports/mobile-money.ts`, because Bitnob's
+ * payout adapter has to read its own catalogue the same way. */
 
 /**
  * A COUNTRY'S DIALLING CODE, because the two calls want the number written

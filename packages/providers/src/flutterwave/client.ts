@@ -125,6 +125,25 @@ export const FLUTTERWAVE_ENDPOINTS = {
   verifyByReference: (txRef: string) =>
     `/v3/transactions/verify_by_reference?tx_ref=${encodeURIComponent(txRef)}`,
 
+  /**
+   * DEDICATED ACCOUNT NUMBERS, and the two reads a deposit into one needs.
+   *
+   * A permanent account is one `tx_ref` that many payments arrive under, so
+   * `verifyByReference` — which answers ONE transaction — cannot confirm a
+   * deposit into it. A deposit is verified by THEIR transaction id instead,
+   * and the account's history is listed by OUR `tx_ref`. Both are published v3
+   * paths (`/v3/transactions/:id/verify`, `/v3/transactions?tx_ref=`),
+   * September 2026; the list's filter is additionally re-checked row by row
+   * in the adapter, because a filter a server ignores returns everybody's
+   * money.
+   */
+  virtualAccounts: '/v3/virtual-account-numbers',
+  virtualAccount: (orderRef: string) =>
+    `/v3/virtual-account-numbers/${encodeURIComponent(orderRef)}`,
+  verifyTransaction: (id: string) => `/v3/transactions/${encodeURIComponent(id)}/verify`,
+  transactionsByReference: (txRef: string) =>
+    `/v3/transactions?tx_ref=${encodeURIComponent(txRef)}&status=successful`,
+
   /** Paying out. `country` is an ISO code here — NG, GH, KE — unlike
    *  Paystack, whose `country` is the lowercase NAME. */
   banks: (country: string) => `/v3/banks/${encodeURIComponent(country)}`,

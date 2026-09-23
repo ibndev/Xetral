@@ -77,6 +77,8 @@ describe('reading an event', () => {
       event: 'charge.completed',
       data: { id: 1, tx_ref: 'x', amount: 999999, currency: 'GHS' },
     });
-    expect(Object.keys(event ?? {}).sort()).toEqual(['kind', 'reference', 'status']);
+    // The transaction id is an IDENTIFIER — what a deposit is re-read BY — and
+    // never a figure anything is credited with.
+    expect(Object.keys(event ?? {}).sort()).toEqual(['kind', 'reference', 'status', 'transactionId']);
   });
 });

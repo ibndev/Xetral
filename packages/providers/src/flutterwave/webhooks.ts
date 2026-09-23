@@ -79,6 +79,12 @@ export interface FlutterwaveEvent {
   /** OUR reference — `tx_ref` on a charge, `reference` on a transfer. */
   readonly reference: string | undefined;
   readonly status: string | undefined;
+  /**
+   * THEIR transaction id — what a deposit into a permanent account is
+   * re-read by, because every payment into one shares the account's
+   * `tx_ref`. Carried as text: it is an identifier, never arithmetic.
+   */
+  readonly transactionId: string | undefined;
 }
 
 export function parseFlutterwaveEvent(payload: unknown): FlutterwaveEvent | undefined {
@@ -95,5 +101,6 @@ export function parseFlutterwaveEvent(payload: unknown): FlutterwaveEvent | unde
      */
     reference: data?.tx_ref ?? data?.reference,
     status: data?.status,
+    transactionId: data?.id === undefined ? undefined : String(data.id),
   };
 }

@@ -401,6 +401,8 @@ function sentenceFor(error: ApiError): string {
        * building, and 006's rule keeps it in the log.
        */
       return 'We cannot send to this destination right now \u2014 the problem is on our side, not with your account or the number you entered. Nothing has left your balance. Please try again shortly.';
+    case 'provider_not_available':
+      return 'That company cannot carry this on this deployment. Pick one of the options shown.';
     case 'payout_provider_unavailable':
       // Not the customer's number and not their account. Saying "we could not
       // find that account" for a rail that was never reachable sends somebody

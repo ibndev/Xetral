@@ -6,6 +6,7 @@ import { ProviderCredentialService } from '../settings/provider-credentials.serv
 import { flutterwaveWebhookHash } from '../app.module.js';
 import { PaymentLinkService } from '../pay/payment-link.service.js';
 import { PayoutService } from '../payouts/payout.service.js';
+import { FlutterwaveDepositService } from './flutterwave-deposit.service.js';
 
 /**
  * Money arriving through Flutterwave.
@@ -41,6 +42,8 @@ export class FlutterwaveWebhookService {
     private readonly credentials: ProviderCredentialService,
     @Inject(PaymentLinkService) private readonly links: PaymentLinkService,
     @Inject(PayoutService) private readonly payouts: PayoutService,
+    @Inject(FlutterwaveDepositService)
+    private readonly deposits: FlutterwaveDepositService,
   ) {}
 
   async handle(rawBody: string, headers: Record<string, string | undefined>): Promise<void> {
@@ -103,6 +106,41 @@ export class FlutterwaveWebhookService {
     if (event.kind.startsWith('transfer')) {
       const outcome = await this.payouts.resolveByReference(event.reference);
       this.#logger.log(`flutterwave transfer ${event.reference}: ${outcome}`);
+      return;
+    }
+
+    /*
+     * A TRANSFER INTO A CUSTOMER'S OWN ACCOUNT NUMBER is a charge too, on the
+     * same URL, and the link settler has never heard of one. The reference
+     * decides only whether to ASK: the deposit is re-read by Flutterwave's
+     * transaction id and credited on their answer, never on this body.
+     *
+     * AN UNSETTLED ONE IS RETHROWN AS A 500 SO THEY RETRY. A `charge.completed`
+     * that their API does not yet call successful is a deposit in flight;
+     * acknowledging it would drop real money on the floor with nothing ever
+     * asking again but a sweep. Phase 5's rule about an authorization the card
+     * cannot yet cover, on the rail that creates money.
+     */
+    if (await this.deposits.isAccountReference(event.reference)) {
+      if (event.status !== undefined && event.status !== 'successful') {
+        // A failed or abandoned transfer is not money, and asking about it
+        // would only confirm that. Acknowledged, so it is not retried for ever.
+        this.#logger.log(`flutterwave deposit event for ${event.reference}: ${event.status}`);
+        return;
+      }
+      if (event.transactionId === undefined) {
+        this.#logger.warn(
+          `a deposit event for account ${event.reference} carried no transaction id`,
+        );
+        return;
+      }
+      const outcome = await this.deposits.credit(event.transactionId);
+      this.#logger.log(`flutterwave deposit ${event.transactionId}: ${outcome}`);
+      if (outcome === 'not_settled') {
+        throw new Error(
+          `flutterwave deposit ${event.transactionId} is not settled at Flutterwave yet`,
+        );
+      }
       return;
     }
 

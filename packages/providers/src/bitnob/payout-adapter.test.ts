@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { ngn } from '@xetral/shared';
+import { money, ngn } from '@xetral/shared';
 
 import { BitnobPayoutAdapter } from './payout-adapter.js';
 import { BitnobClient, type FetchLike } from './client.js';
-import { ProviderContractError } from '../ports/errors.js';
+import { ProviderContractError, ProviderRejectedError } from '../ports/errors.js';
 
 interface Call {
   readonly url: string;
@@ -194,3 +194,47 @@ describe('what the provider says it became', () => {
     expect((await adapter.status('po_1')).failureReason).toBe('the provider did not say');
   });
 });
+
+describe('a mobile money wallet, routed to Bitnob', () => {
+  const wallet = {
+    country: 'GH',
+    bankCode: 'VOD',
+    accountNumber: '233501234567',
+    accountName: undefined,
+    amount: money(5_000n, 'GHS'),
+    reference: 'xetral-payout-9-momo',
+  } as const;
+
+  it('sends BITNOB’S code for the network, matched by name, never ours', async () => {
+    const { adapter, calls } = adapterWith([
+      { data: [{ code: 'GH-MTN-01', name: 'MTN Mobile Money' }, { code: 'GH-TCL-02', name: 'Telecel Cash' }] },
+      QUOTE,
+      INITIALIZED,
+      INITIALIZED,
+    ]);
+    await adapter.send(wallet);
+
+    expect(new URL(calls[0]!.url).pathname).toBe('/api/payouts/banks/GH');
+    expect((calls[2]?.body as { beneficiary: { bank_code: string } }).beneficiary.bank_code).toBe(
+      'GH-TCL-02',
+    );
+  });
+
+  it('REFUSES before a quote when their list names no such network', async () => {
+    // The call that cannot be recalled is never made on a guess.
+    const { adapter, calls } = adapterWith([{ data: [{ code: '058', name: 'GTBank' }] }]);
+    await expect(adapter.send(wallet)).rejects.toMatchObject({
+      providerCode: 'unsupported_destination',
+    });
+    expect(calls.some((c) => c.url.includes('/quotes'))).toBe(false);
+  });
+
+  it('says a wallet has no name enquiry rather than asking the bank lookup', async () => {
+    const { adapter, calls } = adapterWith([]);
+    const refusal = adapter.lookup('GH', 'MTN', '233501234567');
+    await expect(refusal).rejects.toBeInstanceOf(ProviderRejectedError);
+    await expect(refusal).rejects.toMatchObject({ providerCode: 'name_unavailable' });
+    expect(calls).toHaveLength(0);
+  });
+});
+

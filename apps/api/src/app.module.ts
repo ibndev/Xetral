@@ -93,6 +93,8 @@ import { PlatformFloatService } from './payouts/platform-float.service.js';
 import { RecipientBookService } from './recipients/recipient-book.service.js';
 import { PaystackWebhookService } from './funding/paystack-webhook.service.js';
 import { FlutterwaveWebhookService } from './funding/flutterwave-webhook.service.js';
+import { FlutterwaveDepositService } from './funding/flutterwave-deposit.service.js';
+import { ProviderRoutesService } from './routing/provider-routes.service.js';
 import { SwitchingFundingPort } from './funding/funding-provider.js';
 import { SwitchingPayoutPort } from './payouts/payout-provider.js';
 import { PayoutController } from './payouts/payout.controller.js';
@@ -630,7 +632,11 @@ export function createFundingPort(
     // Paystack unless this deployment has no Paystack configuration at all,
     // in which case falling back to a rail that cannot answer would be worse
     // than falling back to the one that can.
-    fallback: adapters.has('paystack') ? 'paystack' : 'bitnob',
+    // The first rail this deployment HAS. It named `bitnob` whenever Paystack
+    // was absent, so a deployment holding only a Flutterwave key fell back to
+    // an adapter it did not have and refused every account with an error
+    // about Bitnob.
+    fallback: ['paystack', 'flutterwave', 'bitnob'].find((p) => adapters.has(p)) ?? 'paystack',
     /*
      * PASSED ON, AND THE FIRST VERSION OF THIS DID NOT.
      *
@@ -1464,6 +1470,8 @@ export class AppModule {
         DepositWebhookService,
         PaystackWebhookService,
         FlutterwaveWebhookService,
+        FlutterwaveDepositService,
+        ProviderRoutesService,
         CryptoService,
         PayoutService,
         PlatformFloatService,

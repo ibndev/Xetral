@@ -21,6 +21,7 @@ import {
 import type { FundingCustomer, FundingPort } from '@xetral/providers';
 import { CURRENCIES, toMajor } from '@xetral/shared';
 import type { Currency } from '@xetral/shared';
+import { open } from '@xetral/identity';
 import { API_CONFIG, DATABASE, FUNDING_PORT, LEDGER } from '../tokens.js';
 import { isMissingSchema, reportMissingSchema } from '../database-schema.js';
 import type { ApiConfig } from '../config.js';
@@ -212,7 +213,7 @@ export class FundingService {
      * The mapping is still PASSED when we have one — a customer who has been
      * through KYC should not get a second provider-side customer record.
      */
-    const customer = await this.#fundingCustomer(userId);
+    const customer = await this.#fundingCustomer(userId, await this.#railFor(currency));
 
     let issued;
     try {
@@ -609,7 +610,7 @@ export class FundingService {
     return this.port.provider;
   }
 
-  async #fundingCustomer(userId: string): Promise<FundingCustomer> {
+  async #fundingCustomer(userId: string, rail: string): Promise<FundingCustomer> {
     const result = await this.pool.query<{
       email: string | null;
       full_name: string | null;
@@ -620,7 +621,13 @@ export class FundingService {
               (SELECT pc.provider_customer_id FROM provider_customers pc
                 WHERE pc.user_id = u.id AND pc.provider = $2) AS provider_customer_id
          FROM users u WHERE u.id = $1::bigint`,
-      [userId, this.port.provider],
+      /*
+       * THE RAIL THAT WILL SERVE, not `port.provider` — which is the switch's
+       * configured DEFAULT. Asking about the default passed Paystack's mapping
+       * (none) to a Bitnob request, so a verified customer was refused by
+       * Bitnob as unverified whenever the default and the route differed.
+       */
+      [userId, rail],
     );
     const row = result.rows[0];
     if (row === undefined) throw new NotFoundException({ error: 'not_found' });
@@ -640,7 +647,45 @@ export class FundingService {
       lastName,
       phone: row.phone ?? undefined,
       providerCustomerId: row.provider_customer_id ?? undefined,
+      bvn: () => this.#approvedBvn(userId),
     };
+  }
+
+  /**
+   * The customer's BVN, unsealed — ONLY for a rail that has asked for it.
+   *
+   * From an APPROVED submission and no other: a pending one is a claim nobody
+   * has checked, and sending it to a bank opens an account in whatever name
+   * was typed. Undefined rather than a throw when there is none, so the
+   * adapter that needs it refuses with `kyc_required` in its own words.
+   *
+   * The plaintext lives for one request and is never logged, returned or
+   * stored; the sealed column is the only place it rests.
+   */
+  async #approvedBvn(userId: string): Promise<string | undefined> {
+    const keyring = this.config.encryptionKeyring;
+    if (keyring === undefined) return undefined;
+    const found = await this.pool.query<{ bvn_sealed: string }>(
+      `SELECT bvn_sealed FROM kyc_submissions
+        WHERE user_id = $1::bigint AND status = 'approved'
+        ORDER BY id DESC LIMIT 1`,
+      [userId],
+    );
+    const sealed = found.rows[0]?.bvn_sealed;
+    if (sealed === undefined) return undefined;
+    try {
+      return open(sealed, keyring);
+    } catch (error: unknown) {
+      // A sealed value this keyring cannot open — a key version retired while
+      // rows still carried it. Said LOUDLY and never with the value; the
+      // adapter then refuses as for a customer with no BVN, because sending
+      // nothing is the only safe thing to send.
+      this.#logger.error(
+        `the approved BVN for user ${userId} could not be unsealed: ` +
+          (error instanceof Error ? error.message : String(error)),
+      );
+      return undefined;
+    }
   }
 
   async #activeUserId(uuid: string): Promise<string> {

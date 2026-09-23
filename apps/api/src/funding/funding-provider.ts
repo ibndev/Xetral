@@ -1,9 +1,12 @@
 import { Logger } from '@nestjs/common';
 import type { ProviderRouterService } from '../routing/provider-router.service.js';
+import { supportsDepositVerification } from '@xetral/providers';
 import type {
   CreateVirtualAccountRequest,
+  DepositLookup,
   FundingPort,
   ProviderDeposit,
+  VerifiedDeposit,
   VirtualAccount,
 } from '@xetral/providers';
 import type { SettingsService } from '../settings/settings.service.js';
@@ -84,16 +87,29 @@ export class SwitchingFundingPort implements FundingPort {
    */
   async providerForCurrency(currency: string): Promise<string> {
     if (this.#router !== undefined) {
-      const routed = await this.#router.providerFor('collect', currency);
-      if (routed !== undefined && this.#adapters.has(routed)) return routed;
-      if (routed !== undefined) {
-        this.#logger.warn(
-          `provider_routes collects ${currency} through '${routed}', which this ` +
-            `deployment has no adapter for. Falling back.`,
-        );
+      /*
+       * `account` FIRST, then `collect`. 076 made "who opens a naira account
+       * number" its own route so it can move to Flutterwave without taking
+       * every naira payment link with it. A currency with no `account` row is
+       * answered by `collect`, which is exactly how it was answered before.
+       */
+      for (const operation of ['account', 'collect'] as const) {
+        const routed = await this.#router.providerFor(operation, currency);
+        if (routed !== undefined && this.#adapters.has(routed)) return routed;
+        if (routed !== undefined) {
+          this.#logger.warn(
+            `provider_routes '${operation}' for ${currency} names '${routed}', which ` +
+              `this deployment has no adapter for. Falling back.`,
+          );
+        }
       }
     }
     return this.activeProvider();
+  }
+
+  /** Which rails this deployment can open an account with, for the dashboard. */
+  get providers(): readonly string[] {
+    return [...this.#adapters.keys()];
   }
 
   /**
@@ -150,12 +166,24 @@ export class SwitchingFundingPort implements FundingPort {
   }
 
   async listDeposits(
-    providerAccountId: string,
+    account: DepositLookup,
     provider?: string,
   ): Promise<readonly ProviderDeposit[]> {
-    return this.#adapterFor(provider ?? (await this.activeProvider())).listDeposits(
-      providerAccountId,
-    );
+    return this.#adapterFor(provider ?? (await this.activeProvider())).listDeposits(account);
+  }
+
+  /**
+   * A deposit re-read from the rail that took it — dispatched by NAME, never
+   * by the setting, because a transaction id means something only to its
+   * issuer. Undefined where that rail has nothing to re-read.
+   */
+  async verifyDepositAt(
+    provider: string,
+    providerReference: string,
+  ): Promise<VerifiedDeposit | undefined> {
+    const adapter = this.#adapterFor(provider);
+    if (!supportsDepositVerification(adapter)) return undefined;
+    return adapter.verifyDeposit(providerReference);
   }
 
   #adapterFor(provider: string): FundingPort {

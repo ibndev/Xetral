@@ -40,8 +40,12 @@ INSERT INTO consent_documents (kind, version, body_sha256, summary) VALUES
   -- asked about is a change nobody agreed to. THE TERMS ARE UNTOUCHED, and
   -- deliberately — republishing them for a document that did not change would
   -- ask every customer to agree again to the same words.
-  ('privacy', '2026-09-20',
-   'eb6c32bfbc357c5a8dd85bc3bbe04d3c9f23da7d7bdaf0be6ad3202a3baf6ece',
+  -- 077's, and the first hashed over what the page RENDERS as well as the
+  -- page itself: the recipient list lives in `lib/processors.ts`, and a hash
+  -- of `page.tsx` alone let that list change under an unchanged version. It
+  -- names Flutterwave as receiving a BVN, which it does from 076 on.
+  ('privacy', '2026-09-23',
+   'a8891157983f45a907bc29e6787aefc836f934df1d2ba0dbc688db60979f6a56',
    'What personal data Xetral Ltd holds, why, exactly which companies receive '
    'it and what reaches them, how long it is kept, and how to get a copy or '
    'have it erased.'),
