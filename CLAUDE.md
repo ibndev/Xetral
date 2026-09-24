@@ -2659,9 +2659,8 @@ tokens at the top of `globals.css` and `theme.ts`.
 - **A FIELD IS WHITE WITH A VISIBLE EDGE**, on the page and in a card. A tinted
   borderless field was invisible on the tinted ground — the sign-in email box
   disappeared first.
-- **THE TOTAL IS A GRADIENT HERO IN LIGHT ONLY.** In dark the glow is the only
-  light on black and works; on the pale ground it was a smudge. The phone draws
-  it with react-native-svg, which it already ships for the flags.
+- **THE TOTAL HAS NO CARD** — see "The home screen's figure" below; the
+  gradient hero and the black card that followed it are both gone.
 - **A ROW WEARS WHAT IT IS.** `entryMark(kind, outgoing)` in `@xetral/client`
   names an icon and a tone per entry kind for both apps. The tone is CATEGORY,
   not direction — direction is already the amount's colour.
@@ -2680,14 +2679,37 @@ tokens at the top of `globals.css` and `theme.ts`.
   beside a black accent read as two brands on one screen. They are graphite
   and silver now. `--info`'s blue and the other semantic colours are
   deliberately NOT changed: a notice is not the accent.
-- **THE TOTAL IS A BLACK CARD IN BOTH THEMES.** Near-black metal with a silver
-  sheen in light; GRAPHITE with a silver hairline in dark, because black on a
-  black page is no card at all. The figure is white at 800, the minor units
-  and label silver. The web's `.hero` and the phone's `HERO`/`HeroGround`
-  carry the same values.
 - **IN DARK THE ACCENT IS SILVER WITH NEAR-BLACK TYPE**, a shade off pure white
   so a filled action never collides with `--brand`. `palette-parity.test.ts`
   still holds the two apps to the same hex values.
+
+### The home screen's figure — non-obvious rules
+
+`.hero` in `apps/web/src/app/globals.css`, `Figure` in `apps/mobile/app/wallet.tsx`,
+the font in `apps/web/src/app/layout.tsx` and `font.balance` in `theme.ts`.
+
+- **THE TOTAL IS NOT IN A CARD.** The home screen was cards on cards — a
+  balance card, a rail of currency cards, a grid of tiles — and the product
+  owner called it busy. The figure sits centred on the page in the theme's
+  own ink, and the four actions are small ROUND buttons centred directly
+  beneath it, never a row spread to the screen's edges.
+- **IT IS SET IN JOST BOLD AT 48, AS A STAND-IN FOR PAYPAL'S FIGURE.** The
+  product owner asked for PayPal's balance font. PayPal Sans Big, and since
+  the 2024 rebrand PayPal Pro (built on a Futura-lineage geometric), are
+  licensed to PayPal alone and cannot ship. Jost is the SIL OFL
+  Futura-lineage geometric. One static weight on each platform — the web's
+  `Jost-Bold.woff2`, and the phone's TTF converted from that same file — for
+  one line on one screen; the licence sits beside both.
+- **ONE INK FOR THE WHOLE FIGURE.** Elsewhere the minor units are quieter than
+  the major; on the headline a greyed ".52" read as a figure half faded out.
+- **IT STEPS DOWN AS IT GROWS, never cut.** Jost Bold at 48 draws about
+  eleven characters across 320px; `heroFit` drops a longer total to 38, 32 or
+  26, measured at 320px, and the phone uses `adjustsFontSizeToFit`.
+- **A CURRENCY CARD SHOWS NO HOVER OR PRESS STATE.** `button:hover:where(…)`
+  scores (0,1,1) and beats `.ccy-card` at (0,1,0), so sliding a thumb across
+  the rail flashed every card it crossed in the accent fill. `.ccy-card`
+  restates its own background on `:hover`, `:active` and `:focus`, and the
+  press does not shrink it, because a swipe is not a tap.
 
 ### Metrics — non-obvious rules
 

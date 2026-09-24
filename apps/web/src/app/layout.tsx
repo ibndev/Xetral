@@ -72,6 +72,24 @@ const manrope = localFont({
   weight: '200 800',
 });
 
+/*
+ * THE TOTAL BALANCE IS SET IN JOST BOLD, and only the total balance.
+ *
+ * The product owner asked for PayPal's balance figure. PayPal's faces —
+ * PayPal Sans Big, and since the 2024 rebrand PayPal Pro, built on a
+ * Futura-lineage geometric — are licensed exclusively to PayPal, so they
+ * cannot ship here. Jost is the open (SIL OFL) Futura-lineage geometric, and
+ * at 700 it carries the same confident, round-bowled figure. One static
+ * weight, latin subset, 10KB: it draws one line on one screen, and a
+ * variable file for that would be forty kilobytes of weights nobody asks for.
+ */
+const jost = localFont({
+  src: './fonts/Jost-Bold.woff2',
+  variable: '--font-jost',
+  display: 'swap',
+  weight: '700',
+});
+
 const grotesk = localFont({
   src: './fonts/SpaceGrotesk.woff2',
   variable: '--font-grotesk',
@@ -152,7 +170,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
     <html
       lang="en"
       data-theme="light"
-      className={`${manrope.variable} ${grotesk.variable} ${inter.variable} ${spline.variable}`}
+      className={`${manrope.variable} ${grotesk.variable} ${inter.variable} ${spline.variable} ${jost.variable}`}
       suppressHydrationWarning
     >
       <head>

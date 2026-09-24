@@ -270,6 +270,8 @@
      and a figure and is what the comp chose; the monospace fallbacks stay
      for a browser that has neither. */
   --font-mono:    var(--font-grotesk), 'Noto Sans Mono', 'DejaVu Sans Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* The home screen's total, and nothing else — see `layout.tsx` on Jost. */
+  --font-balance: var(--font-jost), var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
 
   /* Motion — one curve and three durations, so nothing in the product moves
      to a timing nobody chose. */
@@ -5631,6 +5633,21 @@ html, body { overflow-x: hidden; }
   box-shadow: 0 0 0 3px var(--iris-glow);
 }
 .ccy-card .ccy-top { display: flex; align-items: center; gap: 9px; }
+/*
+ * NO COLOUR ON HOVER OR PRESS. `button:hover:where(…)` scores (0,1,1) and
+ * `.ccy-card` (0,1,0), so the bare rule WON: sliding a thumb across the rail
+ * is a hover on a touch screen, and every card it crossed flashed the accent
+ * fill — black in light, silver in dark. The selection is the only state a
+ * card shows; each is restated at (0,2,0) or above so the fill cannot return,
+ * and the press does not shrink it either, because a swipe is not a tap.
+ */
+.ccy-card:hover, .ccy-card:active, .ccy-card:focus {
+  background: var(--surface);
+  transform: none;
+}
+.ccy-card.on:hover, .ccy-card.on:active, .ccy-card.on:focus {
+  background: linear-gradient(150deg, var(--card-grad-1), var(--card-grad-2));
+}
 .ccy-card .ccy-code { display: block; font-size: 14px; font-weight: 700; }
 .ccy-card .ccy-name { display: block; font-size: 11px; font-weight: 500; color: var(--text-3); }
 /*
@@ -5669,7 +5686,7 @@ html, body { overflow-x: hidden; }
  * Send is what this app is for; the other three are near it because they are
  * near it in somebody's head, not because they are equal to it.
  */
-.act-row { display: flex; justify-content: space-between; padding: 22px 10px 8px; }
+.act-row { display: flex; justify-content: center; gap: 26px; padding: 20px 0 6px; }
 /*
  * THE FOUR ACTIONS STAY TOGETHER ON A LAPTOP.
  *
@@ -5679,9 +5696,9 @@ html, body { overflow-x: hidden; }
  * reading as one control. Capped and left-aligned, the row is the same shape
  * at every width — which is the point of one design across three countries.
  */
-@media (min-width: 720px) {
-  .act-row { justify-content: flex-start; gap: 44px; padding: 26px 0 8px; }
-}
+/* SMALL ROUND BUTTONS, CENTRED UNDER THE BALANCE, at every width — they
+   belong to the figure above them, not to the edges of the screen, so the
+   row never stretches edge to edge on a phone or spreads on a laptop. */
 .act {
   display: flex; flex-direction: column; align-items: center; gap: 9px;
   background: none; border: none; padding: 0;
@@ -5692,8 +5709,8 @@ html, body { overflow-x: hidden; }
 }
 .act .act-ico {
   display: grid; place-items: center;
-  width: 54px; height: 54px;
-  border-radius: 18px;
+  width: 50px; height: 50px;
+  border-radius: 50%;
   background: var(--surface-2);
   border: 1px solid var(--edge);
   color: var(--text);
@@ -7035,66 +7052,53 @@ html:not([data-theme='dark']) .tabbar {
   box-shadow: 0 -6px 20px -14px rgba(16, 24, 40, .18);
 }
 
-/* ── THE TOTAL BALANCE, as a hero ────────────────────────────────────────
+/* ── THE TOTAL BALANCE, with no card ─────────────────────────────────────
  *
- * A BLACK CARD, IN BOTH THEMES. The brand is black with silver as its second
- * colour, and this is the one surface on the home screen that should carry
- * it at full weight: near-black metal with a cool silver sheen top right, two
- * faint silver rings, and the figure in white at 800. It was a violet
- * gradient in light and a violet glow on black in dark, and neither was the
- * brand.
- *
- * In dark the card is GRAPHITE rather than black, with a silver hairline:
- * true black on a true-black page would be no card at all. Same shape, same
- * type, same chip — only the metal is a shade lighter.
+ * THE FIGURE IS THE HERO, NOT A BOX AROUND IT. The home screen stacked a
+ * balance card, a rail of currency cards and a grid of tiles — cards on cards,
+ * which the product owner rightly called busy. The total now sits centred on
+ * the page itself, in Jost Bold at 48px (the PayPal-style figure; see
+ * `layout.tsx`), in the theme's own ink so it commands on white and on black
+ * alike, with the four round actions directly beneath it.
  */
 .hero {
   position: relative;
-  margin-top: 6px;
-  padding: 18px 20px 20px;
-  border-radius: 24px;
-  overflow: hidden;
-  color: #FFFFFF;
-  background:
-    radial-gradient(120% 140% at 100% 0%, rgba(214, 219, 228, .20) 0%, transparent 46%),
-    radial-gradient(90% 120% at 0% 100%, rgba(0, 0, 0, .55) 0%, transparent 60%),
-    linear-gradient(135deg, #050506 0%, #141518 55%, #2A2C31 100%);
-  box-shadow: 0 20px 40px -22px rgba(0, 0, 0, .55);
+  margin-top: 2px;
+  text-align: center;
 }
-[data-theme='dark'] .hero {
-  background:
-    radial-gradient(120% 140% at 100% 0%, rgba(214, 219, 228, .12) 0%, transparent 46%),
-    linear-gradient(135deg, #1E1F23 0%, #121316 55%, #08090A 100%);
-  box-shadow: inset 0 0 0 1px rgba(214, 219, 228, .14);
+.hero .balance-head { justify-content: center; }
+.hero .balance-value {
+  font-family: var(--font-balance);
+  font-weight: 700;
+  font-size: 48px;
+  letter-spacing: -0.015em;
+  line-height: 1.05;
+  color: var(--text);
+  margin: 4px 0 0;
+  font-variant-numeric: normal;
 }
+/* ONE INK FOR THE WHOLE FIGURE, as PayPal sets it. Elsewhere the kobo is
+   quieter than the naira; on the headline a greyed ".52" read as a figure
+   half faded out, which is the opposite of commanding. */
+.hero .balance-value .minor { color: inherit; }
+.hero .balance-value .skeleton { margin: 0 auto; }
+/* A longer total steps down rather than overflowing a 320px handset; see
+   `heroFit` in `wallet/page.tsx`. */
+.hero .balance-value.fit-1 { font-size: 38px; }
+.hero .balance-value.fit-2 { font-size: 32px; }
+.hero .balance-value.fit-3 { font-size: 26px; }
 .balance-unavailable { color: var(--text-3); }
-/* Two faint silver rings, top right: texture, not decoration you read. */
-.hero::after {
-  content: '';
-  position: absolute;
-  top: -70px; right: -60px;
-  width: 220px; height: 220px;
-  border-radius: 50%;
-  border: 1px solid rgba(214, 219, 228, .16);
-  box-shadow: 0 0 0 28px rgba(214, 219, 228, .045);
-  pointer-events: none;
-}
 .glow-wrap > .glow { display: none; }
-.hero .balance-head .balance-label { color: #B9BEC8; }
-.hero .balance-value { color: #FFFFFF; font-weight: 800; }
-.hero .balance-value .minor { color: #9CA1AB; }
-.hero .balance-unavailable { color: #B9BEC8; }
-.hero .icon-btn,
-.hero .icon-btn:hover,
-.hero .icon-btn:active,
-.hero .icon-btn:focus { background: transparent; color: #C9CDD5; }
+/* What the total IS, as one quiet line rather than a pill: the figure above
+   it is the thing to read, and a bordered chip beside it was one more box. */
+.hero .balance-chips { justify-content: center; margin-top: 6px; }
 .hero .delta-chip {
-  background: rgba(214, 219, 228, .10);
-  border-color: rgba(214, 219, 228, .22);
-  color: #E4E6EA;
-  backdrop-filter: blur(6px);
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--text-3);
+  font-weight: 500;
 }
-.hero .skeleton { background: rgba(214, 219, 228, .20); }
 
 /* ── A ROW'S MARK: what it is, as a shape and a tone ─────────────────────
  * One grey arrow on every row made a card payment, a bill and an exchange

@@ -76,6 +76,9 @@ export default function Layout() {
     'SpaceGrotesk-Regular': require('../assets/fonts/SpaceGrotesk-Regular.ttf'),
     'SpaceGrotesk-SemiBold': require('../assets/fonts/SpaceGrotesk-SemiBold.ttf'),
     'SpaceGrotesk-Bold': require('../assets/fonts/SpaceGrotesk-Bold.ttf'),
+    /* The home screen's total only — converted from the web's own
+       `Jost-Bold.woff2`, so both apps draw the same figure. */
+    'Jost-Bold': require('../assets/fonts/Jost-Bold.ttf'),
     'Inter-Regular': require('../assets/fonts/Inter-Regular.ttf'),
     'Inter-Medium': require('../assets/fonts/Inter-Medium.ttf'),
     'Inter-SemiBold': require('../assets/fonts/Inter-SemiBold.ttf'),

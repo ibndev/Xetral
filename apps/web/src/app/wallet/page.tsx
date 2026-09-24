@@ -85,6 +85,19 @@ function fitClass(figure: string): string {
   return 'ccy-amt';
 }
 
+/**
+ * THE TOTAL IS SET SMALLER AS IT GROWS, never cut and never wrapped. Jost Bold
+ * at 48px draws about eleven characters across a 320px handset — "$3,447.52"
+ * is nine, and a seven-figure total is thirteen. The phone does the same with
+ * `adjustsFontSizeToFit`.
+ */
+function heroFit(figure: string): string {
+  if (figure.length > 16) return 'balance-value fade-in fit-3';
+  if (figure.length > 13) return 'balance-value fade-in fit-2';
+  if (figure.length > 10) return 'balance-value fade-in fit-1';
+  return 'balance-value fade-in';
+}
+
 export default function Wallet() {
   const client = useXetral();
 
@@ -210,7 +223,10 @@ export default function Wallet() {
 
         {/* Keyed on the state so React replaces the node and the figure
             cross-fades instead of snapping between dots and digits. */}
-        <div className="balance-value fade-in" key={hidden ? 'masked' : 'shown'}>
+        <div
+          className={heroFit(headline === undefined || hidden ? '' : formatAmount(headline.amount, 'USD'))}
+          key={hidden ? 'masked' : 'shown'}
+        >
           {dollars.loading ? (
             <span className="skeleton" style={{ display: 'block', width: 210, height: 42 }} />
           ) : headline === undefined ? (
@@ -243,6 +259,36 @@ export default function Wallet() {
           </div>
         )}
 
+        </div>
+
+        {/*
+          FOUR ACTIONS, ONE OF THEM FILLED, DIRECTLY UNDER THE TOTAL. Send is
+          what this app is for; the other three are beside it because they are
+          beside it in somebody's head. They sit with the figure they act on,
+          as small round buttons centred beneath it, rather than below the
+          currency cards spread to the screen's edges.
+        */}
+        <div className="act-row">
+          <Link href="/transfer" className="act primary">
+            <span className="act-ico"><Icon name="send" size={22} /></span>
+            Send
+          </Link>
+          <Link href="/add-money" className="act">
+            <span className="act-ico"><Icon name="plus" size={22} /></span>
+            Add
+          </Link>
+          <Link href="/fx" className="act">
+            <span className="act-ico"><Icon name="swap" size={22} /></span>
+            Convert
+          </Link>
+          {/* ITS OWN SCREEN. Request and Add both pointed here at
+              `/add-money`, so two of the four actions led to one page — and
+              the one headed "Add money", which is not what somebody asking to
+              be paid came for. */}
+          <Link href="/request" className="act">
+            <span className="act-ico"><Icon name="download" size={22} /></span>
+            Request
+          </Link>
         </div>
 
         {/*
@@ -292,33 +338,6 @@ export default function Wallet() {
               ))}
         </div>
 
-        {/*
-          FOUR ACTIONS, ONE OF THEM FILLED. Send is what this app is for; the
-          other three are beside it because they are beside it in somebody's
-          head, not because they are equal to it.
-        */}
-        <div className="act-row">
-          <Link href="/transfer" className="act primary">
-            <span className="act-ico"><Icon name="send" size={22} /></span>
-            Send
-          </Link>
-          <Link href="/add-money" className="act">
-            <span className="act-ico"><Icon name="plus" size={22} /></span>
-            Add
-          </Link>
-          <Link href="/fx" className="act">
-            <span className="act-ico"><Icon name="swap" size={22} /></span>
-            Convert
-          </Link>
-          {/* ITS OWN SCREEN. Request and Add both pointed here at
-              `/add-money`, so two of the four actions led to one page — and
-              the one headed "Add money", which is not what somebody asking to
-              be paid came for. */}
-          <Link href="/request" className="act">
-            <span className="act-ico"><Icon name="download" size={22} /></span>
-            Request
-          </Link>
-        </div>
       </section>
 
       {/*

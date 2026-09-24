@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
-import Svg, { Circle, Defs, LinearGradient, RadialGradient, Rect, Stop } from 'react-native-svg';
 import { Link } from 'expo-router';
 import { formatAmount, symbolFor } from '@xetral/client';
 import type { Balance, Transaction } from '@xetral/client';
@@ -12,7 +11,7 @@ import { CurrencyMark } from '@/currency-mark';
 import { TxList } from '@/tx-list';
 import { TransactionSheet } from '@/transaction-sheet';
 import { useLoad, useRemembered, useXetral } from '@/hooks';
-import { cardShadow, font, radius, space, useTheme } from '@/theme';
+import { cardShadow, font, space, useTheme } from '@/theme';
 import { BALANCE_VISIBILITY } from '@/preferences';
 
 /** A fixed mask. As many dots as the amount has digits would be a picture of
@@ -124,9 +123,6 @@ export default function Home() {
     [client, currency],
   );
 
-  // The total is a black card in both themes; dark draws it as graphite.
-  const dark = colors.bg === '#000000';
-
   const tone = {
     amber: { bg: colors.warnBg, fg: colors.warn },
     green: { bg: colors.okBg, fg: colors.ok },
@@ -138,24 +134,16 @@ export default function Home() {
     <Shell greeting={{ name: session.data?.first_name }}>
       <View style={{ paddingHorizontal: GUTTER }}>
         {/*
-          THE TOTAL, AS A BLACK CARD, in both themes. The brand is black with
-          silver as its second colour, and this is where it carries full
-          weight: near-black metal, a silver sheen, white type at 800, the
-          chip in smoked glass — the web's `.hero`, drawn with
-          react-native-svg because React Native has no gradient of its own.
-          On a black page it is graphite with a silver hairline, because
-          black on black is no card at all.
+          THE TOTAL, WITH NO CARD AROUND IT — the web's `.hero`. Centred on
+          the page in Jost Bold at 48 (the PayPal-style figure; see
+          `font.balance`), in the theme's own ink so it commands on white and
+          on black alike, with the four round actions directly beneath it.
+          The home screen was cards on cards, and the figure it exists to
+          show is the one thing that needs no box.
         */}
-        <View
-          style={{
-            marginTop: 6, paddingHorizontal: 20, paddingTop: 18, paddingBottom: 20,
-            borderRadius: 24, overflow: 'hidden',
-            borderWidth: dark ? 1 : 0, borderColor: HERO.hairline,
-          }}
-        >
-        <HeroGround dark={dark} />
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingTop: 4 }}>
-          <Text style={{ color: HERO.label, fontFamily: font.sansSemi, fontSize: 13 }}>
+        <View style={{ marginTop: 2, alignItems: 'center' }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingTop: 4 }}>
+          <Text style={{ color: colors.text2, fontFamily: font.sansSemi, fontSize: 13 }}>
             Total balance
           </Text>
           {/*
@@ -175,21 +163,10 @@ export default function Home() {
             hitSlop={8}
             style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }}
           >
-            <Icon name={hidden ? 'eyeOff' : 'eye'} size={18} color={HERO.icon} />
+            <Icon name={hidden ? 'eyeOff' : 'eye'} size={18} color={colors.text2} />
           </Pressable>
         </View>
 
-        {/*
-          THE MINOR UNITS ARE QUIETER THAN THE MAJOR — two <Text> children of
-          one line rather than two views, so they share a baseline.
-
-          A customer reads the whole number and GLANCES at the kobo; setting
-          both at full contrast makes a seven-figure figure harder to take in,
-          which is the one thing this line exists to be good at. Split on the
-          LAST separator, because `formatAmount` writes what the currency
-          writes and the eight decimals of a BTC balance are still the minor
-          part.
-        */}
         <Figure
           text={
             dollars.loading
@@ -200,8 +177,6 @@ export default function Home() {
                   ? `$ ${MASK}`
                   : formatAmount(headline.amount, 'USD')
           }
-          split={!hidden && !dollars.loading && headline !== undefined}
-          onHero
         />
 
         {/*
@@ -221,16 +196,37 @@ export default function Home() {
         {/* Pending money is on its own currency's card below: a chip here
             that followed the selected card made the total look as if it did. */}
         {!hidden && !dollars.loading && (
-          <View style={{ marginTop: 11, flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            <Chip icon="swap" onHero>
+          <View style={{ marginTop: 6, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+            <Icon name="swap" size={13} color={colors.text3} />
+            <Text style={{ flexShrink: 1, color: colors.text3, fontFamily: font.sansMedium, fontSize: 12, textAlign: 'center' }}>
               {headline === undefined
                 ? 'Your total cannot be priced right now'
                 : headline.excluded.length === 0
                   ? 'All your wallets, in dollars at today’s rate'
                   : `In dollars · not counted: ${headline.excluded.join(', ')}`}
-            </Chip>
+            </Text>
           </View>
         )}
+        </View>
+
+        {/*
+          FOUR ACTIONS, ONE OF THEM FILLED, DIRECTLY UNDER THE TOTAL — small
+          round buttons centred beneath the figure they act on, not a row
+          spread to the screen's edges below the currency cards.
+        */}
+        <View
+          style={{
+            flexDirection: 'row', justifyContent: 'center', gap: 26,
+            paddingTop: 20, paddingBottom: 6,
+          }}
+        >
+          <Action href="/transfer"  icon="send"     label="Send" primary />
+          <Action href="/add-money" icon="plus"     label="Add" />
+          <Action href="/fx"        icon="swap"     label="Convert" />
+          {/* ITS OWN SCREEN. Request and Add both pointed at `/add-money`, so
+              two of the four actions led to one screen — and the one headed Add
+              Money, which is not what somebody asking to be paid came for. */}
+          <Action href="/request" icon="download" label="Request" />
         </View>
       </View>
 
@@ -316,25 +312,6 @@ export default function Home() {
             })}
       </ScrollView>
 
-      {/*
-        FOUR ACTIONS, ONE OF THEM FILLED. Send is what this app is for; the
-        other three are beside it because they are beside it in somebody's
-        head, not because they are equal to it.
-      */}
-      <View
-        style={{
-          flexDirection: 'row', justifyContent: 'space-between',
-          paddingHorizontal: GUTTER + 6, paddingTop: 22, paddingBottom: 8,
-        }}
-      >
-        <Action href="/transfer"  icon="send"     label="Send" primary />
-        <Action href="/add-money" icon="plus"     label="Add" />
-        <Action href="/fx"        icon="swap"     label="Convert" />
-        {/* ITS OWN SCREEN. Request and Add both pointed at `/add-money`, so
-            two of the four actions led to one screen — and the one headed Add
-            Money, which is not what somebody asking to be paid came for. */}
-        <Action href="/request" icon="download" label="Request" />
-      </View>
 
       <View style={{ paddingHorizontal: GUTTER }}>
         <FormError error={balances.error} code={balances.code} />
@@ -437,35 +414,29 @@ export default function Home() {
 }
 
 /**
- * The balance, with the minor units set quieter than the major.
- *
- * Both halves are `<Text>` children of one `<Text>`, which is what shares the
- * baseline — two sibling views would each lay out their own box and the
- * decimals would sit a pixel off the digits beside them.
+ * The total, in Jost Bold at 48 and ONE INK — as PayPal sets its balance.
+ * Elsewhere the minor units are quieter than the major; on the headline a
+ * greyed ".52" read as a figure half faded out, the opposite of commanding.
+ * The web's `.hero .balance-value` carries the same values.
  */
-function Figure({
-  text, split, onHero,
-}: { readonly text: string; readonly split: boolean; readonly onHero?: boolean }) {
+function Figure({ text }: { readonly text: string }) {
   const colors = useTheme();
-  const at = split ? text.lastIndexOf('.') : -1;
-  const base = {
-    color: onHero === true ? '#FFFFFF' : colors.text,
-    fontFamily: font.numBold,
-    fontSize: 40,
-    letterSpacing: -1.6,
-    // `800 40px Manrope; letter-spacing:-1.6px; tabular-nums` — the comp's
-    // balance, to the character.
-    // NOT `as const` on this one: React Native types `fontVariant` as a
-    // MUTABLE array, so a readonly tuple is refused — and widening the whole
-    // object with a cast to silence it would take the compiler off a style
-    // that sets a size and a colour.
-    fontVariant: ['tabular-nums'] as ('tabular-nums')[],
-  };
-  if (at === -1) return <Text style={base} numberOfLines={1}>{text}</Text>;
   return (
-    <Text style={base} numberOfLines={1}>
-      {text.slice(0, at)}
-      <Text style={{ color: onHero === true ? HERO.minor : colors.text3 }}>{text.slice(at)}</Text>
+    <Text
+      numberOfLines={1}
+      adjustsFontSizeToFit
+      minimumFontScale={0.6}
+      style={{
+        color: colors.text,
+        fontFamily: font.balance,
+        fontSize: 48,
+        // -0.015em, the web's tracking at this size.
+        letterSpacing: -0.7,
+        marginTop: 4,
+        textAlign: 'center',
+      }}
+    >
+      {text}
     </Text>
   );
 }
@@ -516,11 +487,9 @@ function Action({
       >
         <View
           style={{
-            // 54 AND `surface2`, off the comp. It was 56 on `surface`, which
-            // is the same tile two pixels larger on a fill one step
-            // shallower — invisible alone and visible beside the web, which
-            // had it right.
-            width: 54, height: 54, borderRadius: 18,
+            // A 50pt CIRCLE, the web's `.act-ico` — small and round under
+            // the balance rather than a rounded square in a full-width row.
+            width: 50, height: 50, borderRadius: 25,
             alignItems: 'center', justifyContent: 'center',
             // White with an iris glyph in light, where the grey squares read
             // as disabled; the web's `.act` rules. Dark keeps its well.
@@ -549,79 +518,3 @@ function Action({
   );
 }
 
-/** The comp's iris chip under the headline: a tint, a hairline, 12px text. */
-function Chip({
-  icon, children, onHero,
-}: { readonly icon: IconName; readonly children: string; readonly onHero?: boolean }) {
-  const colors = useTheme();
-  // On the hero the chip is smoked glass over the metal, not tint on tint.
-  const fg = onHero === true ? HERO.chipText : colors.irisText;
-  return (
-    <View
-      style={{
-        flexDirection: 'row', alignItems: 'center', gap: 5,
-        paddingVertical: 4, paddingHorizontal: 10,
-        borderRadius: radius.pill,
-        backgroundColor: onHero === true ? HERO.chipFill : colors.irisTint,
-        borderWidth: 1, borderColor: onHero === true ? HERO.chipEdge : colors.irisEdge,
-      }}
-    >
-      <Icon name={icon} size={13} color={fg} />
-      <Text style={{ color: fg, fontFamily: font.sansSemi, fontSize: 12 }}>{children}</Text>
-    </View>
-  );
-}
-
-/**
- * The hero's type and glass, the same values as the web's `.hero` rules — one
- * set for both themes, because the card is dark metal in both.
- */
-const HERO = {
-  label: '#B9BEC8',
-  icon: '#C9CDD5',
-  minor: '#9CA1AB',
-  chipText: '#E4E6EA',
-  chipFill: 'rgba(214,219,228,0.10)',
-  chipEdge: 'rgba(214,219,228,0.22)',
-  hairline: 'rgba(214,219,228,0.14)',
-} as const;
-
-/**
- * The hero's ground: the web's layers — a 135° black-to-graphite gradient, a
- * silver sheen top right, a deeper shade bottom left — plus two faint silver
- * rings. On a black page the metal is lighter graphite so it reads as a card.
- * Absolutely filled behind the hero's content and inert to touch.
- */
-function HeroGround({ dark }: { readonly dark: boolean }) {
-  const [from, mid, to] = dark
-    ? (['#1E1F23', '#121316', '#08090A'] as const)
-    : (['#050506', '#141518', '#2A2C31'] as const);
-  return (
-    <View pointerEvents="none" style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}>
-      <Svg width="100%" height="100%" preserveAspectRatio="none">
-        <Defs>
-          <LinearGradient id="heroFill" x1="0" y1="0" x2="1" y2="1">
-            <Stop offset="0" stopColor={from} />
-            <Stop offset="0.55" stopColor={mid} />
-            <Stop offset="1" stopColor={to} />
-          </LinearGradient>
-          <RadialGradient id="heroShine" cx="1" cy="0" r="0.9">
-            <Stop offset="0" stopColor="#D6DBE4" stopOpacity={dark ? 0.12 : 0.2} />
-            <Stop offset="1" stopColor="#D6DBE4" stopOpacity="0" />
-          </RadialGradient>
-          <RadialGradient id="heroDeep" cx="0" cy="1" r="0.8">
-            <Stop offset="0" stopColor="#000000" stopOpacity={dark ? 0 : 0.55} />
-            <Stop offset="1" stopColor="#000000" stopOpacity="0" />
-          </RadialGradient>
-        </Defs>
-        <Rect x="0" y="0" width="100%" height="100%" fill="url(#heroFill)" />
-        <Rect x="0" y="0" width="100%" height="100%" fill="url(#heroShine)" />
-        <Rect x="0" y="0" width="100%" height="100%" fill="url(#heroDeep)" />
-      </Svg>
-      <Svg width={260} height={220} style={{ position: 'absolute', top: -70, right: -60 }}>
-        <Circle cx={150} cy={110} r={110} stroke="rgba(214,219,228,0.16)" strokeWidth={1} fill="none" />
-        <Circle cx={150} cy={110} r={124} stroke="rgba(214,219,228,0.045)" strokeWidth={28} fill="none" />
-      </Svg>
-    </View>
-  );
-}

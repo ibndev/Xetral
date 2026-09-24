@@ -371,6 +371,13 @@ export const font = {
   numSemi: 'Manrope-Bold',
   numBold: 'Manrope-ExtraBold',
 
+  /**
+   * THE HOME SCREEN'S TOTAL, AND NOTHING ELSE — Jost Bold, the open
+   * Futura-lineage geometric standing in for PayPal's own balance face, which
+   * is licensed to PayPal alone. See `apps/web/src/app/layout.tsx`.
+   */
+  balance: 'Jost-Bold',
+
   /** Long-form prose. Inter is the better reading face at 15px, and a privacy
    *  notice does not need to look like a dashboard. */
   read: 'Inter-Regular',
