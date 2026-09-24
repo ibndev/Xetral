@@ -245,3 +245,60 @@ describe('paying a link in a currency Flutterwave collects', () => {
     expect(body).not.toMatch(/paystack|flutterwave|FLWSECK|sk_/i);
   });
 });
+
+describe('topping up by card or USSD', () => {
+  /*
+   * Add Money's two buttons. The customer has already chosen, so the
+   * provider's page opens on THAT method — and USSD, a Nigerian bank's short
+   * code on every rail, is refused for any other currency before a row is
+   * written, because sent on it is a checkout page with no method on it.
+   */
+  async function ghanaianToken(): Promise<string> {
+    const created = await request(app.getHttpServer())
+      .post('/v1/auth/register')
+      .send({
+        email: `topup-${randomUUID()}@example.gh`,
+        password: PASSWORD,
+        full_name: 'Ama Owusu',
+        country: 'GH',
+        phone: String(240000000 + Math.floor(Math.random() * 9999999)),
+        device: { fingerprint: `fp-${randomUUID()}`, platform: 'web' },
+      })
+      .expect(201);
+    return created.body.access_token as string;
+  }
+
+  it('opens the page on the card when the card was pressed', async () => {
+    const token = await ghanaianToken();
+    seen.length = 0;
+    const res = await request(app.getHttpServer())
+      .post('/v1/funding/topup')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ amount: '25.00', method: 'card' })
+      .expect(200);
+    expect(res.body.authorization_url).toContain('checkout.flutterwave.com');
+    const body = seen.find((r) => r.url.startsWith('/v3/payments'))?.body as { payment_options?: string };
+    expect(body.payment_options).toBe('card');
+  });
+
+  it('REFUSES USSD for cedis, before anything is written or sent', async () => {
+    const token = await ghanaianToken();
+    seen.length = 0;
+    const res = await request(app.getHttpServer())
+      .post('/v1/funding/topup')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ amount: '25.00', method: 'ussd' })
+      .expect(400);
+    expect(res.body.error).toBe('payment_method_not_supported');
+    expect(seen.filter((r) => r.url.startsWith('/v3/payments'))).toHaveLength(0);
+  });
+
+  it('refuses a method it does not know, rather than ignoring it', async () => {
+    const token = await ghanaianToken();
+    await request(app.getHttpServer())
+      .post('/v1/funding/topup')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ amount: '25.00', method: 'crypto' })
+      .expect(400);
+  });
+});

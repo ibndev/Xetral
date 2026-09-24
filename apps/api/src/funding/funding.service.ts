@@ -17,6 +17,7 @@ import {
   ProviderRejectedError,
   ProviderTimeoutError,
   ProviderUnavailableError,
+  providerDidNothing,
 } from '@xetral/providers';
 import type { FundingCustomer, FundingPort } from '@xetral/providers';
 import { CURRENCIES, toMajor } from '@xetral/shared';
@@ -187,7 +188,7 @@ export class FundingService {
      * to Flutterwave, NGN stays on Paystack, and a corridor with no route
      * falls back to the global setting rather than becoming an outage.
      */
-    const currency = await this.#homeCurrencyOf(userId);
+    const currency = await this.#accountCurrencyOf(userId);
 
     const existing = await this.#accountOf(userId, currency);
     if (existing !== undefined) return toAccountView(existing);
@@ -213,130 +214,69 @@ export class FundingService {
      * The mapping is still PASSED when we have one — a customer who has been
      * through KYC should not get a second provider-side customer record.
      */
-    const customer = await this.#fundingCustomer(userId, await this.#railFor(currency));
-
+    /*
+     * EACH RAIL IN TURN, AND ONLY AFTER A DEFINITE "NO".
+     *
+     * Activate Account failed in Nigeria and in Ghana for one reason: naira
+     * account numbers were routed to Flutterwave, which opens a permanent
+     * account only with a verified BVN, and nothing else was ever asked. An
+     * unverified Nigerian and every Ghanaian — who has no BVN to give — were
+     * refused while another rail that opens a tier 1 account from a name sat
+     * one row away. 079's `account_fallback` lets the refusal move on.
+     *
+     * IT MOVES ON ONLY WHEN THE RAIL CERTAINLY DID NOTHING: a refusal, or a
+     * request that never left. A timeout, a 5xx or a reply we could not read
+     * may have opened an account, and a second rail after that is a customer
+     * with two live numbers, one of them receiving money nothing watches.
+     *
+     * `kyc_required` IS REMEMBERED ACROSS RAILS. Where one rail wanted a
+     * verified identity and the last refused for its own reason, the customer
+     * is told the one thing that would change the answer.
+     */
+    const rails = await this.#accountRailsFor(currency);
+    let wantedKyc = false;
     let issued;
-    try {
-      issued = await this.port.createVirtualAccount({
-        customer,
-        currency,
-        // Derived from our user id AND the currency, so a retry after a
-        // timeout asks for the same account rather than a second one — and a
-        // customer who holds two currencies is not answered with the wrong
-        // account.
-        idempotencyKey: `xetral-va-${userId}-${currency}`,
-      });
-    } catch (error) {
-      /*
-       * ACCEPTED AND NOT FINISHED IS NOT A FAILURE.
-       *
-       * Paystack attaches a dedicated account number ASYNCHRONOUSLY: the
-       * create succeeds and the NUBAN lands moments later. Reported as an
-       * outage the customer is told something is broken on the one screen
-       * they opened in order to be paid; `account_issue_pending` is a code
-       * both apps already render as "being opened, check back in a moment",
-       * and the look-before-create in the adapter finds the account on the
-       * next attempt.
-       */
-      if (error instanceof ProviderPendingError) {
-        this.#logger.log(
-          `the funding rail accepted the account request and has not attached a number ` +
-            `yet: ${error.message}`,
-        );
-        throw new ServiceUnavailableException({ error: 'account_issue_pending' });
-      }
-
-      if (error instanceof ProviderTimeoutError) {
-        // We do not know whether an account was created. Asking again is safe
-        // BECAUSE the request carried an idempotency key; inventing one here
-        // would make the retry a second account.
-        throw new ServiceUnavailableException({ error: 'account_issue_pending' });
-      }
-
-      /*
-       * WHAT THE PROVIDER SAID, WRITTEN DOWN — because without this the whole
-       * class of "Activate Account fails and nobody can say why" is a 500.
-       *
-       * Every other provider error fell through to Nest's default handler,
-       * which answers a bare 500 with no code the client names. The customer
-       * saw "something went wrong"; the operator saw a stack trace with the
-       * refusal buried in it. And these are exactly the failures an operator
-       * CAN fix: dedicated accounts not enabled on the integration, a
-       * `preferred_bank` this business is not approved for, a key from the
-       * wrong environment. Every one arrives as the provider's own sentence,
-       * and every one was being thrown away.
-       *
-       * The sentence goes to the LOG, never to the customer: it names our
-       * integration and sometimes our merchant id. What the customer gets is
-       * a code their app can turn into a real message.
-       */
-      const rail = await this.#railFor(currency);
-      if (error instanceof ProviderRejectedError) {
-        this.#logger.error(
-          `${rail} REFUSED to open a ${currency} account: ${error.message} ` +
-            `(provider code ${error.providerCode ?? 'none'}). This is a refusal, not an ` +
-            `outage — the credential is reaching them.` +
-            /*
-             * THE ADVICE ONLY WHERE IT APPLIES. It named `paystack_preferred_bank`
-             * on every refusal, including the one that means this rail has no
-             * such product in this currency at all — sending an operator to
-             * check a setting that has nothing to do with it, which is the same
-             * fault as the log line that named the wrong provider.
-             */
-            (error.providerCode === 'account_not_supported_here'
-              ? ''
-              : ' Check that dedicated accounts are enabled on the integration and that ' +
-                'paystack_preferred_bank names a bank it is approved for.'),
-        );
-        // `kyc_required` is a real answer a client already handles — Bitnob
-        // returns it for an unverified customer — so it is passed through
-        // rather than flattened into the generic code.
-        /*
-         * TWO PROVIDER CODES ARE PASSED THROUGH rather than flattened, and
-         * both for the same reason: they are PERMANENT facts a customer's app
-         * can turn into a true sentence, where the generic code invites
-         * somebody to try again shortly.
-         *
-         * WRITTEN AS THREE THROWS RATHER THAN A NESTED TERNARY, deliberately.
-         * `error-codes.test.ts` scans this source for the codes the API can
-         * emit, and its own header records that a code chosen by a ternary is
-         * invisible to it — two once reached customers with no client-side
-         * name while the scanner reported full coverage. A second level of
-         * nesting is the same trap one turn deeper, so the literals stay
-         * literal.
-         */
-        if (error.providerCode === 'kyc_required') {
-          // Bitnob's answer for a customer it has not verified a BVN for.
-          throw new UnprocessableEntityException({ error: 'kyc_required' });
+    for (let i = 0; i < rails.length; i += 1) {
+      const rail = rails[i] as string;
+      const customer = await this.#fundingCustomer(userId, rail);
+      try {
+        issued = await this.#createAt(rail, {
+          customer,
+          currency,
+          // Derived from our user id AND the currency, so a retry after a
+          // timeout asks for the same account rather than a second one — and
+          // a customer who holds two currencies is not answered with the
+          // wrong account.
+          idempotencyKey: `xetral-va-${userId}-${currency}`,
+        });
+        if (i > 0) {
+          this.#logger.log(
+            `opened a ${currency} account for user ${userId} on ${rail} after ` +
+              `${rails.slice(0, i).join(', ')} refused`,
+          );
         }
-        if (error.providerCode === 'account_not_supported_here') {
-          /*
-           * The rail serving this currency does not issue dedicated account
-           * numbers in it AT ALL — the Ghana and Kenya case. Flutterwave's
-           * virtual accounts are an NGN product, and
-           * `countries.funding_methods` already records that money arrives
-           * there by a mobile money charge instead.
-           */
-          throw new UnprocessableEntityException({ error: 'account_not_supported_here' });
+        break;
+      } catch (error) {
+        if (error instanceof ProviderRejectedError && error.providerCode === 'kyc_required') {
+          wantedKyc = true;
         }
-        throw new UnprocessableEntityException({ error: 'account_issue_refused' });
+        if (i < rails.length - 1 && providerDidNothing(error)) {
+          this.#logger.warn(
+            `${rail} did not open a ${currency} account for user ${userId} ` +
+              `(${error instanceof Error ? error.message : String(error)}); trying ${rails[i + 1]}`,
+          );
+          continue;
+        }
+        if (wantedKyc && providerDidNothing(error)) {
+          throw new UnprocessableEntityException({
+            error: 'kyc_required',
+            detail: 'Verify your identity to get your own account number.',
+          });
+        }
+        this.#relayAccountFailure(error, rail, currency);
       }
-      if (error instanceof ProviderContractError) {
-        this.#logger.error(
-          `${rail} answered a shape this adapter does not accept while opening a ` +
-            `${currency} account: ${error.message}. Their API has changed, or the ` +
-            `credential belongs to a different product; waiting will not fix it.`,
-        );
-        throw new ServiceUnavailableException({ error: 'account_issue_unavailable' });
-      }
-      if (error instanceof ProviderUnavailableError) {
-        this.#logger.error(
-          `${rail} is unreachable while opening a ${currency} account: ${error.message}`,
-        );
-        throw new ServiceUnavailableException({ error: 'account_issue_unavailable' });
-      }
-      throw error;
     }
+    if (issued === undefined) throw new Error('no funding rail was asked for an account');
 
     /*
      * WRAPPED, because this INSERT writes columns a MIGRATION adds.
@@ -525,6 +465,168 @@ export class FundingService {
       [userId, home],
     );
     return result.rows[0];
+  }
+
+  /**
+   * WHAT A PROVIDER'S REFUSAL BECOMES — every branch throws, so the caller's
+   * loop cannot fall through with nothing issued.
+   */
+  #relayAccountFailure(error: unknown, rail: string, currency: Currency): never {
+      if (error instanceof ProviderPendingError) {
+        this.#logger.log(
+          `the funding rail accepted the account request and has not attached a number ` +
+            `yet: ${error.message}`,
+        );
+        throw new ServiceUnavailableException({ error: 'account_issue_pending' });
+      }
+
+      if (error instanceof ProviderTimeoutError) {
+        // We do not know whether an account was created. Asking again is safe
+        // BECAUSE the request carried an idempotency key; inventing one here
+        // would make the retry a second account.
+        throw new ServiceUnavailableException({ error: 'account_issue_pending' });
+      }
+
+      /*
+       * WHAT THE PROVIDER SAID, WRITTEN DOWN — because without this the whole
+       * class of "Activate Account fails and nobody can say why" is a 500.
+       *
+       * Every other provider error fell through to Nest's default handler,
+       * which answers a bare 500 with no code the client names. The customer
+       * saw "something went wrong"; the operator saw a stack trace with the
+       * refusal buried in it. And these are exactly the failures an operator
+       * CAN fix: dedicated accounts not enabled on the integration, a
+       * `preferred_bank` this business is not approved for, a key from the
+       * wrong environment. Every one arrives as the provider's own sentence,
+       * and every one was being thrown away.
+       *
+       * The sentence goes to the LOG, never to the customer: it names our
+       * integration and sometimes our merchant id. What the customer gets is
+       * a code their app can turn into a real message.
+       */
+      if (error instanceof ProviderRejectedError) {
+        this.#logger.error(
+          `${rail} REFUSED to open a ${currency} account: ${error.message} ` +
+            `(provider code ${error.providerCode ?? 'none'}). This is a refusal, not an ` +
+            `outage — the credential is reaching them.` +
+            /*
+             * THE ADVICE ONLY WHERE IT APPLIES. It named `paystack_preferred_bank`
+             * on every refusal, including the one that means this rail has no
+             * such product in this currency at all — sending an operator to
+             * check a setting that has nothing to do with it, which is the same
+             * fault as the log line that named the wrong provider.
+             */
+            (error.providerCode === 'account_not_supported_here'
+              ? ''
+              : ' Check that dedicated accounts are enabled on the integration and that ' +
+                'paystack_preferred_bank names a bank it is approved for.'),
+        );
+        // `kyc_required` is a real answer a client already handles — Bitnob
+        // returns it for an unverified customer — so it is passed through
+        // rather than flattened into the generic code.
+        /*
+         * TWO PROVIDER CODES ARE PASSED THROUGH rather than flattened, and
+         * both for the same reason: they are PERMANENT facts a customer's app
+         * can turn into a true sentence, where the generic code invites
+         * somebody to try again shortly.
+         *
+         * WRITTEN AS THREE THROWS RATHER THAN A NESTED TERNARY, deliberately.
+         * `error-codes.test.ts` scans this source for the codes the API can
+         * emit, and its own header records that a code chosen by a ternary is
+         * invisible to it — two once reached customers with no client-side
+         * name while the scanner reported full coverage. A second level of
+         * nesting is the same trap one turn deeper, so the literals stay
+         * literal.
+         */
+        if (error.providerCode === 'kyc_required') {
+          // Bitnob's answer for a customer it has not verified a BVN for.
+          throw new UnprocessableEntityException({
+            error: 'kyc_required',
+            detail: 'Verify your identity to get your own account number.',
+          });
+        }
+        if (error.providerCode === 'account_not_supported_here') {
+          /*
+           * The rail serving this currency does not issue dedicated account
+           * numbers in it AT ALL — the Ghana and Kenya case. Flutterwave's
+           * virtual accounts are an NGN product, and
+           * `countries.funding_methods` already records that money arrives
+           * there by a mobile money charge instead.
+           */
+          throw new UnprocessableEntityException({ error: 'account_not_supported_here' });
+        }
+        throw new UnprocessableEntityException({ error: 'account_issue_refused' });
+      }
+      if (error instanceof ProviderContractError) {
+        this.#logger.error(
+          `${rail} answered a shape this adapter does not accept while opening a ` +
+            `${currency} account: ${error.message}. Their API has changed, or the ` +
+            `credential belongs to a different product; waiting will not fix it.`,
+        );
+        throw new ServiceUnavailableException({ error: 'account_issue_unavailable' });
+      }
+      if (error instanceof ProviderUnavailableError) {
+        this.#logger.error(
+          `${rail} is unreachable while opening a ${currency} account: ${error.message}`,
+        );
+        throw new ServiceUnavailableException({ error: 'account_issue_unavailable' });
+      }
+      throw error;
+    throw error;
+  }
+
+  /**
+   * THE CURRENCY AN ACCOUNT NUMBER IS OPENED IN.
+   *
+   * The customer's own, WHERE A RAIL OPENS ACCOUNTS IN IT — and naira
+   * everywhere else. A Ghanaian pressing Activate Account was asking
+   * Flutterwave for a CEDI account number, which no rail here issues, and
+   * never got the naira one every customer is offered: the naira wallet is
+   * the funding rail for everybody (040), and money paid to a Ghanaian by a
+   * Nigerian lands in it. 079's coverage says where an account number is a
+   * product; today that is naira alone.
+   */
+  async #accountCurrencyOf(userId: string): Promise<Currency> {
+    const home = await this.#homeCurrencyOf(userId);
+    const switching = this.port as FundingPort & {
+      accountCurrencies?: () => Promise<readonly string[]>;
+    };
+    let offered: readonly string[] = [FALLBACK_ACCOUNT_CURRENCY];
+    try {
+      if (typeof switching.accountCurrencies === 'function') {
+        offered = await switching.accountCurrencies();
+      }
+    } catch {
+      // The naira answer stands: the one currency every rail has opened in.
+    }
+    return offered.includes(home) ? home : FALLBACK_ACCOUNT_CURRENCY;
+  }
+
+  /** The rails to ask, in order: the switch's answer, or the one port there is. */
+  async #accountRailsFor(currency: Currency): Promise<readonly string[]> {
+    const switching = this.port as FundingPort & {
+      accountRails?: (currency: string) => Promise<readonly string[]>;
+    };
+    if (typeof switching.accountRails === 'function') {
+      const rails = await switching.accountRails(currency);
+      if (rails.length > 0) return rails;
+    }
+    return [await this.#railFor(currency)];
+  }
+
+  async #createAt(
+    rail: string,
+    request: Parameters<FundingPort['createVirtualAccount']>[0],
+  ): ReturnType<FundingPort['createVirtualAccount']> {
+    const switching = this.port as FundingPort & {
+      createVirtualAccountAt?: FundingPort['createVirtualAccount'] extends (r: infer R) => infer O
+        ? (provider: string, request: R) => O
+        : never;
+    };
+    if (typeof switching.createVirtualAccountAt === 'function') {
+      return switching.createVirtualAccountAt(rail, request);
+    }
+    return this.port.createVirtualAccount(request);
   }
 
   /**

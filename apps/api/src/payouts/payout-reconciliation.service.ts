@@ -239,7 +239,7 @@ export class PayoutReconciliationService implements OnApplicationShutdown {
        * Flutterwave payout asked about at Paystack answers "no such transfer",
        * which the branch below reads as a definite refusal and reverses.
        */
-      receipt = await this.port.status(row.provider_payout_id, row.provider);
+      receipt = await this.payouts.askRail(row, row.provider_payout_id);
     } catch (error) {
       /*
        * A REJECTION IS AN ANSWER. "No such payout" from a provider that issued
@@ -251,6 +251,21 @@ export class PayoutReconciliationService implements OnApplicationShutdown {
         return 'reversed';
       }
       throw error;
+    }
+
+    /*
+     * NO RAIL COULD SAY, WITH EVIDENCE, WHAT HAPPENED — a row whose rail is
+     * unknown (before 080) and no answer carrying our reference. Reversing
+     * would refund money that may have left; it is held for a person.
+     */
+    if (receipt === undefined) {
+      this.#escalate(
+        row,
+        (Date.now() - row.created_at.getTime()) / 1000,
+        'no rail returned this payout with our reference, and the row predates ' +
+          'the provider being recorded; confirm with each provider by reference',
+      );
+      return 'pending';
     }
 
     // `state`, not `status`: the receipt describes what the PROVIDER did, and
@@ -283,7 +298,7 @@ export class PayoutReconciliationService implements OnApplicationShutdown {
       `SELECT id::text, uuid, user_id::text, reference, status::text, country,
               bank_code, bank_name, account_number, account_name, narration,
               currency, amount_minor::text, fee_minor::text, tax_minor::text,
-              provider_quote_id, provider_payout_id, provider, failure_reason,
+              provider_quote_id, provider_payout_id, provider, provider_known, failure_reason,
               reserve_entry_id::text, settle_entry_id::text, created_at
          FROM bank_payouts
         WHERE status IN ('reserved', 'sent')

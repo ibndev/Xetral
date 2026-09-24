@@ -55,10 +55,16 @@ function serviceWith(port: ProviderBalancePort): BalanceReconciliationService {
   );
 }
 
-/** The ledger's own view of the NGN float, in minor units. */
+/**
+ * What the ledger says we hold at the provider, in minor units — the NEGATIVE
+ * of the `provider_float` balance. This helper used to return the raw balance,
+ * the service compared against the raw balance, and the pair agreed with each
+ * other while both disagreed with every real provider: a deposit leaves the
+ * float NEGATIVE and the provider reporting a POSITIVE figure.
+ */
 async function ledgerFloat(): Promise<bigint> {
   const r = await pool.query<{ minor: string }>(
-    `SELECT COALESCE(SUM(b.balance_minor), 0)::text AS minor
+    `SELECT (-COALESCE(SUM(b.balance_minor), 0))::text AS minor
        FROM accounts a JOIN account_balances b ON b.account_id = a.id
       WHERE a.kind = 'provider_float' AND a.currency = 'NGN'`,
   );
@@ -99,6 +105,38 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await pool?.end();
+});
+
+describe('the sign', () => {
+  it('reads a deposit as money held, the way a provider reports it', async () => {
+    // Pinned by a DELTA, as 073's test does: absolute figures depend on every
+    // suite that ran before on the shared database, a delta does not.
+    const before = await ledgerFloat();
+    const user = await pool.query<{ id: string }>(
+      `INSERT INTO users (email, status) VALUES ($1, 'active') RETURNING id`,
+      [`balance-sign-${randomUUID()}@example.ng`],
+    );
+    await ledger.post({
+      idempotencyKey: `balance-sign:${randomUUID()}`,
+      kind: 'wallet_funding',
+      occurredAt: new Date(),
+      description: 'a ₦500 deposit',
+      metadata: {},
+      postings: [
+        posting({ kind: 'customer_wallet', ownerId: user.rows[0]!.id, currency: 'NGN' }, ngn(50_000)),
+        posting({ kind: 'provider_float', currency: 'NGN' }, ngn(-50_000)),
+      ],
+    });
+    expect((await ledgerFloat()) - before).toBe(50_000n);
+
+    // And a provider that received exactly that deposit agrees with us.
+    const findings = await openFindings();
+    const report = await serviceWith(
+      new StubBalances(() => [{ amount: before + 50_000n, currency: 'NGN' } as Money<Currency>]),
+    ).sweep();
+    expect(report.differences).toBe(0);
+    expect(await openFindings()).toBe(findings);
+  });
 });
 
 describe('when the two sides agree', () => {

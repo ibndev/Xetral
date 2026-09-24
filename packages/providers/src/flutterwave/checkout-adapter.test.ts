@@ -223,6 +223,21 @@ describe('starting a Flutterwave checkout', () => {
     expect(body.currency).toBe('GHS');
   });
 
+  it('narrows the page to the ONE method the customer pressed', async () => {
+    // Add Money's "Debit card" and "USSD" buttons. The customer has already
+    // chosen, so the provider's full picker would be a second, slower choice.
+    const { client, sent } = stub([{ status: 'success', data: { link: 'https://x' } }]);
+    await new FlutterwaveCheckoutAdapter(client).begin({
+      payerEmail: 'payer@example.com',
+      amountMinor: 500_000n,
+      currency: 'NGN',
+      reference: 'xetpay-ussd',
+      callbackUrl: 'https://app.xetral.com/pay/abc',
+      method: 'ussd',
+    });
+    expect((sent[0]?.body as { payment_options: string }).payment_options).toBe('ussd');
+  });
+
   it('offers a dollar checkout a card and nothing else', async () => {
     const { client, sent } = stub([{ status: 'success', data: { link: 'https://x' } }]);
     await new FlutterwaveCheckoutAdapter(client).begin({

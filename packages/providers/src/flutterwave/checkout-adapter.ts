@@ -127,7 +127,10 @@ export class FlutterwaveCheckoutAdapter implements CheckoutPort {
   }
 
   async begin(request: CheckoutRequest): Promise<CheckoutSession> {
-    const options = FLUTTERWAVE_PAYMENT_OPTIONS[request.currency];
+    /* A method the customer chose narrows the page to it — Flutterwave's
+       `payment_options` names both `card` and `ussd` as we do. Otherwise the
+       per-currency list, for a stranger who has not chosen. */
+    const options = request.method ?? FLUTTERWAVE_PAYMENT_OPTIONS[request.currency];
 
     const body = await this.#client.request('POST', FLUTTERWAVE_ENDPOINTS.payments, {
       /* THEIRS IS `tx_ref`, OURS IS `reference`, and it is the same string.

@@ -17,8 +17,9 @@ import type { AuthenticatedRequest } from '../auth/auth.guard.js';
 import { AdminService } from './admin.service.js';
 import { StaffService } from '../auth/staff.service.js';
 import { PushService } from '../push/push.service.js';
+import { TreasuryService, type Treasury } from '../payouts/treasury.service.js';
 import { ProviderRoutesService } from '../routing/provider-routes.service.js';
-import type { RouteRow } from '../routing/provider-routes.service.js';
+import type { RouteRow, RoutingView } from '../routing/provider-routes.service.js';
 import { AuditService } from './audit.service.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { ConsentService } from '../consent/consent.service.js';
@@ -111,6 +112,14 @@ const settingSchema = z.object({
 });
 
 /** A route change. `transaction_pin` rides in the same body and is read by the guard. */
+const routingPolicySchema = z.object({
+  mode: z.enum(['per_route', 'by_coverage', 'single']),
+  preferred_provider: z.string().trim().max(40).nullable().optional(),
+  single_provider: z.string().trim().max(40).nullable().optional(),
+  account_fallback: z.boolean(),
+  transaction_pin: z.string().optional(),
+});
+
 const routeSchema = z.object({
   operation: z.enum(['account', 'collect', 'payout']),
   currency: z.string().trim().regex(/^[A-Za-z]{3,4}$/),
@@ -317,6 +326,7 @@ export class AdminController {
     @Inject(StaffService) private readonly staffRoles: StaffService,
     @Inject(PushService) private readonly push: PushService,
     @Inject(ProviderRoutesService) private readonly providerRoutes: ProviderRoutesService,
+    @Inject(TreasuryService) private readonly treasury: TreasuryService,
   ) {}
 
   /**
@@ -1430,14 +1440,55 @@ export class AdminController {
     return changed;
   }
 
+  /**
+   * THE WHOLE GRID AND HOW IT IS READ — 079. Per route, by each provider's
+   * documented coverage, or one provider for everything; and whether an
+   * account request may try the next rail after a definite refusal.
+   */
+  @Get('routing')
+  async routing(): Promise<RoutingView> {
+    return this.providerRoutes.routing();
+  }
+
+  @Post('routing')
+  @HttpCode(200)
+  async setRouting(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: unknown,
+  ): Promise<RoutingView> {
+    const parsed = routingPolicySchema.safeParse(body);
+    if (!parsed.success) throw invalid(parsed.error.issues);
+
+    const actor = claims(request).sub;
+    const changed = await this.providerRoutes.setPolicy({
+      mode: parsed.data.mode,
+      preferredProvider: parsed.data.preferred_provider ?? null,
+      singleProvider: parsed.data.single_provider ?? null,
+      accountFallback: parsed.data.account_fallback,
+      byUserUuid: actor,
+    });
+
+    const ip = ipOf(request);
+    await this.audit.record({
+      actorId: actor,
+      action: 'route.change',
+      subjectType: 'provider_route',
+      subjectId: 'policy',
+      detail: { was: changed.was, now: changed.now },
+      ...(ip === undefined ? {} : { ip }),
+    });
+    return this.providerRoutes.routing();
+  }
+
   @Get('providers')
   async providers(): Promise<{
     degraded: readonly unknown[];
     recent: readonly unknown[];
     nameEnquiry: readonly unknown[];
     float: readonly unknown[];
+    treasury: Treasury;
   }> {
-    const [degraded, recent, nameEnquiry, float] = await Promise.all([
+    const [degraded, recent, nameEnquiry, float, treasury] = await Promise.all([
       this.providerHealth.degraded(),
       this.providerHealth.recent(),
       /* WHY A RECIPIENT COULD NOT BE NAMED. It rides on this screen rather
@@ -1459,8 +1510,16 @@ export class AdminController {
        * wearing different words.
        */
       this.admin.platformFloat(),
+      /*
+       * AND WHAT EACH PROVIDER REALLY HOLDS, beside what customers are owed.
+       * The ledger's float is one figure for every provider together, so it
+       * can say "we hold cedis" while the rail that pays cedis out holds none
+       * — which is exactly how a customer comes to hold a balance no rail can
+       * send. Read live, per rail; unreadable is shown as unreadable.
+       */
+      this.treasury.treasury(),
     ]);
-    return { degraded, recent, nameEnquiry, float };
+    return { degraded, recent, nameEnquiry, float, treasury };
   }
 
   @Get('settings')

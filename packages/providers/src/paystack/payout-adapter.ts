@@ -8,7 +8,8 @@ import type {
   PayoutReceipt,
   PayoutRequest,
 } from '../ports/payout.js';
-import type { Currency } from '@xetral/shared';
+import type { Currency, Money } from '@xetral/shared';
+import { isCurrency, money } from '@xetral/shared';
 
 const PROVIDER = 'paystack';
 
@@ -65,7 +66,20 @@ const transferResponse = z.object({
     transfer_code: z.string().min(1).optional(),
     status: z.string().optional(),
     reason: z.string().optional(),
+    /** OUR reference, echoed on their transfer object — what lets a status
+     *  answer be checked against the payout it claims to be about. */
+    reference: z.string().nullish(),
   }),
+});
+
+const balanceResponse = z.object({
+  status: z.literal(true),
+  data: z.array(
+    z.object({
+      currency: z.string().min(1),
+      balance: z.union([z.number(), z.string()]),
+    }),
+  ),
 });
 
 function issues(error: z.ZodError): string {
@@ -251,6 +265,35 @@ export class PaystackPayoutAdapter implements PayoutPort {
     );
   }
 
+  /**
+   * What the Paystack balance can spend, per currency — SUBUNITS on the wire,
+   * so no conversion at all. A currency this platform does not model is
+   * skipped, and an unsafe JSON number is refused rather than rounded: this
+   * figure is compared against the last kobo.
+   */
+  async floatBalances(): Promise<readonly Money<Currency>[]> {
+    const parsed = balanceResponse.safeParse(
+      await this.#client.request('GET', PAYSTACK_ENDPOINTS.balance),
+    );
+    if (!parsed.success) {
+      throw new ProviderContractError(PROVIDER, `balance does not match the expected shape: ${issues(parsed.error)}`, parsed.error);
+    }
+    const held: Money<Currency>[] = [];
+    for (const row of parsed.data.data) {
+      const code = row.currency.trim().toUpperCase();
+      if (!isCurrency(code)) continue;
+      if (typeof row.balance === 'number' && !Number.isSafeInteger(row.balance)) {
+        throw new ProviderContractError(PROVIDER, `balance ${row.balance} is not a safe integer`);
+      }
+      const text = String(row.balance).trim();
+      if (!/^-?[0-9]+$/.test(text)) {
+        throw new ProviderContractError(PROVIDER, `balance '${text}' is not whole subunits`);
+      }
+      held.push(money(BigInt(text), code));
+    }
+    return held;
+  }
+
   #toReceipt(payload: unknown): PayoutReceipt {
     const parsed = transferResponse.safeParse(payload);
     if (!parsed.success) {
@@ -331,6 +374,7 @@ export class PaystackPayoutAdapter implements PayoutPort {
       providerPayoutId: String(row.id),
       state: mapped,
       ...(reason === undefined ? {} : { failureReason: reason }),
+      ...(row.reference == null ? {} : { reference: row.reference }),
     };
   }
 }

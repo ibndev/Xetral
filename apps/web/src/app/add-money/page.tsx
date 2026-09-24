@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { formatAmount, nationalPhone, paymentLinkFor } from '@xetral/client';
+import { exponentFor, formatAmount, isValidAmount, nationalPhone, paymentLinkFor } from '@xetral/client';
 import type { MomoAccount, XetralClient, XetralCountry } from '@xetral/client';
 import { MOMO_NETWORKS } from '@xetral/client';
 import { Shell } from '@/ui/shell';
@@ -207,7 +207,7 @@ export default function AddMoney() {
               product for exactly that reason.
             */}
             <div className="acct-card">
-              <span className="eyebrow" style={{ padding: 0 }}>Your Xetral account</span>
+              <span className="eyebrow" style={{ padding: 0 }}>Your Xetral {account.data.currency} account</span>
               <div className="acct-card-row">
                 <span className="acct-number">{account.data.account_number}</span>
                 <button
@@ -339,6 +339,8 @@ export default function AddMoney() {
             client={client}
           />
         )}
+
+      {!account.loading && <PayIn currency={home} client={client} />}
 
       {/* Anything that is NOT the verification gate. A provider outage or a
           signed-out session is a different problem and needs its own words. */}
@@ -548,5 +550,98 @@ function LinkMomo({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * DEBIT CARD OR USSD, AS A TOP-UP THAT NEEDS NO ACCOUNT NUMBER.
+ *
+ * An account number is the cheapest way in, and it is not always there: it is
+ * a verified customer's product on Flutterwave, and a transfer from a bank
+ * app is three screens the customer may not have to hand. A card and a USSD
+ * short code are the two ways almost every Nigerian can pay in from where
+ * they are standing — and a card is how somebody abroad funds a cedi or
+ * shilling wallet.
+ *
+ * IT IS THE HOSTED CHECKOUT, with the customer as their own payer — the path
+ * 058 built and mobile money already uses. The card number is typed on the
+ * provider's page and never reaches this app or the API; what this screen
+ * sends is an amount and which button was pressed, so the provider opens on
+ * THAT method rather than its full picker.
+ *
+ * USSD IS OFFERED FOR NAIRA ONLY. It is a Nigerian bank's short code on both
+ * rails, and the API refuses it for any other currency — a button that could
+ * only be refused is worse than no button.
+ */
+function PayIn({ currency, client }: { currency: string; client: XetralClient }) {
+  const [method, setMethod] = useState<'card' | 'ussd'>('card');
+  const [amount, setAmount] = useState('');
+  const { busy, error, code, run } = useSubmit();
+  const ussd = currency === 'NGN';
+  const valid = amount.trim() !== '' && isValidAmount(amount, exponentFor(currency)) && !/^0+(\.0+)?$/.test(amount.trim());
+
+  return (
+    <form
+      className="payin"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!valid) return;
+        void run(async () => {
+          const session = await client.topUp(amount.trim(), ussd ? method : 'card');
+          // The provider's own page. Nothing about a card passes through here.
+          window.location.href = session.authorization_url;
+          return undefined;
+        });
+      }}
+    >
+      <span className="eyebrow" style={{ padding: 0 }}>
+        {ussd ? 'Or pay in by card or USSD' : 'Or pay in by card'}
+      </span>
+
+      {ussd && (
+        <div className="segmented wide" role="radiogroup" aria-label="How you pay">
+          {(['card', 'ussd'] as const).map((m) => (
+            <button
+              type="button"
+              key={m}
+              role="radio"
+              aria-checked={method === m}
+              className={method === m ? 'active' : undefined}
+              onClick={() => setMethod(m)}
+            >
+              <Icon name={m === 'card' ? 'card' : 'phone'} size={16} /> {m === 'card' ? 'Debit card' : 'USSD'}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="amount-card">
+        <span className="field-label">Amount</span>
+        <div className="amount-row">
+          <span className="currency-pill">{currency}</span>
+          <input
+            inputMode="decimal"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
+            placeholder="0"
+            aria-label={`Amount in ${currency}`}
+          />
+        </div>
+      </div>
+
+      <button type="submit" className="block" disabled={busy || !valid}>
+        {busy
+          ? 'Opening…'
+          : valid
+            ? `Pay ${formatAmount(amount.trim(), currency)} ${method === 'ussd' && ussd ? 'by USSD' : 'by card'}`
+            : 'Enter an amount'}
+      </button>
+      <p className="hint">
+        {method === 'ussd' && ussd
+          ? 'You will get a short code to dial from the phone linked to your bank.'
+          : 'You enter your card on a secure page. Xetral never sees your card details.'}
+      </p>
+      <FormError error={error} code={code} />
+    </form>
   );
 }

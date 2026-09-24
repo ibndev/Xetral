@@ -5,6 +5,7 @@ import { Logo } from '@/ui/logo';
 import { Icon } from '@/ui/icon';
 import { Select } from '@/ui/select';
 import { CurrencyMark } from '@/ui/currency-mark';
+import { readRequest, REQUEST_NOTE_MAX, symbolFor } from '@xetral/client';
 
 /**
  * THE PUBLIC CHECKOUT. No account, no sign-in, no app.
@@ -77,6 +78,22 @@ function Checkout({ slug }: { readonly slug: string }) {
   const [error, setError] = useState<string | undefined>();
   const [paid, setPaid] = useState(false);
 
+  /*
+   * A REQUEST'S PREFILL, off the query string — the amount, currency and
+   * reason the customer typed on their Request screen. Validated by
+   * `readRequest` and still only a suggestion: the payer sees it in the box
+   * and can change it, and the server credits what the provider says was
+   * PAID, never what a link claimed.
+   */
+  const [asked, setAsked] = useState<{ amount?: string; currency?: string; note?: string }>({});
+  useEffect(() => {
+    const request = readRequest(new URLSearchParams(window.location.search));
+    setAsked(request);
+    if (request.amount !== undefined) setAmount(request.amount);
+    if (request.currency !== undefined) setCurrency(request.currency);
+    if (request.note !== undefined) setNote(request.note);
+  }, []);
+
   useEffect(() => {
     let live = true;
     void (async () => {
@@ -134,7 +151,18 @@ function Checkout({ slug }: { readonly slug: string }) {
    * offered — so an older API loses the picker rather than the checkout.
    */
   const options = payee === undefined ? [] : (payee.currencies ?? [payee.currency]);
-  const chosen = currency === '' ? (payee?.currency ?? '') : currency;
+  /* A requested currency this link cannot collect falls back to the payee's
+     own rather than opening a checkout that refuses on submit. */
+  const chosen =
+    currency !== '' && (options.length === 0 || options.includes(currency))
+      ? currency
+      : (payee?.currency ?? '');
+  const initials = (payee?.name ?? '')
+    .split(/\s+/)
+    .filter((w) => w !== '')
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() ?? '')
+    .join('');
 
   async function pay(event: React.FormEvent): Promise<void> {
     event.preventDefault();
@@ -206,33 +234,22 @@ function Checkout({ slug }: { readonly slug: string }) {
             </div>
           ) : (
             <>
-              <div className="auth-head animate-in d1">
-                <h1>Pay {payee?.name ?? '…'}</h1>
-                <p>They receive it in their Xetral wallet</p>
-              </div>
+              {/*
+                THE REQUEST CARD — the same card the customer filled in on
+                their Request screen, so asking and paying read as one thing.
+                The figure is the whole of what is being asked, so it leads,
+                centred and large; everything a payer must type sits under it.
+              */}
+              <form className="req-card animate-in d1" onSubmit={pay}>
+                <div className="req-payee">
+                  <span className="req-avatar" aria-hidden>{initials === '' ? '·' : initials}</span>
+                  <span className="req-eyebrow">
+                    {asked.amount !== undefined ? `${payee?.name ?? '…'} requests` : `Pay ${payee?.name ?? '…'}`}
+                  </span>
+                </div>
 
-              <form className="auth-card animate-in d2" onSubmit={pay}>
-                {options.length > 1 && (
-                  <div className="field">
-                    <label htmlFor="pay-currency" id="pay-currency-label">
-                      Currency
-                    </label>
-                    <Select
-                      labelledBy="pay-currency-label"
-                      value={chosen}
-                      onChange={setCurrency}
-                      renderMark={(code) => <CurrencyMark currency={code} size={18} />}
-                      options={options.map((code) => ({ value: code, label: code }))}
-                    />
-                  </div>
-                )}
-
-                <div className="field">
-                  {/* THE LABEL FOLLOWS THE CHOICE. It was the payee's currency,
-                      fixed, so a payer who picked another one was typing into a
-                      box that still said the old code — and the amount is the
-                      one field where reading the wrong unit costs money. */}
-                  <label htmlFor="amount">Amount ({chosen})</label>
+                <label className="req-amount">
+                  <span className="req-symbol" aria-hidden>{symbolFor(chosen)}</span>
                   <input
                     id="amount"
                     // `text` with a decimal keypad, not `number`: money is a
@@ -240,58 +257,79 @@ function Checkout({ slug }: { readonly slug: string }) {
                     // input hands back a value the browser has already parsed.
                     type="text"
                     inputMode="decimal"
-                    placeholder="0.00"
+                    placeholder="0"
+                    aria-label={`Amount (${chosen})`}
                     value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
+                    style={{ width: `${Math.max(1, amount.length || 1) + 0.4}ch` }}
+                    onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
                     required
                   />
-                </div>
+                </label>
 
-                <div className="field">
-                  <label htmlFor="email">Your email</label>
-                  <input
-                    id="email"
-                    type="email"
-                    inputMode="email"
-                    placeholder="you@example.com"
-                    value={email}
-                    autoComplete="email"
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                  />
-                  <p className="hint">Your receipt goes here. It is not shared with anyone else.</p>
-                </div>
+                {options.length > 1 && (
+                  <div className="req-currency">
+                    <Select
+                      labelledBy="pay-currency-label"
+                      value={chosen}
+                      onChange={setCurrency}
+                      renderMark={(code) => <CurrencyMark currency={code} size={18} />}
+                      options={options.map((code) => ({ value: code, label: code }))}
+                    />
+                    <span id="pay-currency-label" hidden>Currency</span>
+                  </div>
+                )}
 
-                <div className="field">
-                  <label htmlFor="name">Your name (optional)</label>
+                {asked.note !== undefined ? (
+                  /* WHAT IT IS FOR, as the requester wrote it. Shown, not an
+                     input: it is their words, and it cannot change the amount. */
+                  <p className="req-note">
+                    <span className="req-note-label">What it&apos;s for</span>
+                    {asked.note}
+                  </p>
+                ) : (
                   <input
-                    id="name"
+                    className="req-for"
                     type="text"
-                    placeholder="So they know who paid"
-                    value={name}
-                    autoComplete="name"
-                    onChange={(e) => setName(e.target.value)}
-                  />
-                </div>
-
-                <div className="field">
-                  <label htmlFor="note">What&apos;s this for? (optional)</label>
-                  <textarea
-                    id="note"
-                    rows={2}
-                    maxLength={140}
-                    placeholder="Rent, invoice 24, lunch…"
+                    maxLength={REQUEST_NOTE_MAX}
+                    placeholder="What's it for? (optional)"
+                    aria-label="What it is for"
                     value={note}
                     onChange={(e) => setNote(e.target.value)}
                   />
-                  <p className="hint">
-                    They see this beside the payment. It cannot change the amount.
-                  </p>
+                )}
+
+                <div className="req-fields">
+                  <div className="field">
+                    <label htmlFor="email">Your email</label>
+                    <input
+                      id="email"
+                      type="email"
+                      inputMode="email"
+                      placeholder="you@example.com"
+                      value={email}
+                      autoComplete="email"
+                      onChange={(e) => setEmail(e.target.value)}
+                      required
+                    />
+                    <p className="hint">Your receipt goes here. It is not shared with anyone else.</p>
+                  </div>
+
+                  <div className="field">
+                    <label htmlFor="name">Your name (optional)</label>
+                    <input
+                      id="name"
+                      type="text"
+                      placeholder="So they know who paid"
+                      value={name}
+                      autoComplete="name"
+                      onChange={(e) => setName(e.target.value)}
+                    />
+                  </div>
                 </div>
 
                 <button
                   type="submit"
-                  className="block"
+                  className="block req-action"
                   disabled={busy || payee === undefined || chosen === ''}
                 >
                   {busy ? 'Opening…' : 'Continue to pay'}
@@ -308,8 +346,9 @@ function Checkout({ slug }: { readonly slug: string }) {
                     goes to Flutterwave — and a payer does not need to know
                     which processor we route to, only that we never see their
                     card. */}
-                <p className="hint">
-                  You pay on a secure page. Xetral never sees your card details.
+                <p className="req-foot">
+                  They receive it in their Xetral wallet. You pay on a secure
+                  page — Xetral never sees your card details.
                 </p>
               </form>
             </>

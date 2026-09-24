@@ -249,6 +249,8 @@ describe('the privileged surface is declared as privileged', () => {
       'GET /v1/admin/risk/cases/:id (compliance)',
       'GET /v1/admin/risk/signals (compliance)',
       'GET /v1/admin/routes (support)',
+      // How the whole grid is read — per route, by coverage, or one provider.
+      'GET /v1/admin/routing (support)',
       'GET /v1/admin/settings (finance)',
       'GET /v1/admin/settings/:key/history (finance)',
       'GET /v1/admin/staff (admin)',
@@ -307,6 +309,7 @@ describe('the privileged surface is declared as privileged', () => {
       'POST /v1/admin/risk/cases/:id/notes (compliance)',
       'POST /v1/admin/risk/signals/:id/resolve (compliance)',
       'POST /v1/admin/routes (admin)',
+      'POST /v1/admin/routing (admin)',
       'POST /v1/admin/settings/:key (finance)',
       'POST /v1/admin/staff/grant (admin)',
       'POST /v1/admin/staff/revoke (admin)',

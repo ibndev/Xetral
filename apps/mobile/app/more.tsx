@@ -28,7 +28,8 @@ const GROUPS: readonly {
   {
     title: 'Products',
     items: [
-      { href: '/bills', label: 'Bills and top-ups', hint: 'Airtime, data, electricity, eSIM', icon: 'receipt' },
+      { href: '/bills', label: 'Bills and top-ups', hint: 'Airtime, data, electricity', icon: 'receipt' },
+      { href: '/esim', label: 'Travel eSIM', hint: 'Data abroad, installs in seconds', icon: 'sim' },
       { href: '/crypto', label: 'Crypto', hint: 'Receive and send on-chain', icon: 'bitcoin' },
       { href: '/cards', label: 'USD cards', hint: 'Spend online in dollars', icon: 'card' },
     ],

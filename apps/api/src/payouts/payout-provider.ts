@@ -1,5 +1,5 @@
 import { Logger } from '@nestjs/common';
-import type { Currency } from '@xetral/shared';
+import type { Currency, Money } from '@xetral/shared';
 import type { ProviderRouterService } from '../routing/provider-router.service.js';
 import type {
   BeneficiaryLookup,
@@ -182,6 +182,46 @@ export class SwitchingPayoutPort implements PayoutPort {
      * Routing on the destination country keeps the three calls on one rail.
      */
     return this.#adapterFor(await this.providerForCountry(request.country)).send(request);
+  }
+
+  /**
+   * Every rail that could send to this country, the routed one first.
+   *
+   * The routed rail leads because it is what an operator chose; the others
+   * follow only where the routing policy's candidates name them AND this
+   * deployment has an adapter — a rail with no adapter cannot be tried, and
+   * listing it would be a choice the send then cannot honour.
+   */
+  async railsFor(country: string): Promise<readonly string[]> {
+    const rails = [await this.providerForCountry(country)];
+    // ONE PROVIDER FOR EVERYTHING means exactly that: an operator who chose
+    // `single` has said no other rail carries money, short balance or not.
+    if (this.#router !== undefined && (await this.#router.policy()).mode !== 'single') {
+      const currency = await this.#currencyOf(country.trim().toUpperCase());
+      if (currency !== undefined) {
+        for (const candidate of await this.#router.candidates('payout', currency)) {
+          if (this.#adapters.has(candidate) && !rails.includes(candidate)) rails.push(candidate);
+        }
+      }
+    }
+    return rails;
+  }
+
+  /** The named rail and no other — the one recorded on the payout row. */
+  async sendVia<C extends Currency>(
+    provider: string,
+    request: PayoutRequest<C>,
+  ): Promise<PayoutReceipt> {
+    return this.#adapterFor(provider).send(request);
+  }
+
+  /** What a named rail says it holds, or undefined where it cannot say. */
+  async balancesOf(provider: string): Promise<readonly Money<Currency>[] | undefined> {
+    const adapter = this.#adapters.get(provider) as
+      | (PayoutPort & { floatBalances?: () => Promise<readonly Money<Currency>[]> })
+      | undefined;
+    if (adapter?.floatBalances === undefined) return undefined;
+    return adapter.floatBalances();
   }
 
   async status(providerPayoutId: string, provider?: string): Promise<PayoutReceipt> {

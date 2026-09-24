@@ -129,6 +129,8 @@ function sentenceFor(error: ApiError): string {
       return 'That country cannot be opened until its currency has limits.';
     case 'currency_not_supported':
       return 'That currency needs a code change before a country can use it.';
+    case 'payment_method_not_supported':
+      return 'USSD works for naira only. Pay by card instead.';
     case 'gift_cards_disabled':
       return 'Gift cards are not available yet.';
     // Paused by an operator, usually because a provider is having an incident.

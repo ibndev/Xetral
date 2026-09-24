@@ -27,9 +27,13 @@ import { font, radius, space, useStyles, useTheme } from '@/theme';
  * apps; the crypto screen's equivalent duplication is how the browser spent
  * the whole life of that feature sending chain names the API refused.
  */
-const SERVICES = PURCHASE_SERVICES;
+type ServiceCode = Exclude<PurchaseService['code'], 'esim'>;
 
-type ServiceCode = PurchaseService['code'];
+/* eSIM has its own screen, `esim.tsx` — the comp's. Same purchase flow. */
+const SERVICES = PURCHASE_SERVICES.filter(
+  (s): s is Extract<(typeof PURCHASE_SERVICES)[number], { code: ServiceCode }> => s.code !== 'esim',
+);
+
 
 export default function Bills() {
   const client = useXetral();
@@ -37,13 +41,14 @@ export default function Bills() {
   const colors = useTheme();
   const [service, setService] = useState<ServiceCode>('airtime');
   const history = useLoad(() => client.purchases(), [client]);
-  const chosen = SERVICES.find((s) => s.code === service) ?? SERVICES[0];
+  // The list is a non-empty literal minus one entry, so there is always a first.
+  const chosen = SERVICES.find((s) => s.code === service) ?? (SERVICES[0] as (typeof SERVICES)[number]);
 
   return (
     /* A BACK ARROW AND A TITLE, because this screen is reached from More and
        is not a tab — the web's is the same. */
     <Shell back="/more" title="Bills and airtime">
-      <Text style={styles.lead}>Airtime, data, electricity, eSIM and numbers.</Text>
+      <Text style={styles.lead}>Airtime, data, electricity and numbers.</Text>
 
       {/*
         A GRID OF TILES, WHICH IS WHAT THE COMP DRAWS — and what a wrapping
@@ -203,7 +208,7 @@ function Buy({
 
       <Field
         label={service.target}
-        inputMode={service.mode === 'tel' ? 'tel' : service.mode === 'numeric' ? 'numeric' : service.mode === 'email' ? 'email' : 'text'}
+        inputMode={service.mode === 'tel' ? 'tel' : service.mode === 'numeric' ? 'numeric' : 'text'}
         autoCapitalize="none"
         value={target}
         onChangeText={setTarget}

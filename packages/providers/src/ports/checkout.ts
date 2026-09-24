@@ -62,7 +62,21 @@ export interface CheckoutRequest {
    * a free-text box worth attacking.
    */
   readonly note?: string;
+  /**
+   * ONE METHOD, WHEN THE CUSTOMER ALREADY CHOSE IT.
+   *
+   * Add Money offers "Debit card" and "USSD" as two buttons, so a customer who
+   * pressed one must land on a page offering THAT — not the provider's full
+   * picker, where USSD is three taps down under a heading about banks. Absent,
+   * the provider renders every method the currency allows, which is what a
+   * stranger paying a link needs. `ussd` is a naira product on both rails;
+   * the service refuses it for any other currency before a row is written.
+   */
+  readonly method?: CheckoutMethod;
 }
+
+/** The methods a customer can choose before leaving for the provider's page. */
+export type CheckoutMethod = 'card' | 'ussd';
 
 export interface CheckoutSession {
   /** Where to send the payer. The provider renders the method picker. */

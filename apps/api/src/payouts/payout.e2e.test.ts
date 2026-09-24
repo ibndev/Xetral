@@ -22,10 +22,11 @@ import type {
   PayoutRequest,
 } from '@xetral/providers';
 import { money, toMajor } from '@xetral/shared';
-import type { Currency } from '@xetral/shared';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import type { Currency, Money } from '@xetral/shared';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { PayoutReconciliationService } from './payout-reconciliation.service.js';
 import { PayoutService } from './payout.service.js';
+import { ProviderLiquidityService } from './provider-liquidity.service.js';
 import { AppModule } from '../app.module.js';
 import type { ApiConfig } from '../config.js';
 import { systemClock } from '../tokens.js';
@@ -122,13 +123,46 @@ class FakePayoutPort implements PayoutPort {
     return this.sendAnswer;
   }
 
-  async status(): Promise<PayoutReceipt> {
-    if (this.statusAnswer instanceof Error) throw this.statusAnswer;
-    return this.statusAnswer;
+  async status(_id?: string, provider?: string): Promise<PayoutReceipt> {
+    const answer =
+      this.statusBy !== undefined && provider !== undefined
+        ? (this.statusBy[provider] ?? new ProviderRejectedError(provider, 'no such payout', 'not_found'))
+        : this.statusAnswer;
+    if (answer instanceof Error) throw answer;
+    return answer;
   }
 
   async prefundedFor(): Promise<boolean> {
     return this.prefunded;
+  }
+
+  /*
+   * THE SWITCH'S HALF, for the tests about which rail pays. Unset — the
+   * default — they answer as a single adapter would: one rail, no readable
+   * balance, and every earlier test in this file is untouched by them.
+   */
+  rails: string[] | undefined;
+  /** What each rail says it holds. A rail absent here cannot be read. */
+  held: Record<string, readonly Money<Currency>[]> = {};
+  /** Per-rail status answers, for a row whose rail is unknown (080). */
+  statusBy: Record<string, PayoutReceipt | Error> | undefined;
+  readonly sentVia: string[] = [];
+
+  get providers(): readonly string[] {
+    return this.rails ?? [this.provider];
+  }
+
+  async railsFor(): Promise<readonly string[]> {
+    return this.rails ?? [this.provider];
+  }
+
+  async sendVia<C extends Currency>(provider: string, input: PayoutRequest<C>): Promise<PayoutReceipt> {
+    this.sentVia.push(provider);
+    return this.send(input);
+  }
+
+  async balancesOf(provider: string): Promise<readonly Money<Currency>[] | undefined> {
+    return this.held[provider];
   }
 }
 
@@ -1223,3 +1257,189 @@ async function floatHeld(currency: string): Promise<bigint> {
   );
   return BigInt(rows.rows[0]?.held_minor ?? '0');
 }
+
+/** A balance a rail reports. `Money` is invariant, so a list of balances in
+ *  several currencies is a list of `Money<Currency>` — built, not narrowed. */
+const bal = (currency: Currency, minor: bigint): Money<Currency> =>
+  ({ amount: minor, currency }) as Money<Currency>;
+
+describe('which rail pays, and what it really holds', () => {
+  /*
+   * THE LEDGER'S FLOAT IS ONE FIGURE FOR EVERY PROVIDER, so it can say the
+   * platform holds naira while the rail that pays naira out holds none —
+   * money collected at Paystack, or credited by a conversion the platform
+   * priced itself, is nowhere near Flutterwave. These tests are about the
+   * rail being ASKED, and about the row recording which rail it was.
+   */
+  beforeEach(() => {
+    // The service caches each rail's reading for thirty seconds — right for a
+    // screen money is sent from, and a reading one test would hand the next.
+    const liquidity = app.get(ProviderLiquidityService);
+    for (const rail of ['bitnob', 'paystack', 'flutterwave']) liquidity.forget(rail);
+  });
+
+  afterEach(() => {
+    port.rails = undefined;
+    port.held = {};
+    port.statusBy = undefined;
+    port.sendAnswer = { providerPayoutId: 'po_1', state: 'sent' };
+  });
+
+  it('RECORDS THE RAIL THAT SENT IT, and sends on exactly that rail', async () => {
+    // 046 added `provider` and nothing wrote it, so every payout read the
+    // column default — and was then asked about at the wrong provider.
+    const customer = await onboard();
+    await fund(customer.userId, 1_000_000n);
+    port.rails = ['paystack'];
+
+    const res = await pay(customer).expect(200);
+    const row = await pool.query<{ provider: string; provider_known: boolean }>(
+      `SELECT provider, provider_known FROM bank_payouts WHERE uuid = $1::uuid`,
+      [res.body.id],
+    );
+    expect(row.rows[0]).toEqual({ provider: 'paystack', provider_known: true });
+    expect(port.sentVia.at(-1)).toBe('paystack');
+  });
+
+  it('REFUSES BEFORE HOLDING ANYTHING when the rail says it cannot cover it', async () => {
+    const customer = await onboard();
+    await fund(customer.userId, 1_000_000n);
+    port.rails = ['paystack'];
+    port.held = { paystack: [bal('NGN', 100n)] }; // ₦1, readable, short
+    const sendsBefore = port.sends.length;
+
+    const res = await pay(customer).expect(503);
+    expect(res.body.error).toBe('insufficient_platform_liquidity');
+    // Nothing held, nothing asked: the customer's balance is untouched.
+    const balance = await nairaBalance(customer);
+    expect(balance.spendable).toBe('10000.00');
+    expect(balance.pending).toBe('0.00');
+    expect(port.sends.length).toBe(sendsBefore);
+  });
+
+  it('PAYS A WALLET FROM THE NEXT RAIL THAT CAN, where the routed one is empty', async () => {
+    const ghanaian = await onboard();
+    await pool.query(`UPDATE users SET country = 'GH' WHERE id = $1::bigint`, [ghanaian.userId]);
+    await fundIn(ghanaian.userId, 'GHS', 1_000_00n);
+    port.lookupAnswer = new ProviderRejectedError('flutterwave', 'no name enquiry', 'name_unavailable');
+    port.rails = ['flutterwave', 'bitnob'];
+    port.held = { flutterwave: [], bitnob: [bal('GHS', 1_000_000n)] };
+
+    const res = await request(app.getHttpServer())
+      .post('/v1/payouts')
+      .set('Authorization', `Bearer ${ghanaian.token}`)
+      .send({
+        country: 'GH',
+        bank_code: 'MTN',
+        account_number: '0501234567',
+        amount: '25.00',
+        currency: 'GHS',
+        transaction_pin: PIN,
+        idempotency_key: randomUUID(),
+      })
+      .expect(200);
+
+    expect(port.sentVia.at(-1)).toBe('bitnob');
+    const row = await pool.query<{ provider: string }>(
+      `SELECT provider FROM bank_payouts WHERE uuid = $1::uuid`,
+      [res.body.id],
+    );
+    expect(row.rows[0]?.provider).toBe('bitnob');
+  });
+
+  it('NEVER MOVES A BANK PAYOUT to another rail — the bank code is the first rail\'s', async () => {
+    const customer = await onboard();
+    await fund(customer.userId, 1_000_000n);
+    port.rails = ['paystack', 'flutterwave'];
+    port.held = { paystack: [], flutterwave: [bal('NGN', 100_000_000n)] };
+
+    const res = await pay(customer).expect(503);
+    expect(res.body.error).toBe('insufficient_platform_liquidity');
+  });
+
+  it('A RAIL THAT CANNOT READ ITS BALANCE CHANGES NOTHING', async () => {
+    // Unreadable is not zero. A balance endpoint that is down must not become
+    // an outage on the screen money is sent from.
+    const customer = await onboard();
+    await fund(customer.userId, 1_000_000n);
+    port.rails = ['paystack'];
+    port.held = {};
+
+    await pay(customer).expect(200);
+  });
+});
+
+describe('a payout written before its rail was recorded', () => {
+  /*
+   * EVERY ROW BEFORE 080 SAYS `bitnob`, whoever sent it. Asking Bitnob about
+   * a Flutterwave transfer answers "no such payout", and the sweep read that
+   * as a definite refusal and REVERSED — refunding money that had left. For
+   * such a row, only an answer carrying OUR reference is believed.
+   */
+  async function legacyPayout(): Promise<{ customer: Customer; reference: string }> {
+    const customer = await onboard();
+    await fund(customer.userId, 1_000_000n);
+    const reference = `legacy-${randomUUID()}`;
+    const reserve = await ledger.post({
+      idempotencyKey: `bank-payout-reserve:${reference}`,
+      kind: 'wallet_withdrawal',
+      occurredAt: new Date(),
+      description: 'bank payout reserved',
+      metadata: { reference },
+      postings: [
+        posting({ kind: 'customer_wallet', ownerId: customer.userId, currency: 'NGN' }, money(-500_000n, 'NGN')),
+        posting({ kind: 'customer_pending', ownerId: customer.userId, currency: 'NGN' }, money(500_000n, 'NGN')),
+      ],
+    });
+    await pool.query(
+      `INSERT INTO bank_payouts
+         (user_id, reference, idempotency_key, country, bank_code, bank_name,
+          account_number, account_name, currency, amount_minor, reserve_entry_id,
+          provider_payout_id, provider, provider_known, created_at)
+       VALUES ($1::bigint, $2, $3, 'NG', '058', 'GTBank', $4, $5, 'NGN', 500000,
+               $6::bigint, 'tx_legacy', 'bitnob', FALSE, now() - interval '2 days')`,
+      [customer.userId, reference, randomUUID(), ACCOUNT, BANK_NAME_ON_ACCOUNT, reserve.entryId],
+    );
+    return { customer, reference };
+  }
+
+  afterEach(() => {
+    port.rails = undefined;
+    port.statusBy = undefined;
+  });
+
+  it('DOES NOT REVERSE IT on the recorded rail\'s "no such payout"', async () => {
+    const { customer } = await legacyPayout();
+    port.rails = ['bitnob', 'paystack'];
+    port.statusBy = {}; // every rail: no such payout
+
+    await app.get(PayoutReconciliationService).sweep();
+    const after = await nairaBalance(customer);
+    expect(after.pending).toBe('5000.00'); // still held, not refunded
+  });
+
+  it('SETTLES IT from whichever rail returns it WITH OUR REFERENCE', async () => {
+    const { customer, reference } = await legacyPayout();
+    port.rails = ['bitnob', 'paystack'];
+    port.statusBy = {
+      paystack: { providerPayoutId: 'tx_legacy', state: 'completed', reference },
+    };
+
+    await app.get(PayoutReconciliationService).sweep();
+    const after = await nairaBalance(customer);
+    expect(after.spendable).toBe('5000.00');
+    expect(after.pending).toBe('0.00');
+  });
+
+  it('IGNORES a rail that returns the same id for SOMEBODY ELSE\'S transfer', async () => {
+    const { customer } = await legacyPayout();
+    port.rails = ['bitnob', 'flutterwave'];
+    port.statusBy = {
+      flutterwave: { providerPayoutId: 'tx_legacy', state: 'failed', reference: 'not-ours' },
+    };
+
+    await app.get(PayoutReconciliationService).sweep();
+    expect((await nairaBalance(customer)).pending).toBe('5000.00');
+  });
+});
+

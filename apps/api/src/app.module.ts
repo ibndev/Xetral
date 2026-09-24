@@ -90,6 +90,8 @@ import {
 import { CryptoService } from './crypto/crypto.service.js';
 import { PayoutService } from './payouts/payout.service.js';
 import { PlatformFloatService } from './payouts/platform-float.service.js';
+import { ProviderLiquidityService } from './payouts/provider-liquidity.service.js';
+import { TreasuryService } from './payouts/treasury.service.js';
 import { RecipientBookService } from './recipients/recipient-book.service.js';
 import { PaystackWebhookService } from './funding/paystack-webhook.service.js';
 import { FlutterwaveWebhookService } from './funding/flutterwave-webhook.service.js';
@@ -1475,6 +1477,8 @@ export class AppModule {
         CryptoService,
         PayoutService,
         PlatformFloatService,
+        ProviderLiquidityService,
+        TreasuryService,
         RecipientBookService,
         CryptoWebhookService,
         FxService,

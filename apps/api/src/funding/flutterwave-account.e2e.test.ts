@@ -15,6 +15,7 @@ import { systemClock } from '../tokens.js';
 import { testApiConfig } from '../test-support/api-config.js';
 import { approveKyc } from '../test-support/kyc-fixture.js';
 import { DepositReconciliationService } from './deposit-reconciliation.service.js';
+import { ProviderRouterService } from '../routing/provider-router.service.js';
 
 /**
  * A NAIRA ACCOUNT NUMBER ON FLUTTERWAVE, end to end, through the REAL adapter
@@ -59,6 +60,34 @@ beforeAll(async () => {
       seen.push({ method: req.method ?? '', url, body: raw === '' ? undefined : JSON.parse(raw) });
       res.setHeader('content-type', 'application/json');
 
+      /*
+       * PAYSTACK, for the account fallback — the rail 079 moves on to when
+       * Flutterwave refuses an unverified customer. Served here so no test in
+       * this file can reach the real api.paystack.co with a made-up key.
+       */
+      if (req.method === 'POST' && url === '/customer') {
+        res.end(JSON.stringify({ status: true, data: { customer_code: `CUS_${randomUUID().slice(0, 8)}` } }));
+        return;
+      }
+      if (req.method === 'GET' && url.startsWith('/dedicated_account?')) {
+        res.end(JSON.stringify({ status: true, data: [] }));
+        return;
+      }
+      if (req.method === 'POST' && url === '/dedicated_account') {
+        res.end(
+          JSON.stringify({
+            status: true,
+            data: {
+              id: Math.floor(Math.random() * 1e9),
+              account_number: String(9_000_000_000 + Math.floor(Math.random() * 999_999_999)),
+              account_name: 'XETRAL/ADA OBI',
+              bank: { name: 'Test Bank' },
+              active: true,
+            },
+          }),
+        );
+        return;
+      }
       if (req.method === 'POST' && url === '/v3/virtual-account-numbers') {
         res.end(
           JSON.stringify({
@@ -114,6 +143,8 @@ beforeAll(async () => {
           flutterwaveBaseUrl: `http://127.0.0.1:${port}`,
           flutterwaveSecretKey: 'FLWSECK_TEST-not-a-real-key',
           flutterwaveWebhookHash: HASH,
+          paystackBaseUrl: `http://127.0.0.1:${port}`,
+          paystackSecretKey: 'sk_test_not_a_real_key',
         },
         pool,
         clock: systemClock,
@@ -216,14 +247,55 @@ function deposited(id: string, txRef: string, overrides: Record<string, unknown>
 let nextId = 900_000_000 + Math.floor(Math.random() * 90_000_000);
 const newId = () => String(nextId++);
 
+async function setFallback(on: boolean): Promise<void> {
+  // Through the service, not a raw UPDATE, so its five-second cache is
+  // cleared and the next request reads what was just written.
+  await app.get(ProviderRouterService).setPolicy({
+    mode: 'per_route',
+    preferredProvider: null,
+    singleProvider: null,
+    accountFallback: on,
+    byUserUuid: randomUUID(),
+  });
+}
+
 describe('opening a naira account number on Flutterwave', () => {
-  it('refuses an unverified customer with kyc_required, and sends Flutterwave nothing', async () => {
+  it('with the fallback OFF, refuses an unverified customer with kyc_required and sends Flutterwave nothing', async () => {
+    await setFallback(false);
+    try {
+      const customer = await nigerian(false);
+      seen.length = 0;
+      const res = await openAccount(customer);
+      expect(res.status).toBe(422);
+      expect(res.body.error).toBe('kyc_required');
+      expect(seen.filter((r) => r.url === '/v3/virtual-account-numbers')).toHaveLength(0);
+    } finally {
+      await setFallback(true);
+    }
+  });
+
+  /*
+   * THE ACTIVATE ACCOUNT FAULT, as a test. Flutterwave will not open a
+   * permanent naira account without a verified BVN, and nothing else was ever
+   * asked — so an unverified Nigerian was refused while Paystack, which opens
+   * a tier 1 account from a name, sat one row away. With 079's fallback on
+   * (as it ships) the refusal moves on, and the account is recorded against
+   * the rail that actually opened it.
+   */
+  it('with the fallback ON, opens an unverified customer an account on the next rail', async () => {
     const customer = await nigerian(false);
     seen.length = 0;
     const res = await openAccount(customer);
-    expect(res.status).toBe(422);
-    expect(res.body.error).toBe('kyc_required');
+    expect(res.status).toBe(200);
+    expect(res.body.currency).toBe('NGN');
     expect(seen.filter((r) => r.url === '/v3/virtual-account-numbers')).toHaveLength(0);
+    expect(seen.some((r) => r.method === 'POST' && r.url === '/dedicated_account')).toBe(true);
+
+    const row = await pool.query<{ provider: string }>(
+      `SELECT provider FROM virtual_accounts WHERE user_id = $1::bigint`,
+      [customer.userId],
+    );
+    expect(row.rows[0]?.provider).toBe('paystack');
   });
 
   it('sends the BVN sealed at KYC, and records the reference deposits arrive under', async () => {

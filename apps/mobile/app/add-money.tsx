@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { Linking, Share, Text, TextInput, View } from 'react-native';
-import { formatAmount, nationalPhone, paymentLinkFor } from '@xetral/client';
+import { exponentFor, formatAmount, isValidAmount, nationalPhone, paymentLinkFor } from '@xetral/client';
 import type { MomoAccount, XetralClient, XetralCountry } from '@xetral/client';
 import { MOMO_NETWORKS } from '@xetral/client';
 import { Select } from '@/select';
 import { Shell } from '@/shell';
 import { AcctCard } from '@/acct-card';
-import { Button, FormError, Loading, Panel } from '@/ui';
+import { AmountCard, Button, CurrencyPill, FormError, Loading, Panel, Segmented } from '@/ui';
 import { useLoad, useSubmit, useXetral } from '@/hooks';
 import { font, radius, space, useStyles, useTheme } from '@/theme';
 
@@ -115,7 +115,7 @@ export default function AddMoney() {
               are read together, so all three sit in one panel.
             */}
             <AcctCard
-              eyebrow="Your Xetral account"
+              eyebrow={`Your Xetral ${account.data.currency} account`}
               value={account.data.account_number}
               share={account.data.account_number}
               sub={
@@ -208,6 +208,10 @@ export default function AddMoney() {
 
         <FormError error={account.error} code={account.code} />
       </Panel>
+
+      {!account.loading && (
+        <PayIn currency={here?.currency ?? session.data?.home_currency ?? 'NGN'} client={client} />
+      )}
 
       {/*
         AND ASKING TO BE PAID IS A DIFFERENT SCREEN — `/request`.
@@ -368,3 +372,83 @@ function LinkMomo({
     </View>
   );
 }
+
+/**
+ * DEBIT CARD OR USSD — the web's panel, control for control. See
+ * `apps/web/src/app/add-money/page.tsx`: the hosted checkout with the
+ * customer as their own payer, opened on the method they pressed. The card is
+ * typed on the provider's page, never here. USSD is naira only.
+ */
+function PayIn({ currency, client }: { readonly currency: string; readonly client: XetralClient }) {
+  const styles = useStyles();
+  const colors = useTheme();
+  const [method, setMethod] = useState<'card' | 'ussd'>('card');
+  const [amount, setAmount] = useState('');
+  const { busy, error, code, run } = useSubmit();
+  const ussd = currency === 'NGN';
+  const chosen = ussd ? method : 'card';
+  const valid =
+    amount.trim() !== '' &&
+    isValidAmount(amount, exponentFor(currency)) &&
+    !/^0+(\.0+)?$/.test(amount.trim());
+
+  return (
+    <Panel title={ussd ? 'Pay in by card or USSD' : 'Pay in by card'}>
+      {ussd && (
+        <Segmented
+          label="How you pay"
+          value={method}
+          onChange={setMethod}
+          options={[
+            { value: 'card', label: 'Debit card' },
+            { value: 'ussd', label: 'USSD' },
+          ]}
+        />
+      )}
+      <AmountCard>
+        <Text style={styles.label}>Amount</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+          <CurrencyPill>
+            <Text style={{ fontFamily: font.sansSemi, color: colors.text }}>{currency}</Text>
+          </CurrencyPill>
+          <TextInput
+            value={amount}
+            onChangeText={(t) => setAmount(t.replace(/[^0-9.]/g, ''))}
+            placeholder="0"
+            placeholderTextColor={colors.text3}
+            keyboardType="decimal-pad"
+            accessibilityLabel={`Amount in ${currency}`}
+            style={{ flex: 1, fontFamily: font.numBold, fontSize: 26, color: colors.text, padding: 0 }}
+          />
+        </View>
+      </AmountCard>
+      <View style={{ marginTop: space.md }}>
+        <Button
+          label={
+            valid
+              ? `Pay ${formatAmount(amount.trim(), currency)} ${chosen === 'ussd' ? 'by USSD' : 'by card'}`
+              : 'Enter an amount'
+          }
+          busy={busy}
+          disabled={!valid}
+          onPress={() =>
+            void run(async () => {
+              const session = await client.topUp(amount.trim(), chosen);
+              // The provider's own page, in the browser. Nothing about a card
+              // passes through this app.
+              await Linking.openURL(session.authorization_url);
+              return undefined;
+            })
+          }
+        />
+      </View>
+      <Text style={[styles.hint, { marginTop: space.xs }]}>
+        {chosen === 'ussd'
+          ? 'You will get a short code to dial from the phone linked to your bank.'
+          : 'You enter your card on a secure page. Xetral never sees your card details.'}
+      </Text>
+      <FormError error={error} code={code} />
+    </Panel>
+  );
+}
+

@@ -154,6 +154,36 @@ export interface AdminRoute {
   readonly options: readonly string[];
 }
 
+/** 079: how the route grid is read. */
+export type AdminRoutingMode = 'per_route' | 'by_coverage' | 'single';
+
+export interface AdminRoutingPolicy {
+  readonly mode: AdminRoutingMode;
+  readonly preferred_provider: string | null;
+  readonly single_provider: string | null;
+  /** Whether an account request may try the next rail after a refusal. */
+  readonly account_fallback: boolean;
+}
+
+/** The whole grid, as it will be served after the policy is applied. */
+export interface AdminRouting {
+  readonly policy: AdminRoutingPolicy;
+  readonly coverage: readonly {
+    readonly provider: string;
+    readonly operation: AdminRoute['operation'];
+    readonly currency: string;
+    readonly basis: string;
+  }[];
+  readonly configured: Readonly<Record<AdminRoute['operation'], readonly string[]>>;
+  readonly effective: readonly {
+    readonly operation: AdminRoute['operation'];
+    readonly currency: string;
+    readonly routed: string | null;
+    readonly serving: string | null;
+    readonly candidates: readonly string[];
+  }[];
+}
+
 /**
  * A provider credential slot, and whether it is filled.
  *
@@ -883,6 +913,28 @@ export interface AdminProviderHealth {
     readonly short: boolean;
     readonly last_movement_at: string | null;
   }[];
+  /**
+   * WHAT CUSTOMERS ARE OWED BESIDE WHAT EACH PROVIDER REALLY HOLDS.
+   *
+   * `float` above is the ledger's figure for every provider together; this is
+   * each rail asked for itself. Minor units as strings; null where a rail has
+   * no readable balance, which is not the same as zero.
+   */
+  readonly treasury?: AdminTreasury;
+}
+
+export interface AdminTreasury {
+  readonly rails: readonly { readonly provider: string; readonly readable: boolean }[];
+  readonly lines: readonly {
+    readonly currency: string;
+    readonly owed_minor: string;
+    readonly ledger_held_minor: string;
+    readonly live: readonly { readonly provider: string; readonly available_minor: string | null }[];
+    readonly payout_rail: string | null;
+    readonly payout_rail_available_minor: string | null;
+    readonly debit_currency: string | null;
+    readonly payout_rail_short_minor: string | null;
+  }[];
 }
 
 /**
@@ -1226,6 +1278,16 @@ export class AdminClient {
       ...route,
       transaction_pin: pin,
     });
+  }
+
+  /** The routing policy, the documented coverage, and who serves each cell now. */
+  async routing(): Promise<AdminRouting> {
+    return this.#get<AdminRouting>('/v1/admin/routing');
+  }
+
+  /** Change how the whole grid is read. Nobody already served moves. */
+  async setRouting(policy: AdminRoutingPolicy, pin: string): Promise<AdminRouting> {
+    return this.#post<AdminRouting>('/v1/admin/routing', { ...policy, transaction_pin: pin });
   }
 
   /* ------------------------------- readiness ---------------------------- */

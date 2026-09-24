@@ -114,6 +114,12 @@ export const PAYSTACK_ENDPOINTS = {
   createTransferRecipient: '/transferrecipient',
   createTransfer: '/transfer',
   getTransfer: (id: string) => `/transfer/${encodeURIComponent(id)}`,
+  /**
+   * WHAT WE HOLD WITH THEM — `GET /balance`, Paystack's "Check Balance"
+   * (Transfer Control, read September 2026): `{ data: [{ currency, balance }] }`
+   * with the balance in SUBUNITS, like every other Paystack amount.
+   */
+  balance: '/balance',
 } as const;
 
 export class PaystackClient {

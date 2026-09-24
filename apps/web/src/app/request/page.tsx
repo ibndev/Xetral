@@ -1,10 +1,21 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { nationalPhone, paymentLinkFor } from '@xetral/client';
+import {
+  exponentFor,
+  formatAmount,
+  isValidAmount,
+  nationalPhone,
+  paymentLinkFor,
+  REQUEST_NOTE_MAX,
+  requestLinkFor,
+  symbolFor,
+} from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { Icon } from '@/ui/icon';
 import { FormError } from '@/ui/form-error';
+import { Select } from '@/ui/select';
+import { CurrencyMark } from '@/ui/currency-mark';
 import { useLoad, useXetral } from '@/lib/hooks';
 
 /**
@@ -22,13 +33,18 @@ import { useLoad, useXetral } from '@/lib/hooks';
  * the number a customer's bank, contacts and two-factor codes are attached
  * to.
  *
- * AND NOT THE COMP'S REQUEST SCREEN, deliberately. That one asks for an
- * amount and lists pending requests against named people — a product with a
- * table behind it that this platform does not have. A screen that took an
- * amount and produced a link which ignores it would be worse than not
- * offering one: a payment link's amount is chosen by the PAYER (058), and a
- * customer who typed ₦25,000 into a box would reasonably believe that is what
- * was asked for.
+ * AND NOW THE COMP'S REQUEST CARD, on the product owner's instruction — with
+ * the objection that kept it out answered rather than ignored. The objection
+ * was that a link which IGNORED a typed amount would be worse than none. So
+ * the amount is not ignored: it rides on the link (`requestLinkFor`) and the
+ * checkout opens with it filled in, beside the reason, for the payer to read.
+ * It is still the payer who pays, and the server still credits what was
+ * paid — a request is a prefill, never a claim the API trusts.
+ *
+ * THE COMP'S "PENDING REQUESTS" LIST IS NOT DRAWN. It names who was asked
+ * and whether they paid, which needs a table of requests against people that
+ * this platform does not keep — a list of links nobody can mark as settled
+ * would be a list that is wrong from the first payment.
  */
 export default function Request() {
   const client = useXetral();
@@ -41,6 +57,11 @@ export default function Request() {
   const here = countries.data?.find((c) => c.code === session.data?.country);
   const [copiedPhone, setCopiedPhone] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [copiedRequest, setCopiedRequest] = useState(false);
+  const [amount, setAmount] = useState('');
+  const [note, setNote] = useState('');
+  const [picked, setPicked] = useState('');
+  const [made, setMade] = useState<{ url: string; amount: string; currency: string } | undefined>();
 
   /*
    * THE ORIGIN THIS PAGE IS ALREADY BEING SERVED FROM, as the fallback for a
@@ -66,6 +87,33 @@ export default function Request() {
   const link =
     profile.data?.link ?? (slug !== null && origin !== '' ? paymentLinkFor(origin, slug) : null);
 
+  /* Their own money first, then dollars — the two a stranger abroad is
+     likeliest to hold. The checkout still offers whatever the route table
+     can collect; this is only what the request is written in. */
+  const home = session.data?.home_currency ?? 'NGN';
+  const currencies = [...new Set([home, 'USD'])];
+  const currency = picked === '' ? home : picked;
+  const valid = amount.trim() !== '' && isValidAmount(amount, exponentFor(currency)) && !/^0+(\.0+)?$/.test(amount.trim());
+
+  function create(): void {
+    if (link === null || !valid) return;
+    setCopiedRequest(false);
+    setMade({
+      url: requestLinkFor(link, { amount: amount.trim(), currency, ...(note.trim() === '' ? {} : { note: note.trim() }) }),
+      amount: amount.trim(),
+      currency,
+    });
+  }
+
+  function share(url: string): void {
+    const text = `Pay me ${formatAmount(made?.amount ?? '0', made?.currency ?? currency)}${note.trim() === '' ? '' : ` for ${note.trim()}`} on Xetral`;
+    if (typeof navigator.share === 'function') {
+      void navigator.share({ title: 'Payment request', text, url }).catch(() => undefined);
+    } else {
+      copy(url, setCopiedRequest);
+    }
+  }
+
   function copy(text: string, mark: (v: boolean) => void): void {
     if (text === '') return;
     void navigator.clipboard
@@ -78,7 +126,83 @@ export default function Request() {
 
   return (
     <Shell back="/wallet" title="Request money">
-      <p className="page-lede">Two ways to be paid. Both are yours permanently.</p>
+      {/*
+        THE COMP'S REQUEST CARD: the figure first, centred, in the home
+        screen's own face — the amount is the whole of what is being asked —
+        then the reason, then one action. The same card is what the payer
+        sees on the checkout, so both sides of a request look like one thing.
+      */}
+      <div className="req-card">
+        <span className="req-eyebrow">You request</span>
+        <label className="req-amount">
+          <span className="req-symbol" aria-hidden>{symbolFor(currency)}</span>
+          <input
+            type="text"
+            inputMode="decimal"
+            placeholder="0"
+            aria-label={`Amount in ${currency}`}
+            value={amount}
+            style={{ width: `${Math.max(1, amount.length || 1) + 0.4}ch` }}
+            onChange={(e) => {
+              setAmount(e.target.value.replace(/[^0-9.]/g, ''));
+              setMade(undefined);
+            }}
+          />
+        </label>
+        {currencies.length > 1 && (
+          <div className="req-currency">
+            <Select
+              labelledBy="req-currency-label"
+              value={currency}
+              onChange={(code) => {
+                setPicked(code);
+                setMade(undefined);
+              }}
+              renderMark={(code) => <CurrencyMark currency={code} size={18} />}
+              options={currencies.map((code) => ({ value: code, label: code }))}
+            />
+            <span id="req-currency-label" hidden>Currency</span>
+          </div>
+        )}
+        <input
+          className="req-for"
+          type="text"
+          maxLength={REQUEST_NOTE_MAX}
+          placeholder="What's it for? (optional)"
+          aria-label="What it is for"
+          value={note}
+          onChange={(e) => {
+            setNote(e.target.value);
+            setMade(undefined);
+          }}
+        />
+        {made === undefined ? (
+          <button type="button" className="block req-action" disabled={!valid || link === null} onClick={create}>
+            Create request link
+          </button>
+        ) : (
+          <div className="req-made">
+            <span className="req-made-label">
+              Request for {formatAmount(made.amount, made.currency)} ready
+            </span>
+            <div className="copy-value mono link">{made.url}</div>
+            <div className="req-made-actions">
+              <button type="button" className="block" onClick={() => share(made.url)}>
+                <Icon name="arrowUpRight" size={16} /> Share request
+              </button>
+              <button type="button" className="ghost" onClick={() => copy(made.url, setCopiedRequest)}>
+                <Icon name="copy" size={15} /> {copiedRequest ? 'Copied' : 'Copy'}
+              </button>
+            </div>
+          </div>
+        )}
+        <p className="req-foot">
+          They pay on a secure page, by card, bank transfer or mobile money. It
+          lands in your {currency} wallet.
+        </p>
+      </div>
+
+      <span className="eyebrow">Or share what is always yours</span>
 
       {/*
         THE NUMBER GETS THE COMP'S ACCOUNT CARD, because it is the identifier

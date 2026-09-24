@@ -100,7 +100,10 @@ DECLARE
         -- Who replaced a provider credential and when. It holds no secret,
         -- and it is the row somebody reads when asking how a key changed
         -- during an incident.
-        'provider_credential_rotations'
+        'provider_credential_rotations',
+        -- Who changed how every corridor is routed. 079's trigger refuses the
+        -- edit for the owner too.
+        'provider_routing_policy_history'
     ];
     v_table TEXT;
 BEGIN

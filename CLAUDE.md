@@ -2001,6 +2001,95 @@ Schema: `packages/ledger/sql/065_push.sql`. Port in
   compiled, it typechecked, and the e2e caught it on its first run — the same
   shape as the `TypeError` the elevation Proxy threw through a cast.
 
+### How the grid is read, and which rail really holds the money — non-obvious rules
+
+Schema: `packages/ledger/sql/079_routing_policy.sql`, `080_payout_provider_known.sql`.
+Router in `apps/api/src/routing/provider-router.service.ts`, liquidity in
+`apps/api/src/payouts/provider-liquidity.service.ts`, treasury in
+`apps/api/src/payouts/treasury.service.ts`, screen at `/admin/providers`.
+
+- **THE ROUTE TABLE ANSWERS ONE CELL AND THE QUESTION WAS ABOUT THE GRID.**
+  "Bitnob carries what it documents, Flutterwave carries theirs" and "one
+  provider for everything" could only be said by flipping every cell by hand.
+  079 is ONE policy row — `per_route` (the table, as since 059), `by_coverage`
+  (the preferred provider where two cover a cell) and `single` — over a
+  `provider_coverage` table that says what this codebase has an ADAPTER for,
+  each row with its evidence. Coverage is widened by migration, never a form.
+- **`per_route` STILL REFUSES AN UNROUTED CURRENCY.** Coverage is read only by
+  the modes an operator chose in order to route by coverage; otherwise GBP
+  would quietly start being served by whoever covers it.
+- **ACTIVATE ACCOUNT FAILED IN BOTH COUNTRIES FOR TWO REASONS.** Ghana asked for
+  a GHS account, which no rail issues; and naira routed to Flutterwave, which
+  needs a BVN, with nothing else asked. The account currency is now the home
+  currency only where coverage offers an account in it, else NGN; and
+  `account_fallback` tries the next covering rail — Paystack opens tier 1 from
+  a name — ONLY after `providerDidNothing()`. A timeout may have opened an
+  account; moving on from one is a second account number.
+- **`provider_float` IS ONE ACCOUNT PER CURRENCY FOR EVERY PROVIDER AT ONCE.**
+  Naira collected at Paystack, and cedis credited by a conversion the platform
+  priced itself, read there as HELD while the rail that must pay them out —
+  Flutterwave, a prefunded wallet — holds none. 073's guard read that figure
+  and was satisfied every time; the customer held a balance no rail could
+  send. No code can move money between providers; what it can do is ASK.
+- **SO THE RAIL IS ASKED WHAT IT HOLDS** (`GET /v3/balances`, `GET /balance`,
+  Bitnob's `/wallets`), before the reserve, cached thirty seconds. Readable
+  and short refuses with `insufficient_platform_liquidity` before any money is
+  held; UNREADABLE IS NOT ZERO and changes nothing, because a balance endpoint
+  that is down must not be an outage on the Send screen. A readable, covering
+  answer stands 073's ledger guard down; so does `payout_debit_currencies`,
+  where the balance being spent is not the payout currency's at all.
+- **ONLY A WALLET PAYOUT MAY MOVE TO ANOTHER RAIL.** A mobile money network
+  code is OURS and every adapter translates it by name; a bank code came from
+  the routed rail's own list and means nothing to another. `single` means no
+  other rail at all.
+- **`bank_payouts.provider` WAS NEVER WRITTEN.** 046 added it, the INSERT named
+  sixteen columns and not that one, and every payout read `bitnob`. The sweep
+  and the `transfer.*` webhook ask `row.provider`, so a Flutterwave transfer
+  was asked about at Bitnob — a thrown error and a webhook retried for ever,
+  or "no such payout", which the sweep read as a definite refusal and
+  REVERSED, refunding money that had left. The rail is now chosen once before
+  the reserve, recorded, and `sendVia` sends on exactly it.
+- **THE ROWS ALREADY WRITTEN CANNOT BE REPAIRED FROM SQL** — Paystack and
+  Flutterwave both issue numeric ids and both serve naira. 080 marks them
+  `provider_known = FALSE`, and `askRail()` asks every rail and believes ONLY
+  an answer carrying OUR reference; a refusal from a guessed rail decides
+  nothing and the payout is escalated. Paystack's status now echoes the
+  reference for that reason.
+- **THE BALANCE SWEEP HAD THE SIGN BACKWARDS, and its test agreed.** It compared
+  a provider's +₦500 with the raw −₦500 `provider_float` balance and would
+  have reported every healthy float as twice its size. It compares against
+  the held figure now, SUMMED over every rail — and only when every rail
+  answered, because a partial sum is a finding about whichever was down.
+- **ROUTING DECISIONS AND BALANCE READS ARE NOT PAYOUT CALLS** for provider
+  health: a key that cannot read balances must not show payouts as failing.
+- **THE ADMIN SIDEBAR SCROLLED AWAY BECAUSE `body` WAS A SCROLL CONTAINER.**
+  `overflow-x: hidden` on html AND body computes body's other axis to `auto`,
+  so every `position: sticky` in the app stuck to a box that never scrolls.
+  `clip` cuts the overflow without making one; `hidden` stays as the fallback.
+
+### Asking to be paid, and paying in without an account number — non-obvious rules
+
+`packages/client/src/request-link.ts`, `/request`, `/pay/<slug>`, Add Money.
+
+- **A REQUEST IS A PAYMENT LINK WITH A PREFILL.** The comp's card takes an
+  amount and a reason; they ride on the link's query string and the checkout
+  opens with them filled in. Nothing about it is trusted: the payer can change
+  the box, and the server credits what the provider says was PAID. The link
+  was kept out of the comp's design because it would ignore the amount — it
+  no longer does.
+- **`readRequest` DROPS WHAT IS MALFORMED rather than showing it** — an amount
+  the currency cannot represent opens a checkout that then refuses the payer
+  for a number they did not type. The comp's "pending requests" list is not
+  drawn: nothing records a request against a person.
+- **DEBIT CARD AND USSD ARE THE HOSTED CHECKOUT, NARROWED.** `CheckoutRequest.method`
+  becomes Paystack's `channels` and Flutterwave's `payment_options`, so the
+  provider opens on the button pressed. The card is typed on their page and
+  never reaches this app or the API. **USSD IS A NAIRA PRODUCT** on both rails
+  and is refused for any other currency before a row is written — sent on, it
+  is a checkout page with no method on it.
+- **eSIM IS ITS OWN SCREEN** (`/esim`, `esim.tsx`), the comp's: a search and a
+  list of plans, buying second. The money path is the one every bill uses.
+
 ### Which rail opens an account — non-obvious rules
 
 Schema: `packages/ledger/sql/061_country_and_route_repair.sql`. Service in
@@ -4280,6 +4369,8 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/075_privacy_republish.s
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/076_account_route.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/077_privacy_republish.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/078_card_funding_cascade.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/079_routing_policy.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/080_payout_provider_known.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -4356,6 +4447,8 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/075_privacy_republish.t
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/076_account_route.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/077_privacy_republish.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/078_card_funding_cascade.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/079_routing_policy.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/080_payout_provider_known.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

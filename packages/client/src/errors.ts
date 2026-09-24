@@ -449,6 +449,8 @@ const API_ERROR_CODES = [
   'country_not_found',
   'country_not_covered',
   'currency_not_supported',
+  // USSD is a naira product on every rail this platform uses.
+  'payment_method_not_supported',
   // The kill switches. Each names its service so a screen can say which part
   // of the product is paused rather than showing one generic message.
   'crypto_disabled',

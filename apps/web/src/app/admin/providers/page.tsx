@@ -3,11 +3,12 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { formatMinor } from '@xetral/client';
-import type { AdminProviderHealth, AdminRoute, ApiErrorCode } from '@xetral/client';
+import type { AdminProviderHealth, AdminRoute, AdminRoutingMode, ApiErrorCode } from '@xetral/client';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
 import { AdminError } from '../access';
 import { AdminTitle } from '@/app/admin/nav';
+import { RoutingPolicyPanel, TreasuryPanel } from './routing';
 
 /**
  * Whether the providers are answering.
@@ -31,6 +32,7 @@ export default function Providers() {
   const admin = useAdmin();
   const health = useLoad(() => admin.providerHealth(), [admin]);
   const routes = useLoad(() => admin.routes(), [admin]);
+  const routing = useLoad(() => admin.routing(), [admin]);
 
   const cards = providerCards(health.data, routes.data?.routes ?? []);
 
@@ -76,12 +78,28 @@ export default function Providers() {
         ))}
       </div>
 
+      <RoutingPolicyPanel
+        routing={routing.data}
+        error={routing.error}
+        code={routing.code}
+        onChanged={() => {
+          routing.reload();
+          routes.reload();
+        }}
+      />
+
       <RouteSwitches
         routes={routes.data?.routes}
         error={routes.error}
         code={routes.code}
-        onChanged={routes.reload}
+        mode={routing.data?.policy.mode}
+        onChanged={() => {
+          routes.reload();
+          routing.reload();
+        }}
       />
+
+      <TreasuryPanel treasury={health.data?.treasury} />
 
       {health.data !== undefined && health.data.recent.length === 0 && (
         <div className="panel">
@@ -417,6 +435,7 @@ function RouteSwitches(props: {
   readonly routes: readonly AdminRoute[] | undefined;
   readonly error: string | undefined;
   readonly code: ApiErrorCode | undefined;
+  readonly mode?: AdminRoutingMode | undefined;
   readonly onChanged: () => void;
 }) {
   const admin = useAdmin();
@@ -545,12 +564,12 @@ function RouteSwitches(props: {
   return (
     <div className="panel route-panel">
       <div className="panel-row-head">
-        <span className="sec">Who carries what</span>
+        <span className="sec">Each corridor</span>
       </div>
       <p className="lead route-lead">
-        Switching moves nobody: an account number already issued keeps
-        receiving where it was opened, and a payout in flight settles on its
-        own rail. Only the next request goes to the company you pick.
+        {props.mode === undefined || props.mode === 'per_route'
+          ? 'Switching moves nobody: an account number already issued keeps receiving where it was opened, and a payout in flight settles on its own rail. Only the next request goes to the company you pick.'
+          : 'Routing is set to cover by provider above, so these rows decide only what no provider covers — and what serves again if you go back to per corridor.'}
       </p>
       <AdminError error={props.error} code={props.code} role="support" />
       {done !== undefined && <p className="route-done">{done}</p>}

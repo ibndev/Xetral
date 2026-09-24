@@ -23,6 +23,48 @@ interface Cached {
 }
 
 /**
+ * HOW THE ROUTE TABLE IS READ — 079.
+ *
+ * `per_route` is the table exactly as since 059. `by_coverage` sends each
+ * operation and currency to a provider whose documented coverage includes it,
+ * the preferred one where several do. `single` sends everything to one
+ * provider wherever it can serve, and lets the table answer the rest — Bitnob
+ * has no hosted checkout here, and "one provider for everything" must not
+ * become "no checkout at all".
+ */
+export type RoutingMode = 'per_route' | 'by_coverage' | 'single';
+
+export const ROUTING_PROVIDERS: readonly string[] = ['flutterwave', 'bitnob', 'paystack'];
+
+export interface RoutingPolicy {
+  readonly mode: RoutingMode;
+  readonly preferredProvider: string | null;
+  readonly singleProvider: string | null;
+  /** Whether an account request may try the next covering rail after a
+   *  definite refusal. */
+  readonly accountFallback: boolean;
+}
+
+export interface CoverageRow {
+  readonly provider: string;
+  readonly operation: RoutedOperation;
+  readonly currency: string;
+  readonly basis: string;
+}
+
+/**
+ * WHAT A DEPLOYMENT BEHIND 079 READS AS. The route table, unchanged, and the
+ * fallback on — the policy that migration ships, so applying it changes
+ * nothing about who serves what.
+ */
+const DEFAULT_POLICY: RoutingPolicy = {
+  mode: 'per_route',
+  preferredProvider: null,
+  singleProvider: null,
+  accountFallback: true,
+};
+
+/**
  * WHICH PROVIDER SERVES WHICH CURRENCY.
  *
  * WHY THIS EXISTS AT ALL. `funding_provider` and `payout_provider` are one
@@ -56,6 +98,8 @@ export class ProviderRouterService {
   readonly #logger = new Logger(ProviderRouterService.name);
   readonly #cache = new Map<string, Cached>();
   readonly #ttlMs = 5_000;
+  #policy: { readonly value: RoutingPolicy; readonly at: number } | undefined;
+  #coverage: { readonly value: readonly CoverageRow[]; readonly at: number } | undefined;
 
   constructor(@Inject(DATABASE) private readonly pool: Pool) {}
 
@@ -72,6 +116,131 @@ export class ProviderRouterService {
     operation: RoutedOperation,
     currency: string,
   ): Promise<string | undefined> {
+    /*
+     * PER ROUTE IS THE TABLE AND NOTHING ELSE. An unrouted currency is still
+     * REFUSED there, as 059 records — coverage must not quietly start serving
+     * a corridor an operator never opened. Only the modes an operator chose
+     * in order to route by coverage read it.
+     */
+    if ((await this.policy()).mode === 'per_route') return this.#routed(operation, currency);
+    return (await this.candidates(operation, currency))[0];
+  }
+
+  /**
+   * EVERY PROVIDER THAT COULD SERVE THIS, in the order the policy prefers
+   * them. The first is who serves; the rest are what an account request may
+   * fall back to after a definite refusal.
+   *
+   * The route table's own answer is always in the list — first under
+   * `per_route`, and after the covering providers otherwise — so a corridor an
+   * operator pointed somewhere by hand is never dropped by a mode change.
+   */
+  async candidates(operation: RoutedOperation, currency: string): Promise<readonly string[]> {
+    const [policy, coverage, routed] = await Promise.all([
+      this.policy(),
+      this.coverage(),
+      this.#routed(operation, currency),
+    ]);
+    const covering = coverage
+      .filter((c) => c.operation === operation && c.currency === currency)
+      .map((c) => c.provider);
+
+    const ordered: string[] = [];
+    const push = (p: string | null | undefined): void => {
+      if (p !== null && p !== undefined && !ordered.includes(p)) ordered.push(p);
+    };
+
+    if (policy.mode === 'single' && policy.singleProvider !== null && covering.includes(policy.singleProvider)) {
+      push(policy.singleProvider);
+    }
+    if (policy.mode === 'by_coverage' && covering.length > 0) {
+      if (policy.preferredProvider !== null && covering.includes(policy.preferredProvider)) {
+        push(policy.preferredProvider);
+      }
+      if (routed !== undefined && covering.includes(routed)) push(routed);
+      for (const p of ROUTING_PROVIDERS) if (covering.includes(p)) push(p);
+    }
+    push(routed);
+    // The fallbacks: whatever else covers it, in a fixed order so two reads of
+    // one policy never disagree about who is next.
+    for (const p of ROUTING_PROVIDERS) if (covering.includes(p)) push(p);
+    return ordered;
+  }
+
+  /** The policy row, or the shipped default where 079 is not applied. */
+  async policy(): Promise<RoutingPolicy> {
+    if (this.#policy !== undefined && Date.now() - this.#policy.at < this.#ttlMs) {
+      return this.#policy.value;
+    }
+    let value = DEFAULT_POLICY;
+    try {
+      const found = await this.pool.query<{
+        mode: RoutingMode;
+        preferred_provider: string | null;
+        single_provider: string | null;
+        account_fallback: boolean;
+      }>(
+        `SELECT mode, preferred_provider, single_provider, account_fallback
+           FROM provider_routing_policy LIMIT 1`,
+      );
+      const row = found.rows[0];
+      if (row !== undefined) {
+        value = {
+          mode: row.mode,
+          preferredProvider: row.preferred_provider,
+          singleProvider: row.single_provider,
+          accountFallback: row.account_fallback,
+        };
+      }
+    } catch (error: unknown) {
+      this.#logger.warn(
+        `no routing policy (${describe(error)}); reading the route table as it stands. ` +
+          `If this says the table does not exist, apply packages/ledger/sql/079_routing_policy.sql.`,
+      );
+    }
+    this.#policy = { value, at: Date.now() };
+    return value;
+  }
+
+  /** Documented coverage, or none where 079 is not applied. */
+  async coverage(): Promise<readonly CoverageRow[]> {
+    if (this.#coverage !== undefined && Date.now() - this.#coverage.at < this.#ttlMs) {
+      return this.#coverage.value;
+    }
+    let value: readonly CoverageRow[] = [];
+    try {
+      const found = await this.pool.query<CoverageRow>(
+        `SELECT provider, operation, currency, basis
+           FROM provider_coverage ORDER BY currency, operation, provider`,
+      );
+      value = found.rows;
+    } catch {
+      value = [];
+    }
+    this.#coverage = { value, at: Date.now() };
+    return value;
+  }
+
+  /** Change the policy. The history row is written by trigger. */
+  async setPolicy(options: RoutingPolicy & { readonly byUserUuid: string }): Promise<void> {
+    await this.pool.query(
+      `UPDATE provider_routing_policy
+          SET mode = $1, preferred_provider = $2, single_provider = $3,
+              account_fallback = $4, updated_at = now(),
+              updated_by = (SELECT id FROM users WHERE uuid = $5::uuid)`,
+      [
+        options.mode,
+        options.preferredProvider,
+        options.singleProvider,
+        options.accountFallback,
+        options.byUserUuid,
+      ],
+    );
+    this.#policy = undefined;
+  }
+
+  /** What the route TABLE says, before any policy is applied. */
+  async #routed(operation: RoutedOperation, currency: string): Promise<string | undefined> {
     const key = `${operation}:${currency}`;
     const hit = this.#cache.get(key);
     if (hit !== undefined && Date.now() - hit.at < this.#ttlMs) return hit.provider;

@@ -2,8 +2,12 @@ import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import type { FundingPort, PayoutPort } from '@xetral/providers';
 import { isCurrency } from '@xetral/shared';
 import { FUNDING_PORT, PAYOUT_PORT } from '../tokens.js';
-import { ProviderRouterService, ROUTED_OPERATIONS } from './provider-router.service.js';
-import type { RoutedOperation } from './provider-router.service.js';
+import {
+  ProviderRouterService,
+  ROUTED_OPERATIONS,
+  ROUTING_PROVIDERS,
+} from './provider-router.service.js';
+import type { RoutedOperation, RoutingMode, RoutingPolicy } from './provider-router.service.js';
 
 /**
  * Which companies COULD carry each kind of money, whatever this deployment
@@ -32,6 +36,38 @@ export interface RouteRow {
   /** Who else could serve it on this deployment, in the order to offer them. */
   readonly options: readonly string[];
 }
+
+/** One cell of the grid AFTER the policy is applied — who serves now. */
+export interface EffectiveRoute {
+  readonly operation: RoutedOperation;
+  readonly currency: string;
+  /** What the route table says, before the policy. */
+  readonly routed: string | null;
+  /** Who actually serves the next request, after the policy. */
+  readonly serving: string | null;
+  /** Everything that could, in the order the policy would try them. */
+  readonly candidates: readonly string[];
+}
+
+export interface RoutingView {
+  readonly policy: {
+    readonly mode: RoutingMode;
+    readonly preferred_provider: string | null;
+    readonly single_provider: string | null;
+    readonly account_fallback: boolean;
+  };
+  readonly coverage: readonly {
+    readonly provider: string;
+    readonly operation: string;
+    readonly currency: string;
+    readonly basis: string;
+  }[];
+  /** Which providers this deployment can actually call, per operation. */
+  readonly configured: Readonly<Record<RoutedOperation, readonly string[]>>;
+  readonly effective: readonly EffectiveRoute[];
+}
+
+const MODES: readonly RoutingMode[] = ['per_route', 'by_coverage', 'single'];
 
 /**
  * The route table as the operations screen reads and changes it.
@@ -103,6 +139,113 @@ export class ProviderRoutesService {
       byUserUuid: options.byUserUuid,
     });
     return { was: before?.provider ?? null, now: options.provider };
+  }
+
+  /**
+   * THE WHOLE GRID, AS IT WILL BE SERVED. The route table says what an
+   * operator pointed where; the policy may send a cell elsewhere; and the
+   * screen must show the second, because that is where the next customer's
+   * money goes.
+   */
+  async routing(): Promise<RoutingView> {
+    const [policy, coverage, rows] = await Promise.all([
+      this.router.policy(),
+      this.router.coverage(),
+      this.router.all(),
+    ]);
+    const cells = new Map<string, { operation: RoutedOperation; currency: string; routed: string | null }>();
+    for (const r of rows) {
+      if (!(ROUTED_OPERATIONS as readonly string[]).includes(r.operation)) continue;
+      cells.set(`${r.operation}:${r.currency}`, {
+        operation: r.operation as RoutedOperation,
+        currency: r.currency,
+        routed: r.provider,
+      });
+    }
+    for (const c of coverage) {
+      const key = `${c.operation}:${c.currency}`;
+      if (!cells.has(key)) cells.set(key, { operation: c.operation, currency: c.currency, routed: null });
+    }
+
+    const effective: EffectiveRoute[] = [];
+    for (const cell of cells.values()) {
+      const configured = this.#options(cell.operation, cell.currency);
+      const candidates = (await this.router.candidates(cell.operation, cell.currency)).filter(
+        (p) => configured.includes(p),
+      );
+      const serving = await this.router.providerFor(cell.operation, cell.currency);
+      effective.push({
+        ...cell,
+        serving: serving ?? null,
+        candidates,
+      });
+    }
+    effective.sort(
+      (a, b) =>
+        ROUTED_OPERATIONS.indexOf(a.operation) - ROUTED_OPERATIONS.indexOf(b.operation) ||
+        a.currency.localeCompare(b.currency),
+    );
+
+    return {
+      policy: {
+        mode: policy.mode,
+        preferred_provider: policy.preferredProvider,
+        single_provider: policy.singleProvider,
+        account_fallback: policy.accountFallback,
+      },
+      coverage,
+      configured: {
+        account: this.#configured('account') ?? CAPABLE.account,
+        collect: CAPABLE.collect,
+        payout: this.#configured('payout') ?? CAPABLE.payout,
+      },
+      effective,
+    };
+  }
+
+  /**
+   * Change how the grid is read. Refuses a provider this deployment cannot
+   * call — a policy naming one would route everything to a rail the switches
+   * then fall back from, loudly in a log and silently on the screen.
+   */
+  async setPolicy(options: {
+    readonly mode: string;
+    readonly preferredProvider: string | null;
+    readonly singleProvider: string | null;
+    readonly accountFallback: boolean;
+    readonly byUserUuid: string;
+  }): Promise<{ readonly was: RoutingPolicy; readonly now: RoutingPolicy }> {
+    const mode = options.mode as RoutingMode;
+    if (!MODES.includes(mode)) {
+      throw new BadRequestException({ error: 'invalid_request', fields: ['mode'] });
+    }
+    const reachable = new Set([
+      ...(this.#configured('account') ?? CAPABLE.account),
+      ...(this.#configured('payout') ?? CAPABLE.payout),
+      ...CAPABLE.collect,
+    ]);
+    const check = (provider: string | null, field: string, required: boolean): string | null => {
+      if (provider === null || provider === '') {
+        if (required) throw new BadRequestException({ error: 'invalid_request', fields: [field] });
+        return null;
+      }
+      if (!ROUTING_PROVIDERS.includes(provider) || !reachable.has(provider)) {
+        throw new BadRequestException({
+          error: 'provider_not_available',
+          options: ROUTING_PROVIDERS.filter((p) => reachable.has(p)),
+        });
+      }
+      return provider;
+    };
+    const next: RoutingPolicy = {
+      mode,
+      preferredProvider: check(options.preferredProvider, 'preferred_provider', mode === 'by_coverage'),
+      singleProvider: check(options.singleProvider, 'single_provider', mode === 'single'),
+      accountFallback: options.accountFallback,
+    };
+    const was = await this.router.policy();
+    await this.router.setPolicy({ ...next, byUserUuid: options.byUserUuid });
+    return { was, now: next };
   }
 
   #options(operation: RoutedOperation, currency: string): readonly string[] {

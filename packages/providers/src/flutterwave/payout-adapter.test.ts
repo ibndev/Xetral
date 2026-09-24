@@ -618,3 +618,32 @@ describe('sending', () => {
     ).toBe('sent');
   });
 });
+
+describe('what the Flutterwave wallet can spend', () => {
+  it('reads AVAILABLE balance in MAJOR units and converts per currency', async () => {
+    // Major units here, minor at Paystack — the same trap as the checkout.
+    const { client, sent } = stub([
+      {
+        status: 'success',
+        data: [
+          { currency: 'GHS', available_balance: 1250.5, ledger_balance: 9999 },
+          { currency: 'NGN', available_balance: '0' },
+          { currency: 'XOF', available_balance: 100 },
+        ],
+      },
+    ]);
+    const held = await new FlutterwavePayoutAdapter(client).floatBalances();
+    expect(sent[0]?.url).toContain('/v3/balances');
+    // `ledger_balance` includes money still settling, which cannot fund a
+    // transfer; a currency this platform does not model is skipped.
+    expect(held).toEqual([
+      { amount: 125050n, currency: 'GHS' },
+      { amount: 0n, currency: 'NGN' },
+    ]);
+  });
+
+  it('refuses an "error" envelope rather than reading it as a balance', async () => {
+    const { client } = stub([{ status: 'error', message: 'invalid key', data: [] }]);
+    await expect(new FlutterwavePayoutAdapter(client).floatBalances()).rejects.toThrow();
+  });
+});

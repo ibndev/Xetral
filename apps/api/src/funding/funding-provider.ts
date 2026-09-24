@@ -107,6 +107,50 @@ export class SwitchingFundingPort implements FundingPort {
     return this.activeProvider();
   }
 
+  /**
+   * THE RAILS TO TRY FOR AN ACCOUNT, in order — the one that serves first,
+   * then, where 079's `account_fallback` is on, every other rail that covers
+   * this currency and that this deployment has an adapter for.
+   *
+   * WHY A SECOND RAIL AT ALL. Naira account numbers were routed to
+   * Flutterwave, which opens a permanent account only with a verified BVN —
+   * so every unverified customer, and every Ghanaian (who has no BVN to
+   * give), was refused with nothing else asked, while Paystack opens a tier 1
+   * account from a name. The caller moves on only after a DEFINITE refusal;
+   * a timeout may have opened an account and is never followed by a second.
+   */
+  async accountRails(currency: string): Promise<readonly string[]> {
+    const first = await this.providerForCurrency(currency);
+    const rails = [first];
+    if (this.#router === undefined) return rails;
+    const policy = await this.#router.policy();
+    if (!policy.accountFallback) return rails;
+    for (const p of await this.#router.candidates('account', currency)) {
+      if (this.#adapters.has(p) && !rails.includes(p)) rails.push(p);
+    }
+    return rails;
+  }
+
+  /**
+   * WHICH CURRENCIES AN ACCOUNT NUMBER IS A PRODUCT IN, from 079's coverage.
+   * Naira alone today. Where the coverage cannot be read, naira as well —
+   * the one currency every rail here has ever opened an account in.
+   */
+  async accountCurrencies(): Promise<readonly string[]> {
+    if (this.#router === undefined) return ['NGN'];
+    const rows = (await this.#router.coverage()).filter((c) => c.operation === 'account');
+    const currencies = [...new Set(rows.map((c) => c.currency))];
+    return currencies.length === 0 ? ['NGN'] : currencies;
+  }
+
+  /** Open an account on one NAMED rail — the fallback's step. */
+  async createVirtualAccountAt(
+    provider: string,
+    request: CreateVirtualAccountRequest,
+  ): Promise<VirtualAccount> {
+    return this.#adapterFor(provider).createVirtualAccount(request);
+  }
+
   /** Which rails this deployment can open an account with, for the dashboard. */
   get providers(): readonly string[] {
     return [...this.#adapters.keys()];

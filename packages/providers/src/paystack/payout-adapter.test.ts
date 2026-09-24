@@ -195,3 +195,30 @@ describe('what became of it', () => {
     await expect(adapter.status('6')).rejects.toBeInstanceOf(ProviderContractError);
   });
 });
+
+describe('what the Paystack balance can spend', () => {
+  it('reads SUBUNITS as they are, with no conversion', async () => {
+    const { adapter, calls } = adapterWith([
+      { status: true, data: [{ currency: 'NGN', balance: 1_700_000 }] },
+    ]);
+    const held = await adapter.floatBalances();
+    expect(calls[0]?.path).toBe('/balance');
+    expect(held).toEqual([{ amount: 1_700_000n, currency: 'NGN' }]);
+  });
+
+  it('refuses a balance past 2^53 rather than rounding it', async () => {
+    const { adapter } = adapterWith([
+      { status: true, data: [{ currency: 'NGN', balance: 2 ** 53 + 2 }] },
+    ]);
+    await expect(adapter.floatBalances()).rejects.toBeInstanceOf(ProviderContractError);
+  });
+
+  it('echoes OUR reference off a transfer, so a status answer can be checked', async () => {
+    const { adapter } = adapterWith([
+      { status: true, data: { id: 42, status: 'success', reference: 'xetpo-ours' } },
+    ]);
+    const receipt = await adapter.status('42');
+    expect(receipt.reference).toBe('xetpo-ours');
+  });
+});
+

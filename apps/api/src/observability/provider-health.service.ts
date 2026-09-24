@@ -161,6 +161,26 @@ export function outcomeOf(
  * of an object a proxy cannot forward — so the only correct receiver here is
  * the target itself.
  */
+/**
+ * ASYNC, AND STILL NOT A CALL TO A PROVIDER'S MONEY PATH.
+ *
+ * The switches answer routing questions — which rail serves this country —
+ * from our own tables, and recording those as successes inflates a rail's
+ * call count with work it never did. `balancesOf` IS a provider call, but a
+ * treasury READ: a rail whose key cannot read balances would otherwise show
+ * its payouts as failing on a screen whose payouts are fine — an alert that
+ * fires on ordinary configuration is one people mute.
+ */
+const NOT_A_PROVIDER_CALL: ReadonlySet<string> = new Set([
+  'providerForCountry',
+  'prefundedFor',
+  'activeProvider',
+  'railsFor',
+  'balancesOf',
+  'accountRails',
+  'accountCurrencies',
+]);
+
 export function watched<T extends object>(
   port: T,
   provider: string,
@@ -174,6 +194,7 @@ export function watched<T extends object>(
       void receiver;
       const value = Reflect.get(target, property, target) as unknown;
       if (typeof value !== 'function' || typeof property !== 'string') return value;
+      if (NOT_A_PROVIDER_CALL.has(property)) return (value as (...a: unknown[]) => unknown).bind(target);
 
       return (...args: unknown[]): unknown => {
         const result = (value as (...a: unknown[]) => unknown).apply(target, args);

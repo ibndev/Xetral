@@ -12,7 +12,10 @@ import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/lib/hooks';
 import { Toast } from '@/ui/toast';
 
 /**
- * Airtime, data, bills, eSIMs and virtual numbers.
+ * Airtime, data, bills and virtual numbers.
+ *
+ * eSIMs have their own screen at `/esim` — the comp's — because choosing one
+ * is choosing a destination, not a bill. The purchase flow is the same one.
  *
  * Five services behind one form, because from the customer's side they are the
  * same act: pick a thing, say who it is for, pay. The differences between
@@ -23,9 +26,11 @@ import { Toast } from '@/ui/toast';
 /* One list, in `@xetral/client`. It was written out here and again on the
  * phone — the same duplication that let the crypto screen's chain names drift
  * from the schema for the whole life of that feature. */
-const SERVICES = PURCHASE_SERVICES;
+type ServiceCode = Exclude<PurchaseService['code'], 'esim'>;
 
-type ServiceCode = PurchaseService['code'];
+const SERVICES = PURCHASE_SERVICES.filter(
+  (s): s is Extract<(typeof PURCHASE_SERVICES)[number], { code: ServiceCode }> => s.code !== 'esim',
+);
 
 export default function Bills() {
   const client = useXetral();
@@ -251,7 +256,7 @@ function Buy({ service, onBought }: { service: ServiceCode; onBought: () => void
       {done !== undefined && <p className="ok">{done}</p>}
 
         {/*
-          OVER the form as well as in it. Buying a bill, some airtime or an eSIM moves money, and
+          OVER the form as well as in it. Buying a bill or some airtime moves money, and
           the outcome has to be unmistakable on a phone where the keyboard is
           closing over the line above. The inline copy stays, so a refusal can
           still be re-read after this has gone.

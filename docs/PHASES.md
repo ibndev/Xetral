@@ -33,6 +33,7 @@ shipped, that is called out explicitly.
 | 22 — The gate that was red by design | ✅ | |
 | 23 — Naira accounts on Flutterwave, and a switch for who carries what | ✅ | Flutterwave NGN static accounts to be enabled |
 | 24 — A card paid for from whichever wallets can | ✅ | a Bitnob authorization hook, for per-spend attribution |
+| 25 — Who carries the grid, and who really holds the money | ✅ | funding each provider's float is a transfer a person makes |
 
 All eleven phases are built, a **pre-deployment audit** (Phase 12) closed what
 building them phase by phase had left between the phases, and **Phase 13** is
@@ -2493,3 +2494,33 @@ itself.
 **099** (it grants the new table and makes it append-only for the app role),
 and publish an FX spread for every currency customers should be able to top
 up from — an unpublished pair is skipped by the cascade, never guessed.
+
+---
+
+## Phase 25 — Who carries the grid, and who really holds the money ✅
+
+A customer held cedis and naira that neither Flutterwave nor Bitnob held, and
+Activate account failed in Nigeria and Ghana. Both were one fact about the
+ledger and one about routing.
+
+| File | What it is |
+|---|---|
+| `packages/ledger/sql/079_routing_policy.sql` | per route, by coverage, or one provider; and the account fallback |
+| `packages/ledger/sql/080_payout_provider_known.sql` | whether a payout's `provider` is a fact or the column default |
+| `apps/api/src/payouts/provider-liquidity.service.ts` | each rail asked what it can spend |
+| `apps/api/src/payouts/treasury.service.ts` | owed, ledger-held and live, side by side |
+| `apps/web/src/app/admin/providers/routing.tsx` | the policy panel and the treasury panel |
+
+1. **`provider_float` is one figure for every provider.** It said we held
+   what Paystack collected and what an internal conversion credited; the rail
+   that pays it out held none. The rail is asked now, before money is held.
+2. **`bank_payouts.provider` had never been written**, so every payout was
+   asked about at Bitnob — and the sweep reversed one on "no such payout".
+3. **The balance sweep compared with the wrong sign**, and its test agreed.
+4. **Every sticky element was broken** by `overflow-x: hidden` on `body`.
+
+**Before this goes live, an operator must:** apply **079** and **080** and
+re-apply **099**; open `/admin/providers` and read "Can each rail pay what
+customers hold?" — every `short` badge is a balance to fund at that provider,
+or a `payout_debit_currencies` entry to set; and choose the routing mode.
+

@@ -23,7 +23,14 @@ import { z } from 'zod';
 
 /** MAJOR units as a decimal STRING, parsed once by `fromMajor` — the rule
  *  every money field on this platform follows. */
-const topUpSchema = z.object({ amount: z.string().trim().min(1).max(32) }).strict();
+const topUpSchema = z
+  .object({
+    amount: z.string().trim().min(1).max(32),
+    /* The Add Money button the customer pressed. Absent is every method the
+       rail offers, which is what this endpoint always did. */
+    method: z.enum(['card', 'ussd']).optional(),
+  })
+  .strict();
 
 /*
  * `.strict()`, so a caller-supplied currency or country is REFUSED rather than
@@ -163,7 +170,7 @@ export class FundingController {
         fields: parsed.error.issues.map((i) => i.path.join('.')),
       });
     }
-    return this.links.topUp(claimsOf(request).sub, parsed.data.amount);
+    return this.links.topUp(claimsOf(request).sub, parsed.data.amount, undefined, parsed.data.method);
   }
 
   /** What has landed. Reading this moves nothing, so no PIN. */

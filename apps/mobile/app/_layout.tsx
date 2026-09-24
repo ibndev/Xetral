@@ -228,6 +228,7 @@ function Chrome() {
         <Stack.Screen name="add-money" />
         <Stack.Screen name="request" />
         <Stack.Screen name="bills" />
+        <Stack.Screen name="esim" />
         <Stack.Screen name="fx" />
         <Stack.Screen name="crypto" />
         <Stack.Screen name="kyc" />

@@ -32,7 +32,7 @@ const GROUPS: readonly {
     title: 'Services',
     items: [
       { href: '/bills',  label: 'Airtime & bills', sub: 'Data, electricity, TV', icon: 'receipt' },
-      { href: '/bills',  label: 'eSIM',            sub: 'Travel data plans', icon: 'sim' },
+      { href: '/esim',   label: 'eSIM',            sub: 'Travel data plans', icon: 'sim' },
       { href: '/cards',  label: 'Virtual cards',   sub: 'Spend online in dollars', icon: 'card' },
     ],
   },

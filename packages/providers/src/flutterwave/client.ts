@@ -161,6 +161,13 @@ export const FLUTTERWAVE_ENDPOINTS = {
   resolveAccount: '/v3/accounts/resolve',
   transfers: '/v3/transfers',
   getTransfer: (id: string) => `/v3/transfers/${encodeURIComponent(id)}`,
+  /**
+   * WHAT WE HOLD WITH THEM, per currency — `GET /v3/balances`, Flutterwave's
+   * v3 reference ("Get all wallet balances", read September 2026). Each row is
+   * `{ currency, available_balance, ledger_balance }` in MAJOR units; only
+   * `available_balance` can fund a transfer, so it is the one read.
+   */
+  balances: '/v3/balances',
 } as const;
 
 export class FlutterwaveClient {

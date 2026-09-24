@@ -2,7 +2,9 @@ import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import type { OnApplicationShutdown } from '@nestjs/common';
 import type { Pool } from 'pg';
 import type { CardPort, ProviderBalancePort } from '@xetral/providers';
-import { ProviderError } from '@xetral/providers';
+import type { Currency, Money } from '@xetral/shared';
+import { ProviderLiquidityService } from '../payouts/provider-liquidity.service.js';
+import { ProviderError, ProviderUnavailableError } from '@xetral/providers';
 import { API_CONFIG, CARD_PORT, DATABASE, PROVIDER_BALANCE_PORT } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
 import { SettingsService } from '../settings/settings.service.js';
@@ -43,6 +45,8 @@ export interface BalanceSweepReport {
 export class BalanceReconciliationService implements OnApplicationShutdown {
   readonly #logger = new Logger(BalanceReconciliationService.name);
   #timer: NodeJS.Timeout | undefined;
+  /** Whose figure the last float comparison used, for the record it writes. */
+  #source = 'unknown';
 
   constructor(
     @Inject(DATABASE) private readonly pool: Pool,
@@ -51,6 +55,7 @@ export class BalanceReconciliationService implements OnApplicationShutdown {
     @Inject(NotificationService) private readonly notifications: NotificationService,
     @Optional() @Inject(PROVIDER_BALANCE_PORT) private readonly balances?: ProviderBalancePort,
     @Optional() @Inject(CARD_PORT) private readonly cards?: CardPort,
+    @Optional() @Inject(ProviderLiquidityService) private readonly liquidity?: ProviderLiquidityService,
   ) {}
 
   start(): void {
@@ -64,7 +69,7 @@ export class BalanceReconciliationService implements OnApplicationShutdown {
       );
       return;
     }
-    if (this.balances === undefined) {
+    if (this.balances === undefined && this.liquidity === undefined) {
       this.#logger.warn('no provider balance port configured: balance reconciliation is off.');
       return;
     }
@@ -92,7 +97,7 @@ export class BalanceReconciliationService implements OnApplicationShutdown {
    */
   async sweep(): Promise<BalanceSweepReport> {
     const empty = { checked: 0, differences: 0, skipped: 0, stuckHolds: 0 };
-    if (this.balances === undefined) return empty;
+    if (this.balances === undefined && this.liquidity === undefined) return empty;
 
     const lock = await this.pool.connect();
     try {
@@ -120,12 +125,16 @@ export class BalanceReconciliationService implements OnApplicationShutdown {
 
     /* ---- the float, per currency ---- */
     try {
-      for (const held of await this.balances!.floatBalances()) {
+      for (const held of await this.#providerTotals()) {
         checked += 1;
-        // The ledger's own figure. `provider_float` is DEBIT-normal and holds a
-        // positive balance when the provider owes us, so the two are directly
-        // comparable without a sign flip — but the sign is taken from the
-        // stored balance rather than assumed here.
+        // What the ledger says we hold there. NOT the raw balance: liabilities
+        // are positive in this ledger, so money a provider holds for us is a
+        // NEGATIVE `provider_float` balance — a ₦500 deposit posts −50,000 to
+        // it. This compared the provider's +50,000 against −50,000 and would
+        // have reported every healthy float as a discrepancy of twice its
+        // size; its test agreed because it was written from the same
+        // assumption. 073's `platform_float_positions` states the sign and
+        // pins it by measuring a delta.
         const ours = await this.#ledgerFloat(held.currency);
         if (
           await this.#record('provider_float', held.currency, held.currency, held.amount, ours, tolerance)
@@ -233,10 +242,52 @@ export class BalanceReconciliationService implements OnApplicationShutdown {
     return Number(result.rows[0]?.n ?? '0');
   }
 
-  /** What our books say the provider holds, in minor units. */
+  /**
+   * WHAT EVERY PROVIDER TOGETHER SAYS IT HOLDS, per currency.
+   *
+   * `provider_float` is ONE account per currency for every provider at once —
+   * naira collected at Paystack and naira sent out through Flutterwave move
+   * the same row. Comparing it against Bitnob's balance alone, as this did,
+   * reports the other providers' money as a discrepancy on every sweep. So
+   * each payout rail is asked and the answers summed; and the sum is only
+   * trusted when EVERY rail answered, because a partial sum is a finding
+   * about whichever rail was down. With no rail readable, the Bitnob port is
+   * asked as before.
+   */
+  async #providerTotals(): Promise<readonly Money<Currency>[]> {
+    if (this.liquidity !== undefined) {
+      const rails = this.liquidity.rails();
+      const totals = new Map<string, bigint>();
+      let read = 0;
+      for (const rail of rails) {
+        const held = await this.liquidity.balancesOf(rail, true);
+        if (held === undefined) continue;
+        read += 1;
+        for (const m of held) totals.set(m.currency, (totals.get(m.currency) ?? 0n) + m.amount);
+      }
+      if (read > 0 && read === rails.length) {
+        this.#source = 'all payout rails';
+        return [...totals].map(([currency, amount]) => ({ currency, amount }) as Money<Currency>);
+      }
+      if (read > 0) {
+        throw new ProviderUnavailableError(
+          'payouts',
+          `${rails.length - read} of ${rails.length} rails could not report a balance; a partial sum is not compared`,
+        );
+      }
+    }
+    if (this.balances === undefined) {
+      throw new ProviderUnavailableError('payouts', 'no payout rail could report a balance');
+    }
+    this.#source = this.balances.provider;
+    return this.balances.floatBalances();
+  }
+
+  /** What our books say the provider holds, in minor units — the NEGATIVE of
+   *  the `provider_float` balance, positive when we hold money there. */
   async #ledgerFloat(currency: string): Promise<bigint> {
     const result = await this.pool.query<{ minor: string }>(
-      `SELECT COALESCE(SUM(b.balance_minor), 0)::text AS minor
+      `SELECT (-COALESCE(SUM(b.balance_minor), 0))::text AS minor
          FROM accounts a
          JOIN account_balances b ON b.account_id = a.id
         WHERE a.kind = 'provider_float' AND a.currency = $1`,
@@ -270,7 +321,8 @@ export class BalanceReconciliationService implements OnApplicationShutdown {
          (provider, scope, subject, currency, provider_minor, ledger_minor, difference_minor)
        VALUES ($1, $2::balance_scope, $3, $4, $5::bigint, $6::bigint, $7::bigint)`,
       [
-        this.balances?.provider ?? 'unknown',
+        // Bitnob is the only card issuer; a float figure names whose it was.
+        scope === 'card' ? 'bitnob' : this.#source,
         scope,
         subject,
         currency,

@@ -1009,8 +1009,11 @@ export class XetralClient {
    * into: in Ghana and Kenya money moves through a mobile money wallet, and
    * Paystack's mobile money is a charge rather than an account we can issue.
    */
-  async topUp(amount: string): Promise<{ authorization_url: string; reference: string }> {
-    return this.#post('/v1/funding/topup', { amount });
+  async topUp(
+    amount: string,
+    method?: 'card' | 'ussd',
+  ): Promise<{ authorization_url: string; reference: string }> {
+    return this.#post('/v1/funding/topup', { amount, ...(method === undefined ? {} : { method }) });
   }
 
   /**

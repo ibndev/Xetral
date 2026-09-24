@@ -103,6 +103,9 @@ export async function initializeCheckout(
     currency: request.currency,
     reference: request.reference,
     ...(request.callbackUrl === undefined ? {} : { callback_url: request.callbackUrl }),
+    /* Paystack's `channels`: one entry narrows their page to that method.
+       Their names match ours for these two — `card` and `ussd`. */
+    ...(request.method === undefined ? {} : { channels: [request.method] }),
     metadata: {
       /*
        * Shown on Paystack's page and on their dashboard. The payer sees who

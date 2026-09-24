@@ -364,6 +364,10 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
        */
       .staff('GET', '/v1/admin/routes', { pin: false, role: 'support' })
       .staff('POST', '/v1/admin/routes', { pin: true, role: 'admin' })
+      // 079: how the whole grid is read. Same role and the same PIN as moving
+      // one cell, because moving the policy moves every cell at once.
+      .staff('GET', '/v1/admin/routing', { pin: false, role: 'support' })
+      .staff('POST', '/v1/admin/routing', { pin: true, role: 'admin' })
       /* The caller's own roles, so a screen can hide what they may not use.
          `support` is the widest staff role: everybody needs their own. */
       .staff('GET', '/v1/admin/me', { pin: false, role: 'support' })

@@ -221,6 +221,27 @@ export interface PayoutPort {
   prefundedFor?(country: string): Promise<boolean>;
 
   /**
+   * WHICH RAILS COULD SEND TO THIS COUNTRY, in the order they should be
+   * tried — the routed one first. A switch answers; a single adapter leaves
+   * it out and is its own only rail.
+   *
+   * IT EXISTS SO THE RAIL IS CHOSEN ONCE, BEFORE THE ROW IS WRITTEN. The row
+   * records who sent the payout and that column is immutable (046); a rail
+   * chosen again inside `send()` could differ from the one recorded, and then
+   * the only rail that can resolve the payout id is not the one anything asks.
+   */
+  railsFor?(country: string): Promise<readonly string[]>;
+
+  /** Sends on the NAMED rail, never on whichever the routing reads now. */
+  sendVia?<C extends Currency>(provider: string, request: PayoutRequest<C>): Promise<PayoutReceipt>;
+
+  /**
+   * What a named rail says it holds for us, per currency — or undefined where
+   * that rail has no balance read this platform can use. Read-only.
+   */
+  balancesOf?(provider: string): Promise<readonly Money<Currency>[] | undefined>;
+
+  /**
    * Banks — or mobile money networks — a customer may send to in this country.
    *
    * ONE CALL FOR BOTH, because the question is the same one: what may the

@@ -287,16 +287,27 @@ describe('getting an account number', () => {
    * literal, and the fake port echoed 'NGN' whatever it was asked for — so the
    * test agreed with the service about the very thing that was wrong.
    */
-  it("opens the account in the CUSTOMER'S OWN currency, not always naira", async () => {
+  /*
+   * A NAIRA ACCOUNT NUMBER FOR EVERYBODY, because that is the only account
+   * number any rail here opens.
+   *
+   * This asserted the opposite — a Ghanaian's account opened in CEDIS — and
+   * that is exactly what broke Activate Account in Accra: the request went to
+   * Flutterwave for a cedi account number no rail issues, and the naira one
+   * every customer is offered (040: money paid to a Ghanaian by a Nigerian
+   * lands in naira) was never asked for. 079's coverage says where an account
+   * number is a product; the customer's own currency is used only there.
+   */
+  it('opens a NAIRA account number wherever no rail opens one in the local currency', async () => {
     const ghanaian = await onboard(true, 'GH');
     const res = await getAccount(ghanaian).expect(200);
 
-    expect(res.body.currency).toBe('GHS');
-    expect(port.created.at(-1)?.currency).toBe('GHS');
+    expect(res.body.currency).toBe('NGN');
+    expect(port.created.at(-1)?.currency).toBe('NGN');
 
     const kenyan = await onboard(true, 'KE');
     await getAccount(kenyan).expect(200);
-    expect(port.created.at(-1)?.currency).toBe('KES');
+    expect(port.created.at(-1)?.currency).toBe('NGN');
 
     const nigerian = await onboard(true, 'NG');
     await getAccount(nigerian).expect(200);
@@ -324,7 +335,7 @@ describe('getting an account number', () => {
    * request would have raced the partial unique index rather than reading the
    * winner's row.
    */
-  it('returns a non-naira account to the screen that reads it', async () => {
+  it("returns a Ghanaian's naira account to the screen that reads it", async () => {
     const ghanaian = await onboard(true, 'GH');
     const opened = await getAccount(ghanaian).expect(200);
 
@@ -335,7 +346,7 @@ describe('getting an account number', () => {
 
     // The route wraps it: `{ account: … | null }`.
     expect(read.body.account.account_number).toBe(opened.body.account_number);
-    expect(read.body.account.currency).toBe('GHS');
+    expect(read.body.account.currency).toBe('NGN');
   });
 
   it('NAMES THE MISSING MIGRATION when the schema is behind the build', async () => {

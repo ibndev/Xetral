@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import type { Currency } from '@xetral/shared';
+import type { Currency, Money } from '@xetral/shared';
+import { BitnobBalanceAdapter } from './balance-adapter.js';
 import { ProviderContractError, ProviderRejectedError } from '../ports/errors.js';
 import { NETWORK_NAME_HINTS, isOurNetworkCode } from '../ports/mobile-money.js';
 import type { BitnobClient } from './client.js';
@@ -125,6 +126,15 @@ export class BitnobPayoutAdapter implements PayoutPort {
 
   constructor(options: BitnobPayoutOptions) {
     this.#client = options.client;
+  }
+
+  /**
+   * What Bitnob says it holds for us. ONE reader, shared with the balance
+   * reconciliation sweep — a second parser for the same endpoint would be a
+   * second set of guesses about a response shape that is still unsettled.
+   */
+  async floatBalances(): Promise<readonly Money<Currency>[]> {
+    return new BitnobBalanceAdapter(this.#client).floatBalances();
   }
 
   async banks(country: string): Promise<readonly PayoutBank[]> {

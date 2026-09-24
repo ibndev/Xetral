@@ -40,7 +40,7 @@ const PRODUCTS: readonly {
 }[] = [
   { href: '/bills',  label: 'Bills',    icon: 'receipt', tone: 'amber' },
   { href: '/crypto', label: 'Crypto',   icon: 'bitcoin', tone: 'green' },
-  { href: '/bills',  label: 'eSIM',     icon: 'sim',     tone: 'blue' },
+  { href: '/esim',   label: 'eSIM',     icon: 'sim',     tone: 'blue' },
   { href: '/cards',  label: 'USD Card', icon: 'card',    tone: 'navy' },
 ];
 

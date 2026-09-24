@@ -12,3 +12,4 @@ export * from './receipt.js';
 export * from './entry-kind.js';
 export * from './amount-entry.js';
 export * from './portfolio.js';
+export * from './request-link.js';

@@ -18,6 +18,7 @@ import { DATABASE, LEDGER, PAYOUT_PORT } from '../tokens.js';
 import { internationalDigits } from '../phone.js';
 import { CountriesService } from '../countries/countries.service.js';
 import { PlatformFloatService } from './platform-float.service.js';
+import { ProviderLiquidityService } from './provider-liquidity.service.js';
 import type { BranchesQuery, LookupQuery, PayoutBody } from './dto.js';
 import { AffordabilityService } from '../wallet/affordability.service.js';
 import { SettingsService } from '../settings/settings.service.js';
@@ -45,6 +46,12 @@ import { NotificationService } from '../notifications/notification.service.js';
  * row, and it is what is sent to the provider — a confirmation against a name
  * the sender typed themselves confirms nothing.
  */
+
+/** The rail a payout will leave on, and whether 073's ledger guard applies. */
+interface PayoutRail {
+  readonly provider: string;
+  readonly ledgerGuard: boolean;
+}
 
 /**
  * WHERE A PAYOUT IS GOING, resolved once and used everywhere after.
@@ -108,6 +115,10 @@ export interface PayoutRow {
   /** WHICH RAIL SENT IT, immutable since 046. A payout id is opaque and only
    *  its issuer can resolve one. */
   provider: string;
+  /** FALSE for a row written before 080, whose `provider` is only the
+   *  column's default. Optional so a row read by an older SELECT is treated
+   *  as the guess it may be. */
+  provider_known?: boolean;
   failure_reason: string | null;
   reserve_entry_id: string;
   /**
@@ -156,6 +167,7 @@ export class PayoutService {
     @Inject(NotificationService) private readonly notifications: NotificationService,
     @Inject(CountriesService) private readonly countries: CountriesService,
     @Inject(PlatformFloatService) private readonly float: PlatformFloatService,
+    @Inject(ProviderLiquidityService) private readonly liquidity: ProviderLiquidityService,
   ) {}
 
   /** Banks — or Mobile Money networks — a customer may send to. */
@@ -299,6 +311,20 @@ export class PayoutService {
      */
     const debitCurrency = await this.settings.payoutDebitCurrency(currency);
 
+    /*
+     * THE RAIL IS CHOSEN ONCE, HERE, AND RECORDED ON THE ROW.
+     *
+     * The row's `provider` was never written — the INSERT did not name the
+     * column, so every payout since 046 read `bitnob`, whoever sent it. The
+     * status sweep and the `transfer.*` webhook both ask `row.provider`, so a
+     * Flutterwave or Paystack payout was being asked about at Bitnob: on a
+     * deployment without Bitnob that is a thrown error and a webhook retried
+     * for ever, and with it, "no such payout". Choosing here and sending on
+     * exactly this rail means what the row says and what happened cannot
+     * differ.
+     */
+    const rail = await this.#payingRail(destination, amount, debitCurrency);
+
     const reference = payoutReferenceFor(userUuid, body.idempotency_key);
     const reserved = await this.#reserve(
       userId,
@@ -309,56 +335,65 @@ export class PayoutService {
       amount,
       split,
       total,
+      rail,
     );
+
+    const request = {
+      country: destination.country,
+      bankCode: destination.bank_code,
+      accountNumber: destination.account_number,
+      /*
+       * THE BRANCH, WHERE THE CORRIDOR REQUIRES ONE — Ghana, today.
+       * Flutterwave refuses a Ghanaian transfer without it, which would
+       * have made 070's new bank rail fail on every send.
+       */
+      ...(destination.branch_code === undefined
+        ? {}
+        : { branchCode: destination.branch_code }),
+      /*
+       * WHO SENT IT, because one corridor is refused without it.
+       *
+       * Kenya's M-PESA payout is treated as a cross-border remittance and
+       * Flutterwave refuses it unless the originator is named — we sent no
+       * `meta` at all, so every shilling transfer was rejected for a missing
+       * required field before anything else about it was considered.
+       *
+       * It is the SENDING CUSTOMER and never the platform: a remittance
+       * names the person the money came from, and naming ourselves would be
+       * a false statement on a regulatory field.
+       */
+      ...(sender === undefined ? {} : { sender }),
+      /*
+       * WHICH OF OUR BALANCES FUNDS IT. Empty means the payout currency's
+       * own float, which is the provider's default and keeps OUR published
+       * spread as the price; a value here trades that float for somebody
+       * else's conversion rate, which is why it is a setting an operator
+       * types rather than an assumption this file makes.
+       */
+      ...(debitCurrency === undefined ? {} : { debitCurrency }),
+      /*
+       * WHAT THE RAIL TOLD US, or nothing. Never the sender's own text: a
+       * confirmation against a name the sender typed confirms nothing while
+       * looking exactly like one, which is 043's rule and the reason this
+       * field is not on `payoutSchema` at all.
+       */
+      accountName: beneficiary?.accountName,
+      amount,
+      narration: body.narration,
+      reference,
+    };
 
     let receipt: PayoutReceipt;
     try {
-      receipt = await this.port.send({
-        country: destination.country,
-        bankCode: destination.bank_code,
-        accountNumber: destination.account_number,
-        /*
-         * THE BRANCH, WHERE THE CORRIDOR REQUIRES ONE — Ghana, today.
-         * Flutterwave refuses a Ghanaian transfer without it, which would
-         * have made 070's new bank rail fail on every send.
-         */
-        ...(destination.branch_code === undefined
-          ? {}
-          : { branchCode: destination.branch_code }),
-        /*
-         * WHO SENT IT, because one corridor is refused without it.
-         *
-         * Kenya's M-PESA payout is treated as a cross-border remittance and
-         * Flutterwave refuses it unless the originator is named — we sent no
-         * `meta` at all, so every shilling transfer was rejected for a missing
-         * required field before anything else about it was considered.
-         *
-         * It is the SENDING CUSTOMER and never the platform: a remittance
-         * names the person the money came from, and naming ourselves would be
-         * a false statement on a regulatory field.
-         */
-        ...(sender === undefined ? {} : { sender }),
-        /*
-         * WHICH OF OUR BALANCES FUNDS IT. Empty means the payout currency's
-         * own float, which is the provider's default and keeps OUR published
-         * spread as the price; a value here trades that float for somebody
-         * else's conversion rate, which is why it is a setting an operator
-         * types rather than an assumption this file makes.
-         */
-        ...(debitCurrency === undefined ? {} : { debitCurrency }),
-        /*
-         * WHAT THE RAIL TOLD US, or nothing. Never the sender's own text: a
-         * confirmation against a name the sender typed confirms nothing while
-         * looking exactly like one, which is 043's rule and the reason this
-         * field is not on `payoutSchema` at all.
-         */
-        accountName: beneficiary?.accountName,
-        amount,
-        narration: body.narration,
-        reference,
-      });
+      receipt =
+        this.port.sendVia === undefined
+          ? await this.port.send(request)
+          : await this.port.sendVia(rail.provider, request);
     } catch (error) {
       if (providerDidNothing(error)) {
+        // A refusal may well be for want of funds; the next read must not be
+        // the cached one that said there were enough.
+        this.liquidity.forget(rail.provider);
         // A definite answer: they refused it, or it never left. Nothing moved,
         // so the customer's money goes back now.
         await this.fail(reserved, describe(error));
@@ -860,9 +895,9 @@ export class PayoutService {
         );
         return 'held';
       }
-      let found: PayoutReceipt;
+      let found: PayoutReceipt | undefined;
       try {
-        found = await this.port.status(transactionId, row.provider);
+        found = await this.askRail(row, transactionId, { requireReference: true });
       } catch (error) {
         // "No such transfer" is an answer about THEIR id, not about our
         // payout — the event may be forged or for another integration.
@@ -870,10 +905,10 @@ export class PayoutService {
         this.#logger.warn(`payout ${reference}: transfer ${transactionId} is unknown to the rail; ignored`);
         return 'held';
       }
-      if (found.reference !== row.reference) {
+      if (found === undefined || found.reference !== row.reference) {
         this.#logger.warn(
           `payout ${reference}: the event named transfer ${transactionId}, which the ` +
-            `rail says is ${found.reference ?? 'unreferenced'}; ignored`,
+            `rail says is ${found?.reference ?? 'unreferenced'}; ignored`,
         );
         return 'held';
       }
@@ -883,10 +918,60 @@ export class PayoutService {
 
     // The rail that ISSUED the id, off the row — never the active one. 046
     // put `provider` on `bank_payouts` for exactly this.
-    const receipt = await this.port.status(row.provider_payout_id, row.provider);
-    if (receipt.state === 'sent') return 'held';
+    const receipt = await this.askRail(row, row.provider_payout_id);
+    if (receipt === undefined || receipt.state === 'sent') return 'held';
     await this.applyReceipt(row, receipt);
     return 'resolved';
+  }
+
+  /**
+   * WHAT THE RAIL THAT SENT A PAYOUT SAYS ABOUT IT — or undefined when no rail
+   * can say so with evidence.
+   *
+   * A KNOWN RAIL is asked and believed, as since 046: its refusal propagates as
+   * `ProviderRejectedError`, which the sweep reads as "no such payout" and
+   * reverses. One thing is added — an answer carrying a reference that is not
+   * ours is not an answer about this payout, whoever gave it.
+   *
+   * AN UNKNOWN RAIL — every row written before 080, whose `provider` is the
+   * column default — is the dangerous case. Asking the recorded `bitnob` about
+   * a Flutterwave transfer answers "no such payout", and reading THAT as a
+   * refusal reverses money that has left. So every rail is asked, a refusal
+   * from any of them decides nothing, and the only answer accepted is one that
+   * carries OUR reference, read off the provider's own response. Nothing that
+   * cannot show that is believed; the payout stays held for a person.
+   */
+  async askRail(
+    row: Pick<PayoutRow, 'provider' | 'provider_known' | 'reference'>,
+    providerPayoutId: string,
+    options: { requireReference?: boolean } = {},
+  ): Promise<PayoutReceipt | undefined> {
+    const ours = (receipt: PayoutReceipt): boolean =>
+      receipt.reference === undefined
+        ? options.requireReference !== true
+        : receipt.reference === row.reference;
+
+    if (row.provider_known === true) {
+      const receipt = await this.port.status(providerPayoutId, row.provider);
+      return ours(receipt) ? receipt : undefined;
+    }
+
+    const switched = this.port as PayoutPort & { providers?: readonly string[] };
+    const rails = [row.provider, ...(switched.providers ?? []).filter((p) => p !== row.provider)];
+    for (const rail of rails) {
+      try {
+        const receipt = await this.port.status(providerPayoutId, rail);
+        if (receipt.reference !== undefined && receipt.reference === row.reference) return receipt;
+      } catch (error) {
+        // A refusal from a rail that may never have seen this id is not an
+        // outcome, and neither is a rail this deployment no longer builds.
+        this.#logger.warn(
+          `payout ${row.reference}: ${rail} could not describe ${providerPayoutId} ` +
+            `(${describe(error)}); the row predates 080 so its rail is unknown`,
+        );
+      }
+    }
+    return undefined;
   }
 
   /**
@@ -1109,6 +1194,66 @@ export class PayoutService {
 
   /* ------------------------------------------------------------------ */
 
+  /**
+   * WHICH RAIL PAYS THIS, and whether the ledger's own float guard still has
+   * anything to say about it.
+   *
+   * THE RAIL IS ASKED WHAT IT HOLDS. The ledger's `provider_float` is one
+   * account per currency for every provider together, so it reads naira
+   * collected at Paystack, and cedis credited by a platform-priced conversion
+   * that paid nobody, as held — while the rail that must pay them out has
+   * none. So each candidate is asked in order, the routed one first, and the
+   * first that can spend the amount is chosen.
+   *
+   * ONLY A WALLET MAY MOVE TO ANOTHER RAIL. A bank code came from the routed
+   * rail's own list and means nothing to another provider; a mobile money
+   * network code is OURS, and every adapter translates it by name. So a bank
+   * payout is only ever asked of its one rail.
+   *
+   * AN UNREADABLE BALANCE CHOOSES THAT RAIL AND CHANGES NOTHING — the rail
+   * itself still refuses, and the ledger guard still runs — because a balance
+   * endpoint that is down must not become an outage on the screen money is
+   * sent from. And it is NOT a pre-check in the sense CLAUDE.md forbids: the
+   * customer's own balance is still decided by the overdraft guard inside the
+   * ledger. Two payouts reading one balance can both pass; the rail refuses
+   * the second, which reverses, exactly as it did before this existed.
+   */
+  async #payingRail(
+    destination: PayoutDestination,
+    amount: Money<Currency>,
+    debitCurrency: string | undefined,
+  ): Promise<PayoutRail> {
+    const rails = (await this.port.railsFor?.(destination.country)) ?? [this.port.provider];
+    const eligible = destination.mobile_money ? rails : rails.slice(0, 1);
+    const funding = debitCurrency ?? amount.currency;
+    const converted = funding !== amount.currency;
+
+    const short: string[] = [];
+    for (const provider of eligible) {
+      const live = await this.liquidity.available(provider, funding);
+      if (live === undefined) return { provider, ledgerGuard: !converted };
+      /*
+       * PAID FROM ANOTHER BALANCE AT THEIR RATE, the amount that balance must
+       * cover is theirs to compute, so all this can say is whether there is
+       * any. And the ledger's float in the PAYOUT currency is then not the
+       * money being spent, so its guard stands down rather than refusing a
+       * payout funded from somewhere it cannot see.
+       */
+      if (converted ? live > 0n : live >= amount.amount) {
+        return { provider, ledgerGuard: false };
+      }
+      short.push(`${provider} can spend ${live} ${funding}`);
+    }
+
+    this.#logger.error(
+      `PROVIDER BALANCE SHORTFALL: a ${amount.amount} ${amount.currency} payout to ` +
+        `${destination.country} was refused before any money was held. ` +
+        `${short.join('; ')} (minor units). Fund the ${funding} balance at the ` +
+        `provider, or name another balance in payout_debit_currencies.`,
+    );
+    throw new ServiceUnavailableException({ error: 'insufficient_platform_liquidity' });
+  }
+
   async #reserve(
     userId: string,
     body: PayoutBody,
@@ -1118,6 +1263,7 @@ export class PayoutService {
     amount: Money<Currency>,
     split: { gross: Money<Currency>; tax: Money<Currency> },
     total: Money<Currency>,
+    rail: PayoutRail,
   ): Promise<PayoutRow> {
     const currency = body.currency as Currency;
 
@@ -1162,8 +1308,9 @@ export class PayoutService {
          * the port's own note gives and the one that changes nothing for a
          * rail that never had this flag. */
         prefunded:
-          (await this.port.prefundedFor?.(destination.country)) ??
-          this.port.prefunded === true,
+          rail.ledgerGuard &&
+          ((await this.port.prefundedFor?.(destination.country)) ??
+            this.port.prefunded === true),
         amount: total,
       });
 
@@ -1224,9 +1371,10 @@ export class PayoutService {
       `INSERT INTO bank_payouts
          (user_id, reference, idempotency_key, country, bank_code, bank_name,
           account_number, account_name, narration, currency, amount_minor,
-          fee_minor, tax_minor, reserve_entry_id, payout_method, branch_code)
+          fee_minor, tax_minor, reserve_entry_id, payout_method, branch_code,
+          provider)
        VALUES ($1::bigint, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::bigint,
-               $12::bigint, $13::bigint, $14::bigint, $15, $16)
+               $12::bigint, $13::bigint, $14::bigint, $15, $16, $17)
        ON CONFLICT (user_id, idempotency_key) DO NOTHING
        RETURNING id`,
       [
@@ -1270,6 +1418,9 @@ export class PayoutService {
            records what the rail was GIVEN. Ghana refuses a transfer without
            one. */
         destination.branch_code ?? null,
+        /* WHO WILL SEND IT, chosen before the reserve and the rail `send()`
+           then uses — the column 046 added and nothing had ever written. */
+        rail.provider,
       ],
     );
 

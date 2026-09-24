@@ -14,7 +14,7 @@ import {
   PaystackCheckoutAdapter,
   PaystackClient,
 } from '@xetral/providers';
-import type { CheckoutPort } from '@xetral/providers';
+import type { CheckoutMethod, CheckoutPort } from '@xetral/providers';
 import { ProviderRejectedError, ProviderUnavailableError } from '@xetral/providers';
 import { assertBalanced, posting } from '@xetral/ledger';
 import type { LedgerIntent } from '@xetral/ledger';
@@ -201,6 +201,8 @@ export class PaymentLinkService {
       readonly currency?: string;
       /** What the payment is for, in the payer's words. Inert — see the port. */
       readonly note?: string;
+      /** A method the customer already chose on Add Money. See the port. */
+      readonly method?: CheckoutMethod;
     },
   ): Promise<{ authorization_url: string; reference: string }> {
     const target = await this.pool.query<{
@@ -231,6 +233,15 @@ export class PaymentLinkService {
       // Asked for on the wire but not offered by the page. A client cannot
       // widen what this deployment collects by sending a different string.
       throw new BadRequestException({ error: 'currency_not_supported' });
+    }
+    /*
+     * USSD IS A NAIRA PRODUCT, on Paystack and on Flutterwave alike — it is a
+     * Nigerian bank's short code. Refused HERE, before a row is written,
+     * because sent on to the provider it is not an error: it is a checkout
+     * page with no method on it, which the customer reads as a broken screen.
+     */
+    if (input.method === 'ussd' && currency !== 'NGN') {
+      throw new BadRequestException({ error: 'payment_method_not_supported' });
     }
 
     /*
@@ -305,6 +316,7 @@ export class PaymentLinkService {
         ...(payee.full_name === null ? {} : { payeeName: payee.full_name }),
         ...(input.payerName === undefined ? {} : { payerName: input.payerName }),
         ...(input.note === undefined ? {} : { note: input.note }),
+        ...(input.method === undefined ? {} : { method: input.method }),
         ...(this.config.appBaseUrl === undefined
           ? {}
           : { callbackUrl: `${this.config.appBaseUrl}/pay/${slug}?paid=${reference}` }),
@@ -416,6 +428,7 @@ export class PaymentLinkService {
     userUuid: string,
     amount: string,
     currency?: string,
+    method?: CheckoutMethod,
   ): Promise<{ authorization_url: string; reference: string }> {
     const found = await this.pool.query<{ slug: string; email: string | null }>(
       `SELECT p.slug, u.email
@@ -435,6 +448,7 @@ export class PaymentLinkService {
       amount,
       payerEmail: row.email,
       ...(currency === undefined ? {} : { currency }),
+      ...(method === undefined ? {} : { method }),
     });
   }
 

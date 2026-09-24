@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { isCurrency, money, toMajor } from '@xetral/shared';
-import type { Currency } from '@xetral/shared';
+import type { Currency, Money } from '@xetral/shared';
 import { NETWORK_NAME_HINTS } from '../ports/mobile-money.js';
 import { ProviderContractError, ProviderRejectedError } from '../ports/errors.js';
 import type {
@@ -13,6 +13,7 @@ import type {
   PayoutRequest,
 } from '../ports/payout.js';
 import { FLUTTERWAVE_ENDPOINTS, type FlutterwaveClient } from './client.js';
+import { minorFromMajor } from './checkout-adapter.js';
 import { FLUTTERWAVE_V4_ENDPOINTS, type FlutterwaveV4Client } from './v4-client.js';
 
 const PROVIDER = 'flutterwave';
@@ -985,7 +986,50 @@ export class FlutterwavePayoutAdapter implements PayoutPort {
     }
     return receiptOf(parsed.data.data);
   }
+
+  /**
+   * WHAT THIS WALLET CAN ACTUALLY SPEND, per currency.
+   *
+   * Flutterwave is prefunded, so this is the number that decides whether a
+   * transfer will be refused — and the ledger cannot answer it. The ledger's
+   * `provider_float` is ONE account per currency for every provider at once:
+   * naira collected at Paystack reads there as naira held, and so do cedis
+   * credited by a platform-priced conversion that paid no provider anything.
+   * Neither is at Flutterwave. Asking Flutterwave is the only way to know.
+   *
+   * `available_balance`, never `ledger_balance`: the second includes money
+   * still settling, which a transfer cannot draw on. Major units, converted
+   * once through `minorFromMajor` — the exponent is per currency. A currency
+   * this platform does not model is skipped rather than guessed at.
+   */
+  async floatBalances(): Promise<readonly Money<Currency>[]> {
+    const body = await this.#client.request('GET', FLUTTERWAVE_ENDPOINTS.balances);
+    const parsed = balancesResponse.safeParse(body);
+    if (!parsed.success) {
+      throw new ProviderContractError(PROVIDER, 'unexpected /v3/balances response');
+    }
+    const held: Money<Currency>[] = [];
+    for (const row of parsed.data.data) {
+      const code = row.currency.trim().toUpperCase();
+      if (!isCurrency(code)) continue;
+      held.push(money(minorFromMajor(row.available_balance, code), code));
+    }
+    return held;
+  }
 }
+
+/** `GET /v3/balances`. The envelope's `status` is a STRING here, tested by
+ *  equality — `"error"` is truthy, which is the one-directory-away mistake
+ *  059 records. */
+const balancesResponse = z.object({
+  status: z.literal('success'),
+  data: z.array(
+    z.object({
+      currency: z.string().min(1),
+      available_balance: z.union([z.number(), z.string()]),
+    }),
+  ),
+});
 
 /**
  * Their transfer state, as the port's three.

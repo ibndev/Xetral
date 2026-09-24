@@ -1,10 +1,20 @@
-import { Share, Text, View } from 'react-native';
-import { nationalPhone, paymentLinkFor } from '@xetral/client';
+import { useState } from 'react';
+import { Share, Text, TextInput, View } from 'react-native';
+import {
+  exponentFor,
+  formatAmount,
+  isValidAmount,
+  nationalPhone,
+  paymentLinkFor,
+  REQUEST_NOTE_MAX,
+  requestLinkFor,
+  symbolFor,
+} from '@xetral/client';
 import { Shell } from '@/shell';
 import { AcctCard, Eyebrow } from '@/acct-card';
-import { Button, FormError, Loading } from '@/ui';
+import { Button, FormError, Loading, Segmented } from '@/ui';
 import { useLoad, useXetral } from '@/hooks';
-import { radius, space, useStyles, useTheme } from '@/theme';
+import { cardShadow, font, radius, space, useStyles, useTheme } from '@/theme';
 import { webOrigin } from '@/session';
 
 /**
@@ -22,11 +32,11 @@ import { webOrigin } from '@/session';
  * the number a customer's bank, contacts and two-factor codes are attached
  * to.
  *
- * AND NOT THE COMP'S REQUEST SCREEN, deliberately. That one asks for an
- * amount and lists pending requests against named people — a product with a
- * table behind it that this platform does not have. A screen that took an
- * amount and produced a link which ignores it would be worse than not
- * offering one: a payment link's amount is chosen by the PAYER (058).
+ * AND NOW THE COMP'S REQUEST CARD — the web's own, for the same reasons: the
+ * amount and reason ride on the link as a PREFILL (`requestLinkFor`) that the
+ * payer's checkout opens with. It is still the payer who pays and the server
+ * credits what was paid. The comp's "pending requests" list is not drawn,
+ * because nothing records a request against a person.
  */
 export default function Request() {
   const client = useXetral();
@@ -50,14 +60,143 @@ export default function Request() {
     profile.data?.link ??
     (slug !== null && webOrigin() !== '' ? paymentLinkFor(webOrigin(), slug) : null);
 
+  const home = session.data?.home_currency ?? 'NGN';
+  const currencies = [...new Set([home, 'USD'])];
+  const [picked, setPicked] = useState('');
+  const currency = picked === '' ? home : picked;
+  const [amount, setAmount] = useState('');
+  const [note, setNote] = useState('');
+  const [made, setMade] = useState<string | undefined>();
+  const valid =
+    amount.trim() !== '' &&
+    isValidAmount(amount, exponentFor(currency)) &&
+    !/^0+(\.0+)?$/.test(amount.trim());
+
+  function share(url: string): void {
+    const why = note.trim() === '' ? '' : ` for ${note.trim()}`;
+    // Silent on failure: a dismissed share sheet rejects on iOS, which is
+    // somebody changing their mind rather than an error.
+    void Share.share({
+      message: `Pay me ${formatAmount(amount.trim(), currency)}${why} on Xetral: ${url}`,
+    }).catch(() => undefined);
+  }
+
   return (
     <Shell back="/wallet" title="Request money">
-      <Text style={styles.lead}>Two ways to be paid. Both are yours permanently.</Text>
+      {/* THE COMP'S REQUEST CARD — the figure centred in the home screen's
+          own face, the reason under it, one action. The payer's checkout is
+          the same card, so asking and paying read as one thing. */}
+      <View
+        style={{
+          alignItems: 'center',
+          gap: space.sm,
+          padding: space.lg,
+          borderRadius: radius.xl,
+          backgroundColor: colors.surface,
+          borderColor: colors.edge,
+          borderWidth: 1,
+          ...cardShadow(colors),
+        }}
+      >
+        <Text
+          style={{
+            fontFamily: font.sansSemi,
+            fontSize: 12,
+            letterSpacing: 1.2,
+            textTransform: 'uppercase',
+            color: colors.text3,
+          }}
+        >
+          You request
+        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'center' }}>
+          <Text style={{ fontFamily: font.balance, fontSize: 32, color: colors.text2 }}>
+            {symbolFor(currency)}
+          </Text>
+          <TextInput
+            value={amount}
+            onChangeText={(t) => {
+              setAmount(t.replace(/[^0-9.]/g, ''));
+              setMade(undefined);
+            }}
+            placeholder="0"
+            placeholderTextColor={colors.text3}
+            keyboardType="decimal-pad"
+            accessibilityLabel={`Amount in ${currency}`}
+            style={{
+              fontFamily: font.balance,
+              fontSize: 46,
+              color: colors.text,
+              minWidth: 40,
+              textAlign: 'center',
+              padding: 0,
+            }}
+          />
+        </View>
+        {currencies.length > 1 && (
+          <View style={{ alignSelf: 'stretch' }}>
+            <Segmented
+              label="Currency"
+              value={currency}
+              onChange={(c) => {
+                setPicked(c);
+                setMade(undefined);
+              }}
+              options={currencies.map((c) => ({ value: c, label: c }))}
+            />
+          </View>
+        )}
+        <TextInput
+          value={note}
+          onChangeText={(t) => {
+            setNote(t);
+            setMade(undefined);
+          }}
+          maxLength={REQUEST_NOTE_MAX}
+          placeholder="What's it for? (optional)"
+          placeholderTextColor={colors.text3}
+          accessibilityLabel="What it is for"
+          style={[styles.input, { alignSelf: 'stretch', marginTop: space.xs }]}
+        />
+        <View style={{ alignSelf: 'stretch' }}>
+          {made === undefined ? (
+            <Button
+              label="Create request link"
+              disabled={!valid || link === null}
+              onPress={() => {
+                if (link === null || !valid) return;
+                setMade(
+                  requestLinkFor(link, {
+                    amount: amount.trim(),
+                    currency,
+                    ...(note.trim() === '' ? {} : { note: note.trim() }),
+                  }),
+                );
+              }}
+            />
+          ) : (
+            <View style={{ gap: space.sm }}>
+              <Text style={{ fontFamily: font.sansSemi, fontSize: 13, color: colors.ok, textAlign: 'center' }}>
+                Request for {formatAmount(amount.trim(), currency)} ready
+              </Text>
+              <Text style={[styles.muted, { fontSize: 12.5, textAlign: 'center' }]} selectable>
+                {made}
+              </Text>
+              <Button label="Share request" icon="arrowUpRight" onPress={() => share(made)} />
+            </View>
+          )}
+        </View>
+        <Text style={[styles.muted, { fontSize: 12.5, textAlign: 'center' }]}>
+          They pay on a secure page, by card, bank transfer or mobile money. It lands in your{' '}
+          {currency} wallet.
+        </Text>
+      </View>
 
       {profile.loading && <Loading />}
 
       {profile.data !== undefined && (
         <>
+          <Eyebrow>Or share what is always yours</Eyebrow>
           {/* THE NUMBER GETS THE COMP'S ACCOUNT CARD, because it is the
               identifier a customer reads out — and the gradient panel appears
               once per screen for the reason it appears once on Add money. */}

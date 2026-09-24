@@ -127,4 +127,12 @@ describe('the picker is a modal, not a panel', () => {
   it('refuses a page that can scroll sideways', () => {
     expect(/html,\s*body\s*\{[^}]*overflow-x:\s*hidden/.test(css)).toBe(true);
   });
+
+  it('clips rather than hides, so sticky elements still stick', () => {
+    // `hidden` alone made `body` a scroll container that never scrolls, and
+    // the operations sidebar scrolled away with the page. `clip` must be the
+    // value in force — declared AFTER `hidden`, which is only the fallback.
+    const rule = /html,\s*body\s*\{([^}]*)\}/.exec(css)?.[1] ?? '';
+    expect(rule.lastIndexOf('overflow-x: clip')).toBeGreaterThan(rule.lastIndexOf('overflow-x: hidden'));
+  });
 });
