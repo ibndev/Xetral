@@ -2666,6 +2666,29 @@ tokens at the top of `globals.css` and `theme.ts`.
   names an icon and a tone per entry kind for both apps. The tone is CATEGORY,
   not direction — direction is already the amount's colour.
 
+### Black and silver — non-obvious rules
+
+`apps/web/src/app/globals.css`, `apps/mobile/src/theme.ts`, the hero in
+`apps/mobile/app/wallet.tsx`.
+
+- **THE BRAND IS BLACK, WITH SILVER SECOND, AND THE VIOLET WAS NOT IT.** The
+  `--iris` family carried #6D5AE6 as the one accent; it is now near-black in
+  light and bright silver in dark. The token keeps its NAME because "iris"
+  means "the accent" in hundreds of rules across both apps, and renaming it
+  would be a diff about words rather than colour.
+- **THE TEXT AND THE NEUTRALS MOVED WITH IT.** Navy text and blue-grey labels
+  beside a black accent read as two brands on one screen. They are graphite
+  and silver now. `--info`'s blue and the other semantic colours are
+  deliberately NOT changed: a notice is not the accent.
+- **THE TOTAL IS A BLACK CARD IN BOTH THEMES.** Near-black metal with a silver
+  sheen in light; GRAPHITE with a silver hairline in dark, because black on a
+  black page is no card at all. The figure is white at 800, the minor units
+  and label silver. The web's `.hero` and the phone's `HERO`/`HeroGround`
+  carry the same values.
+- **IN DARK THE ACCENT IS SILVER WITH NEAR-BLACK TYPE**, a shade off pure white
+  so a filled action never collides with `--brand`. `palette-parity.test.ts`
+  still holds the two apps to the same hex values.
+
 ### Metrics — non-obvious rules
 
 `apps/api/src/observability/metrics.{service,controller}.ts`, at `GET /metrics`.

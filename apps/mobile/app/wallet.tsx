@@ -124,8 +124,8 @@ export default function Home() {
     [client, currency],
   );
 
-  // The light theme draws the total as a gradient card; dark keeps the glow.
-  const hero = colors.bg !== '#000000';
+  // The total is a black card in both themes; dark draws it as graphite.
+  const dark = colors.bg === '#000000';
 
   const tone = {
     amber: { bg: colors.warnBg, fg: colors.warn },
@@ -136,51 +136,26 @@ export default function Home() {
 
   return (
     <Shell greeting={{ name: session.data?.first_name }}>
-      {/*
-        THE GLOW IS A LIGHT SOURCE, NOT A FILL.
-
-        It sits behind the balance and nothing else, is never on a surface
-        carrying its own text, and takes no touches. On the web it is a
-        radial gradient; React Native has no radial gradient without a native
-        module, so it is a soft translucent disc with the same colour token
-        and the same job. `pointerEvents` none, and everything after it is a
-        later sibling and therefore above it.
-      */}
       <View style={{ paddingHorizontal: GUTTER }}>
-        {!hero && (
-          <View
-            pointerEvents="none"
-            style={{
-              position: 'absolute',
-              top: -110, left: '18%',
-              width: 300, height: 300, borderRadius: 999,
-              backgroundColor: colors.glow,
-              opacity: 0.9,
-            }}
-          />
-        )}
-
         {/*
-          THE TOTAL, AS A HERO — in light. The glow is the only light on a
-          black screen and works there; on the pale ground it was a smudge and
-          the one number the app exists for looked like any other line. So in
-          light the total is a card: a deep iris gradient, white type, the chip
-          in frosted glass — the web's `.hero`, drawn with react-native-svg
-          because React Native has no gradient of its own.
+          THE TOTAL, AS A BLACK CARD, in both themes. The brand is black with
+          silver as its second colour, and this is where it carries full
+          weight: near-black metal, a silver sheen, white type at 800, the
+          chip in smoked glass — the web's `.hero`, drawn with
+          react-native-svg because React Native has no gradient of its own.
+          On a black page it is graphite with a silver hairline, because
+          black on black is no card at all.
         */}
         <View
-          style={
-            hero
-              ? {
-                  marginTop: 6, paddingHorizontal: 20, paddingTop: 18, paddingBottom: 20,
-                  borderRadius: 24, overflow: 'hidden',
-                }
-              : undefined
-          }
+          style={{
+            marginTop: 6, paddingHorizontal: 20, paddingTop: 18, paddingBottom: 20,
+            borderRadius: 24, overflow: 'hidden',
+            borderWidth: dark ? 1 : 0, borderColor: HERO.hairline,
+          }}
         >
-        {hero && <HeroGround />}
+        <HeroGround dark={dark} />
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingTop: 4 }}>
-          <Text style={{ color: hero ? 'rgba(255,255,255,0.82)' : colors.text2, fontFamily: font.sansSemi, fontSize: 13 }}>
+          <Text style={{ color: HERO.label, fontFamily: font.sansSemi, fontSize: 13 }}>
             Total balance
           </Text>
           {/*
@@ -200,7 +175,7 @@ export default function Home() {
             hitSlop={8}
             style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }}
           >
-            <Icon name={hidden ? 'eyeOff' : 'eye'} size={18} color={hero ? 'rgba(255,255,255,0.85)' : colors.text2} />
+            <Icon name={hidden ? 'eyeOff' : 'eye'} size={18} color={HERO.icon} />
           </Pressable>
         </View>
 
@@ -226,7 +201,7 @@ export default function Home() {
                   : formatAmount(headline.amount, 'USD')
           }
           split={!hidden && !dollars.loading && headline !== undefined}
-          onHero={hero}
+          onHero
         />
 
         {/*
@@ -247,7 +222,7 @@ export default function Home() {
             that followed the selected card made the total look as if it did. */}
         {!hidden && !dollars.loading && (
           <View style={{ marginTop: 11, flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            <Chip icon="swap" onHero={hero}>
+            <Chip icon="swap" onHero>
               {headline === undefined
                 ? 'Your total cannot be priced right now'
                 : headline.excluded.length === 0
@@ -490,7 +465,7 @@ function Figure({
   return (
     <Text style={base} numberOfLines={1}>
       {text.slice(0, at)}
-      <Text style={{ color: onHero === true ? 'rgba(255,255,255,0.62)' : colors.text3 }}>{text.slice(at)}</Text>
+      <Text style={{ color: onHero === true ? HERO.minor : colors.text3 }}>{text.slice(at)}</Text>
     </Text>
   );
 }
@@ -579,16 +554,16 @@ function Chip({
   icon, children, onHero,
 }: { readonly icon: IconName; readonly children: string; readonly onHero?: boolean }) {
   const colors = useTheme();
-  // On the hero the chip is frosted glass over the gradient, not iris on iris.
-  const fg = onHero === true ? '#FFFFFF' : colors.irisText;
+  // On the hero the chip is smoked glass over the metal, not tint on tint.
+  const fg = onHero === true ? HERO.chipText : colors.irisText;
   return (
     <View
       style={{
         flexDirection: 'row', alignItems: 'center', gap: 5,
         paddingVertical: 4, paddingHorizontal: 10,
         borderRadius: radius.pill,
-        backgroundColor: onHero === true ? 'rgba(255,255,255,0.16)' : colors.irisTint,
-        borderWidth: 1, borderColor: onHero === true ? 'rgba(255,255,255,0.24)' : colors.irisEdge,
+        backgroundColor: onHero === true ? HERO.chipFill : colors.irisTint,
+        borderWidth: 1, borderColor: onHero === true ? HERO.chipEdge : colors.irisEdge,
       }}
     >
       <Icon name={icon} size={13} color={fg} />
@@ -598,27 +573,45 @@ function Chip({
 }
 
 /**
- * The hero's ground: the web's three layers — a 135° iris gradient, a white
- * highlight top right, a deeper wash bottom left — plus two faint rings.
+ * The hero's type and glass, the same values as the web's `.hero` rules — one
+ * set for both themes, because the card is dark metal in both.
+ */
+const HERO = {
+  label: '#B9BEC8',
+  icon: '#C9CDD5',
+  minor: '#9CA1AB',
+  chipText: '#E4E6EA',
+  chipFill: 'rgba(214,219,228,0.10)',
+  chipEdge: 'rgba(214,219,228,0.22)',
+  hairline: 'rgba(214,219,228,0.14)',
+} as const;
+
+/**
+ * The hero's ground: the web's layers — a 135° black-to-graphite gradient, a
+ * silver sheen top right, a deeper shade bottom left — plus two faint silver
+ * rings. On a black page the metal is lighter graphite so it reads as a card.
  * Absolutely filled behind the hero's content and inert to touch.
  */
-function HeroGround() {
+function HeroGround({ dark }: { readonly dark: boolean }) {
+  const [from, mid, to] = dark
+    ? (['#1E1F23', '#121316', '#08090A'] as const)
+    : (['#050506', '#141518', '#2A2C31'] as const);
   return (
     <View pointerEvents="none" style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}>
       <Svg width="100%" height="100%" preserveAspectRatio="none">
         <Defs>
           <LinearGradient id="heroFill" x1="0" y1="0" x2="1" y2="1">
-            <Stop offset="0" stopColor="#4B3BD4" />
-            <Stop offset="0.52" stopColor="#6D5AE6" />
-            <Stop offset="1" stopColor="#8F7CFF" />
+            <Stop offset="0" stopColor={from} />
+            <Stop offset="0.55" stopColor={mid} />
+            <Stop offset="1" stopColor={to} />
           </LinearGradient>
           <RadialGradient id="heroShine" cx="1" cy="0" r="0.9">
-            <Stop offset="0" stopColor="#FFFFFF" stopOpacity="0.2" />
-            <Stop offset="1" stopColor="#FFFFFF" stopOpacity="0" />
+            <Stop offset="0" stopColor="#D6DBE4" stopOpacity={dark ? 0.12 : 0.2} />
+            <Stop offset="1" stopColor="#D6DBE4" stopOpacity="0" />
           </RadialGradient>
           <RadialGradient id="heroDeep" cx="0" cy="1" r="0.8">
-            <Stop offset="0" stopColor="#281478" stopOpacity="0.35" />
-            <Stop offset="1" stopColor="#281478" stopOpacity="0" />
+            <Stop offset="0" stopColor="#000000" stopOpacity={dark ? 0 : 0.55} />
+            <Stop offset="1" stopColor="#000000" stopOpacity="0" />
           </RadialGradient>
         </Defs>
         <Rect x="0" y="0" width="100%" height="100%" fill="url(#heroFill)" />
@@ -626,8 +619,8 @@ function HeroGround() {
         <Rect x="0" y="0" width="100%" height="100%" fill="url(#heroDeep)" />
       </Svg>
       <Svg width={260} height={220} style={{ position: 'absolute', top: -70, right: -60 }}>
-        <Circle cx={150} cy={110} r={110} stroke="rgba(255,255,255,0.16)" strokeWidth={1} fill="none" />
-        <Circle cx={150} cy={110} r={124} stroke="rgba(255,255,255,0.05)" strokeWidth={28} fill="none" />
+        <Circle cx={150} cy={110} r={110} stroke="rgba(214,219,228,0.16)" strokeWidth={1} fill="none" />
+        <Circle cx={150} cy={110} r={124} stroke="rgba(214,219,228,0.045)" strokeWidth={28} fill="none" />
       </Svg>
     </View>
   );

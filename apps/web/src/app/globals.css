@@ -19,9 +19,9 @@
 
 :root {
   /* Brand */
-  --brand:        #0D1B3E;   /* navy — text, primary buttons, the mark */
-  --brand-700:    #16295A;
-  --brand-500:    #24407F;
+  --brand:        #0B0B0D;   /* black — the brand: text, primary buttons */
+  --brand-700:    #1C1D21;
+  --brand-500:    #3A3D44;
   --accent:       #F5A623;   /* amber — the mark's stroke, promos */
 
   /*
@@ -33,8 +33,8 @@
    * a near-white card with white text on it the first time dark was switched
    * on. These two never move.
    */
-  --ink:          #0D1B3E;
-  --ink-700:      #16295A;
+  --ink:          #0B0B0D;
+  --ink-700:      #1C1D21;
 
   /* The logo's ink, which is NOT --brand.
 
@@ -71,29 +71,38 @@
    * its border and its text each need a value that holds its contrast in BOTH
    * themes, and three mixes of one colour do not.
    *
-   * `--on-iris` is NOT white in dark. On #7B6CF6 a near-black reads better
-   * than white does, and the mockup says so.
+   * `--on-iris` is NOT white in dark. The dark accent is a bright silver, and
+   * white type on it would vanish.
    */
-  --iris:         #6D5AE6;   /* the one filled action on a screen */
-  --iris-tint:    #EFEBFF;   /* a chip, a selected row, an icon well */
-  --iris-edge:    #D9D1FF;   /* that chip's hairline */
-  --iris-text:    #4B3FB0;   /* text ON the tint */
+  /*
+   * BLACK AND SILVER, NOT PURPLE. The product owner's brand is black with
+   * silver as the second colour, and the violet this token carried did not
+   * represent it. The token keeps its NAME — "iris" means "the accent" in a
+   * few hundred rules across both apps, and renaming it would be a diff about
+   * words rather than colour — and every value below is from the brand: the
+   * one filled action is near-black, and a chip, a selected row and an icon
+   * well are a cool silver with graphite text.
+   */
+  --iris:         #0B0B0D;   /* the one filled action on a screen */
+  --iris-tint:    #EDEEF1;   /* a chip, a selected row, an icon well */
+  --iris-edge:    #D3D6DC;   /* that chip's hairline */
+  --iris-text:    #1C1D21;   /* text ON the tint */
   --on-iris:      #FFFFFF;   /* text ON the fill */
-  --iris-glow:    rgba(109, 90, 230, .14);
+  --iris-glow:    rgba(11, 11, 13, .10);
 
   /* The radial wash behind a balance. Large, soft, and never on a surface
      that already carries text — it is a light source, not a fill. */
-  --glow:         rgba(109, 90, 230, .14);
+  --glow:         rgba(120, 126, 138, .14);
 
   /* The live currency card's gradient. Two stops, not one, because a flat
      tint at this size reads as a disabled state. */
-  --card-grad-1:  #EFEBFF;
-  --card-grad-2:  #F5F4FF;
+  --card-grad-1:  #EEF0F3;
+  --card-grad-2:  #FAFAFB;
 
   /* An initials avatar. Its own pair, because it sits on --surface and a
      tint that works on the page ground washes out on a card. */
-  --avatar:       #EFEBFF;
-  --avatar-text:  #5B4BD6;
+  --avatar:       #EDEEF1;
+  --avatar-text:  #1C1D21;
 
   /* Surfaces.
 
@@ -122,20 +131,20 @@
 
      Dark keeps its own logic entirely: on black, a container lifts by a few
      points of lightness and a hairline finishes the edge. */
-  --bg:           #F4F6FB;   /* the page, behind everything */
+  --bg:           #F4F5F7;   /* the page, behind everything */
   --surface:      #FFFFFF;   /* cards, panels, tiles — resting on the page */
-  --surface-2:    #F1F3F9;   /* a well INSIDE a card, one step deeper */
+  --surface-2:    #F1F2F4;   /* a well INSIDE a card, one step deeper */
   --field:        #FFFFFF;   /* a text input: white with a visible edge, on the page or in a card */
   --surface-raised: #FFFFFF; /* only what floats: menus, sheets, modals */
-  --line:         #EBEEF4;
-  --line-strong:  #D5D9E2;
+  --line:         #EBECEF;
+  --line-strong:  #D6D8DD;
 
   /* The outline round a container or a field. A hairline in light now,
      because a white card on a near-white ground needs its edge finished;
      `--edge-hover` is one step stronger so a pointer over a field says so. */
-  --edge:         #E6E9F1;
-  --edge-strong:  #D9DEE8;
-  --edge-hover:   #CDD4E1;
+  --edge:         #E5E7EA;
+  --edge-strong:  #D9DBE0;
+  --edge-hover:   #CBCED4;
 
   /* A CARD'S SHADOW. Two layers: a 1px contact line that grounds it, and a
      wide, faint, negatively spread wash that lifts it without a visible
@@ -144,9 +153,9 @@
   --card-shadow-sm: 0 1px 2px rgba(16, 24, 40, .05);
 
   /* Text */
-  --text:         #0D1B3E;
-  --text-2:       #4A5878;   /* labels, secondary */
-  --text-3:       #8695B4;   /* hints, placeholders */
+  --text:         #0B0B0D;
+  --text-2:       #50545C;   /* labels, secondary */
+  --text-3:       #878C95;   /* hints, placeholders */
   /* An alias for --text-2, and it exists because three rules were already
      asking for it and getting nothing. An undefined custom property is not an
      error: the declaration is simply dropped and the element INHERITS its
@@ -154,7 +163,7 @@
      heading — rendered at full heading contrast and read as a second title.
      Nothing in the toolchain has an opinion about a name that does not
      resolve, which is why `undefined-variables.test.ts` now does. */
-  --text-muted:   #4A5878;
+  --text-muted:   #50545C;
   --on-brand:     #FFFFFF;
 
   /* Status */
@@ -335,27 +344,29 @@
      mark rendered before the gradient sprite mounts is white, not black on
      black. */
   --logo-ink:     #FFFFFF;
-  --brand-700:    #E8EDF7;
-  --brand-500:    #C7D2E8;
+  --brand-700:    #E4E6EA;
+  --brand-500:    #C4C8CF;
   --accent:       #F5A623;
   --accent-600:   #FFB93E;
   --link:         var(--iris);
   --link-600:     var(--iris-text);
 
-  /* IRIS, DARK. Lighter than the light theme's so it holds against black,
-     and `--on-iris` is a near-black rather than white because #7B6CF6 is
-     bright enough that white text on it vibrates. */
-  --iris:         #7B6CF6;
-  --iris-tint:    #171526;
-  --iris-edge:    #2E2952;
-  --iris-text:    #C9C0FF;
-  --on-iris:      #160A24;
-  --iris-glow:    rgba(123, 108, 246, .12);
-  --glow:         rgba(123, 108, 246, .26);
-  --card-grad-1:  #1B1733;
-  --card-grad-2:  #100E1A;
-  --avatar:       #171526;
-  --avatar-text:  #C9C0FF;
+  /* THE ACCENT, DARK: SILVER ON BLACK. Black cannot be the action on a black
+     page, so the one filled thing here is a bright silver with near-black
+     type — white-with-black, the inverse of the light theme — and it stays a
+     shade off pure white so it never collides with `--brand`. A chip is
+     graphite with a silver hairline and silver text. */
+  --iris:         #E4E6EA;
+  --iris-tint:    #1A1B1E;
+  --iris-edge:    #2E3035;
+  --iris-text:    #D5D8DE;
+  --on-iris:      #0B0B0D;
+  --iris-glow:    rgba(228, 230, 234, .10);
+  --glow:         rgba(200, 205, 214, .14);
+  --card-grad-1:  #1C1D21;
+  --card-grad-2:  #0F1012;
+  --avatar:       #1A1B1E;
+  --avatar-text:  #D5D8DE;
 
   /* True black, not near-black navy.
 
@@ -383,11 +394,11 @@
   --edge-strong:  var(--line-strong);
   --edge-hover:   var(--text-3);
 
-  --text:         #EEF2FA;
-  --text-2:       #A3B0CC;
-  --text-3:       #6B7A9B;
-  --text-muted:   #A3B0CC;
-  --on-brand:     #0D1B3E;
+  --text:         #F2F3F5;
+  --text-2:       #A9AEB7;
+  --text-3:       #6F747D;
+  --text-muted:   #A9AEB7;
+  --on-brand:     #0B0B0D;
 
   --ok:      #4ADE80;  --ok-bg:      #10291C;
   --warn:    #FBBF24;  --warn-bg:    #2C2210;
@@ -1613,7 +1624,7 @@ button:active:where(:not(:disabled)) { transform: scale(.97); }
  * solid and obviously pressable the moment it is not — the disabled rule
  * above already does the fading, so this only has to be dark enough to see.
  *
- * DARK: navy with a light-blue edge, rather than the white a primary button
+ * DARK: graphite with a silver edge, rather than the white a primary button
  * takes in dark. White would be correct and would also make this the loudest
  * thing on a screen whose actual subject is the figure it returns. The ring
  * is what carries the visibility instead.
@@ -1635,7 +1646,7 @@ button.accent:hover:where(:not(:disabled)) { background: var(--brand-700); }
 }
 :root[data-theme='dark'] .btn.accent:hover:where(:not(:disabled)),
 :root[data-theme='dark'] button.accent:hover:where(:not(:disabled)) {
-  background: #1D3572;
+  background: #2A2C31;
 }
 /* The un-stamped default, where only the OS preference separates the themes.
    Without this the dark treatment applies only after somebody has used the
@@ -6512,7 +6523,7 @@ html, body { overflow-x: hidden; }
  *
  * The two comps disagree on purpose. `app.html` puts recessed grey cards on a
  * white page — a phone screen of wells cut into paper. `admin.html` puts WHITE
- * panels on a grey ground (#EEF0F5), with a white sidebar and a hairline round
+ * panels on a grey ground (#EEEFF2), with a white sidebar and a hairline round
  * every panel: a dashboard of tiles resting on a desk. This file only ever
  * had the first, so in light every operations screen read inverted — grey
  * boxes on white — and nothing on the page looked like the comp it was built
@@ -6522,12 +6533,12 @@ html, body { overflow-x: hidden; }
  * comp's own dark palette, apart from its slightly quieter hairlines.
  */
 html:not([data-theme='dark']) .admin-frame {
-  --bg:        #EEF0F5;
+  --bg:        #EEEFF2;
   --surface:   #FFFFFF;
-  --surface-2: #EEF1F7;
-  --field:     #EEF1F7;
-  --edge:      #E7EAF0;
-  --line:      #EAEDF3;
+  --surface-2: #EEEFF2;
+  --field:     #EEEFF2;
+  --edge:      #E6E7EB;
+  --line:      #E9EAEE;
   background: var(--bg);
 }
 html[data-theme='dark'] .admin-frame {
@@ -7014,7 +7025,7 @@ html:not([data-theme='dark']) .act.primary .act-ico {
   background: var(--iris);
   border-color: var(--iris);
   color: var(--on-iris);
-  box-shadow: 0 10px 22px -10px rgba(91, 71, 224, .75);
+  box-shadow: 0 10px 22px -10px rgba(0, 0, 0, .55);
 }
 
 /* The tab bar is paper, like the cards, rather than the tinted ground. */
@@ -7026,55 +7037,64 @@ html:not([data-theme='dark']) .tabbar {
 
 /* ── THE TOTAL BALANCE, as a hero ────────────────────────────────────────
  *
- * In dark the figure sits on black under a soft iris glow, and that works:
- * the glow is the only light on the screen. In light the same glow on a pale
- * ground was a smudge, and the one number the app exists for looked like any
- * other line of text. So in light the total is a CARD: a deep iris gradient,
- * white type, the chip in frosted glass. It is the one saturated surface on
- * the home screen, which is exactly the weight that number should carry.
- * The dark theme is untouched — `.hero` there is just a wrapper.
+ * A BLACK CARD, IN BOTH THEMES. The brand is black with silver as its second
+ * colour, and this is the one surface on the home screen that should carry
+ * it at full weight: near-black metal with a cool silver sheen top right, two
+ * faint silver rings, and the figure in white at 800. It was a violet
+ * gradient in light and a violet glow on black in dark, and neither was the
+ * brand.
+ *
+ * In dark the card is GRAPHITE rather than black, with a silver hairline:
+ * true black on a true-black page would be no card at all. Same shape, same
+ * type, same chip — only the metal is a shade lighter.
  */
-.hero { position: relative; }
-.balance-unavailable { color: var(--text-3); }
-html:not([data-theme='dark']) .hero {
+.hero {
+  position: relative;
   margin-top: 6px;
   padding: 18px 20px 20px;
   border-radius: 24px;
   overflow: hidden;
   color: #FFFFFF;
   background:
-    radial-gradient(120% 140% at 100% 0%, rgba(255, 255, 255, .20) 0%, transparent 46%),
-    radial-gradient(90% 120% at 0% 100%, rgba(40, 20, 120, .35) 0%, transparent 60%),
-    linear-gradient(135deg, #4B3BD4 0%, #6D5AE6 52%, #8F7CFF 100%);
-  box-shadow: 0 20px 40px -22px rgba(75, 59, 212, .75);
+    radial-gradient(120% 140% at 100% 0%, rgba(214, 219, 228, .20) 0%, transparent 46%),
+    radial-gradient(90% 120% at 0% 100%, rgba(0, 0, 0, .55) 0%, transparent 60%),
+    linear-gradient(135deg, #050506 0%, #141518 55%, #2A2C31 100%);
+  box-shadow: 0 20px 40px -22px rgba(0, 0, 0, .55);
 }
-/* Two faint rings, top right: texture, not decoration you read. */
-html:not([data-theme='dark']) .hero::after {
+[data-theme='dark'] .hero {
+  background:
+    radial-gradient(120% 140% at 100% 0%, rgba(214, 219, 228, .12) 0%, transparent 46%),
+    linear-gradient(135deg, #1E1F23 0%, #121316 55%, #08090A 100%);
+  box-shadow: inset 0 0 0 1px rgba(214, 219, 228, .14);
+}
+.balance-unavailable { color: var(--text-3); }
+/* Two faint silver rings, top right: texture, not decoration you read. */
+.hero::after {
   content: '';
   position: absolute;
   top: -70px; right: -60px;
   width: 220px; height: 220px;
   border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, .16);
-  box-shadow: 0 0 0 28px rgba(255, 255, 255, .05);
+  border: 1px solid rgba(214, 219, 228, .16);
+  box-shadow: 0 0 0 28px rgba(214, 219, 228, .045);
   pointer-events: none;
 }
-html:not([data-theme='dark']) .glow-wrap > .glow { display: none; }
-html:not([data-theme='dark']) .hero .balance-head .balance-label { color: rgba(255, 255, 255, .82); }
-html:not([data-theme='dark']) .hero .balance-value { color: #FFFFFF; }
-html:not([data-theme='dark']) .hero .balance-value .minor { color: rgba(255, 255, 255, .62); }
-html:not([data-theme='dark']) .hero .balance-unavailable { color: rgba(255, 255, 255, .7); }
-html:not([data-theme='dark']) .hero .icon-btn,
-html:not([data-theme='dark']) .hero .icon-btn:hover,
-html:not([data-theme='dark']) .hero .icon-btn:active,
-html:not([data-theme='dark']) .hero .icon-btn:focus { background: transparent; color: rgba(255, 255, 255, .85); }
-html:not([data-theme='dark']) .hero .delta-chip {
-  background: rgba(255, 255, 255, .16);
-  border-color: rgba(255, 255, 255, .24);
-  color: #FFFFFF;
+.glow-wrap > .glow { display: none; }
+.hero .balance-head .balance-label { color: #B9BEC8; }
+.hero .balance-value { color: #FFFFFF; font-weight: 800; }
+.hero .balance-value .minor { color: #9CA1AB; }
+.hero .balance-unavailable { color: #B9BEC8; }
+.hero .icon-btn,
+.hero .icon-btn:hover,
+.hero .icon-btn:active,
+.hero .icon-btn:focus { background: transparent; color: #C9CDD5; }
+.hero .delta-chip {
+  background: rgba(214, 219, 228, .10);
+  border-color: rgba(214, 219, 228, .22);
+  color: #E4E6EA;
   backdrop-filter: blur(6px);
 }
-html:not([data-theme='dark']) .hero .skeleton { background: rgba(255, 255, 255, .22); }
+.hero .skeleton { background: rgba(214, 219, 228, .20); }
 
 /* ── A ROW'S MARK: what it is, as a shape and a tone ─────────────────────
  * One grey arrow on every row made a card payment, a bill and an exchange

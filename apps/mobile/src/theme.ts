@@ -59,7 +59,8 @@ export interface Palette {
    *
    * A chip, its hairline and its text each need their own value that holds
    * contrast in BOTH themes — three mixes of one colour do not. `onIris` is
-   * deliberately near-black in dark, because white on #7B6CF6 vibrates.
+   * deliberately near-black in dark, because the dark accent is bright silver.
+   * The VALUES are the brand's black and silver; the name is historical.
    */
   readonly iris: string; readonly irisTint: string; readonly irisEdge: string;
   readonly irisText: string; readonly onIris: string; readonly irisGlow: string;
@@ -78,14 +79,14 @@ export interface Palette {
 }
 
 export const light: Palette = {
-  brand: '#0D1B3E',
-  brand700: '#16295A',
+  brand: '#0B0B0D',
+  brand700: '#1C1D21',
   accent: '#F5A623',
   // A LINK IS IRIS, and it was blue — a hue the commissioned design does not
   // contain. The comp sets every inline link in it. `info` keeps the blue and
   // is unchanged: that is a SEMANTIC colour for a notice, and a notice should
   // not be the accent.
-  link: '#6D5AE6',
+  link: '#0B0B0D',
 
   /*
    * THE GROUND IS PURE WHITE AND EVERY CONTAINER ON IT IS RECESSED INTO IT,
@@ -103,34 +104,35 @@ export const light: Palette = {
   // position, for its reasons (see `globals.css`): the grey-recess look it
   // replaces was judged dull, one grey on one white everywhere.
   // `palette-parity.test.ts` keeps these equal to the web's.
-  bg: '#F4F6FB',
+  bg: '#F4F5F7',
   surface: '#FFFFFF',
-  surface2: '#F1F3F9',
+  surface2: '#F1F2F4',
   surfaceRaised: '#FFFFFF',
   field: '#FFFFFF',
-  line: '#EBEEF4',
-  lineStrong: '#D5D9E2',
-  edge: '#E6E9F1',
-  edgeStrong: '#D9DEE8',
-  // `--ink`, the same near-black navy the primary button uses on light.
-  accentButton: '#0D1B3E',
+  line: '#EBECEF',
+  lineStrong: '#D6D8DD',
+  edge: '#E5E7EA',
+  edgeStrong: '#D9DBE0',
+  // `--ink`, the brand black the primary button uses on light.
+  accentButton: '#0B0B0D',
   accentButtonEdge: 'transparent',
   accentButtonText: '#FFFFFF',
-  iris: '#6D5AE6',
-  irisTint: '#EFEBFF',
-  irisEdge: '#D9D1FF',
-  irisText: '#4B3FB0',
+  // BLACK AND SILVER, the brand — see `globals.css`. The token keeps its name.
+  iris: '#0B0B0D',
+  irisTint: '#EDEEF1',
+  irisEdge: '#D3D6DC',
+  irisText: '#1C1D21',
   onIris: '#FFFFFF',
-  irisGlow: 'rgba(109, 90, 230, .14)',
-  glow: 'rgba(109, 90, 230, .14)',
-  cardGrad1: '#EFEBFF',
-  cardGrad2: '#F5F4FF',
-  avatar: '#EFEBFF',
-  avatarText: '#5B4BD6',
+  irisGlow: 'rgba(11, 11, 13, .10)',
+  glow: 'rgba(120, 126, 138, .14)',
+  cardGrad1: '#EEF0F3',
+  cardGrad2: '#FAFAFB',
+  avatar: '#EDEEF1',
+  avatarText: '#1C1D21',
 
-  text: '#0D1B3E',
-  text2: '#4A5878',
-  text3: '#8695B4',
+  text: '#0B0B0D',
+  text2: '#50545C',
+  text3: '#878C95',
   onBrand: '#FFFFFF',
 
   ok: '#0F9D58',
@@ -145,9 +147,9 @@ export const light: Palette = {
 
 export const dark: Palette = {
   brand: '#FFFFFF',
-  brand700: '#E8EDF7',
+  brand700: '#E4E6EA',
   accent: '#F5A623',
-  link: '#7B6CF6',
+  link: '#E4E6EA',
 
   bg: '#000000',
   surface: '#0C0D10',
@@ -159,28 +161,29 @@ export const dark: Palette = {
   lineStrong: '#303237',
   edge: '#212227',
   edgeStrong: '#303237',
-  // `--ink-700` with a `--link` rim: navy that reads as a control on black,
-  // with the light blue saying it is pressable without spending the white the
+  // `--ink-700` with a `--link` rim: graphite that reads as a control on black,
+  // with the silver saying it is pressable without spending the white the
   // primary button owns.
-  accentButton: '#16295A',
-  accentButtonEdge: '#6E9BFF',
-  iris: '#7B6CF6',
-  irisTint: '#171526',
-  irisEdge: '#2E2952',
-  irisText: '#C9C0FF',
-  onIris: '#160A24',
-  irisGlow: 'rgba(123, 108, 246, .12)',
-  glow: 'rgba(123, 108, 246, .26)',
-  cardGrad1: '#1B1733',
-  cardGrad2: '#100E1A',
-  avatar: '#171526',
-  avatarText: '#C9C0FF',
+  accentButton: '#1C1D21',
+  accentButtonEdge: '#E4E6EA',
+  // Silver on black: the dark accent is a bright silver with near-black type.
+  iris: '#E4E6EA',
+  irisTint: '#1A1B1E',
+  irisEdge: '#2E3035',
+  irisText: '#D5D8DE',
+  onIris: '#0B0B0D',
+  irisGlow: 'rgba(228, 230, 234, .10)',
+  glow: 'rgba(200, 205, 214, .14)',
+  cardGrad1: '#1C1D21',
+  cardGrad2: '#0F1012',
+  avatar: '#1A1B1E',
+  avatarText: '#D5D8DE',
   accentButtonText: '#FFFFFF',
 
-  text: '#EEF2FA',
-  text2: '#A3B0CC',
-  text3: '#6B7A9B',
-  onBrand: '#0D1B3E',
+  text: '#F2F3F5',
+  text2: '#A9AEB7',
+  text3: '#6F747D',
+  onBrand: '#0B0B0D',
 
   ok: '#4ADE80',
   okBg: '#10291C',
@@ -399,7 +402,7 @@ export const font = {
  * in front of it and still needs `raised`; a container is not.
  */
 export function shadowsFor(palette: Palette) {
-  const tint = palette.bg === '#000000' ? '#000000' : '#0D1B3E';
+  const tint = palette.bg === '#000000' ? '#000000' : '#0B0B0D';
   return {
     card: Platform.select({
       ios: {
