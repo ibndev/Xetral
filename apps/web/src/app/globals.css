@@ -7019,6 +7019,11 @@ html[data-theme='dark'] .admin-frame {
 .admin-frame .check > summary {
   display: flex; align-items: center; gap: 12px;
   padding: 11px 0; cursor: pointer; list-style: none;
+  /* WIDTH STATED. A check nested inside another <details> (the "Show them"
+     groups) laid its summary out at its content's width, so the state sat
+     against the name rather than at the row's edge — measured at 214px of a
+     922px row. The rows outside a group were right only by luck of layout. */
+  width: 100%;
 }
 .admin-frame .check > summary::-webkit-details-marker { display: none; }
 .admin-frame .check-mark { flex: 0 0 18px; text-align: center; font-weight: 800; color: var(--text-3); }

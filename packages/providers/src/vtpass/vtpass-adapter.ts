@@ -16,6 +16,7 @@ import type {
   TargetVerification,
   VerifiedTarget,
 } from '../ports/fulfilment.js';
+import { requireSecret, type SecretSource } from '../ports/secret.js';
 
 const PROVIDER = 'vtpass';
 
@@ -81,9 +82,10 @@ const CODE_PROCESSING = '099';
 
 export interface VtpassOptions {
   readonly baseUrl: string;
-  readonly apiKey: string;
-  readonly secretKey: string;
-  readonly publicKey: string;
+  /** A value, or a read of `/admin/credentials` made per request. */
+  readonly apiKey: SecretSource;
+  readonly secretKey: SecretSource;
+  readonly publicKey: SecretSource;
   readonly service: ServiceKind;
   readonly fetch?: (url: string, init: RequestInit) => Promise<Response>;
   readonly timeoutMs?: number;
@@ -279,6 +281,13 @@ export class VtpassAdapter implements FulfilmentPort, TargetVerification {
   }
 
   async #request(method: 'GET' | 'POST', path: string, body?: unknown): Promise<unknown> {
+    // Resolved BEFORE the timer starts, so a slow credential read cannot eat
+    // the provider's budget — and a missing one refuses with nothing sent.
+    const apiKey = await requireSecret(PROVIDER, this.#options.apiKey, 'VTpass API key');
+    const pair =
+      method === 'POST'
+        ? { 'secret-key': await requireSecret(PROVIDER, this.#options.secretKey, 'VTpass secret key') }
+        : { 'public-key': await requireSecret(PROVIDER, this.#options.publicKey, 'VTpass public key') };
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.#options.timeoutMs ?? 20_000);
 
@@ -288,11 +297,9 @@ export class VtpassAdapter implements FulfilmentPort, TargetVerification {
         method,
         signal: controller.signal,
         headers: {
-          'api-key': this.#options.apiKey,
+          'api-key': apiKey,
           // VTpass uses the secret key for writes and the public key for reads.
-          ...(method === 'POST'
-            ? { 'secret-key': this.#options.secretKey }
-            : { 'public-key': this.#options.publicKey }),
+          ...pair,
           'content-type': 'application/json',
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),

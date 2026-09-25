@@ -53,9 +53,15 @@
  * because a bold claim that one company receives it is the absolute-denial
  * shape 075 retired, one company wider.
  *
+ * AND A SECOND ACCOUNT RAIL DOES THE SAME. Bitnob can be chosen for naira
+ * account numbers too, and their documentation puts the BVN and a date of
+ * birth that matches the registry on the Bitnob CUSTOMER — so for a verified
+ * customer both are sent when that rail opens the account, and never for an
+ * unverified one, whose account opens on a rail that needs neither.
+ *
  * WHAT NOBODY ELSE RECEIVES IS STILL THE PART WORTH READING. Outside
- * verification and Flutterwave's account opening, no date of birth, address
- * or BVN reaches any provider.
+ * verification and account opening at Flutterwave or Bitnob, no date of
+ * birth, address or BVN reaches any provider.
  * `kyc.service.ts` mints `provider_customers.provider_customer_id` as
  * `xetral-<uuid>` — a string we invent — and makes no provider call at all;
  * Paystack's `/customer/:code/identification`, which is where a BVN would go,
@@ -153,12 +159,17 @@ export const PROCESSORS: readonly Processor[] = [
     via: 'adapter',
     name: 'Bitnob',
     adapter: 'bitnob',
-    purpose: 'Virtual dollar cards, crypto, stablecoins and currency conversion',
+    purpose:
+      'Virtual dollar cards, crypto, stablecoins, currency conversion and, where it ' +
+      'is the rail chosen, naira account numbers',
     receives:
-      'A reference that identifies you to them and means nothing outside their ' +
-      'system, plus the amount and currency of each instruction. Card details ' +
-      'are fetched from them when you ask to see your card; they are not sent ' +
-      'to them by us and not stored by us.',
+      'For cards, crypto and conversion: a reference that identifies you to them ' +
+      'and means nothing outside their system, plus the amount and currency of ' +
+      'each instruction. To open your naira account number with them: your name, ' +
+      'email address, phone number, date of birth and Bank Verification Number — ' +
+      'they will not open a naira account without them, so this happens only once ' +
+      'you are verified. Card details are fetched from them when you ask to see ' +
+      'your card; they are not sent to them by us and not stored by us.',
   },
   {
     via: 'adapter',

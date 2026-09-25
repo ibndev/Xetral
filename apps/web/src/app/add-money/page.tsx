@@ -37,6 +37,9 @@ import { useLoad, useSubmit, useXetral } from '@/lib/hooks';
 export default function AddMoney() {
   const client = useXetral();
   const { busy, error: issueError, code: issueCode, run } = useSubmit();
+  // Its own, so an account that could not be opened never lends its error to
+  // the wallet form below, and a wallet refusal never reads as the account's.
+  const opener = useSubmit();
 
   /*
    * READ, don't issue. This called `fundingAccount()` — which asks Bitnob and
@@ -44,9 +47,12 @@ export default function AddMoney() {
    * page opened an account as a side effect of being looked at. It was
    * survivable only because issuing is idempotent.
    *
-   * Opening one is now a BUTTON, which is also what it is: a dedicated
-   * Nigerian account number is a bank account in the customer's own name, and
-   * that is a thing somebody decides to do rather than a thing that happens
+   * AND THEN THE BUTTON WENT TOO. Registration opens the account now, so
+   * this read nearly always finds one; where it does not — somebody who
+   * signed up before that, or a registration whose rail was having a bad
+   * moment — the screen opens it itself, below, once per visit. The button it
+   * replaces asked a customer to do something that was only ever ours to do,
+   * and to learn whether it had worked by pressing it
    * while they are reading.
    */
   const account = useLoad(() => client.existingFundingAccount(), [client]);
@@ -115,6 +121,32 @@ export default function AddMoney() {
   const usesVirtualAccount = true;
 
   const has = account.data != null;
+
+  /*
+   * NO ACCOUNT YET, SO OPEN IT — no button, and no verification asked.
+   *
+   * Once per visit, and only after the READ has said there is none, so a
+   * customer who has one never causes a provider call by looking at it. The
+   * server tries each rail that covers naira and skips the ones that need a
+   * verified identity, so an unverified customer is issued a tier 1 account
+   * rather than told to verify. Issuing is idempotent on the user, so a
+   * second tab racing this one reads the same account.
+   */
+  const [opening, setOpening] = useState<'idle' | 'opening' | 'done'>('idle');
+  useEffect(() => {
+    if (account.loading || account.data != null || account.error !== undefined) return;
+    if (opening !== 'idle') return;
+    setOpening('opening');
+    void opener.run(async () => {
+      try {
+        await client.fundingAccount();
+        account.reload();
+        return undefined;
+      } finally {
+        setOpening('done');
+      }
+    });
+  }, [account, client, opening, opener]);
 
   /*
    * REQUEST PAYMENT LIVES HERE, on the screen whose whole subject is money
@@ -232,79 +264,26 @@ export default function AddMoney() {
         )}
 
         {/*
-          NO ACCOUNT YET — one button, and NO VERIFICATION GATE IN FRONT OF IT.
+          NO ACCOUNT YET — AND NOTHING TO PRESS.
 
-          This screen used to send an unverified customer to /kyc first, on
-          the reasoning that a Nigerian account number is a bank account
-          issued in a person's name and regulation does not permit an
-          unidentified one. The second half of that was wrong: CBN's tiered
-          KYC permits a tier 1 account on a name and a phone number, capped —
-          and `029_kyc_tiers.seed.sql` has capped tier 0 at ₦50,000 a day
-          since it landed. So the platform enforced the tier 1 ceiling while
-          refusing the account that ceiling is for, on the screen somebody
-          opens in order to put money in.
-
-          What was true was a fact about BITNOB, which will not issue without
-          a verified BVN. That requirement now lives in its adapter, and the
-          default rail does not have it.
+          This was an "Activate Account" button, and before that a gate sending
+          an unverified customer to /kyc first. Both asked the customer to do
+          our work. Registration opens the account; the effect above opens it
+          for anybody who reached this screen without one. What is left to
+          show is that it is happening, or — if every rail refused — the
+          reason, in words, and that the next visit asks again.
         */}
         {!account.loading && !has && usesVirtualAccount && (
-          /*
-            EACH PIECE IN ITS OWN ROW, WITH ROOM AROUND IT.
-
-            This was three siblings inside a card whose default gap is tight
-            enough for a form: a line, a button and a second line, stacked hard
-            against one another so the primary action on the page read as part
-            of a paragraph. `.activate` is a small grid — the statement, the
-            button, then the ceiling — so the button is a deliberate act with
-            space either side rather than the middle of a sentence.
-          */
-          /*
-           * ACTIVATE IS OFFERED ONLY WHERE AN ACCOUNT NUMBER EXISTS, which is
-           * a correction of the previous reasoning rather than a restoration
-           * of the old gate.
-           *
-           * It was gated on `virtual_account` and then deliberately ungated,
-           * on the argument that a hidden button is a silence nobody can act
-           * on while a provider refusal is a sentence an operator can. That
-           * was right about refusals and wrong about this one: Flutterwave
-           * issues dedicated numbers in NGN ONLY, so in Accra and Nairobi the
-           * button could never succeed — and it answered "we could not open
-           * your account number just now, try again shortly" about something
-           * permanent. `funding_methods` has recorded which countries have
-           * this product since 051.
-           *
-           * The refusal is still relayed where it can happen: a country that
-           * DOES issue and a provider that refuses gets
-           * `account_issue_refused` with its own reason, unchanged.
-           */
-          <div className="activate">
-            {/* NOT "your naira account". The account this button opens is
-                the one for the customer's OWN country, and calling it a naira
-                account in Accra is the same mistake as the Send screen
-                offering a Nigerian bank list everywhere — it describes a
-                Nigerian product to somebody who is not in Nigeria. The
-                currency is stated where it is true, on the amount field. */}
-            <p className="activate-lead">Your account is ready. Get it below.</p>
-
-            <div>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() =>
-                  void run(async () => {
-                    await client.fundingAccount();
-                    account.reload();
-                    return 'Your account is open.';
-                  })
-                }
-              >
-                {busy ? 'Activating…' : 'Activate Account'}{' '}
-                <Icon name="arrowRight" size={18} />
-              </button>
-            </div>
-
-            <FormError error={issueError} code={issueCode} />
+          <div className="activate" aria-live="polite">
+            {opening !== 'done' ? (
+              <p className="activate-lead">Setting up your account number…</p>
+            ) : (
+              <>
+                <p className="activate-lead">Your account number is not ready yet.</p>
+                <FormError error={opener.error} code={opener.code} />
+                <p className="hint">We will try again the next time you open this screen.</p>
+              </>
+            )}
           </div>
         )}
 
@@ -339,6 +318,10 @@ export default function AddMoney() {
             client={client}
           />
         )}
+        {/* The wallet form's refusals. They were only ever drawn inside the
+            no-account panel, so a customer WITH an account number who could
+            not link a wallet pressed the button and saw nothing at all. */}
+        {!account.loading && usesMobileMoney && <FormError error={issueError} code={issueCode} />}
 
       {!account.loading && <PayIn currency={home} client={client} />}
 

@@ -14,6 +14,7 @@ import type {
   PurchaseResult,
   ServiceKind,
 } from '../ports/fulfilment.js';
+import { requireSecret, type SecretSource } from '../ports/secret.js';
 
 const PROVIDER = 'twilio';
 
@@ -40,7 +41,8 @@ export const TWILIO_ENDPOINTS = {
 export interface TwilioOptions {
   readonly baseUrl: string;
   readonly accountSid: string;
-  readonly authToken: string;
+  /** A value, or a read of `/admin/credentials` made per request. */
+  readonly authToken: SecretSource;
   /** What we charge a customer per number, in cents. Twilio's own price list
    *  varies by country and is not what the customer pays. */
   readonly priceCents: bigint;
@@ -183,11 +185,12 @@ export class TwilioAdapter implements FulfilmentPort {
     path: string,
     body?: URLSearchParams,
   ): Promise<unknown> {
+    const authToken = await requireSecret(PROVIDER, this.#options.authToken, 'Twilio auth token');
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.#options.timeoutMs ?? 20_000);
 
     const credentials = Buffer.from(
-      `${this.#options.accountSid}:${this.#options.authToken}`,
+      `${this.#options.accountSid}:${authToken}`,
       'utf8',
     ).toString('base64');
 

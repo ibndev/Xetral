@@ -644,3 +644,76 @@ describe('a webhook that never arrived', () => {
     expect(await balanceOf(customer)).toBe('50000.00');
   });
 });
+
+describe('an account number without asking for one', () => {
+  /*
+   * THE ACTIVATE BUTTON IS GONE, and this is what replaced it: registering
+   * opens the account. Asserted through the real endpoint, on an app built
+   * with the switch the production config always sets — the shared fixture
+   * turns it off so the other suites' registrations never reach a rail.
+   *
+   * No KYC anywhere in this path: the customer registered a moment ago, has
+   * no approved identity, and is issued an account on the rail that opens
+   * one from a name.
+   */
+  it('opens it at registration, unverified, without the customer asking', async () => {
+    const registering = await boot(makeConfig({ openAccountOnRegistration: true }));
+    try {
+      const email = `fund-reg-${randomUUID()}@example.ng`;
+      await request(registering.getHttpServer())
+        .post('/v1/auth/register')
+        .send({
+          email,
+          password: PASSWORD,
+          full_name: 'Registered Customer',
+          country: 'NG',
+          phone: String(8000000000 + Math.floor(Math.random() * 999999999)),
+          device: { fingerprint: `fp-${randomUUID()}`, platform: 'web' },
+        })
+        .expect(201);
+
+      // NOT awaited by the endpoint, deliberately — a signup must not wait
+      // on a bank — so the row is polled for rather than expected at once.
+      let rows = 0;
+      for (let i = 0; i < 50 && rows === 0; i += 1) {
+        const found = await pool.query(
+          `SELECT 1 FROM virtual_accounts va JOIN users u ON u.id = va.user_id
+            WHERE u.email = $1`,
+          [email],
+        );
+        rows = found.rowCount ?? 0;
+        if (rows === 0) await new Promise((r) => setTimeout(r, 100));
+      }
+      expect(rows).toBe(1);
+      expect(port.created.at(-1)?.customer.email).toBe(email);
+      expect(port.created.at(-1)?.currency).toBe('NGN');
+    } finally {
+      await registering.close();
+    }
+  });
+
+  it('a registration whose rail refused still succeeds', async () => {
+    // The account is ours to open later; the signup is the customer's, and a
+    // bank having a bad moment must never cost them it.
+    const registering = await boot(makeConfig({ openAccountOnRegistration: true }));
+    try {
+      port.failNextWith = new ProviderTimeoutError('bitnob', 'slow');
+      await request(registering.getHttpServer())
+        .post('/v1/auth/register')
+        .send({
+          email: `fund-reg-${randomUUID()}@example.ng`,
+          password: PASSWORD,
+          full_name: 'Registered Customer',
+          country: 'NG',
+          phone: String(8000000000 + Math.floor(Math.random() * 999999999)),
+          device: { fingerprint: `fp-${randomUUID()}`, platform: 'web' },
+        })
+        .expect(201);
+      // Let the background attempt finish before the app closes under it.
+      await new Promise((r) => setTimeout(r, 300));
+    } finally {
+      port.failNextWith = undefined;
+      await registering.close();
+    }
+  });
+});

@@ -229,12 +229,17 @@ export class FundingService {
      * may have opened an account, and a second rail after that is a customer
      * with two live numbers, one of them receiving money nothing watches.
      *
-     * `kyc_required` IS REMEMBERED ACROSS RAILS. Where one rail wanted a
-     * verified identity and the last refused for its own reason, the customer
-     * is told the one thing that would change the answer.
+     * `kyc_required` ONLY WHEN EVERY RAIL WANTED IT. The customer is told to
+     * verify only if verifying is genuinely the one thing that would change
+     * the answer. It used to be said whenever ANY rail had wanted it, so a
+     * deployment whose Paystack key was missing — the rail that opens a
+     * tier 1 account from a name — told every unverified customer to go and
+     * verify, which is the KYC prompt this flow exists to not show, about a
+     * problem that was an operator's. Where a rail failed for its own reason,
+     * THAT is the failure relayed.
      */
     const rails = await this.#accountRailsFor(currency);
-    let wantedKyc = false;
+    const refusals: { rail: string; error: unknown }[] = [];
     let issued;
     for (let i = 0; i < rails.length; i += 1) {
       const rail = rails[i] as string;
@@ -257,23 +262,30 @@ export class FundingService {
         }
         break;
       } catch (error) {
-        if (error instanceof ProviderRejectedError && error.providerCode === 'kyc_required') {
-          wantedKyc = true;
-        }
-        if (i < rails.length - 1 && providerDidNothing(error)) {
+        // Anything but a certain "no" stops here: that rail may have opened
+        // an account, and asking another is a second live number.
+        if (!providerDidNothing(error)) this.#relayAccountFailure(error, rail, currency);
+        refusals.push({ rail, error });
+        if (i < rails.length - 1) {
           this.#logger.warn(
             `${rail} did not open a ${currency} account for user ${userId} ` +
               `(${error instanceof Error ? error.message : String(error)}); trying ${rails[i + 1]}`,
           );
-          continue;
         }
-        if (wantedKyc && providerDidNothing(error)) {
-          throw new UnprocessableEntityException({
-            error: 'kyc_required',
-            detail: 'Verify your identity to get your own account number.',
-          });
-        }
-        this.#relayAccountFailure(error, rail, currency);
+      }
+    }
+    if (issued === undefined) {
+      const actionable = refusals.find(
+        (r) => !(r.error instanceof ProviderRejectedError && r.error.providerCode === 'kyc_required'),
+      );
+      if (actionable === undefined && refusals.length > 0) {
+        throw new UnprocessableEntityException({
+          error: 'kyc_required',
+          detail: 'Verify your identity to get your own account number.',
+        });
+      }
+      if (actionable !== undefined) {
+        this.#relayAccountFailure(actionable.error, actionable.rail, currency);
       }
     }
     if (issued === undefined) throw new Error('no funding rail was asked for an account');
@@ -750,7 +762,23 @@ export class FundingService {
       phone: row.phone ?? undefined,
       providerCustomerId: row.provider_customer_id ?? undefined,
       bvn: () => this.#approvedBvn(userId),
+      dateOfBirth: () => this.#approvedDateOfBirth(userId),
     };
+  }
+
+  /**
+   * The date of birth off the APPROVED submission, for the rail that verifies
+   * a BVN against it (Bitnob). Same rule as the BVN: a pending submission is
+   * a claim nobody has checked.
+   */
+  async #approvedDateOfBirth(userId: string): Promise<string | undefined> {
+    const found = await this.pool.query<{ dob: string }>(
+      `SELECT to_char(date_of_birth, 'YYYY-MM-DD') AS dob FROM kyc_submissions
+        WHERE user_id = $1::bigint AND status = 'approved'
+        ORDER BY id DESC LIMIT 1`,
+      [userId],
+    );
+    return found.rows[0]?.dob;
   }
 
   /**

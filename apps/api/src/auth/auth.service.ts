@@ -210,12 +210,24 @@ export class AuthService {
    * user row with no credential cannot be signed into and cannot be
    * registered again, the email being taken.
    *
-   * NOTE what this does NOT create: no wallet, no accounts, no provider
-   * customer. Ledger accounts are made on first posting by the ledger service,
-   * and a provider identity is a KYC decision. Creating either here would mean
-   * a signup form quietly performing a regulated step.
+   * NOTE what this does NOT create: no wallet, no ledger accounts and no
+   * provider customer. Ledger accounts are made on first posting by the
+   * ledger service, and a provider identity is a KYC decision.
+   *
+   * The deposit ACCOUNT NUMBER is opened straight after, by the controller,
+   * outside this transaction — see `AuthController.register`. It is a
+   * provider call, and a signup must neither wait on a bank nor roll back
+   * because one was slow.
    */
   async register(input: RegisterRequest, context: ConsentContext = {}): Promise<TokenPair> {
+    return (await this.registerAndIdentify(input, context)).pair;
+  }
+
+  /** `register`, also naming who was created — what opens their account. */
+  async registerAndIdentify(
+    input: RegisterRequest,
+    context: ConsentContext = {},
+  ): Promise<{ readonly pair: TokenPair; readonly userUuid: string }> {
     if (!(await this.settings.registrationEnabled())) {
       // A flag rather than a deploy, so an abuse wave can be stopped in
       // seconds without taking the platform down for existing customers.
@@ -317,7 +329,7 @@ export class AuthService {
 
       await client.query('COMMIT');
       this.#logger.log(`account opened: user ${user.uuid}`);
-      return pair;
+      return { pair, userUuid: user.uuid };
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;

@@ -563,6 +563,8 @@ export interface AdminReadinessRow {
     | 'default-is-deliberate';
   readonly state: 'set' | 'unset' | 'unset-here' | 'not-observable';
   readonly ifMissed: string;
+  /** Where a `set` came from when it was not the variable itself. */
+  readonly via?: string;
   readonly flow?: string;
 }
 

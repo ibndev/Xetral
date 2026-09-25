@@ -162,6 +162,9 @@ export function testApiConfig(databaseUrl: string, overrides: Partial<ApiConfig>
     operationsEmail: 'ops@xetral.test',
     errorAlertIntervalSeconds: undefined,
     notificationAllowlist: [],
+    // Off in the fixture: every suite registers somebody, and only the
+    // funding suite is about what that does to a rail.
+    openAccountOnRegistration: false,
     ...overrides,
   };
 }

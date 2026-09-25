@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { VtpassAdapter, vtpassRequestId, koboToNaira, nairaToKobo } from './vtpass-adapter.js';
 import { fulfilmentContract, scriptedFetch } from '../ports/fulfilment.contract.js';
-import { ProviderRejectedError } from '../ports/errors.js';
+import { ProviderNotSentError, ProviderRejectedError } from '../ports/errors.js';
 import { supportsVerification } from '../ports/fulfilment.js';
 
 /** A fixed instant, so a request_id derived from it is stable across runs. */
@@ -241,5 +241,46 @@ describe("VTpass's request_id format", () => {
     const requeried = JSON.parse(String(transport.calls[1]?.init.body)) as { request_id: string };
     expect(requeried.request_id).toBe(ordered.request_id);
     expect(ordered.request_id).toBe('202602071830xtsharedref');
+  });
+});
+
+describe('keys pasted on the dashboard', () => {
+  /*
+   * The adapter took strings from the environment alone, so a key stored at
+   * `/admin/credentials` was read by nothing. It is asked for per request
+   * now, and a missing one refuses BEFORE anything is sent — the definite
+   * answer a purchase needs to hand the customer's money straight back.
+   */
+  it('reads the key through the resolver on every request', async () => {
+    const transport = scriptedFetch();
+    let key = 'first';
+    const port = new VtpassAdapter({
+      baseUrl: 'https://vtpass.test',
+      apiKey: async () => key,
+      secretKey: async () => 's',
+      publicKey: async () => 'p',
+      service: 'data',
+      fetch: transport.fetch,
+    });
+    transport.script([{ json: variations }]);
+    await port.catalogue({ group: 'mtn-data' });
+    key = 'rotated';
+    await port.catalogue({ group: 'mtn-data' });
+    const sent = transport.calls.map((c) => (c.init.headers as Record<string, string>)['api-key']);
+    expect(sent).toEqual(['first', 'rotated']);
+  });
+
+  it('refuses with nothing sent when no key is configured anywhere', async () => {
+    const transport = scriptedFetch();
+    const port = new VtpassAdapter({
+      baseUrl: 'https://vtpass.test',
+      apiKey: async () => undefined,
+      secretKey: async () => 's',
+      publicKey: async () => 'p',
+      service: 'data',
+      fetch: transport.fetch,
+    });
+    await expect(port.catalogue({ group: 'mtn-data' })).rejects.toBeInstanceOf(ProviderNotSentError);
+    expect(transport.calls).toHaveLength(0);
   });
 });

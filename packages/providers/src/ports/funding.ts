@@ -102,6 +102,12 @@ export interface FundingCustomer {
    * unreviewed one to a bank is how an account is opened in a stranger's name.
    */
   readonly bvn?: () => Promise<string | undefined>;
+  /**
+   * The date of birth off the same APPROVED submission, `YYYY-MM-DD`, fetched
+   * the same way and for the same reason. Bitnob verifies a BVN against the
+   * registry's name AND date of birth, so a rail that sends one needs both.
+   */
+  readonly dateOfBirth?: () => Promise<string | undefined>;
 }
 
 /**

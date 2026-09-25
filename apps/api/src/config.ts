@@ -541,6 +541,15 @@ export interface ApiConfig {
    * bug.
    */
   readonly notificationAllowlist: readonly string[];
+  /**
+   * Open the customer's deposit account number the moment they register.
+   *
+   * Not an environment variable: it is how the product works, and a switch
+   * nobody reads is one somebody leaves off. It exists so the e2e fixture can
+   * keep a registration from reaching a funding rail in suites whose subject
+   * is something else — every one of them registers somebody.
+   */
+  readonly openAccountOnRegistration: boolean;
 }
 
 export class ConfigError extends Error {
@@ -867,7 +876,10 @@ export function loadConfig(env: Env): ApiConfig {
     trustProxyHops: integer(env, 'TRUST_PROXY_HOPS', 1),
     redisUrl: env['REDIS_URL'] === '' ? undefined : env['REDIS_URL'],
     transferFeeBasisPoints: basisPoints(env, 'TRANSFER_FEE_BASIS_POINTS'),
-    bitnobBaseUrl: optional(env, 'BITNOB_BASE_URL'),
+    // Bitnob v2's ONE host: sandbox and production share it and the secret
+    // selects. Without a default, a deployment configured from the dashboard
+    // had no Bitnob adapter at all — every key pasted and nothing to call.
+    bitnobBaseUrl: optional(env, 'BITNOB_BASE_URL') ?? 'https://api.bitnob.com',
     bitnobClientId: optional(env, 'BITNOB_CLIENT_ID'),
     bitnobClientSecret: optional(env, 'BITNOB_CLIENT_SECRET'),
     bitnobWebhookSecret: optional(env, 'BITNOB_WEBHOOK_SECRET'),
@@ -884,14 +896,23 @@ export function loadConfig(env: Env): ApiConfig {
     metricsToken: optional(env, 'METRICS_TOKEN'),
     encryptionKeyring: parseEncryptionKeyring(env),
     kycBlindIndexKey: parseBlindIndexKey(env),
-    vtpassBaseUrl: optional(env, 'VTPASS_BASE_URL'),
+    // Live only in production. VTpass keeps two hosts, so the default follows
+    // the environment and can never point a staging box at real bills.
+    vtpassBaseUrl:
+      optional(env, 'VTPASS_BASE_URL') ??
+      (environment === 'production' ? 'https://vtpass.com' : 'https://sandbox.vtpass.com'),
     vtpassApiKey: optional(env, 'VTPASS_API_KEY'),
     vtpassSecretKey: optional(env, 'VTPASS_SECRET_KEY'),
     vtpassPublicKey: optional(env, 'VTPASS_PUBLIC_KEY'),
-    airaloBaseUrl: optional(env, 'AIRALO_BASE_URL'),
+    // Production only: Airalo's sandbox is its own arrangement, so anywhere
+    // else an unset host still means eSIM refuses.
+    airaloBaseUrl:
+      optional(env, 'AIRALO_BASE_URL') ??
+      (environment === 'production' ? 'https://partners-api.airalo.com' : undefined),
     airaloClientId: optional(env, 'AIRALO_CLIENT_ID'),
     airaloClientSecret: optional(env, 'AIRALO_CLIENT_SECRET'),
-    twilioBaseUrl: optional(env, 'TWILIO_BASE_URL'),
+    // Twilio's one host; test credentials select test behaviour on it.
+    twilioBaseUrl: optional(env, 'TWILIO_BASE_URL') ?? 'https://api.twilio.com',
     twilioAccountSid: optional(env, 'TWILIO_ACCOUNT_SID'),
     twilioAuthToken: optional(env, 'TWILIO_AUTH_TOKEN'),
     twilioNumberPriceCents: minorUnits(env, 'TWILIO_NUMBER_PRICE_CENTS'),
@@ -963,9 +984,14 @@ export function loadConfig(env: Env): ApiConfig {
     adminBootstrapEmail: adminBootstrapEmail(env),
     webhookBaseUrl: webhookBaseUrl(env),
     passwordResetTtlMinutes: integer(env, 'PASSWORD_RESET_TTL_MINUTES', 30),
-    operationsEmail: optional(env, 'OPERATIONS_EMAIL'),
+    // THE FIRST ADMINISTRATOR, when nobody named an operations inbox. Alerts
+    // composed and addressed to nobody are the silent failure; the bootstrap
+    // address is the one this deployment is certain belongs to somebody
+    // responsible for it.
+    operationsEmail: optional(env, 'OPERATIONS_EMAIL') ?? adminBootstrapEmail(env),
     errorAlertIntervalSeconds: optionalInteger(env, 'ERROR_ALERT_INTERVAL_SECONDS'),
     notificationAllowlist: parseAllowlist(env),
+    openAccountOnRegistration: true,
   };
 }
 

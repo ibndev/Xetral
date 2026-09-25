@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { AiraloAdapter, usdToCents } from './airalo-adapter.js';
 import { fulfilmentContract, scriptedFetch } from '../ports/fulfilment.contract.js';
 import { supportsVerification } from '../ports/fulfilment.js';
+import { ProviderNotSentError } from '../ports/errors.js';
 
 /** A fixed instant, so a request_id derived from it is stable across runs. */
 const INITIATED_AT = new Date('2026-02-07T17:30:00.000Z');
@@ -260,5 +261,33 @@ describe('the token exchange matches what Airalo actually accepts', () => {
     expect(headers['airalo-signature']).toEqual(expect.any(String));
     expect(headers['content-type']).toBe('application/json');
     expect(headers['authorization']).toBe('Bearer tok_live');
+  });
+});
+
+describe('a secret pasted on the dashboard', () => {
+  it('signs with the resolved secret, and refuses with nothing sent when there is none', async () => {
+    const transport = scriptedFetch();
+    const port = new AiraloAdapter({
+      baseUrl: 'https://airalo.test',
+      clientId: 'id',
+      clientSecret: async () => undefined,
+      fetch: transport.fetch,
+    });
+    await expect(port.catalogue({})).rejects.toBeInstanceOf(ProviderNotSentError);
+    expect(transport.calls).toHaveLength(0);
+
+    const signed = scriptedFetch();
+    const live = new AiraloAdapter({
+      baseUrl: 'https://airalo.test',
+      clientId: 'id',
+      clientSecret: async () => 'from-the-store',
+      fetch: signed.fetch,
+    });
+    signed.script([{ json: { data: { access_token: 't', expires_in: 3600 } } }, { json: { data: [] } }]);
+    await live.catalogue({}).catch(() => undefined);
+    const token = signed.calls[0];
+    const body = { client_id: 'id', client_secret: 'from-the-store', grant_type: 'client_credentials' };
+    const expected = createHmac('sha512', 'from-the-store').update(JSON.stringify(body)).digest('hex');
+    expect((token?.init.headers as Record<string, string>)['airalo-signature']).toBe(expected);
   });
 });

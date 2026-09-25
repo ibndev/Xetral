@@ -631,7 +631,7 @@ describe('the operations surface', () => {
     // `risk_dormant_days`, which is the trouble with pattern-matching for
     // secrets: it finds prose and would miss a field somebody adds called
     // `currentValue`.
-    const allowed = new Set(['name', 'kind', 'failure', 'state', 'ifMissed', 'flow']);
+    const allowed = new Set(['name', 'kind', 'failure', 'state', 'ifMissed', 'flow', 'via']);
     for (const row of rows as unknown as Record<string, unknown>[]) {
       const extra = Object.keys(row).filter((k) => !allowed.has(k));
       expect(extra, `a readiness row carries ${extra.join(', ')}`).toEqual([]);
@@ -654,6 +654,18 @@ describe('the operations surface', () => {
     expect(bitnobKey?.state).toBe(
       configuredInEnv || (stored.rowCount ?? 0) > 0 ? 'set' : 'unset',
     );
+
+    // AN ENVIRONMENT FALLBACK THE DATABASE OVERRIDES IS NOT MISSING. With
+    // `platform_settings` holding the fee, `TRANSFER_FEE_BASIS_POINTS` is read
+    // by nothing — reporting it unset sends an operator to set a value that
+    // changes nothing. It reads set, and says through what.
+    // (The e2e task declares no such variable, so turbo guarantees it is
+    // unset here — which is the state being asserted about.)
+    const fee = rows.find((r) => r.name === 'TRANSFER_FEE_BASIS_POINTS') as
+      | { state: string; via?: string }
+      | undefined;
+    expect(fee?.state).toBe('set');
+    expect(fee?.via).toBe('setting transfer_fee_basis_points');
   });
 
   it('refuses `support` the readiness report', async () => {

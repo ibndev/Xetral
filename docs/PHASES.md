@@ -34,6 +34,7 @@ shipped, that is called out explicitly.
 | 23 — Naira accounts on Flutterwave, and a switch for who carries what | ✅ | Flutterwave NGN static accounts to be enabled |
 | 24 — A card paid for from whichever wallets can | ✅ | a Bitnob authorization hook, for per-spend attribution |
 | 25 — Who carries the grid, and who really holds the money | ✅ | funding each provider's float is a transfer a person makes |
+| 26 — An account number nobody has to ask for | ✅ | Paystack key for tier 1 accounts; Bitnob NGN enabled for verified ones |
 
 All eleven phases are built, a **pre-deployment audit** (Phase 12) closed what
 building them phase by phase had left between the phases, and **Phase 13** is
@@ -2523,4 +2524,39 @@ ledger and one about routing.
 re-apply **099**; open `/admin/providers` and read "Can each rail pay what
 customers hold?" — every `short` badge is a balance to fund at that provider,
 or a `payout_debit_currencies` entry to set; and choose the routing mode.
+
+---
+
+## Phase 26 — An account number nobody has to ask for ✅
+
+The Activate account button is gone, the readiness screen reported five
+silent failures and thirty unset items on a working deployment, and Bitnob
+could not have opened a naira account for anybody.
+
+| File | What it is |
+|---|---|
+| `apps/api/src/auth/auth.controller.ts` | registration opens the account, not awaited |
+| `apps/web/src/app/add-money/page.tsx`, `apps/mobile/app/add-money.tsx` | no button; opens it once per visit if missing |
+| `packages/providers/src/bitnob/funding-adapter.ts` | a real Bitnob customer, nested v2 shapes |
+| `packages/providers/src/ports/secret.ts` | keys from the dashboard for VTpass, Airalo, Twilio |
+| `apps/api/src/golive/readiness.service.ts` | set through the credential store, a setting, or a fallback |
+| `packages/ledger/sql/081_privacy_republish.sql` | the notice names Bitnob as a BVN recipient |
+
+1. **The customer is never asked to verify for an account number.** An
+   unverified customer is skipped by the rails that need a BVN, with nothing
+   sent, and opens tier 1 on Paystack. `kyc_required` is said only when every
+   rail wanted it.
+2. **Bitnob's account opening was unreachable three ways**: no base URL
+   default, a customer id we had invented, and a response shape read flat.
+3. **Readiness was wrong about working things**, so the real findings were
+   buried: stored keys, overriding settings and fallbacks now count, and the
+   compose file wires Redis, the app address and the sender it already had.
+
+**Before this goes live, an operator must:** apply **081**; keep a Paystack
+secret key set, because it is the rail that opens accounts for unverified
+customers; and, to route naira accounts to Bitnob for verified customers, ask
+Bitnob to enable NGN on the account. The remaining readiness rows —
+`WEBHOOK_BASE_URL`, `TRUST_PROXY_HOPS`, `AIRALO_CLIENT_ID`,
+`TWILIO_ACCOUNT_SID`, `TWILIO_NUMBER_PRICE_CENTS` and the provider keys not
+yet pasted — are decisions only an operator can make.
 

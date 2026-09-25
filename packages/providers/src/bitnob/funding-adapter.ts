@@ -35,6 +35,9 @@ const PROVIDER = 'bitnob';
  * first call rather than silently returning something plausible.
  */
 export const BITNOB_FUNDING_ENDPOINTS = {
+  customers: '/api/customers',
+  customerByEmail: (email: string) => `/api/customers?email=${encodeURIComponent(email)}`,
+  customer: (id: string) => `/api/customers/${id}`,
   createVirtualAccount: BITNOB_ENDPOINTS.createVirtualAccount,
   getVirtualAccount: BITNOB_ENDPOINTS.getVirtualAccount,
   listDeposits: BITNOB_ENDPOINTS.virtualAccountTransactions,
@@ -46,33 +49,69 @@ export const BITNOB_FUNDING_ENDPOINTS = {
  * that backwards produces `undefined` amounts, and `undefined` in a money path
  * is how a posting of zero gets written.
  */
-const virtualAccountResponse = z.object({
-  data: z.object({
-    id: z.string().min(1),
-    account_number: z.string().min(1),
-    bank_name: z.string().min(1),
-    account_name: z.string().min(1),
-    currency: z.string().min(1).optional(),
-    // Some providers report activation asynchronously; absent means active.
-    status: z.string().optional(),
-  }),
+const virtualAccountBody = z.object({
+  id: z.string().min(1),
+  account_number: z.string().min(1),
+  bank_name: z.string().min(1),
+  account_name: z.string().min(1),
+  currency: z.string().min(1).optional(),
+  // Some providers report activation asynchronously; absent means active.
+  status: z.string().optional(),
 });
 
+/**
+ * NESTED, per their published v2 specification — and the first version read
+ * it FLAT.
+ *
+ * `bitnob-api-v2.openapi.json` answers both `POST /api/virtual-accounts` and
+ * `GET /api/virtual-accounts/:id` with `data.virtual_account.{…}`. This
+ * schema required `data.id`, so the one call that OPENS AN ACCOUNT would have
+ * thrown a contract error after Bitnob had opened it: not a refusal, so no
+ * other rail was asked, and the customer read "we could not open your
+ * account" about an account number that existed. Both shapes are accepted,
+ * because being tolerant on a read costs nothing — 003's lesson about their
+ * card response, one resource over.
+ */
+const virtualAccountResponse = z.object({
+  data: z.union([z.object({ virtual_account: virtualAccountBody }), virtualAccountBody]),
+});
+
+/** A customer as `GET /api/customers` and `POST /api/customers` return one. */
+const customerBody = z.object({
+  id: z.string().min(1),
+  email: z.string().optional(),
+  id_number: z.string().optional().nullable(),
+  id_type: z.string().optional().nullable(),
+});
+const customerResponse = z.object({ data: customerBody });
+const customerListResponse = z.object({
+  data: z.union([
+    z.object({ customers: z.array(customerBody) }),
+    z.array(customerBody),
+  ]),
+});
+
+const depositRow = z.object({
+  id: z.string().min(1),
+  /** Left `unknown` and narrowed by `depositToKobo`, exactly as card
+   *  amounts are left to `parseMicro`. A `z.number()` here would accept a
+   *  value JSON.parse has already rounded and hand it over looking valid. */
+  amount: z.unknown(),
+  currency: z.string().min(1).optional(),
+  /** v2 lists debits and pending rows beside credits; absent reads as a
+   *  completed credit, which is what the v1 shape only ever carried. */
+  type: z.string().optional(),
+  status: z.string().optional(),
+  sender_name: z.string().optional(),
+  sender_bank: z.string().optional(),
+  sender_account_number: z.string().optional(),
+  created_at: z.string().optional(),
+});
+
+/** `data.transactions[]` in v2 (`GET /api/virtual-accounts/:id/transactions`),
+ *  a bare array before it. Same reasoning as the account read above. */
 const depositListResponse = z.object({
-  data: z.array(
-    z.object({
-      id: z.string().min(1),
-      /** Left `unknown` and narrowed by `depositToKobo`, exactly as card
-       *  amounts are left to `parseMicro`. A `z.number()` here would accept a
-       *  value JSON.parse has already rounded and hand it over looking valid. */
-      amount: z.unknown(),
-      currency: z.string().min(1).optional(),
-      sender_name: z.string().optional(),
-      sender_bank: z.string().optional(),
-      sender_account_number: z.string().optional(),
-      created_at: z.string().optional(),
-    }),
-  ),
+  data: z.union([z.object({ transactions: z.array(depositRow) }), z.array(depositRow)]),
 });
 
 export interface BitnobFundingOptions {
@@ -106,26 +145,32 @@ export class BitnobFundingAdapter implements FundingPort {
     /*
      * BITNOB'S PREREQUISITE, STATED HERE RATHER THAN IN THE PORT.
      *
-     * Their virtual-account endpoint requires a customer already carrying a
-     * BVN — their docs are explicit that the BVN lives on the customer and
-     * that the name and date of birth must match the national registry. So
-     * this adapter genuinely cannot issue an account to somebody unverified.
+     * Their docs are explicit (`docs/virtual-accounts/overview.mdx`): Nigerian
+     * regulation puts identity verification behind every naira account, and
+     * the BVN — with a date of birth that matches the registry — lives on the
+     * Bitnob CUSTOMER. That is a fact about BITNOB, not about the rail: CBN
+     * tier 1 needs a name and a phone number, which is what Paystack opens on.
      *
-     * That is a fact about BITNOB, not about the rail: the same account under
-     * CBN tier 1 needs a name and a phone number. Keeping the requirement in
-     * the adapter is what lets a second provider have a different one, which
-     * is the whole point of the port.
+     * SO THE REFUSAL IS DEFINITE AND NOTHING IS SENT, and that is what makes
+     * it cost the customer nothing. `providerDidNothing()` reads it as a clean
+     * "no", the account opening moves on to the next rail that covers naira,
+     * and an unverified customer is issued a tier 1 account without ever being
+     * asked for anything — instead of this adapter creating a Bitnob customer
+     * it already knows Bitnob will not open an account for.
      */
-    const providerCustomerId = request.customer.providerCustomerId;
-    if (providerCustomerId === undefined || providerCustomerId === '') {
+    const bvn = await request.customer.bvn?.();
+    const dateOfBirth = await request.customer.dateOfBirth?.();
+    if (bvn === undefined || dateOfBirth === undefined) {
       throw new ProviderRejectedError(
         PROVIDER,
-        'Bitnob issues a naira account only to a customer it already holds a ' +
-          'verified BVN for. Complete identity verification first, or use a ' +
-          'funding provider that opens a tier 1 account.',
+        'Bitnob issues a naira account only to a customer carrying a verified ' +
+          'BVN and date of birth; nothing was sent. Another rail can open a ' +
+          'tier 1 account.',
         'kyc_required',
       );
     }
+
+    const providerCustomerId = await this.#customerFor(request.customer, bvn, dateOfBirth);
 
     const payload = await this.#client.request(
       'POST',
@@ -149,6 +194,77 @@ export class BitnobFundingAdapter implements FundingPort {
     );
 
     return this.#toAccount(payload);
+  }
+
+  /**
+   * THE BITNOB CUSTOMER THIS ACCOUNT IS OPENED FOR — found, or registered.
+   *
+   * `provider_customers` could never supply one. KYC approval writes that row
+   * with an id WE mint (`xetral-<uuid>`) and makes no provider call, so the
+   * `customer_id` this adapter used to send was a string Bitnob had never
+   * issued, and no naira account could have opened here for anybody. A real
+   * Bitnob id (anything not ours) is used as given; otherwise the customer is
+   * looked up by email FIRST, because `POST /api/customers` has no
+   * idempotency key and a retry after a timeout must not register a second
+   * one — the same look-before-create Paystack's adapter does.
+   *
+   * The BVN goes on the customer because that is where their docs put it.
+   * An existing customer without one is completed with a PUT, rather than
+   * registered again.
+   */
+  async #customerFor(
+    customer: CreateVirtualAccountRequest['customer'],
+    bvn: string,
+    dateOfBirth: string,
+  ): Promise<string> {
+    const given = customer.providerCustomerId;
+    if (given !== undefined && given !== '' && !given.startsWith('xetral-')) return given;
+
+    const identity = {
+      first_name: customer.firstName,
+      last_name: customer.lastName,
+      date_of_birth: dateOfBirth,
+      id_type: 'bvn',
+      id_number: bvn,
+      country: 'NGA',
+    };
+
+    const listed = customerListResponse.safeParse(
+      await this.#client.request('GET', BITNOB_FUNDING_ENDPOINTS.customerByEmail(customer.email)),
+    );
+    if (listed.success) {
+      const rows = Array.isArray(listed.data.data) ? listed.data.data : listed.data.data.customers;
+      // Their filter is a query parameter we cannot see being applied, so the
+      // match is re-checked here — a server that ignored it would otherwise
+      // hand this customer somebody else's record.
+      const found = rows.find(
+        (c) => (c.email ?? '').toLowerCase() === customer.email.toLowerCase(),
+      );
+      if (found !== undefined) {
+        if ((found.id_number ?? '') === '') {
+          await this.#client.request('PUT', BITNOB_FUNDING_ENDPOINTS.customer(found.id), identity);
+        }
+        return found.id;
+      }
+    }
+
+    const created = customerResponse.safeParse(
+      await this.#client.request('POST', BITNOB_FUNDING_ENDPOINTS.customers, {
+        email: customer.email,
+        customer_type: 'individual',
+        ...(customer.phone === undefined ? {} : { phone_number: customer.phone }),
+        reference: `xetral-${customer.reference}`,
+        ...identity,
+      }),
+    );
+    if (!created.success) {
+      throw new ProviderContractError(
+        PROVIDER,
+        'customer registration did not return a customer id',
+        created.error,
+      );
+    }
+    return created.data.data.id;
   }
 
   async getVirtualAccount(providerAccountId: string): Promise<VirtualAccount> {
@@ -177,7 +293,16 @@ export class BitnobFundingAdapter implements FundingPort {
       );
     }
 
-    return parsed.data.data.map((row) => ({
+    const rows = Array.isArray(parsed.data.data) ? parsed.data.data : parsed.data.data.transactions;
+    return rows
+      // Only money that ARRIVED. v2 lists debits and unsettled rows beside
+      // credits, and crediting a pending one is money we may never receive.
+      .filter(
+        (row) =>
+          (row.type === undefined || row.type.toLowerCase() === 'credit') &&
+          (row.status === undefined || ['completed', 'successful', 'success'].includes(row.status.toLowerCase())),
+      )
+      .map((row) => ({
       providerReference: row.id,
       amountMinor: depositToKobo(row.amount, this.#amountUnit),
       currency: 'NGN' as Currency,
@@ -200,7 +325,7 @@ export class BitnobFundingAdapter implements FundingPort {
       );
     }
 
-    const data = parsed.data.data;
+    const data = 'virtual_account' in parsed.data.data ? parsed.data.data.virtual_account : parsed.data.data;
 
     // The NUBAN is checked HERE, at the boundary, not only by the database.
     // An account number we print in a customer's app and they type into their

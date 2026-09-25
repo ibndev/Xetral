@@ -15,6 +15,7 @@ import type {
   PurchaseResult,
   ServiceKind,
 } from '../ports/fulfilment.js';
+import { requireSecret, type SecretSource } from '../ports/secret.js';
 
 const PROVIDER = 'airalo';
 
@@ -37,7 +38,8 @@ export const AIRALO_ENDPOINTS = {
 export interface AiraloOptions {
   readonly baseUrl: string;
   readonly clientId: string;
-  readonly clientSecret: string;
+  /** A value, or a read of `/admin/credentials` made per request. */
+  readonly clientSecret: SecretSource;
   readonly fetch?: (url: string, init: RequestInit) => Promise<Response>;
   readonly timeoutMs?: number;
   /** Injected so token expiry is testable without waiting. */
@@ -194,7 +196,7 @@ export class AiraloAdapter implements FulfilmentPort {
 
     const credentials = {
       client_id: this.#options.clientId,
-      client_secret: this.#options.clientSecret,
+      client_secret: await this.#secret(),
       grant_type: 'client_credentials',
     } as const;
 
@@ -236,8 +238,12 @@ export class AiraloAdapter implements FulfilmentPort {
    * credentials. Verified against Airalo's official PHP SDK
    * (`Helpers/Signature.php`, `Services/OAuthService.php`).
    */
-  #signature(serialisedPayload: string): string {
-    return createHmac('sha512', this.#options.clientSecret)
+  #secret(): Promise<string> {
+    return requireSecret(PROVIDER, this.#options.clientSecret, 'Airalo client secret');
+  }
+
+  async #signature(serialisedPayload: string): Promise<string> {
+    return createHmac('sha512', await this.#secret())
       .update(serialisedPayload, 'utf8')
       .digest('hex');
   }
@@ -256,6 +262,8 @@ export class AiraloAdapter implements FulfilmentPort {
     // signature and which is invisible in a diff.
     const serialised = body === undefined ? undefined : JSON.stringify(body);
     const signed = form !== undefined ? JSON.stringify(form) : serialised;
+    // Computed before the timer, for the reason the credential read is.
+    const signature = signed === undefined ? undefined : await this.#signature(signed);
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.#options.timeoutMs ?? 20_000);
@@ -270,7 +278,7 @@ export class AiraloAdapter implements FulfilmentPort {
           'content-type':
             form === undefined ? 'application/json' : 'application/x-www-form-urlencoded',
           ...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
-          ...(signed === undefined ? {} : { 'airalo-signature': this.#signature(signed) }),
+          ...(signature === undefined ? {} : { 'airalo-signature': signature }),
         },
         ...(form !== undefined
           ? { body: new URLSearchParams(form).toString() }

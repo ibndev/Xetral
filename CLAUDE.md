@@ -2090,6 +2090,66 @@ Router in `apps/api/src/routing/provider-router.service.ts`, liquidity in
 - **eSIM IS ITS OWN SCREEN** (`/esim`, `esim.tsx`), the comp's: a search and a
   list of plans, buying second. The money path is the one every bill uses.
 
+### An account number nobody has to ask for, and what readiness reads — non-obvious rules
+
+`AuthController.register`, `apps/api/src/funding/funding.service.ts`,
+`packages/providers/src/bitnob/funding-adapter.ts`,
+`apps/api/src/golive/readiness.service.ts`. Republished by
+`packages/ledger/sql/081_privacy_republish.sql`.
+
+- **THERE IS NO ACTIVATE BUTTON.** Registration opens the deposit account,
+  NOT AWAITED — a signup must never wait on a bank or fail because one was
+  slow — and Add Money opens it itself, once per visit, for anybody who
+  arrived without one. The idempotency key is derived from the user, so the
+  two can race and one account results. `openAccountOnRegistration` is
+  config rather than an environment variable only so the e2e fixture can
+  keep every other suite's registrations away from a rail.
+- **`kyc_required` ONLY WHEN EVERY RAIL WANTED IT.** It used to be said when
+  ANY rail had, so a deployment missing its Paystack key — the rail that
+  opens tier 1 from a name — told every unverified customer to verify, about
+  a problem that was an operator's. Otherwise the actionable refusal is
+  relayed.
+- **BITNOB CAN NEVER OPEN AN ACCOUNT FOR AN UNVERIFIED CUSTOMER, and that is
+  their rule, not ours.** Their docs put the BVN and a registry-matching date
+  of birth on the Bitnob CUSTOMER. So the adapter refuses with nothing sent
+  when either is missing, and the fallback opens tier 1 on Paystack — the
+  customer is never asked for anything. For a verified customer it looks the
+  Bitnob customer up BY EMAIL (their create has no idempotency key),
+  completes one without a BVN with a PUT, or registers one.
+- **`provider_customers` NEVER HELD A BITNOB ID.** KYC approval writes
+  `xetral-<uuid>` — a string we mint — and the adapter sent it as
+  `customer_id` to an API that had never issued it. An id with that prefix is
+  ignored; anything else is used as given.
+- **THE ACCOUNT RESPONSE IS NESTED**, `data.virtual_account`, and deposits are
+  `data.transactions` — per `bitnob-api-v2.openapi.json`. The flat schema
+  threw a contract error AFTER Bitnob had opened the account, which is not a
+  refusal, so no other rail was asked. Both shapes are read; only completed
+  credits count as deposits.
+- **VTPASS, AIRALO AND TWILIO READ THEIR KEYS FROM THE DASHBOARD NOW.** They
+  took environment strings alone, so their slots on `/admin/credentials`
+  accepted a key and were read by nothing. `SecretSource` resolves per
+  request; a missing key is `ProviderNotSentError` (a purchase is reversed)
+  and a catalogue read answers `service_not_configured`, as before.
+- **BASE URLS HAVE DEFAULTS WHERE THE VENDOR HAS ONE HOST.** Bitnob v2's only
+  host is `https://api.bitnob.com`, so with no default a deployment configured
+  from the dashboard had no Bitnob at all. VTpass and Airalo default to live
+  only in PRODUCTION, so a default can never point staging at real money.
+- **A READINESS ROW IS SET THROUGH WHAT ACTUALLY ANSWERS, and says so.** An
+  environment variable is set if its credential slot holds a stored key,
+  if the `platform_settings` row that overrides it exists (`overriddenBy`),
+  or if the variable it falls back to is set (`fallsBackTo`) — the row
+  carries `via`. The first version asked only the environment and was wrong
+  about a working deployment thirty times, which buried the five that were
+  real.
+- **THE COMPOSE FILE WIRES WHAT IT ALREADY RUNS.** `redis` has been a service
+  on the app node since the first deploy and nothing pointed `REDIS_URL` at
+  it; `APP_BASE_URL` and `NOTIFICATION_FROM` default there too, `.env` still
+  winning. `OPERATIONS_EMAIL` falls back to `ADMIN_BOOTSTRAP_EMAIL`.
+- **THE NOTICE HAD TO SAY IT FIRST.** Bitnob opening a verified customer's
+  naira account sends their name, email, phone, date of birth and BVN, so
+  081 republishes the privacy notice naming that before the first one
+  leaves. 077's suite now asserts `>=` its version, the lesson 075's learned.
+
 ### Which rail opens an account — non-obvious rules
 
 Schema: `packages/ledger/sql/061_country_and_route_repair.sql`. Service in
@@ -4371,6 +4431,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/077_privacy_republish.s
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/078_card_funding_cascade.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/079_routing_policy.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/080_payout_provider_known.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/081_privacy_republish.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -4449,6 +4510,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/077_privacy_republish.t
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/078_card_funding_cascade.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/079_routing_policy.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/080_payout_provider_known.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/081_privacy_republish.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

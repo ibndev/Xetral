@@ -82,6 +82,21 @@ export interface Item {
   readonly singleInstance?: boolean;
   /** The flow that stops working. Undefined means the whole platform. */
   readonly flow?: string;
+  /**
+   * A `platform_settings` key that SUPERSEDES this variable. The database is
+   * authoritative and the environment is the fallback, so where the row
+   * exists this variable is read by nothing — and reporting it as missing
+   * would send an operator to set a value that changes nothing, which is the
+   * silent-and-infuriating failure 009's bootstrap warning exists for. The
+   * setting stays on this list as its own row, so the decision is still asked.
+   */
+  readonly overriddenBy?: string;
+  /**
+   * Another variable the code falls back to when this one is unset. The row
+   * reads as set THROUGH it and says so, rather than claiming the variable
+   * itself was given.
+   */
+  readonly fallsBackTo?: string;
 }
 
 /**
@@ -346,11 +361,14 @@ export const PROVIDERS: readonly Item[] = [
   {
     name: 'BITNOB_BASE_URL',
     kind: 'env',
-    failure: 'refuses-the-first-request',
+    failure: 'default-is-deliberate',
     flow: 'cards, NGN funding, crypto, FX',
     ifMissed:
-      'four flows refuse at the first request: cards, naira funding, crypto and '  +
-      'FX all speak to one provider and there is no host to call.',
+      'nothing: it defaults to https://api.bitnob.com, which is Bitnob v2\'s ONLY '  +
+      'host — sandbox and production share it and the secret selects between '  +
+      'them. It used to have no default, so a deployment whose Bitnob keys were '  +
+      'pasted on the dashboard had no Bitnob at all: cards, naira accounts, '  +
+      'crypto and FX refused with the keys sitting there.',
   },
   {
     name: 'BITNOB_CLIENT_ID',
@@ -481,6 +499,7 @@ export const PROVIDERS: readonly Item[] = [
       'usually Wema, and a business enabled for one and not the other gets a '  +
       'refusal at the moment a customer asks for an account. The stored '  +
       'setting `paystack_preferred_bank` overrides this.',
+    overriddenBy: 'paystack_preferred_bank',
   },
   {
     name: 'BITNOB_WEBHOOK_SECRET',
@@ -519,11 +538,12 @@ export const PROVIDERS: readonly Item[] = [
   {
     name: 'VTPASS_BASE_URL',
     kind: 'env',
-    failure: 'refuses-the-first-request',
+    failure: 'default-is-deliberate',
     flow: 'airtime, data, bills',
     ifMissed:
-      'the catalogue loads and every purchase refuses: there is no host to send '  +
-      'the order to.',
+      'nothing: production defaults to https://vtpass.com and every other '  +
+      'environment to https://sandbox.vtpass.com, so a default can never point '  +
+      'a staging box at live VTpass.',
   },
   {
     name: 'VTPASS_API_KEY',
@@ -551,11 +571,13 @@ export const PROVIDERS: readonly Item[] = [
   {
     name: 'AIRALO_BASE_URL',
     kind: 'env',
-    failure: 'refuses-the-first-request',
+    failure: 'default-is-deliberate',
     flow: 'eSIM',
     ifMissed:
-      'eSIM routes refuse. Airalo is the only provider for them, so the whole '  +
-      'product is unavailable rather than degraded.',
+      'nothing in production, which defaults to https://partners-api.airalo.com. '  +
+      'Elsewhere there is no default and eSIM routes refuse — Airalo\'s sandbox '  +
+      'is its own arrangement, and guessing it would be a staging box ordering '  +
+      'from somewhere nobody chose.',
   },
   {
     name: 'AIRALO_CLIENT_ID',
@@ -578,10 +600,11 @@ export const PROVIDERS: readonly Item[] = [
   {
     name: 'TWILIO_BASE_URL',
     kind: 'env',
-    failure: 'refuses-the-first-request',
+    failure: 'default-is-deliberate',
     flow: 'virtual numbers',
     ifMissed:
-      'number routes refuse. Twilio is the only provider for them.',
+      'nothing: it defaults to https://api.twilio.com, Twilio\'s one host — test '  +
+      'credentials select test behaviour on the same address.',
   },
   {
     name: 'TWILIO_ACCOUNT_SID',
@@ -704,7 +727,11 @@ export const PROVIDERS: readonly Item[] = [
     kind: 'env',
     failure: 'silent',
     flow: 'error alerting',
-    ifMissed: 'error alerts are composed and have nowhere to go.',
+    ifMissed:
+      'error alerts are composed and have nowhere to go. Unset, alerts go to '  +
+      '`ADMIN_BOOTSTRAP_EMAIL` — the first administrator is the one address '  +
+      'this deployment is certain belongs to somebody responsible for it.',
+    fallsBackTo: 'ADMIN_BOOTSTRAP_EMAIL',
   },
 ];
 
@@ -857,7 +884,9 @@ export const DEPLOYMENT: readonly Item[] = [
       'the largest deposit that will be CREDITED rather than held in suspense. ' +
       'Asymmetric on purpose — it catches over-crediting, which is spent before ' +
       'anyone notices; under-crediting surfaces as a complaint within the hour. ' +
-      'Set it to a figure that reflects what your customers actually send.',
+      'Set it to a figure that reflects what your customers actually send. ' +
+      'The stored setting `deposit_ceiling_kobo` overrides this.',
+    overriddenBy: 'deposit_ceiling_kobo',
   },
   {
     name: 'TRANSFER_FEE_BASIS_POINTS',
@@ -868,6 +897,7 @@ export const DEPLOYMENT: readonly Item[] = [
       'authoritative, so setting this and restarting appears to do nothing — ' +
       'bootstrap names every environment value the database is overriding, ' +
       'because that failure is otherwise silent and infuriating.',
+    overriddenBy: 'transfer_fee_basis_points',
   },
   {
     name: 'GIFT_CARDS_ENABLED',
@@ -887,7 +917,8 @@ export const DEPLOYMENT: readonly Item[] = [
     ifMissed:
       'the hold is the only control still standing once a card is approved. ' +
       'Enforced by the DATABASE clock in two places so a skewed worker cannot ' +
-      'shorten it.',
+      'shorten it. The stored setting `giftcard_hold_days` overrides this.',
+    overriddenBy: 'giftcard_hold_days',
   },
   {
     name: 'CRYPTO_CONFIRMATIONS_*',
@@ -1487,9 +1518,13 @@ export const CREDENTIALS: readonly Item[] = [
   {
     name: 'bitnob.api_key',
     kind: 'credential',
-    failure: 'refuses-the-first-request',
+    failure: 'default-is-deliberate',
     flow: 'cards, NGN funding, crypto, FX',
-    ifMissed: 'the database overrides the environment when set; five seconds of cache.',
+    ifMissed:
+      'nothing: 042 RETIRED this slot. It was the v1 bearer key, Bitnob v2 signs '  +
+      'with the client id and secret instead, and nothing reads it. It was '  +
+      'still listed as blocking, which told an operator with a working v2 pair '  +
+      'to go and find a key that authorises nothing.',
   },
   {
     name: 'bitnob.webhook_secret',

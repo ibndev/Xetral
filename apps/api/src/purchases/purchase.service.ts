@@ -14,6 +14,7 @@ import type { Pool } from 'pg';
 import { InsufficientFundsError, LedgerService, posting } from '@xetral/ledger';
 import {
   supportsVerification,
+  ProviderNotSentError,
   providerDidNothing,
 } from '@xetral/providers';
 import type {
@@ -114,8 +115,31 @@ export class PurchaseService {
     group: string | undefined,
   ): Promise<readonly CatalogueItemView[]> {
     const port = this.#port(service);
-    const items = await port.catalogue(group === undefined ? {} : { group });
+    const items = await this.#asked(service, () =>
+      port.catalogue(group === undefined ? {} : { group }),
+    );
     return items.map(toCatalogueView);
+  }
+
+  /**
+   * A READ THAT NEVER LEFT is the service not being configured, and says so.
+   *
+   * The adapters are built at boot now and ask `/admin/credentials` for their
+   * key per request, so "no key yet" arrives here as `ProviderNotSentError`
+   * rather than as a missing port. Left to the generic handler it would be a
+   * 500 and "something went wrong" on a screen that used to say the service
+   * is not available — the same answer, for the same state, as before.
+   */
+  async #asked<T>(service: ServiceKind, read: () => Promise<T>): Promise<T> {
+    try {
+      return await read();
+    } catch (error) {
+      if (error instanceof ProviderNotSentError) {
+        this.#logger.warn(`${service}: ${describe(error)}`);
+        throw new ServiceUnavailableException({ error: 'service_not_configured', service });
+      }
+      throw error;
+    }
   }
 
   /** Confirms a meter or smartcard number belongs to who the customer thinks.
@@ -126,7 +150,7 @@ export class PurchaseService {
     if (!supportsVerification(port)) {
       throw new ConflictException({ error: 'verification_not_supported', service });
     }
-    return port.verifyTarget(itemCode, target);
+    return this.#asked(service, () => port.verifyTarget(itemCode, target));
   }
 
   async list(userUuid: string): Promise<readonly PurchaseView[]> {

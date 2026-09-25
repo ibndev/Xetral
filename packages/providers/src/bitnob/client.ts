@@ -217,7 +217,7 @@ export class BitnobClient {
   }
 
   async request(
-    method: 'GET' | 'POST',
+    method: 'GET' | 'POST' | 'PUT',
     path: string,
     body?: unknown,
     idempotencyKey?: string,

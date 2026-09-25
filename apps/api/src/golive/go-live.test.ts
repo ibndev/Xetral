@@ -206,6 +206,30 @@ describe('the checklist says something useful about each entry', () => {
     }
   });
 
+  it('points every override and fallback at something that exists', () => {
+    // A row reads as set THROUGH another name, so a typo in that name would be
+    // a row that can never go green — or, worse, one that goes green through a
+    // setting nothing reads. Both directions are held to the list itself.
+    const settings = named('setting');
+    const env = named('env');
+    const broken = CHECKLIST.flatMap((i) => [
+      ...(i.overriddenBy !== undefined && !settings.has(i.overriddenBy)
+        ? [`${i.name} -> setting ${i.overriddenBy}`]
+        : []),
+      ...(i.fallsBackTo !== undefined && !env.has(i.fallsBackTo)
+        ? [`${i.name} -> variable ${i.fallsBackTo}`]
+        : []),
+    ]);
+    expect(broken).toEqual([]);
+    // Only an environment variable can be superseded; a setting or a
+    // credential slot IS the authoritative copy.
+    expect(
+      CHECKLIST.filter(
+        (i) => i.kind !== 'env' && (i.overriddenBy !== undefined || i.fallsBackTo !== undefined),
+      ).map((i) => i.name),
+    ).toEqual([]);
+  });
+
   it('marks every worker interval as single-instance', () => {
     // The rule is in `docker-compose.app.yml` and in three phase documents.
     // Here it is a property of the row, so a worker added later cannot be

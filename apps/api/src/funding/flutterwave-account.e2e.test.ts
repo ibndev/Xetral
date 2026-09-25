@@ -51,6 +51,9 @@ const seen: { method: string; url: string; body: unknown }[] = [];
 /** What their API says about each transaction id, and each account's history. */
 const transactions = new Map<string, Record<string, unknown>>();
 
+/** Paystack refusing the account, for the one test about what is said then. */
+let paystackRefuses = false;
+
 beforeAll(async () => {
   stub = createServer((req, res) => {
     let raw = '';
@@ -71,6 +74,11 @@ beforeAll(async () => {
       }
       if (req.method === 'GET' && url.startsWith('/dedicated_account?')) {
         res.end(JSON.stringify({ status: true, data: [] }));
+        return;
+      }
+      if (req.method === 'POST' && url === '/dedicated_account' && paystackRefuses) {
+        res.statusCode = 400;
+        res.end(JSON.stringify({ status: false, message: 'Dedicated NUBAN is not available for this business' }));
         return;
       }
       if (req.method === 'POST' && url === '/dedicated_account') {
@@ -296,6 +304,25 @@ describe('opening a naira account number on Flutterwave', () => {
       [customer.userId],
     );
     expect(row.rows[0]?.provider).toBe('paystack');
+  });
+
+  /*
+   * NOT A KYC PROMPT ABOUT AN OPERATOR'S PROBLEM. Flutterwave wanted a BVN;
+   * Paystack — which needs none — refused for a reason of its own. Telling
+   * this customer to verify would send them to do something that changes
+   * nothing, and it is the prompt the auto-opened account exists to not show.
+   * The refusal relayed is the one somebody can act on.
+   */
+  it('names the rail that failed for its own reason rather than asking an unverified customer to verify', async () => {
+    paystackRefuses = true;
+    try {
+      const customer = await nigerian(false);
+      const res = await openAccount(customer);
+      expect(res.body.error).not.toBe('kyc_required');
+      expect(res.body.error).toBe('account_issue_refused');
+    } finally {
+      paystackRefuses = false;
+    }
   });
 
   it('sends the BVN sealed at KYC, and records the reference deposits arrive under', async () => {

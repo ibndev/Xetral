@@ -71,7 +71,12 @@ function Rows({ rows }: { rows: readonly AdminReadinessRow[] }) {
               </span>
               <span className="check-name">
                 <code>{row.name}</code>
-                <small>{row.flow ?? 'the platform'} · {FAILURE_LABEL[row.failure]}</small>
+                <small>
+                  {row.flow ?? 'the platform'} · {FAILURE_LABEL[row.failure]}
+                  {/* Set THROUGH something else is said, never implied: a green
+                      row must not claim more than the process knows. */}
+                  {row.via !== undefined && <> · from {row.via}</>}
+                </small>
               </span>
               <span className="check-state">{MARK_TEXT[mark]}{mark === 'blocking' && row.failure === 'silent' ? ' — silent' : ''}</span>
             </summary>

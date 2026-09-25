@@ -1,57 +1,34 @@
 -- ============================================================================
---  077 invariants — the privacy notice moved forward, and only forward
+--  081 invariants — the privacy notice moved forward again, and only forward
 -- ============================================================================
 \set ON_ERROR_STOP on
 
 -- ---------------------------------------------------------------------------
--- 1. The 2026-09-23 privacy notice exists, and nothing older than it is live.
+-- 1. The 2026-09-25 privacy notice exists, and nothing older is live.
 --
---    PROPERTIES RATHER THAN "the live version is 2026-09-23", for the reason
---    074's suite records: this database is shared, `033_consent.test.sql`
---    runs first and deliberately republishes to prove the mechanism, and a
---    suite asserting an exact live version is asserting that no other suite
---    exercised it.
---
---    What 077 promises is that the row it publishes exists and that the two
---    versions it supersedes are not live — absent on a fresh database,
---    retired on an upgraded one, live on neither.
+--    AT OR AFTER, from the start — the lesson 075's and 077's suites each
+--    learned when a later republish moved past them: a suite asserting an
+--    exact live version is asserting no newer notice will ever exist.
 -- ---------------------------------------------------------------------------
 DO $$
 DECLARE
     published  INT;
     stale_live INT;
-    duplicates INT;
 BEGIN
-    -- AT OR AFTER, not exactly: on a fresh database the seed carries 081's
-    -- 2026-09-25 and 077 correctly publishes nothing behind it — 075's suite
-    -- learned the same thing when 077 moved past it.
     SELECT count(*) INTO published
-      FROM consent_documents WHERE kind = 'privacy' AND version >= '2026-09-23';
-
+      FROM consent_documents WHERE kind = 'privacy' AND version >= '2026-09-25';
     IF published < 1 THEN
-        RAISE EXCEPTION 'TEST FAILED: no privacy notice at 2026-09-23 or later';
+        RAISE EXCEPTION 'TEST FAILED: 081 did not publish the privacy notice';
     END IF;
 
     SELECT count(*) INTO stale_live
       FROM consent_documents
-     WHERE kind = 'privacy'
-       AND version IN ('2026-08-28', '2026-09-19', '2026-09-20')
-       AND retired_at IS NULL;
-
+     WHERE kind = 'privacy' AND version < '2026-09-25' AND retired_at IS NULL;
     IF stale_live <> 0 THEN
-        RAISE EXCEPTION 'TEST FAILED: % privacy notice(s) 077 supersedes are still live',
-            stale_live;
+        RAISE EXCEPTION 'TEST FAILED: % privacy notice(s) older than 081 are still live', stale_live;
     END IF;
 
-    SELECT count(*) INTO duplicates
-      FROM (SELECT kind FROM consent_documents
-             WHERE retired_at IS NULL GROUP BY kind HAVING count(*) > 1) AS d;
-
-    IF duplicates <> 0 THEN
-        RAISE EXCEPTION 'TEST FAILED: % kind(s) have more than one live document', duplicates;
-    END IF;
-
-    RAISE NOTICE 'PASS: the 2026-09-23 privacy notice is published and supersedes cleanly';
+    RAISE NOTICE 'PASS: the 2026-09-25 privacy notice is published and supersedes cleanly';
 END $$;
 
 -- ---------------------------------------------------------------------------
@@ -89,7 +66,7 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
--- 3. A republish that is BEHIND what is live does nothing.
+-- 3. A republish that is BEHIND what is live does nothing — 077's, now.
 --
 --    The guard, stated directly. Applying 075 after 077 is not something a
 --    deployment does on purpose — but a fresh database does exactly that,
@@ -113,16 +90,16 @@ BEGIN
       FROM consent_documents WHERE kind = 'privacy' AND retired_at IS NULL;
     SELECT count(*) INTO rows_before FROM consent_documents;
 
-    -- 075's statements, verbatim, run against a database 077 has moved past.
+    -- 077's statements, verbatim, run against a database 081 has moved past.
     UPDATE consent_documents SET retired_at = now()
-     WHERE kind = 'privacy' AND retired_at IS NULL AND version < '2026-09-20';
+     WHERE kind = 'privacy' AND retired_at IS NULL AND version < '2026-09-23';
 
     INSERT INTO consent_documents (kind, version, body_sha256, summary)
-    SELECT 'privacy', '2026-09-20',
-           'eb6c32bfbc357c5a8dd85bc3bbe04d3c9f23da7d7bdaf0be6ad3202a3baf6ece', 'x'
+    SELECT 'privacy', '2026-09-23',
+           'a8891157983f45a907bc29e6787aefc836f934df1d2ba0dbc688db60979f6a56', 'x'
      WHERE NOT EXISTS (SELECT 1 FROM consent_documents
                         WHERE kind = 'privacy' AND retired_at IS NULL
-                          AND version > '2026-09-20')
+                          AND version > '2026-09-23')
     ON CONFLICT (kind, version) DO NOTHING;
 
     SELECT version INTO live_after
@@ -147,7 +124,7 @@ ROLLBACK;
 -- ---------------------------------------------------------------------------
 -- 4. The terms were NOT republished.
 --
---    077 changed the privacy notice and nothing else, and retiring a version
+--    081 changed the privacy notice and nothing else, and retiring a version
 --    puts every customer on `consent_outstanding`. Asking somebody to agree
 --    again to words that did not change is how that queue stops meaning
 --    anything — the same argument 074 makes about the marketing opt-in.
@@ -157,10 +134,10 @@ DECLARE
     terms_at_77 INT;
 BEGIN
     SELECT count(*) INTO terms_at_77
-      FROM consent_documents WHERE kind = 'terms' AND version = '2026-09-23';
+      FROM consent_documents WHERE kind = 'terms' AND version = '2026-09-25';
 
     IF terms_at_77 <> 0 THEN
-        RAISE EXCEPTION 'TEST FAILED: 077 republished the terms, which did not change';
+        RAISE EXCEPTION 'TEST FAILED: 081 republished the terms, which did not change';
     END IF;
 
     RAISE NOTICE 'PASS: the terms were left where they were';

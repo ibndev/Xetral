@@ -44,8 +44,10 @@ INSERT INTO consent_documents (kind, version, body_sha256, summary) VALUES
   -- page itself: the recipient list lives in `lib/processors.ts`, and a hash
   -- of `page.tsx` alone let that list change under an unchanged version. It
   -- names Flutterwave as receiving a BVN, which it does from 076 on.
-  ('privacy', '2026-09-23',
-   'a8891157983f45a907bc29e6787aefc836f934df1d2ba0dbc688db60979f6a56',
+  -- 081's names Bitnob too: it can open naira account numbers, and their
+  -- documentation puts the BVN and date of birth on the Bitnob customer.
+  ('privacy', '2026-09-25',
+   '4109639543a30bcf63136cd763b416ea6b234a5fe8043660199c576920f20689',
    'What personal data Xetral Ltd holds, why, exactly which companies receive '
    'it and what reaches them, how long it is kept, and how to get a copy or '
    'have it erased.'),

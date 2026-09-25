@@ -21,6 +21,25 @@ services:
       # compose file would otherwise start a production topology in staging
       # mode, with the provider guards relaxed.
       XETRAL_ENVIRONMENT: production
+      # THREE VALUES THIS FILE ALREADY KNEW, and a deployment that took its
+      # variables from the dashboard rather than `.env.example` ran without all
+      # three — each silently, which is the worst kind of missing:
+      #
+      #   REDIS_URL — the `redis` service below has run on this node since the
+      #     first deploy, and nothing pointed the API at it. The limiter fell
+      #     back to in-process, so every replica kept its own count and the
+      #     rate limits were multiplied by however many were running.
+      #   APP_BASE_URL — the address the phone is already compiled against
+      #     (`apps/mobile/app.json`), without which a checkout had no page to
+      #     send a payer back to.
+      #   NOTIFICATION_FROM — without a sender Brevo is never built, so every
+      #     email sat in the outbox while the API said "check your inbox".
+      #
+      # Each is a DEFAULT: `.env` still wins, so a deployment on another
+      # domain states its own. The sender's domain must be verified at Brevo.
+      REDIS_URL: '${REDIS_URL:-redis://redis:6379}'
+      APP_BASE_URL: '${APP_BASE_URL:-https://app.xetral.com}'
+      NOTIFICATION_FROM: '${NOTIFICATION_FROM:-Xetral <no-reply@xetral.com>}'
       # SET IT, or /metrics answers 404 and nothing is watching. Unset is the
       # deliberate default rather than an oversight: an open metrics endpoint
       # publishes queue depths, provider health and what is owed to customers
@@ -83,6 +102,12 @@ services:
     env_file: .env
     environment:
       XETRAL_ENVIRONMENT: production
+      # The same three defaults as `api`, for the same reasons — and the worker
+      # is the one that SENDS the outbox, so a sender missing here is every
+      # receipt and alert lost even where the API has one.
+      REDIS_URL: '${REDIS_URL:-redis://redis:6379}'
+      APP_BASE_URL: '${APP_BASE_URL:-https://app.xetral.com}'
+      NOTIFICATION_FROM: '${NOTIFICATION_FROM:-Xetral <no-reply@xetral.com>}'
       # Read from .env for every other worker; named here too because this is
       # the one that DELETES, and the blank on `api` above is what stops a
       # scaled API running it from four processes at once.

@@ -5,6 +5,7 @@ import {
   Get,
   HttpCode,
   Inject,
+  Logger,
   Param,
   Post,
   Req,
@@ -36,6 +37,9 @@ import type { TotpEnrolment } from './staff-totp.service.js';
 import { AccountSecurityService } from './account-security.service.js';
 import type { DeviceView } from './account-security.service.js';
 import { uuidOr404 } from '../uuid-param.js';
+import { FundingService } from '../funding/funding.service.js';
+import { API_CONFIG } from '../tokens.js';
+import type { ApiConfig } from '../config.js';
 
 /**
  * The controller path and each handler path together form the key that
@@ -46,6 +50,8 @@ import { uuidOr404 } from '../uuid-param.js';
  */
 @Controller('v1/auth')
 export class AuthController {
+  readonly #logger = new Logger('Registration');
+
   constructor(
     @Inject(AuthService) private readonly auth: AuthService,
     @Inject(PinService) private readonly pins: PinService,
@@ -53,6 +59,8 @@ export class AuthController {
     @Inject(PasswordResetService) private readonly resets: PasswordResetService,
     @Inject(StaffTotpService) private readonly totp: StaffTotpService,
     @Inject(ProfileService) private readonly profile: ProfileService,
+    @Inject(FundingService) private readonly funding: FundingService,
+    @Inject(API_CONFIG) private readonly config: ApiConfig,
   ) {}
 
   /**
@@ -84,10 +92,38 @@ export class AuthController {
     // Describes the consent this creates, and decides nothing. The signup form
     // shows the terms and the privacy notice above the button; without these
     // two fields, "they agreed" would be a claim with nothing behind it.
-    return this.auth.register(parsed.data, {
+    const { pair, userUuid } = await this.auth.registerAndIdentify(parsed.data, {
       ip: request.ip,
       userAgent: request.headers['user-agent'],
     });
+
+    /*
+     * THE ACCOUNT NUMBER IS OPENED NOW, NOT WHEN SOMEBODY PRESSES A BUTTON.
+     *
+     * Add Money carried an "Activate account" button, and a customer who had
+     * just signed up in order to be paid had to find it, press it, and learn
+     * then whether it worked. Every step of that was ours to do. Opening it
+     * here — no KYC, because the rails that open tier 1 accounts need none and
+     * the ones that do are skipped for somebody unverified — means the number
+     * is usually there by the time the home screen has loaded.
+     *
+     * NOT AWAITED, deliberately. It is a provider call: a signup must not wait
+     * on a bank, and must never fail because one was slow. It cannot race a
+     * second attempt into a second account either — the idempotency key is
+     * derived from the user, and the partial unique index makes the loser read
+     * the winner's row. A failure is logged and changes nothing: Add Money
+     * asks again when it is opened.
+     */
+    if (this.config.openAccountOnRegistration) {
+      void this.funding.accountFor(userUuid).catch((error: unknown) => {
+        this.#logger.warn(
+          `could not open a deposit account for new user ${userUuid} at registration ` +
+            `(${error instanceof Error ? error.message : String(error)}); ` +
+            `Add Money will ask again`,
+        );
+      });
+    }
+    return pair;
   }
 
   @Post('login')

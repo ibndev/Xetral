@@ -54,6 +54,12 @@ export interface Row {
   readonly state: State;
   readonly ifMissed: string;
   readonly flow?: string;
+  /**
+   * WHERE a `set` came from, when it was not this variable itself — the
+   * credential store, a stored setting, or a fallback variable. Said out loud
+   * so a green row never claims more than it knows.
+   */
+  readonly via?: string;
 }
 
 export interface Readiness {
@@ -94,7 +100,7 @@ export class ReadinessService {
   async report(): Promise<Readiness> {
     // Read once. Asking per row would be fifty round trips for a screen.
     const settings = await this.#settings();
-    const credentials = await this.#credentials();
+    const { satisfied: credentials, stored } = await this.#credentials();
 
     const rows = CHECKLIST.map((item): Row => {
       const base = {
@@ -104,7 +110,10 @@ export class ReadinessService {
         ifMissed: item.ifMissed,
         ...(item.flow === undefined ? {} : { flow: item.flow }),
       };
-      return { ...base, state: this.#stateOf(item, settings, credentials) };
+      const state = this.#stateOf(item, settings, credentials);
+      if (state === 'set' || item.kind !== 'env') return { ...base, state };
+      const via = this.#elsewhere(item, settings, stored);
+      return via === undefined ? { ...base, state } : { ...base, state: 'set', via };
     });
 
     const count = (s: State): number => rows.filter((r) => r.state === s).length;
@@ -151,6 +160,28 @@ export class ReadinessService {
   }
 
   /**
+   * An environment variable nothing needs, because something else answers.
+   *
+   * THE FIRST VERSION ASKED ONLY THE ENVIRONMENT, and on a deployment
+   * configured from the dashboard that made the screen wrong about a working
+   * system in thirty places: `PAYSTACK_SECRET_KEY` read as missing with the
+   * key sitting in the credential store, `TRANSFER_FEE_BASIS_POINTS` read as
+   * missing with `platform_settings` overriding it. A check that is wrong
+   * about a working system is a check people stop opening — and the rows it
+   * was wrong about buried the five that were real.
+   */
+  #elsewhere(item: Item, settings: Set<string>, stored: Set<string>): string | undefined {
+    if (stored.has(item.name)) return 'the credential store';
+    if (item.overriddenBy !== undefined && settings.has(item.overriddenBy)) {
+      return `setting ${item.overriddenBy}`;
+    }
+    if (item.fallsBackTo !== undefined && (this.#env[item.fallsBackTo] ?? '') !== '') {
+      return item.fallsBackTo;
+    }
+    return undefined;
+  }
+
+  /**
    * Which settings have a row. NOT which have a non-default value — every one
    * of these is seeded, so "has a row" is true of all of them and the useful
    * question is whether one is MISSING, which happens when a migration has not
@@ -178,7 +209,7 @@ export class ReadinessService {
    * The slot's own `env_var` column is what makes that answerable without a
    * second list here that could disagree with the catalogue.
    */
-  async #credentials(): Promise<Set<string>> {
+  async #credentials(): Promise<{ satisfied: Set<string>; stored: Set<string> }> {
     const result = await this.#pool.query<{
       provider: string;
       name: string;
@@ -192,10 +223,14 @@ export class ReadinessService {
            ON c.provider = s.provider AND c.name = s.name`,
     );
     const satisfied = new Set<string>();
+    // The other direction, for the environment rows: a variable whose slot
+    // holds a stored key is a fallback nothing reads.
+    const stored = new Set<string>();
     for (const row of result.rows) {
       const fromEnv = (this.#env[row.env_var] ?? '') !== '';
       if (row.stored || fromEnv) satisfied.add(`${row.provider}.${row.name}`);
+      if (row.stored) stored.add(row.env_var);
     }
-    return satisfied;
+    return { satisfied, stored };
   }
 }

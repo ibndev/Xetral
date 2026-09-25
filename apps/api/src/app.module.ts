@@ -25,6 +25,7 @@ import type {
   CardPort,
   FulfilmentPort,
   ProviderBalancePort,
+  SecretSource,
   ServiceKind,
 } from '@xetral/providers';
 import { AuthController } from './auth/auth.controller.js';
@@ -435,17 +436,32 @@ function unconfiguredCardPort(): CardPort {
  * missing while the other four work normally. A refusing stand-in would make
  * every service look present until somebody paid for one.
  */
-export function createFulfilmentPorts(config: ApiConfig): ReadonlyMap<ServiceKind, FulfilmentPort> {
+export function createFulfilmentPorts(
+  config: ApiConfig,
+  credentials?: ProviderCredentialService,
+): ReadonlyMap<ServiceKind, FulfilmentPort> {
   const logger = new Logger('Fulfilment');
   const ports = new Map<ServiceKind, FulfilmentPort>();
 
-  const { vtpassBaseUrl, vtpassApiKey, vtpassSecretKey, vtpassPublicKey } = config;
-  if (
-    vtpassBaseUrl !== undefined &&
-    vtpassApiKey !== undefined &&
-    vtpassSecretKey !== undefined &&
-    vtpassPublicKey !== undefined
-  ) {
+  /*
+   * THE KEYS ARE ASKED FOR PER REQUEST, and only the non-secret parts decide
+   * whether a port exists. These three took strings from the environment
+   * alone, so their slots on `/admin/credentials` accepted a key, showed its
+   * hint, and were read by nothing — a deployment configured entirely from
+   * the dashboard had no bills, no eSIM and no numbers, and every screen said
+   * the service was not configured. A missing key now refuses the request
+   * that needed it, naming where to put one, and pasting it fixes that within
+   * the credential cache rather than at the next restart.
+   */
+  const secret = (
+    provider: string,
+    name: string,
+    fallback: string | undefined,
+  ): SecretSource =>
+    credentials === undefined ? (fallback ?? '') : () => credentials.secretFor(provider, name, fallback);
+
+  const { vtpassBaseUrl } = config;
+  if (vtpassBaseUrl !== undefined) {
     // One adapter instance per service rather than one shared: `service` is
     // part of the port's identity, and a caller asking a 'data' port for
     // airtime should not typecheck its way into a wrong VTpass endpoint.
@@ -454,40 +470,37 @@ export function createFulfilmentPorts(config: ApiConfig): ReadonlyMap<ServiceKin
         service,
         new VtpassAdapter({
           baseUrl: vtpassBaseUrl,
-          apiKey: vtpassApiKey,
-          secretKey: vtpassSecretKey,
-          publicKey: vtpassPublicKey,
+          apiKey: secret('vtpass', 'api_key', config.vtpassApiKey),
+          secretKey: secret('vtpass', 'secret_key', config.vtpassSecretKey),
+          publicKey: secret('vtpass', 'public_key', config.vtpassPublicKey),
           service,
         }),
       );
     }
   } else {
-    logger.warn('VTpass is not configured: airtime, data and utility routes will refuse.');
+    logger.warn('VTpass has no base URL: airtime, data and utility routes will refuse.');
   }
 
-  const { airaloBaseUrl, airaloClientId, airaloClientSecret } = config;
-  if (
-    airaloBaseUrl !== undefined &&
-    airaloClientId !== undefined &&
-    airaloClientSecret !== undefined
-  ) {
+  const { airaloBaseUrl, airaloClientId } = config;
+  if (airaloBaseUrl !== undefined && airaloClientId !== undefined) {
     ports.set(
       'esim',
       new AiraloAdapter({
         baseUrl: airaloBaseUrl,
         clientId: airaloClientId,
-        clientSecret: airaloClientSecret,
+        clientSecret: secret('airalo', 'client_secret', config.airaloClientSecret),
       }),
     );
   } else {
-    logger.warn('Airalo is not configured: eSIM routes will refuse.');
+    // The client id is not a secret and has no credential slot, so it is the
+    // one part the dashboard cannot supply.
+    logger.warn('AIRALO_CLIENT_ID is not set: eSIM routes will refuse.');
   }
 
-  const { twilioBaseUrl, twilioAccountSid, twilioAuthToken, twilioNumberPriceCents } = config;
+  const { twilioBaseUrl, twilioAccountSid, twilioNumberPriceCents } = config;
   if (
     twilioBaseUrl !== undefined &&
     twilioAccountSid !== undefined &&
-    twilioAuthToken !== undefined &&
     twilioNumberPriceCents !== undefined
   ) {
     ports.set(
@@ -495,15 +508,15 @@ export function createFulfilmentPorts(config: ApiConfig): ReadonlyMap<ServiceKin
       new TwilioAdapter({
         baseUrl: twilioBaseUrl,
         accountSid: twilioAccountSid,
-        authToken: twilioAuthToken,
+        authToken: secret('twilio', 'auth_token', config.twilioAuthToken),
         priceCents: twilioNumberPriceCents,
       }),
     );
   } else {
-    // Credentials without a price is the interesting case: everything needed to
-    // buy a number, and nothing saying what to charge for it. Selling at an
-    // unset price is worse than not selling.
-    logger.warn('Twilio is not configured (or has no price set): number routes will refuse.');
+    // An account without a price is the interesting case: everything needed
+    // to buy a number, and nothing saying what to charge for it. Selling at
+    // an unset price is worse than not selling.
+    logger.warn('Twilio has no account SID or no price set: number routes will refuse.');
   }
 
   return ports;
@@ -1318,7 +1331,7 @@ export class AppModule {
         {
           provide: FULFILMENT_PORTS,
           useFactory: (health: ProviderHealthService, credentials: ProviderCredentialService) => {
-            const ports = options.fulfilmentPorts ?? createFulfilmentPorts(options.config);
+            const ports = options.fulfilmentPorts ?? createFulfilmentPorts(options.config, credentials);
             // A MAP of three different providers behind one port, so each is
             // watched under its own name: VTpass being down is not Airalo
             // being down, and one health row for all three would say neither.

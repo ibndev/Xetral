@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Linking, Share, Text, TextInput, View } from 'react-native';
 import { exponentFor, formatAmount, isValidAmount, nationalPhone, paymentLinkFor } from '@xetral/client';
 import type { MomoAccount, XetralClient, XetralCountry } from '@xetral/client';
@@ -44,13 +44,17 @@ export default function AddMoney() {
   const styles = useStyles();
   const colors = useTheme();
   const { busy, error: issueError, code: issueCode, run } = useSubmit();
+  // Its own, as on the web: the account's refusal and the wallet form's are
+  // different sentences about different things.
+  const opener = useSubmit();
 
   /*
    * READ, don't issue — the same correction as the web's. This called
    * `fundingAccount()`, which asks Bitnob and opens a bank account, merely to
    * display a number: every visit to this screen opened an account as a side
    * effect of being looked at, and it was survivable only because issuing is
-   * idempotent. Opening one is a BUTTON now, which is what it is.
+   * idempotent. It became a button, and then the button went too — see the
+   * effect below, which is the web's.
    */
   const account = useLoad(() => client.existingFundingAccount(), [client]);
   /* The linked wallet. Its own load: 063 is a later migration and a deployment
@@ -98,6 +102,25 @@ export default function AddMoney() {
 
   const has = account.data != null;
 
+  /* NO ACCOUNT YET, SO OPEN IT — no button and no verification asked; the
+     web's effect and its reasoning. Registration opens it; this catches
+     anybody who reached the screen without one, once per visit. */
+  const [opening, setOpening] = useState<'idle' | 'opening' | 'done'>('idle');
+  useEffect(() => {
+    if (account.loading || account.data != null || account.error !== undefined) return;
+    if (opening !== 'idle') return;
+    setOpening('opening');
+    void opener.run(async () => {
+      try {
+        await client.fundingAccount();
+        account.reload();
+        return undefined;
+      } finally {
+        setOpening('done');
+      }
+    });
+  }, [account, client, opening, opener]);
+
   return (
     <Shell back="/wallet" title="Add Money">
       <Panel title="Add Money">
@@ -129,55 +152,28 @@ export default function AddMoney() {
         )}
 
         {/*
-          NO ACCOUNT YET — one button, and NO VERIFICATION GATE IN FRONT OF IT.
-
-          This sent an unverified customer to /kyc first, on the reasoning
-          that "regulation does not permit an unidentified account". That is a
-          statement about BITNOB, which will not issue one without a verified
-          BVN. CBN's tiered KYC permits a tier 1 account on a name and a phone
-          number, capped — and `029_kyc_tiers.seed.sql` has capped tier 0 at
-          ₦50,000 a day since it landed, so the platform enforced the ceiling
-          and refused the account it is for.
-
-          The requirement now lives in the Bitnob adapter, where it is true.
-          The default rail opens an account from what signup already holds.
+          NO ACCOUNT YET — AND NOTHING TO PRESS. It was an Activate Account
+          button, and before that a gate to /kyc; both asked the customer to do
+          our work. What is left is that it is happening, or why it did not.
+          The lead is `styles.lead` at weight 600 — the web's `.activate-lead`,
+          not the 19pt section heading that once made the phone's copy larger
+          than the web's on the same screen.
         */}
         {!account.loading && !has && usesVirtualAccount && (
-          /*
-            EACH PIECE IN ITS OWN ROW, WITH ROOM AROUND IT — the web's
-            `.activate`, and the same reason. These were three siblings of a
-            Panel whose spacing is set for the fields of a form, so the
-            primary action on the screen a customer opens in order to put
-            money in sat hard against a line of text either side of it.
-          */
-          <View style={{ gap: space.lg, marginTop: space.md }}>
-            {/*
-              NOT "your naira account" — see the web screen. The account is the
-              one for the customer's own country.
-
-              AND NOT `h2`, which is what it was. `h2` is 19pt display bold —
-              a SECTION HEADING — and this is a statement above a button. The
-              web draws the same line as `.activate-lead`: 15px, weight 600.
-              Using the heading style made the phone's copy visibly larger than
-              the web's on the same screen, which is what "the text under the
-              title is too big" was reporting.
-            */}
+          <View style={{ gap: space.sm, marginTop: space.md }}>
             <Text style={[styles.lead, { marginBottom: 0, fontFamily: font.sansSemi, color: colors.text }]}>
-              Your account is ready. Get it below.
+              {opening !== 'done'
+                ? 'Setting up your account number…'
+                : 'Your account number is not ready yet.'}
             </Text>
-            <Button
-              label={busy ? 'Activating…' : 'Activate Account'}
-              icon="arrowRight"
-              busy={busy}
-              onPress={() =>
-                void run(async () => {
-                  await client.fundingAccount();
-                  account.reload();
-                  return 'Your account is open.';
-                })
-              }
-            />
-            <FormError error={issueError} code={issueCode} />
+            {opening === 'done' && (
+              <>
+                <FormError error={opener.error} code={opener.code} />
+                <Text style={[styles.muted, { marginBottom: 0 }]}>
+                  We will try again the next time you open this screen.
+                </Text>
+              </>
+            )}
           </View>
         )}
 
@@ -205,6 +201,7 @@ export default function AddMoney() {
             client={client}
           />
         )}
+        {!account.loading && usesMobileMoney && <FormError error={issueError} code={issueCode} />}
 
         <FormError error={account.error} code={account.code} />
       </Panel>

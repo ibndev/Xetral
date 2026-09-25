@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { TwilioAdapter } from './twilio-adapter.js';
 import { fulfilmentContract, scriptedFetch } from '../ports/fulfilment.contract.js';
 import { supportsVerification } from '../ports/fulfilment.js';
+import { ProviderNotSentError } from '../ports/errors.js';
 
 /** A fixed instant, so a request_id derived from it is stable across runs. */
 const INITIATED_AT = new Date('2026-02-07T17:30:00.000Z');
@@ -129,5 +130,33 @@ describe('capabilities', () => {
   it('does not claim target verification', () => {
     const { port } = harness();
     expect(supportsVerification(port)).toBe(false);
+  });
+});
+
+describe('a token pasted on the dashboard', () => {
+  it('authenticates with the resolved token, and refuses with nothing sent when there is none', async () => {
+    const missing = scriptedFetch();
+    const refused = new TwilioAdapter({
+      baseUrl: 'https://api.twilio.test',
+      accountSid: 'AC123',
+      authToken: async () => undefined,
+      priceCents: 300n,
+      fetch: missing.fetch,
+    });
+    await expect(refused.catalogue({ group: 'US' })).rejects.toBeInstanceOf(ProviderNotSentError);
+    expect(missing.calls).toHaveLength(0);
+
+    const transport = scriptedFetch();
+    const port = new TwilioAdapter({
+      baseUrl: 'https://api.twilio.test',
+      accountSid: 'AC123',
+      authToken: async () => 'stored',
+      priceCents: 300n,
+      fetch: transport.fetch,
+    });
+    transport.script([{ json: { available_phone_numbers: [] } }]);
+    await port.catalogue({ group: 'US' }).catch(() => undefined);
+    const auth = (transport.calls[0]?.init.headers as Record<string, string>)['authorization'];
+    expect(auth).toBe(`Basic ${Buffer.from('AC123:stored').toString('base64')}`);
   });
 });
