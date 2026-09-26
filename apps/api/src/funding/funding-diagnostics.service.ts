@@ -7,7 +7,8 @@ import {
   ProviderTimeoutError,
   ProviderUnavailableError,
 } from '@xetral/providers';
-import { DATABASE, API_CONFIG } from '../tokens.js';
+import { DATABASE, API_CONFIG, FUNDING_PORT } from '../tokens.js';
+import type { FundingPort } from '@xetral/providers';
 import type { ApiConfig } from '../config.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { ProviderCredentialService } from '../settings/provider-credentials.service.js';
@@ -87,11 +88,29 @@ export interface RecentFailure {
   readonly reference: string | null;
 }
 
+/**
+ * WHY A RAIL WOULD NOT OPEN AN ACCOUNT NUMBER, in its own words (082).
+ *
+ * The customer is told "this one is on us to fix — we have been told"; this
+ * is what we were told. One row per distinct sentence, naming no customer.
+ */
+export interface AccountRefusal {
+  readonly rail: string;
+  readonly currency: string;
+  readonly providerCode: string | null;
+  readonly reason: string;
+  readonly occurrences: string;
+  readonly firstSeen: string;
+  readonly lastSeen: string;
+}
+
 export interface FundingDiagnosis {
   readonly rail: string;
   readonly checks: readonly DiagnosticCheck[];
   /** Most recent first. Empty is the good answer. */
   readonly failures: readonly RecentFailure[];
+  /** Most recent first. Empty is the good answer. */
+  readonly accountRefusals: readonly AccountRefusal[];
 }
 
 @Injectable()
@@ -104,6 +123,7 @@ export class FundingDiagnosticsService {
     @Inject(SettingsService) private readonly settings: SettingsService,
     @Inject(ProviderCredentialService)
     private readonly credentials: ProviderCredentialService,
+    @Inject(FUNDING_PORT) private readonly funding: FundingPort,
   ) {}
 
   async diagnose(): Promise<FundingDiagnosis> {
@@ -111,13 +131,7 @@ export class FundingDiagnosticsService {
     const checks: DiagnosticCheck[] = [];
 
     checks.push(await this.#schemaCheck());
-    checks.push({
-      name: 'Which rail opens the next account',
-      state: 'pass',
-      detail:
-        `funding_provider is '${rail}'. Accounts already issued keep working at the ` +
-        `provider that issued them; this only decides the next one.`,
-    });
+    checks.push(await this.#accountRailCheck(rail));
 
     /*
      * CAN EACH ROUTED CURRENCY ACTUALLY BE COLLECTED, which is a different
@@ -140,11 +154,21 @@ export class FundingDiagnosticsService {
         state: 'skip',
         detail: `Skipped: the active rail is '${rail}', not paystack.`,
       });
-      return { rail, checks, failures: await this.#recentFailures() };
+      return {
+        rail,
+        checks,
+        failures: await this.#recentFailures(),
+        accountRefusals: await this.#accountRefusals(),
+      };
     }
 
     checks.push(...(await this.#paystackChecks()));
-    return { rail, checks, failures: await this.#recentFailures() };
+    return {
+      rail,
+      checks,
+      failures: await this.#recentFailures(),
+      accountRefusals: await this.#accountRefusals(),
+    };
   }
 
   /**
@@ -248,6 +272,76 @@ export class FundingDiagnosticsService {
    * Every one of those has happened in this codebase and every one presented
    * as the same sentence.
    */
+  /**
+   * WHICH RAILS OPEN A NAIRA ACCOUNT NUMBER, IN ORDER — read from the switch
+   * that actually opens one.
+   *
+   * This line used to quote `funding_provider`, which stopped deciding
+   * account numbers when 076 gave `account` a route of its own and 079 a
+   * fallback. So the screen could say "paystack" while every account was
+   * being asked of Flutterwave first — the diagnostics page describing a
+   * system other than the one refusing customers.
+   */
+  async #accountRailCheck(fallback: string): Promise<DiagnosticCheck> {
+    const switching = this.funding as FundingPort & {
+      accountRails?: (currency: string) => Promise<readonly string[]>;
+    };
+    try {
+      const rails =
+        typeof switching.accountRails === 'function'
+          ? await switching.accountRails('NGN')
+          : [fallback];
+      return {
+        name: 'Which rails open a naira account number',
+        state: 'pass',
+        detail:
+          `Asked in this order: ${rails.join(' → ')}. The next is asked only after a ` +
+          `definite refusal. Accounts already issued keep working at the provider that ` +
+          `issued them; this only decides the next one.`,
+      };
+    } catch (error) {
+      return {
+        name: 'Which rails open a naira account number',
+        state: 'warn',
+        detail: `The route table could not be read: ${String(error)}. Falling back to '${fallback}'.`,
+      };
+    }
+  }
+
+  async #accountRefusals(): Promise<readonly AccountRefusal[]> {
+    try {
+      const rows = await this.pool.query<{
+        rail: string;
+        currency: string;
+        provider_code: string | null;
+        reason: string;
+        occurrences: string;
+        first_seen: Date;
+        last_seen: Date;
+      }>(
+        `SELECT rail, currency, provider_code, reason, occurrences::text AS occurrences,
+                first_seen, last_seen
+           FROM account_refusals
+          ORDER BY last_seen DESC
+          LIMIT 20`,
+      );
+      return rows.rows.map((row) => ({
+        rail: row.rail,
+        currency: row.currency,
+        providerCode: row.provider_code,
+        reason: row.reason,
+        occurrences: row.occurrences,
+        firstSeen: row.first_seen.toISOString(),
+        lastSeen: row.last_seen.toISOString(),
+      }));
+    } catch (error) {
+      // A deployment behind 082 has nowhere these were written; the page
+      // still renders everything else.
+      this.#logger.warn(`could not read account refusals: ${String(error)}`);
+      return [];
+    }
+  }
+
   async #recentFailures(): Promise<readonly RecentFailure[]> {
     try {
       const rows = await this.pool.query<{

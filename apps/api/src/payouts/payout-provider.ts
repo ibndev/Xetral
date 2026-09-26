@@ -7,6 +7,7 @@ import type {
   PayoutMethod,
   PayoutPort,
   PayoutReceipt,
+  TransferLimit,
   PayoutRequest,
 } from '@xetral/providers';
 import type { SettingsService } from '../settings/settings.service.js';
@@ -205,6 +206,11 @@ export class SwitchingPayoutPort implements PayoutPort {
       }
     }
     return rails;
+  }
+
+  /** What one transfer on a named rail may be, in this currency. */
+  limitsVia(provider: string, currency: string): TransferLimit | undefined {
+    return this.#adapters.get(provider)?.limits?.[currency];
   }
 
   /** The named rail and no other — the one recorded on the payout row. */

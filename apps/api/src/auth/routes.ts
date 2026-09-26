@@ -196,6 +196,12 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
        */
       .authenticated('POST', '/v1/push/devices', { pin: false })
       .authenticated('POST', '/v1/push/devices/revoke', { pin: false })
+      // The bell's feed: what the platform announced, read on request. No PIN
+      // — reading a notice moves nothing.
+      .authenticated('GET', '/v1/push/announcements', { pin: false })
+      // Which services are switched on, so a paused one reads "Coming soon"
+      // where it is offered. The refusal at each flow is still the control.
+      .authenticated('GET', '/v1/services', { pin: false })
 
       .authenticated('GET', '/v1/auth/devices', { pin: false })
       // Acting on it does. All three are reachable with a stolen access token,

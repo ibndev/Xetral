@@ -288,6 +288,18 @@ export const radius = { sm: 10, md: 14, lg: 18, xl: 24, pill: 999 } as const;
 export const space = { xs: 6, sm: 10, md: 14, lg: 18, xl: 24, xxl: 32 } as const;
 
 /**
+ * THE PAGE GUTTER, THE WEB'S `.shell` INSET — 20px on a phone.
+ *
+ * It was `space.lg` (18) on the Shell AND a further 20 on every home-screen
+ * section, so Explore and Recent activity sat at 38px while the currency
+ * rail, bleeding by its own 20, sat at 18: two edges on one screen, and the
+ * lower half read as a narrower column. One constant, applied ONCE by the
+ * Shell, and a rail bleeds by exactly it — the rule `.ccy-rail` records
+ * about a bleed that is not the inset it undoes.
+ */
+export const gutter = 20;
+
+/**
  * The typefaces from the design.
  *
  * These are the KEYS `_layout.tsx` registers the files under, which is what

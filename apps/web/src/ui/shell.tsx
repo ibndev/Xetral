@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
+import { pausedMode, serviceForPath } from '@xetral/client';
+import type { ServiceStates } from '@xetral/client';
 import { resetXetral, xetral } from '@/lib/session';
 import { Logo } from './logo';
 import { Icon } from './icon';
@@ -106,6 +108,30 @@ export function Shell({
 }) {
   const pathname = usePathname();
   const router = useRouter();
+
+  /*
+   * A PAUSED SERVICE SAYS SO HERE, ONCE, for every screen a kill switch
+   * covers — keyed off the path, so a gated screen cannot forget to ask. The
+   * refusal on the request is still the control; this only spares a customer
+   * filling in a form that was never going to go through.
+   */
+  const [services, setServices] = useState<ServiceStates | undefined>(undefined);
+  useEffect(() => {
+    // Only a screen a switch covers asks: the home screen and Send never do.
+    if (serviceForPath(pathname) === undefined) return undefined;
+    let live = true;
+    xetral()
+      .client.services()
+      .then((states) => {
+        if (live) setServices(states);
+      })
+      // A failed courtesy read hides nothing: unknown is "not paused".
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [pathname]);
+  const paused = pausedMode(services, pathname);
   const [scrolled, setScrolled] = useState(false);
 
   /*
@@ -258,13 +284,14 @@ export function Shell({
             comp draws it — and it is decoration rather than a claim, so it
             is `aria-hidden` and the link's own label is unchanged.
 
-            It says "there is something here", which on this product is
-            always true: the bell goes to the account screen, which carries
-            the customer's own settings. What it must NEVER do is imply a
+            It says "there is something here". The bell opens the
+            announcements the platform has published (`/notifications`) — it
+            used to open the account screen, so the one control saying
+            "something to read" led to settings. What it must NEVER do is imply a
             COUNT — a badge reading a number nothing has counted is the
             "+₦150,000 this week" problem in a smaller place.
           */}
-          <Link href="/settings" className="icon-btn has-dot" aria-label="Notifications">
+          <Link href="/notifications" className="icon-btn has-dot" aria-label="Notifications">
             <Icon name="bell" size={20} />
             {greeting !== undefined && <span className="dot" aria-hidden="true" />}
           </Link>
@@ -294,7 +321,31 @@ export function Shell({
               {title !== undefined && <h1>{title}</h1>}
             </div>
           )}
-          {children}
+          {paused === 'replace' ? (
+            <div className="empty coming-soon">
+              <span className="empty-icon"><Icon name="clock" size={24} /></span>
+              <span className="coming-soon-title">Coming soon</span>
+              <span className="coming-soon-sub">
+                This service is paused for now. Nothing on your account has
+                changed — check back soon.
+              </span>
+            </div>
+          ) : (
+            <>
+              {paused === 'notice' && (
+                <div className="notice warn">
+                  <span className="notice-icon"><Icon name="clock" size={18} /></span>
+                  {/* Shrinks beside the icon: a long sentence as a flex item
+                      is max-content wide and wraps onto its own line. */}
+                  <span style={{ flex: '1 1 0', minWidth: 0 }}>
+                    <strong>Coming soon.</strong> New activity here is paused for
+                    now. What you already hold is safe, and you can still manage it.
+                  </span>
+                </div>
+              )}
+              {children}
+            </>
+          )}
         </main>
       </div>
 

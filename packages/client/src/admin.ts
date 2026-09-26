@@ -754,6 +754,23 @@ export interface AdminFundingDiagnosis {
   readonly checks: readonly AdminDiagnosticCheck[];
   /** Most recent first. Empty is the good answer. */
   readonly failures: readonly AdminRecentFailure[];
+  /** Why a rail would not open an account number, in its own words (082).
+   *  Optional because a server older than it does not send the field. */
+  readonly accountRefusals?: readonly AdminAccountRefusal[];
+}
+
+/**
+ * One distinct reason a rail gave for not opening an account number. Names
+ * no customer: it is a fact about our integration, not about a person.
+ */
+export interface AdminAccountRefusal {
+  readonly rail: string;
+  readonly currency: string;
+  readonly providerCode: string | null;
+  readonly reason: string;
+  readonly occurrences: string;
+  readonly firstSeen: string;
+  readonly lastSeen: string;
 }
 
 /**

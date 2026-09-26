@@ -167,6 +167,8 @@ jobs:
             -f packages/ledger/sql/079_routing_policy.sql \
             -f packages/ledger/sql/080_payout_provider_known.sql \
             -f packages/ledger/sql/081_privacy_republish.sql \
+            -f packages/ledger/sql/082_refusals_and_details.sql \
+            -f packages/ledger/sql/083_payment_assignment.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       - name: Ledger and identity invariants
@@ -255,6 +257,8 @@ jobs:
                    packages/ledger/sql/079_routing_policy.test.sql \
                    packages/ledger/sql/080_payout_provider_known.test.sql \
                    packages/ledger/sql/081_privacy_republish.test.sql \
+                   packages/ledger/sql/082_refusals_and_details.test.sql \
+                   packages/ledger/sql/083_payment_assignment.test.sql \
                    packages/ledger/sql/099_least_privilege.test.sql; do
             echo "== $f"
             psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
@@ -375,6 +379,8 @@ jobs:
             -f packages/ledger/sql/079_routing_policy.sql \
             -f packages/ledger/sql/080_payout_provider_known.sql \
             -f packages/ledger/sql/081_privacy_republish.sql \
+            -f packages/ledger/sql/082_refusals_and_details.sql \
+            -f packages/ledger/sql/083_payment_assignment.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       # ------------------------------------------------------------------

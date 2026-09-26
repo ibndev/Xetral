@@ -35,6 +35,7 @@ shipped, that is called out explicitly.
 | 24 — A card paid for from whichever wallets can | ✅ | a Bitnob authorization hook, for per-spend attribution |
 | 25 — Who carries the grid, and who really holds the money | ✅ | funding each provider's float is a transfer a person makes |
 | 26 — An account number nobody has to ask for | ✅ | Paystack key for tier 1 accounts; Bitnob NGN enabled for verified ones |
+| 27 — Who carries what, as the owner assigned it | ✅ | a confirmed Kenyan collection provider |
 
 All eleven phases are built, a **pre-deployment audit** (Phase 12) closed what
 building them phase by phase had left between the phases, and **Phase 13** is
@@ -2559,4 +2560,29 @@ Bitnob to enable NGN on the account. The remaining readiness rows —
 `WEBHOOK_BASE_URL`, `TRUST_PROXY_HOPS`, `AIRALO_CLIENT_ID`,
 `TWILIO_ACCOUNT_SID`, `TWILIO_NUMBER_PRICE_CENTS` and the provider keys not
 yet pasted — are decisions only an operator can make.
+
+---
+
+## Phase 27 — Who carries what, as the owner assigned it ✅
+
+| File | What it is |
+|---|---|
+| `packages/ledger/sql/082_refusals_and_details.sql` | why a rail refused an account, and approval details onto blank accounts |
+| `packages/ledger/sql/083_payment_assignment.sql` | the owner's per-corridor assignment; Kenyan collection unrouted |
+| `apps/api/src/deployment-defaults.ts` | production defaults Coolify's empty variables were hiding |
+| `apps/api/src/settings/services.controller.ts` | which services are switched on, for the apps |
+| `apps/web/src/app/notifications`, `apps/mobile/app/notifications.tsx` | the bell's feed |
+
+1. **Naira account numbers were asked of Flutterwave first**, which needs a
+   BVN — now Paystack, per the assignment.
+2. **An account refusal is written down**, on `/admin/diagnostics`.
+3. **Approved details reach a blank account on every approval**, not once.
+4. **A held payout can be given back from `/admin/recovery`** — a hand-written
+   column list had dropped `settle_entry_id`.
+5. **A paused service reads "Coming soon"** where it is offered.
+
+**Before this goes live, an operator must:** apply **082** and **083** and
+re-apply **099**; open `/admin/diagnostics` after the next refused account and
+read the reason Paystack gave; and, the day a Kenyan collection provider is
+confirmed, add its coverage row by migration and route it on `/admin/providers`.
 

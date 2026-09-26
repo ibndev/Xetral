@@ -40,9 +40,17 @@ BEGIN
 END $$;
 
 -- 4. Moving it is recorded, like every route change.
+--    PUT BACK TO WHAT IT WAS, not to a rail this suite names: 083 moved naira
+--    account numbers to Paystack, and a suite restoring a value it does not
+--    own undoes a later migration on the shared invariant database — 033's
+--    lesson about a hardcoded consent version.
 DO $$
-DECLARE n INT;
+DECLARE
+    n   INT;
+    was TEXT;
 BEGIN
+    SELECT provider INTO was FROM provider_routes
+     WHERE operation = 'account' AND currency = 'NGN';
     UPDATE provider_routes SET provider = 'bitnob'
      WHERE operation = 'account' AND currency = 'NGN';
     SELECT count(*) INTO n FROM provider_route_history
@@ -50,7 +58,7 @@ BEGIN
     IF n < 1 THEN
         RAISE EXCEPTION 'TEST FAILED 4: an account route change left no history';
     END IF;
-    UPDATE provider_routes SET provider = 'flutterwave'
+    UPDATE provider_routes SET provider = was
      WHERE operation = 'account' AND currency = 'NGN';
     RAISE NOTICE 'PASS 4: moving naira account numbers is on the record';
 END $$;

@@ -73,6 +73,40 @@ export default function Diagnostics() {
       </div>
 
       {/*
+        WHY A RAIL WOULD NOT OPEN AN ACCOUNT NUMBER (082). A customer on Add
+        Money reads "this one is on us to fix — we have been told"; this panel
+        is what we were told, in the rail's own words. It sits above the 5xx
+        list because a refusal is a 422 and never appears there — which is
+        exactly why nothing on this page could answer the question before.
+      */}
+      {report.data !== undefined && (
+        <div className="panel">
+          <h2>Why an account number was refused</h2>
+          <p className="lead">
+            Each distinct reason a rail gave for not opening an account, with
+            how often and when it was last said. No customer is named.
+          </p>
+          {(report.data.accountRefusals ?? []).length === 0 && (
+            <p className="empty">No rail has refused to open an account.</p>
+          )}
+          {(report.data.accountRefusals ?? []).map((refusal, index) => (
+            <div className="row" key={`${refusal.rail}-${refusal.currency}-${index}`}>
+              <span style={{ minWidth: 0 }}>
+                <span className="mono">
+                  {refusal.rail} · {refusal.currency}
+                  {refusal.providerCode === null ? '' : ` · ${refusal.providerCode}`}
+                </span>
+                <div className="cell-sub">{refusal.reason}</div>
+              </span>
+              <span className="muted nowrap">
+                {refusal.occurrences}× · {new Date(refusal.lastSeen).toLocaleString('en-GB')}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/*
         WHAT ACTUALLY THREW, and this is the half no configuration check can
         reach. The probes above answer "is the rail set up correctly"; a null
         column, a constraint or a typo in a SQL string passes every one of

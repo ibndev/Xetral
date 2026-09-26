@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Share, Text, TextInput, View } from 'react-native';
+import { Pressable, Share, Text, TextInput, View } from 'react-native';
 import {
   exponentFor,
   formatAmount,
@@ -10,12 +10,14 @@ import {
   requestLinkFor,
   symbolFor,
 } from '@xetral/client';
+import type { VirtualAccount } from '@xetral/client';
 import { Shell } from '@/shell';
 import { AcctCard, Eyebrow } from '@/acct-card';
 import { Button, FormError, Loading, Segmented } from '@/ui';
 import { useLoad, useXetral } from '@/hooks';
 import { cardShadow, font, radius, space, useStyles, useTheme } from '@/theme';
 import { webOrigin } from '@/session';
+import { Icon } from '@/icon';
 
 /**
  * ASKING TO BE PAID.
@@ -43,6 +45,9 @@ export default function Request() {
   const styles = useStyles();
   const colors = useTheme();
   const profile = useLoad(() => client.profile(), [client]);
+  // Read and never opened here: registration opens it, and Add money opens it
+  // for anybody who arrived without one.
+  const account = useLoad(() => client.existingFundingAccount(), [client]);
   const session = useLoad(() => client.currentSession(), [client]);
   /* The customer's own country row, for its dialling code — the code lives on
      the country, not on the session. A missing row costs the trim only. */
@@ -211,44 +216,123 @@ export default function Request() {
             {...(local === '' ? {} : { share: local })}
           />
 
-          <Eyebrow>From anybody else</Eyebrow>
+          <Eyebrow>From any bank</Eyebrow>
 
-          {/* BOTH VALUES ARE ON SCREEN, ABOVE THEIR BUTTONS. A Copy button
-              beside an em dash is a button that copies nothing and says
-              nothing about why; what is shown is what is shared, so a customer
-              can read it back over a phone call. */}
-          <Text style={styles.muted}>
-            A checkout page anybody can pay on, in any currency you hold.
-          </Text>
-          <View
-            style={{
-              marginTop: space.xs,
-              paddingVertical: space.sm,
-              paddingHorizontal: space.md,
-              borderRadius: radius.md,
-              backgroundColor: colors.surface2,
-            }}
-          >
-            <Text style={[styles.amount, { fontSize: 14 }]} selectable>
-              {link ?? 'Not set'}
-            </Text>
-          </View>
-          <Button
-            label="Copy payment link"
-            icon="copy"
-            quiet
-            disabled={link === null}
-            onPress={() => {
-              if (link === null) return;
-              // Silent on failure: a dismissed share sheet rejects on iOS,
-              // which is somebody changing their mind rather than an error.
-              void Share.share({ message: link }).catch(() => undefined);
-            }}
+          {/* THE ACCOUNT DETAILS, WHERE THE PAYMENT LINK WAS — the web's own
+              change. A sender in Nigeria pays by bank transfer and asks for a
+              NAME, a BANK and a NUMBER, so those three are shown in full, each
+              shareable, and together. The request link above still carries a
+              checkout for anybody who needs one. */}
+          <AccountDetails
+            account={account.data ?? null}
+            loading={account.loading}
           />
         </>
       )}
 
       <FormError error={profile.error} code={profile.code} />
     </Shell>
+  );
+}
+
+/** The bank account a stranger pays into: a name, a bank and a number. */
+function AccountDetails({
+  account, loading,
+}: {
+  readonly account: VirtualAccount | null;
+  readonly loading: boolean;
+}) {
+  const colors = useTheme();
+  const styles = useStyles();
+  const card = {
+    marginTop: space.sm,
+    backgroundColor: colors.surface,
+    borderWidth: 1, borderColor: colors.edge,
+    borderRadius: 18,
+    paddingHorizontal: 16, paddingTop: 4, paddingBottom: 14,
+    ...cardShadow(colors),
+  } as const;
+
+  if (account === null) {
+    return (
+      <View style={[card, { paddingTop: 14 }]}>
+        <Text style={styles.muted}>
+          {loading
+            ? 'Loading your account details…'
+            : 'Your account number is still being opened. It appears here, and on Add money, as soon as it is ready.'}
+        </Text>
+      </View>
+    );
+  }
+
+  const all = `Account name: ${account.account_name}\nBank: ${account.bank_name}\nAccount number: ${account.account_number}`;
+  return (
+    <View style={card}>
+      <DetailRow label="Account number" value={account.account_number} large />
+      <DetailRow label="Bank" value={account.bank_name} />
+      <DetailRow label="Account name" value={account.account_name} last />
+      <Button
+        label="Share all details"
+        icon="copy"
+        quiet
+        onPress={() => void Share.share({ message: all }).catch(() => undefined)}
+      />
+      <Text style={[styles.hint, { marginTop: space.sm }]}>
+        Transfers into this account land in your {account.currency} wallet
+        {account.status === 'active' ? ', usually within seconds.' : ' once it finishes activating.'}
+      </Text>
+    </View>
+  );
+}
+
+/** One labelled value and its own Copy — what is shown is what is shared. */
+function DetailRow({
+  label, value, large, last,
+}: {
+  readonly label: string;
+  readonly value: string;
+  readonly large?: boolean;
+  readonly last?: boolean;
+}) {
+  const colors = useTheme();
+  return (
+    <View
+      style={{
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+        paddingVertical: 12,
+        borderBottomWidth: last === true ? 0 : 1, borderBottomColor: colors.line,
+      }}
+    >
+      <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+        <Text style={{ color: colors.text3, fontFamily: font.sansMedium, fontSize: 12 }}>{label}</Text>
+        <Text
+          selectable
+          style={{
+            color: colors.text,
+            fontFamily: large === true ? font.numBold : font.sansSemi,
+            fontSize: large === true ? 19 : 15,
+            letterSpacing: large === true ? 0.6 : 0,
+            fontVariant: ['tabular-nums'],
+          }}
+        >
+          {value}
+        </Text>
+      </View>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Copy ${label.toLowerCase()}`}
+        android_ripple={null}
+        onPress={() => void Share.share({ message: value }).catch(() => undefined)}
+        style={{
+          flexDirection: 'row', alignItems: 'center', gap: 5,
+          paddingVertical: 6, paddingHorizontal: 10,
+          borderRadius: 999, borderWidth: 1, borderColor: colors.edge,
+          backgroundColor: colors.surface,
+        }}
+      >
+        <Icon name="copy" size={13} color={colors.text2} />
+        <Text style={{ color: colors.text2, fontFamily: font.sansSemi, fontSize: 12 }}>Copy</Text>
+      </Pressable>
+    </View>
   );
 }

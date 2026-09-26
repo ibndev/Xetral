@@ -29,11 +29,14 @@ BEGIN
     IF ghs IS DISTINCT FROM 'flutterwave' THEN
         RAISE EXCEPTION 'TEST FAILED 1: cedi collection is routed to %, not flutterwave', ghs;
     END IF;
-    IF kes IS DISTINCT FROM 'flutterwave' THEN
-        RAISE EXCEPTION 'TEST FAILED 1: shilling payouts are routed to %, not flutterwave', kes;
+    -- ROUTED, not "routed to Flutterwave": 083 moved shilling payouts to
+    -- Bitnob by the owner's assignment, and 083's suite asserts WHICH rail.
+    -- What 059 guarantees is that the corridor has one.
+    IF kes IS NULL THEN
+        RAISE EXCEPTION 'TEST FAILED 1: shilling payouts have no rail';
     END IF;
 
-    RAISE NOTICE 'PASS 1: naira stays on Paystack; cedis and shillings route to Flutterwave';
+    RAISE NOTICE 'PASS 1: naira stays on Paystack; cedis route to Flutterwave; shillings are routed (to %)', kes;
 END $$;
 
 -- ---------------------------------------------------------------------------

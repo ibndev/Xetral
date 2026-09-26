@@ -262,6 +262,7 @@ export class FundingService {
         }
         break;
       } catch (error) {
+        this.#recordRefusal(rail, currency, error);
         // Anything but a certain "no" stops here: that rail may have opened
         // an account, and asking another is a second live number.
         if (!providerDidNothing(error)) this.#relayAccountFailure(error, rail, currency);
@@ -477,6 +478,42 @@ export class FundingService {
       [userId, home],
     );
     return result.rows[0];
+  }
+
+  /**
+   * WRITES DOWN WHY A RAIL SAID NO, where an operator can read it (082).
+   *
+   * The log line below was the only record, and on a deployment nobody can
+   * page back through, a customer was told "this one is on us to fix — we
+   * have been told" while nothing anybody could open said what we had been
+   * told. `/admin/diagnostics` reads these rows.
+   *
+   * A refusal, a request that never left and an answer we could not read are
+   * recorded; a timeout and a pending assignment are not, because neither is
+   * a reason — the first may have worked and the second has.
+   *
+   * FIRE-AND-FORGET, and every error swallowed: recording why a customer was
+   * refused must never become a second failure on top of the refusal, and a
+   * deployment behind 082 simply has nowhere to write. No customer is
+   * passed, because the row names none.
+   */
+  #recordRefusal(rail: string, currency: Currency, error: unknown): void {
+    if (
+      !(error instanceof ProviderRejectedError) &&
+      !(error instanceof ProviderContractError) &&
+      !(error instanceof ProviderUnavailableError)
+    ) {
+      return;
+    }
+    const code = error instanceof ProviderRejectedError ? (error.providerCode ?? null) : error.name;
+    this.pool
+      .query(`SELECT record_account_refusal($1, $2, $3, $4)`, [
+        rail,
+        currency,
+        code,
+        error.message,
+      ])
+      .catch(() => undefined);
   }
 
   /**

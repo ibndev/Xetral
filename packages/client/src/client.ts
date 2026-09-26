@@ -1,5 +1,6 @@
 import { ApiError, toApiError } from './errors.js';
 import { Session } from './session.js';
+import type { ServiceStates } from './services.js';
 
 /**
  * The typed HTTP surface.
@@ -685,6 +686,15 @@ export interface CryptoQuote {
  * currency their wallet opens in. None of the three is a text box, and the
  * screen says what changes each rather than showing a disabled field.
  */
+/** One announcement, as a customer reads it: what was said and when. */
+export interface Announcement {
+  readonly uuid: string;
+  readonly title: string;
+  readonly body: string;
+  /** ISO timestamp the announcement was published. */
+  readonly at: string;
+}
+
 export interface AccountDetails {
   /** What somebody typed about themselves, and the only editable field here.
    *  Null on an account that predates the column — which is exactly the
@@ -1045,6 +1055,33 @@ export class XetralClient {
   async accountDetails(): Promise<AccountDetails> {
     return this.#get('/v1/auth/profile/details');
   }
+
+  /**
+   * What the platform has announced to this customer, newest first — the
+   * bell's feed. The same rows the broadcast worker pushes, read on request,
+   * so a customer who declined product news can still read "the app is down
+   * tonight".
+   */
+  async announcements(): Promise<{ readonly announcements: readonly Announcement[] }> {
+    return this.#get('/v1/push/announcements');
+  }
+
+  /**
+   * Which services are switched on — so a paused one reads "Coming soon"
+   * where it is offered. Held for ten seconds: every screen's Shell asks, and
+   * a switch flipped during an incident is seen within one screen change.
+   */
+  async services(): Promise<ServiceStates> {
+    const now = Date.now();
+    if (this.#services !== undefined && now - this.#services.at < 10_000) {
+      return this.#services.value;
+    }
+    const body = await this.#get<{ services: ServiceStates }>('/v1/services');
+    this.#services = { at: now, value: body.services };
+    return body.services;
+  }
+
+  #services: { readonly at: number; readonly value: ServiceStates } | undefined;
 
   /**
    * Fills in or corrects what the account holds — while it is unverified.

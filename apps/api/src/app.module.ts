@@ -134,6 +134,7 @@ import { RateFeedService } from './fx/rate-feed.service.js';
 import { PushService } from './push/push.service.js';
 import { PushBroadcastService } from './push/push-broadcast.service.js';
 import { PushController } from './push/push.controller.js';
+import { ServicesController } from './settings/services.controller.js';
 import { PayController } from './pay/pay.controller.js';
 import { PaymentLinkService } from './pay/payment-link.service.js';
 import { ProviderRouterService } from './routing/provider-router.service.js';
@@ -1276,6 +1277,7 @@ export class AppModule {
         AdminCountriesController,
         PayController,
         PushController,
+        ServicesController,
       ],
       providers: [
         { provide: API_CONFIG, useValue: options.config },

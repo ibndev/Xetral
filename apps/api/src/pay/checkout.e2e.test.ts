@@ -10,6 +10,7 @@ import pg from 'pg';
 import type { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../app.module.js';
+import { ProviderRouterService } from '../routing/provider-router.service.js';
 import { systemClock } from '../tokens.js';
 import { testApiConfig } from '../test-support/api-config.js';
 
@@ -32,6 +33,12 @@ import { testApiConfig } from '../test-support/api-config.js';
  * of which is a place a plausible-looking constant could be wrong.
  */
 const DATABASE_URL = process.env['DATABASE_URL'];
+/*
+ * The OWNER, for one statement: putting a route back to "unrouted" is a
+ * DELETE, which 099 takes away from the application role on purpose — an
+ * operator removes a corridor at a prompt, never through the API.
+ */
+const OWNER_DATABASE_URL = process.env['DATABASE_OWNER_URL'] ?? DATABASE_URL;
 if (DATABASE_URL === undefined || DATABASE_URL === '') {
   throw new Error('this suite needs DATABASE_URL pointing at a migrated database');
 }
@@ -124,12 +131,27 @@ const charge = (slug: string, currency: string, amount = '25.00') =>
     .send({ amount, currency, email: 'payer@example.com' });
 
 describe('paying a link in a currency Flutterwave collects', () => {
-  it('starts a checkout for GHS, KES and USD', async () => {
+  it('starts a checkout for GHS and USD', async () => {
     const slug = await ghanaian();
-    for (const currency of ['GHS', 'KES', 'USD']) {
+    for (const currency of ['GHS', 'USD']) {
       const res = await charge(slug, currency).expect(200);
       expect(res.body.authorization_url).toContain('checkout.flutterwave.com');
     }
+  });
+
+  it('REFUSES SHILLINGS WHILE NO PROVIDER IS CONFIRMED FOR THEM — before a row or a request', async () => {
+    /*
+     * 083 leaves Kenyan collection unrouted by the owner's assignment: no
+     * provider is confirmed, so nothing is sent anywhere and the payer reads
+     * a code the page turns into words, rather than a Flutterwave page that
+     * fails for a reason nobody on our side can see.
+     */
+    const slug = await ghanaian();
+    seen.length = 0;
+    const res = await charge(slug, 'KES');
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('currency_not_supported');
+    expect(seen.filter((r) => r.url.startsWith('/v3/payments'))).toHaveLength(0);
   });
 
   it('SENDS MAJOR UNITS, which is the opposite of Paystack one directory away', async () => {
@@ -169,7 +191,28 @@ describe('paying a link in a currency Flutterwave collects', () => {
     const slug = await ghanaian();
     seen.length = 0;
     await charge(slug, 'GHS').expect(200);
-    await charge(slug, 'KES').expect(200);
+    /*
+     * THE KENYAN SLOT IS PLUGGABLE: routed by an operator the day a provider
+     * is confirmed, the adapter must already offer M-Pesa. Routed for this
+     * assertion and put back, because the e2e files share one database.
+     */
+    const operator = await pool.query<{ uuid: string }>(`SELECT uuid FROM users LIMIT 1`);
+    await app.get(ProviderRouterService).route({
+      operation: 'collect',
+      currency: 'KES',
+      provider: 'flutterwave',
+      byUserUuid: operator.rows[0]!.uuid,
+    });
+    try {
+      await charge(slug, 'KES').expect(200);
+    } finally {
+      const owner = new pg.Pool({ connectionString: OWNER_DATABASE_URL, max: 1 });
+      try {
+        await owner.query(`DELETE FROM provider_routes WHERE operation = 'collect' AND currency = 'KES'`);
+      } finally {
+        await owner.end();
+      }
+    }
 
     const bodies = seen
       .filter((r) => r.url.startsWith('/v3/payments'))

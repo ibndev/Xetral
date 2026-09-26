@@ -187,6 +187,25 @@ describe('a switched-off service refuses', () => {
   });
 });
 
+describe('the apps can see a switch before a customer walks into it', () => {
+  it('reports every switch, and a paused one as off', async () => {
+    await setSwitch('cards_enabled', 'false');
+    const res = await request(app.getHttpServer()).get('/v1/services').set(auth()).expect(200);
+    expect(res.body.services).toEqual({
+      crypto: true,
+      fx: true,
+      cards: false,
+      bills: true,
+      payouts: true,
+    });
+    await setSwitch('cards_enabled', 'true');
+  });
+
+  it('only to somebody signed in', async () => {
+    await request(app.getHttpServer()).get('/v1/services').expect(401);
+  });
+});
+
 describe('a switched-off service still', () => {
   it('authenticates — off must not mean open', async () => {
     // A disabled feature becoming an UNAUTHENTICATED one is the failure mode

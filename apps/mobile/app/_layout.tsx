@@ -234,6 +234,7 @@ function Chrome() {
         <Stack.Screen name="kyc" />
         <Stack.Screen name="settings" />
         <Stack.Screen name="security" />
+        <Stack.Screen name="notifications" />
       </Stack>
     </>
   );

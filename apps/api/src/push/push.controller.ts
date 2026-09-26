@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Get,
   HttpCode,
   Inject,
   Post,
@@ -11,6 +12,7 @@ import {
 import { z } from 'zod';
 import type { AuthenticatedRequest } from '../auth/auth.guard.js';
 import { PushService } from './push.service.js';
+import type { AnnouncementView } from './push.service.js';
 
 /**
  * The handset a customer is signed in on.
@@ -55,6 +57,19 @@ export class PushController {
       });
     }
     await this.push.register(auth.sub, parsed.data.token, parsed.data.platform);
+  }
+
+  /**
+   * What the platform has announced to this customer — the bell's feed.
+   * No PIN: reading a notice moves nothing.
+   */
+  @Get('announcements')
+  async announcements(
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ readonly announcements: readonly AnnouncementView[] }> {
+    const auth = request.auth;
+    if (auth === undefined) throw new UnauthorizedException({ error: 'invalid_token' });
+    return { announcements: await this.push.announcementsFor(auth.sub) };
   }
 
   /**

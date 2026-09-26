@@ -122,6 +122,17 @@ export interface BitnobPayoutOptions {
 export class BitnobPayoutAdapter implements PayoutPort {
   readonly provider = PROVIDER;
 
+  /*
+   * M-PESA THROUGH BITNOB: KSh 150 TO KSh 100,000 PER TRANSACTION. Source:
+   * the product owner's payment architecture specification (September 2026),
+   * from Bitnob's Kenya onboarding — their public v2 specification states no
+   * range. Minor units, KES exponent 2. A currency not named here carries no
+   * rail-stated range.
+   */
+  readonly limits = {
+    KES: { minMinor: 15_000n, maxMinor: 10_000_000n },
+  } as const;
+
   readonly #client: BitnobClient;
 
   constructor(options: BitnobPayoutOptions) {

@@ -56,7 +56,13 @@ export default function Request() {
   const countries = useLoad(() => client.session.countries(), [client]);
   const here = countries.data?.find((c) => c.code === session.data?.country);
   const [copiedPhone, setCopiedPhone] = useState(false);
-  const [copiedLink, setCopiedLink] = useState(false);
+  const [copiedField, setCopiedField] = useState<string | undefined>(undefined);
+  /*
+   * THE BANK ACCOUNT, READ AND NEVER OPENED from here — registration opens
+   * it, and Add money opens it for anybody who arrived without one. This
+   * screen only shows what exists.
+   */
+  const account = useLoad(() => client.existingFundingAccount(), [client]);
   const [copiedRequest, setCopiedRequest] = useState(false);
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
@@ -229,30 +235,96 @@ export default function Request() {
         </p>
       </div>
 
-      <span className="eyebrow">From anybody else</span>
+      <span className="eyebrow">From any bank</span>
 
       {/*
-        BOTH VALUES ARE ON SCREEN, ABOVE THEIR BUTTONS. A Copy button beside
-        an em dash is a button that copies nothing and says nothing about why;
-        what is shown is what is copied, so a customer can read it back over a
-        phone call when the clipboard is not the answer.
+        THE ACCOUNT DETAILS, WHERE THE PAYMENT LINK WAS.
+
+        "A checkout page anybody can pay on" answered a question most people
+        asking to be paid do not have: somebody in Nigeria pays a person by
+        bank transfer, and what they ask for is a NAME, a BANK and a NUMBER.
+        Those three are what a sender types into their banking app, so they
+        are shown in full, each copyable, and together — the request link
+        above still carries the checkout for anybody who needs one.
       */}
-      <div className="copy-row">
-        <span className="copy-label">
-          A checkout page anybody can pay on, in any currency you hold.
-        </span>
-        <div className="copy-value mono link">{link ?? 'Not set'}</div>
-        <button
-          type="button"
-          className="ghost small"
-          disabled={link === null}
-          onClick={() => copy(link ?? '', setCopiedLink)}
-        >
-          <Icon name="copy" size={15} /> {copiedLink ? 'Copied' : 'Copy payment link'}
-        </button>
-      </div>
+      {account.data !== null && account.data !== undefined ? (
+        <div className="card acct-details">
+          <DetailRow
+            label="Account number"
+            value={account.data.account_number}
+            mono
+            copied={copiedField === 'number'}
+            onCopy={() => copy(account.data?.account_number ?? '', (v) => setCopiedField(v ? 'number' : undefined))}
+          />
+          <DetailRow
+            label="Bank"
+            value={account.data.bank_name}
+            copied={copiedField === 'bank'}
+            onCopy={() => copy(account.data?.bank_name ?? '', (v) => setCopiedField(v ? 'bank' : undefined))}
+          />
+          <DetailRow
+            label="Account name"
+            value={account.data.account_name}
+            copied={copiedField === 'name'}
+            onCopy={() => copy(account.data?.account_name ?? '', (v) => setCopiedField(v ? 'name' : undefined))}
+          />
+          <button
+            type="button"
+            className="ghost small acct-details-all"
+            onClick={() =>
+              copy(
+                detailsText(account.data?.account_name ?? '', account.data?.bank_name ?? '', account.data?.account_number ?? ''),
+                (v) => setCopiedField(v ? 'all' : undefined),
+              )
+            }
+          >
+            <Icon name="copy" size={15} /> {copiedField === 'all' ? 'Copied' : 'Copy all details'}
+          </button>
+          <p className="acct-sub-quiet">
+            Transfers into this account land in your {account.data.currency} wallet
+            {account.data.status === 'active' ? ', usually within seconds.' : ' once it finishes activating.'}
+          </p>
+        </div>
+      ) : (
+        <div className="card acct-details">
+          <p className="acct-sub-quiet" style={{ margin: 0 }}>
+            {account.loading
+              ? 'Loading your account details…'
+              : 'Your account number is still being opened. It appears here, and on Add money, as soon as it is ready.'}
+          </p>
+        </div>
+      )}
 
       <FormError error={profile.error} code={profile.code} />
     </Shell>
+  );
+}
+
+/** What "Copy all details" puts on the clipboard: the three lines a sender
+ *  pastes into a message, in the order a banking app asks for them. */
+function detailsText(name: string, bank: string, number: string): string {
+  return `Account name: ${name}\nBank: ${bank}\nAccount number: ${number}`;
+}
+
+/** One labelled value with its own Copy — the value on screen IS what is copied. */
+function DetailRow({
+  label, value, mono, copied, onCopy,
+}: {
+  readonly label: string;
+  readonly value: string;
+  readonly mono?: boolean;
+  readonly copied: boolean;
+  readonly onCopy: () => void;
+}) {
+  return (
+    <div className="acct-detail">
+      <span className="acct-detail-main">
+        <span className="acct-detail-label">{label}</span>
+        <span className={mono === true ? 'acct-detail-value mono' : 'acct-detail-value'}>{value}</span>
+      </span>
+      <button type="button" className="copy-chip" onClick={onCopy} aria-label={`Copy ${label.toLowerCase()}`}>
+        <Icon name="copy" size={14} /> {copied ? 'Copied' : 'Copy'}
+      </button>
+    </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Animated, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -6,7 +6,10 @@ import { Link, router, usePathname } from 'expo-router';
 import { Icon } from '@/icon';
 import type { IconName } from '@/icon';
 import { Logo } from '@/logo';
-import { font, space, useStyles, useTheme, useThemeChoice, useResolvedScheme } from '@/theme';
+import { useXetral } from '@/hooks';
+import { pausedMode, serviceForPath } from '@xetral/client';
+import type { ServiceStates } from '@xetral/client';
+import { font, gutter, space, useStyles, useTheme, useThemeChoice, useResolvedScheme } from '@/theme';
 
 /**
  * ONE NAVIGATION, THE SAME AS THE WEB'S.
@@ -66,6 +69,89 @@ export function ThemeToggle() {
       style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
     >
       <Icon name={scheme === 'dark' ? 'sun' : 'moon'} size={20} color={colors.text2} />
+    </Pressable>
+  );
+}
+
+/** A paused service where its screen would be — the web's `.coming-soon`. */
+function ComingSoon() {
+  const colors = useTheme();
+  return (
+    <View style={{ alignItems: 'center', gap: 8, paddingVertical: space.xxl }}>
+      <View
+        style={{
+          width: 56, height: 56, borderRadius: 14,
+          alignItems: 'center', justifyContent: 'center',
+          backgroundColor: colors.surface2,
+        }}
+      >
+        <Icon name="clock" size={24} color={colors.text3} />
+      </View>
+      <Text style={{ color: colors.text, fontFamily: font.sansBold, fontSize: 17 }}>Coming soon</Text>
+      <Text
+        style={{
+          color: colors.text3, fontFamily: font.sans, fontSize: 13.5,
+          textAlign: 'center', lineHeight: 20, maxWidth: 260,
+        }}
+      >
+        This service is paused for now. Nothing on your account has changed — check back soon.
+      </Text>
+    </View>
+  );
+}
+
+/** Above a paused screen where the customer may hold something. */
+function PausedNotice() {
+  const colors = useTheme();
+  return (
+    <View
+      style={{
+        flexDirection: 'row', gap: 10, alignItems: 'flex-start',
+        padding: 14, borderRadius: 14, marginBottom: space.md,
+        backgroundColor: colors.warnBg,
+      }}
+    >
+      <Icon name="clock" size={18} color={colors.warn} />
+      <Text style={{ flex: 1, color: colors.text, fontFamily: font.sans, fontSize: 13.5, lineHeight: 20 }}>
+        <Text style={{ fontFamily: font.sansBold }}>Coming soon. </Text>
+        New activity here is paused for now. What you already hold is safe, and you can still manage it.
+      </Text>
+    </View>
+  );
+}
+
+/**
+ * THE BELL, AS THE WEB DRAWS IT — beside the theme toggle, opening the
+ * announcements the platform has published.
+ *
+ * The phone had none, and the web's opened the account screen, so the one
+ * control saying "something to read" led nowhere to read anything. The dot is
+ * decoration on the home header only, exactly as the web draws it: it never
+ * carries a count, because nothing counts what a customer has read.
+ */
+function Bell({ dot }: { readonly dot: boolean }) {
+  const colors = useTheme();
+  return (
+    <Pressable
+      onPress={() => router.push('/notifications' as never)}
+      android_ripple={null}
+      accessibilityRole="link"
+      accessibilityLabel="Notifications"
+      hitSlop={8}
+      style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
+    >
+      <Icon name="bell" size={20} color={colors.text2} />
+      {dot && (
+        <View
+          pointerEvents="none"
+          style={{
+            position: 'absolute', top: 10, right: 11,
+            width: 8, height: 8, borderRadius: 4,
+            backgroundColor: colors.iris,
+            borderWidth: 2, borderColor: colors.bg,
+          }}
+        />
+      )}
     </Pressable>
   );
 }
@@ -145,6 +231,28 @@ export function Shell({
   const colors = useTheme();
   const insets = useSafeAreaInsets();
   const pathname = usePathname();
+  const client = useXetral();
+
+  /*
+   * A PAUSED SERVICE SAYS SO HERE, ONCE — the web Shell's own gate, keyed off
+   * the path so no gated screen can forget it. The refusal on the request is
+   * still the control; unknown (loading, or the read failed) is not paused.
+   */
+  const [services, setServices] = useState<ServiceStates | undefined>(undefined);
+  useEffect(() => {
+    if (serviceForPath(pathname) === undefined) return undefined;
+    let live = true;
+    client
+      .services()
+      .then((states) => {
+        if (live) setServices(states);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [client, pathname]);
+  const paused = pausedMode(services, pathname);
 
   const isActive = (href: string) =>
     href === '/wallet' ? pathname === href : pathname.startsWith(href);
@@ -180,7 +288,9 @@ export function Shell({
   const body = (
     <Animated.View
       style={{
-        padding: space.lg,
+        // The web's `.shell`: 16 above, the gutter either side.
+        paddingTop: 16,
+        paddingHorizontal: gutter,
         paddingBottom: space.xxl,
         opacity: entrance,
         transform: [
@@ -248,7 +358,14 @@ export function Shell({
           )}
         </View>
       )}
-      {children}
+      {paused === 'replace' ? (
+        <ComingSoon />
+      ) : (
+        <>
+          {paused === 'notice' && <PausedNotice />}
+          {children}
+        </>
+      )}
     </Animated.View>
   );
 
@@ -275,7 +392,8 @@ export function Shell({
           alignItems: 'center',
           gap: space.sm,
           height: 56,
-          paddingHorizontal: space.md,
+          // The web's `.appbar`, 16 either side.
+          paddingHorizontal: 16,
         }}
       >
         {greeting !== undefined ? (
@@ -323,6 +441,7 @@ export function Shell({
         )}
         <View style={{ flex: 1 }} />
         <ThemeToggle />
+        <Bell dot={greeting !== undefined} />
       </View>
       )}
 

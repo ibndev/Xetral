@@ -7327,3 +7327,65 @@ html:not([data-theme='dark']) .tabbar {
 .payin .segmented.wide button { gap: 7px; }
 .payin .hint { margin: -4px 0 0; }
 .esim-buy { margin-top: 14px; }
+
+/* ── the bell's feed ─────────────────────────────────────────────────────────
+ *
+ * One card of rows, like the More screen's groups — but the body WRAPS, where
+ * a list row clips to one line: an announcement is read, not scanned, and
+ * "the app is down between 22:00 and…" cut at the ellipsis says nothing.
+ */
+.announce-list { list-style: none; margin: 0; padding: 4px 16px; }
+.announce {
+  display: flex;
+  gap: 12px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+.announce:last-child { border-bottom: 0; }
+.announce-icon {
+  display: grid; place-items: center;
+  width: 38px; height: 38px;
+  border-radius: 12px;
+  background: var(--iris-tint);
+  color: var(--iris-text);
+  flex-shrink: 0;
+}
+.announce-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.announce-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.announce-title { font-weight: 600; font-size: 14.5px; color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+.announce-time { font-size: 12px; color: var(--text-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.announce-body { font-size: 13.5px; line-height: 1.5; color: var(--text-2); white-space: pre-line; overflow-wrap: anywhere; }
+
+/* ── the account details on Request money ────────────────────────────────────
+ *
+ * A name, a bank and a number — each on its own line with its own Copy,
+ * because a sender types them into three different boxes. The number is the
+ * largest, since it is the one read aloud and the one got wrong.
+ */
+.acct-details { display: flex; flex-direction: column; padding: 6px 16px 14px; }
+.acct-detail {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+.acct-detail-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.acct-detail-label { font-size: 12px; color: var(--text-3); letter-spacing: 0.01em; }
+.acct-detail-value { font-size: 15px; font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
+.acct-detail-value.mono { font-size: 19px; letter-spacing: 0.04em; font-variant-numeric: tabular-nums; }
+.acct-details-all { align-self: flex-start; margin-top: 12px; }
+.acct-sub-quiet { font-size: 12.5px; color: var(--text-3); margin: 10px 0 0; line-height: 1.5; }
+
+/* A paused service, where its screen would have been. */
+.coming-soon { gap: 6px; }
+.coming-soon-title { font-size: 17px; font-weight: 700; color: var(--text); letter-spacing: -0.01em; }
+.coming-soon-sub { font-size: 13.5px; color: var(--text-3); max-width: 34ch; text-align: center; line-height: 1.5; }
+/* A paused service's tile: still there, labelled, never a count. */
+.tile { position: relative; }
+.tile .tile-soon {
+  position: absolute; top: 5px; right: 5px;
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  background: var(--warn-bg);
+  color: var(--warn);
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.02em;
+}

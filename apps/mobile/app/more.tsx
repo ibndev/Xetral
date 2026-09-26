@@ -1,5 +1,6 @@
 import { Pressable, Text, View } from 'react-native';
 import { Link } from 'expo-router';
+import { isPaused } from '@xetral/client';
 import { Icon } from '@/icon';
 import type { IconName } from '@/icon';
 import { Shell } from '@/shell';
@@ -50,6 +51,7 @@ export default function More() {
   const colors = useTheme();
   const kyc = useLoad(() => client.kyc().catch(() => null), [client]);
   const verified = kyc.data?.status === 'approved';
+  const services = useLoad(() => client.services(), [client]);
 
   return (
     <Shell>
@@ -100,6 +102,18 @@ export default function More() {
                   <Text style={{ color: colors.text, fontFamily: font.sansSemi }}>{item.label}</Text>
                   <Text style={styles.muted}>{item.hint}</Text>
                 </View>
+                {isPaused(services.data, item.href) && (
+                  <View
+                    style={{
+                      paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999,
+                      backgroundColor: colors.warnBg,
+                    }}
+                  >
+                    <Text style={{ color: colors.warn, fontFamily: font.sansSemi, fontSize: 11.5 }}>
+                      Coming soon
+                    </Text>
+                  </View>
+                )}
                 <Icon name="chevronRight" size={18} color={colors.text3} />
               </Pressable>
             </Link>

@@ -1218,13 +1218,35 @@ export class PayoutService {
    * ledger. Two payouts reading one balance can both pass; the rail refuses
    * the second, which reverses, exactly as it did before this existed.
    */
+  /** Whether a rail's own per-transfer range admits this amount. No stated
+   *  range admits everything: the platform's own ceilings still apply. */
+  #withinLimits(provider: string, amount: Money<Currency>): boolean {
+    const limit =
+      this.port.limitsVia?.(provider, amount.currency) ??
+      (this.port.provider === provider ? this.port.limits?.[amount.currency] : undefined);
+    if (limit === undefined) return true;
+    return amount.amount >= limit.minMinor && amount.amount <= limit.maxMinor;
+  }
+
   async #payingRail(
     destination: PayoutDestination,
     amount: Money<Currency>,
     debitCurrency: string | undefined,
   ): Promise<PayoutRail> {
     const rails = (await this.port.railsFor?.(destination.country)) ?? [this.port.provider];
-    const eligible = destination.mobile_money ? rails : rails.slice(0, 1);
+    const candidates = destination.mobile_money ? rails : rails.slice(0, 1);
+    /*
+     * A RAIL THAT CANNOT CARRY THIS AMOUNT IS NOT A CANDIDATE, and that is
+     * known before anything is held. Bitnob's M-Pesa payout takes KSh 150 to
+     * KSh 100,000 per transaction; asked for more, it refuses AFTER the
+     * reserve, and the customer reads a failure as if their number were
+     * wrong. So an out-of-range rail is passed over for the next, and where
+     * none can carry it the customer is told, in words, before a kobo moves.
+     */
+    const eligible = candidates.filter((provider) => this.#withinLimits(provider, amount));
+    if (eligible.length === 0) {
+      throw new UnprocessableEntityException({ error: 'payout_amount_out_of_range' });
+    }
     const funding = debitCurrency ?? amount.currency;
     const converted = funding !== amount.currency;
 

@@ -182,6 +182,12 @@ export interface PayoutReceipt {
  */
 export type PayoutMethod = 'bank' | 'mobile_money';
 
+/** One transfer's inclusive range on a rail, in minor units. */
+export interface TransferLimit {
+  readonly minMinor: bigint;
+  readonly maxMinor: bigint;
+}
+
 export interface PayoutPort {
   readonly provider: string;
 
@@ -221,6 +227,20 @@ export interface PayoutPort {
   prefundedFor?(country: string): Promise<boolean>;
 
   /**
+   * WHAT ONE TRANSFER ON THIS RAIL MAY BE, per currency, in MINOR units —
+   * inclusive at both ends. Absent for a currency means the rail states no
+   * range and the only limits are the platform's own.
+   *
+   * A FACT ABOUT THE RAIL, declared by the adapter for `prefunded`'s reason:
+   * Bitnob's M-Pesa payout takes KSh 150 to KSh 100,000 per transaction, and
+   * outside that the refusal would arrive AFTER the customer's money was held,
+   * as a failure reading like a bad number. Known in advance, it is a rail
+   * that cannot carry this amount — so another one is tried, or the customer
+   * is told before anything moves.
+   */
+  readonly limits?: Readonly<Partial<Record<string, TransferLimit>>>;
+
+  /**
    * WHICH RAILS COULD SEND TO THIS COUNTRY, in the order they should be
    * tried — the routed one first. A switch answers; a single adapter leaves
    * it out and is its own only rail.
@@ -231,6 +251,9 @@ export interface PayoutPort {
    * the only rail that can resolve the payout id is not the one anything asks.
    */
   railsFor?(country: string): Promise<readonly string[]>;
+
+  /** A named rail's `limits` for one currency, asked of a switch. */
+  limitsVia?(provider: string, currency: string): TransferLimit | undefined;
 
   /** Sends on the NAMED rail, never on whichever the routing reads now. */
   sendVia?<C extends Currency>(provider: string, request: PayoutRequest<C>): Promise<PayoutReceipt>;

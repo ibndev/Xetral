@@ -21,6 +21,19 @@ export interface BroadcastView {
   readonly failure_reason: string | null;
 }
 
+/**
+ * An announcement as a CUSTOMER reads it: what was said and when, and nothing
+ * about who pressed the button or how many handsets it reached — those are
+ * operations figures, and a customer's feed is not the place to publish the
+ * size of the audience.
+ */
+export interface AnnouncementView {
+  readonly uuid: string;
+  readonly title: string;
+  readonly body: string;
+  readonly at: string;
+}
+
 export interface AudienceEstimate {
   readonly devices: number;
   readonly customers: number;
@@ -166,6 +179,53 @@ export class PushService {
       [Math.min(Math.max(limit, 1), 200)],
     );
     return result.rows.map(view);
+  }
+
+  /**
+   * THE BELL'S FEED — every announcement meant for this customer, newest
+   * first.
+   *
+   * The bell led to the account screen, so a customer tapping it to read what
+   * the platform had told them found their own settings instead, and anybody
+   * without the app installed, or who had declined marketing, had no way to
+   * read an announcement at all. The same rows the broadcast worker sends,
+   * read on request.
+   *
+   * NOT CONSENT-GATED, and that is the distinction rather than a gap. 065
+   * gates the PUSH because a push arrives unasked on a lock screen; this is a
+   * list the customer opened. Somebody who declined marketing still needs to
+   * be able to read "the app is down for an hour tonight".
+   *
+   * THE COUNTRY FILTER IS THE BROADCAST'S OWN: an announcement addressed to
+   * Ghana is not shown in Lagos. A customer with no country sees only the
+   * ones addressed to everybody — no country is not a licence to see all of
+   * them.
+   *
+   * WRITTEN, not sent: a broadcast appears the moment an operator publishes
+   * it, whatever the worker has done. What the customer is shown is what was
+   * said, and whether a handset has been buzzed yet is not their concern.
+   */
+  async announcementsFor(userUuid: string, limit = 30): Promise<readonly AnnouncementView[]> {
+    const result = await this.pool.query<{
+      uuid: string;
+      title: string;
+      body: string;
+      created_at: Date;
+    }>(
+      `SELECT b.uuid, b.title, b.body, b.created_at
+         FROM push_broadcasts b
+         JOIN users u ON u.uuid = $1
+        WHERE b.country IS NULL OR b.country = u.country
+        ORDER BY b.created_at DESC
+        LIMIT $2`,
+      [userUuid, Math.min(Math.max(limit, 1), 100)],
+    );
+    return result.rows.map((row) => ({
+      uuid: row.uuid,
+      title: row.title,
+      body: row.body,
+      at: row.created_at.toISOString(),
+    }));
   }
 
   async one(uuid: string): Promise<BroadcastView> {

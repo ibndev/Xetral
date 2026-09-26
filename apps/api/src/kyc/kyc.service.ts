@@ -274,6 +274,30 @@ export class KycService {
         [row.user_id],
       );
 
+      /*
+       * THE NAME AND NUMBER THE SUBMISSION CARRIES, ONTO A BLANK ACCOUNT (082).
+       *
+       * 067 did this once, for the rows that existed that day; every approval
+       * since left an account opened before the phone field holding a null
+       * number the platform knew — shown "Not set" to its owner and
+       * unfindable on anybody's Send screen. Blanks only, never an overwrite.
+       *
+       * BEHIND A SAVEPOINT, because an approval must not fail over a
+       * convenience: a database behind 082 has no such function, and an error
+       * inside a Postgres transaction poisons the rest of it — the reason
+       * `enqueueBestEffort` uses one.
+       */
+      await client.query('SAVEPOINT fill_details');
+      try {
+        await client.query(`SELECT fill_details_from_kyc($1::bigint)`, [row.user_id]);
+        await client.query('RELEASE SAVEPOINT fill_details');
+      } catch (error) {
+        await client.query('ROLLBACK TO SAVEPOINT fill_details');
+        this.#logger.warn(
+          `could not copy approved details onto user ${row.user_id}: ${String(error)}`,
+        );
+      }
+
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');

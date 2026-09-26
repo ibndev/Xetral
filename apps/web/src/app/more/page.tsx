@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { isPaused } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { Icon } from '@/ui/icon';
 import type { IconName } from '@/ui/icon';
@@ -59,6 +60,7 @@ export default function More() {
   const router = useRouter();
   const client = useXetral();
   const kyc = useLoad(() => client.kyc(), [client]);
+  const services = useLoad(() => client.services(), [client]);
 
   async function signOut() {
     await xetral().session.signOut();
@@ -98,6 +100,7 @@ export default function More() {
                   <span className="row-title">{item.label}</span>
                   <span className="row-sub">{item.sub}</span>
                 </span>
+                {isPaused(services.data, item.href) && <span className="badge warn">Coming soon</span>}
                 <Icon name="chevronRight" size={18} />
               </Link>
             ))}

@@ -2150,6 +2150,53 @@ Router in `apps/api/src/routing/provider-router.service.ts`, liquidity in
   081 republishes the privacy notice naming that before the first one
   leaves. 077's suite now asserts `>=` its version, the lesson 075's learned.
 
+### The assignment, the refusal nobody could read, and a paused service — non-obvious rules
+
+Schema: `packages/ledger/sql/082_refusals_and_details.sql`,
+`083_payment_assignment.sql`. Feed at `/notifications`, services at
+`GET /v1/services`, refusals on `/admin/diagnostics`.
+
+- **NAIRA ACCOUNT NUMBERS WERE ASKED OF FLUTTERWAVE FIRST.** 076 routed
+  `account NGN` there, and Flutterwave opens a permanent account only with a
+  BVN — so every unverified Nigerian was refused first and read whatever the
+  fallback said. 083 applies the owner's assignment: accounts and payouts in
+  naira on Paystack, cedis both ways on Flutterwave, shilling payouts on
+  Bitnob, and **KENYAN COLLECTION ROUTED NOWHERE** — out of the table AND out
+  of `provider_coverage`, or `by_coverage` would put it straight back. A
+  suite that restores a route must restore what WAS there, not a rail it
+  names — 076's test was putting Flutterwave back over 083.
+- **A REMOVED ROUTE IS HISTORY TOO.** 059's trigger recorded inserts and
+  updates only, so switching a corridor OFF left no trace. `now_is` NULL means
+  routed nowhere.
+- **"THIS ONE IS ON US — WE HAVE BEEN TOLD" HAD NOTHING BEHIND IT** but a log
+  line nobody could page back through. `account_refusals` holds each distinct
+  sentence a rail gave, with a count, and NO CUSTOMER — which is what lets it
+  be kept. A timeout and a pending assignment are not recorded: neither is a
+  reason.
+- **067 FILLED BLANK DETAILS ONCE.** Every approval since left an account
+  opened before the phone field holding a null number the platform knew —
+  "Not set" to its owner and unpayable, however often they signed in.
+  `fill_details_from_kyc()` runs on the approval's own transaction behind a
+  SAVEPOINT, with 067's rules: blanks only, approved only, no guessing a
+  dialling code, no taking a number somebody else holds.
+- **A RAIL DECLARES WHAT ONE TRANSFER MAY BE** (`PayoutPort.limits`) — Bitnob's
+  M-Pesa is KSh 150–100,000 per transaction, from the owner's specification.
+  An out-of-range rail is passed over BEFORE the reserve; with none left the
+  customer reads `payout_amount_out_of_range` and nothing was held.
+- **THE BELL OPENS ANNOUNCEMENTS, NOT SETTINGS**, and the feed is NOT
+  consent-gated: 065 gates the PUSH because it arrives unasked on a lock
+  screen; a list the customer opened is not that, and declining product news
+  must not hide "the app is down tonight". The country filter is the
+  broadcast's own, and nothing about the audience crosses to a customer.
+- **A PAUSED SERVICE IS DECIDED IN THE SHELL, from the path**, so no gated
+  screen can forget it. Bills, eSIM and Convert are REPLACED by "Coming soon";
+  Cards and Crypto keep their content under a notice, because the kill-switch
+  suite requires freezing a card and reading holdings to work while paused.
+  Unknown is not paused: the refusal on the request is still the control.
+- **THE MOBILE HOME WAS INSET TWICE.** The Shell padded 18 and each section
+  another 20, while the currency rail's −20 bleed put its cards at 18 — two
+  edges on one screen. One `gutter` (20, the web's `.shell`), applied once.
+
 ### Which rail opens an account — non-obvious rules
 
 Schema: `packages/ledger/sql/061_country_and_route_repair.sql`. Service in
@@ -4432,6 +4479,8 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/078_card_funding_cascad
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/079_routing_policy.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/080_payout_provider_known.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/081_privacy_republish.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/082_refusals_and_details.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/083_payment_assignment.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -4511,6 +4560,8 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/078_card_funding_cascad
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/079_routing_policy.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/080_payout_provider_known.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/081_privacy_republish.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/082_refusals_and_details.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/083_payment_assignment.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

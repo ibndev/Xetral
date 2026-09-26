@@ -74,6 +74,11 @@ END $$;
 --
 --  A missing row here is the "Payments are unavailable right now" the
 --  checkout answers with, and it is what a payment link in cedis fails on.
+--
+--  KENYAN COLLECTION IS NOT ON THIS LIST, deliberately: 083 leaves it
+--  unrouted because no provider is confirmed for it, and 083's own suite
+--  asserts that. A corridor unrouted ON PURPOSE is not the gap this test
+--  exists to catch.
 -- ---------------------------------------------------------------------------
 DO $$
 DECLARE v_missing TEXT;
@@ -82,7 +87,7 @@ BEGIN
       INTO v_missing
       FROM (VALUES
              ('collect', 'NGN'), ('collect', 'GHS'),
-             ('collect', 'KES'), ('collect', 'USD'),
+             ('collect', 'USD'),
              ('payout',  'NGN'), ('payout',  'GHS'), ('payout', 'KES')
            ) AS want(operation, currency)
      WHERE NOT EXISTS (

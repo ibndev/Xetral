@@ -215,6 +215,12 @@ const API_ERROR_CODES = [
    */
   'insufficient_platform_liquidity',
   /*
+   * `payout_amount_out_of_range` — no rail that could send this will take
+   * this amount in one transfer (Bitnob's M-Pesa: KSh 150 to KSh 100,000).
+   * Refused before anything was held.
+   */
+  'payout_amount_out_of_range',
+  /*
    * `price_is_live` — 064 refuses to delete a rate that is still in force.
    *
    * Deleting one unprices the corridor, and an unpublished pair is REFUSED

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { Link } from 'expo-router';
-import { formatAmount, symbolFor } from '@xetral/client';
+import { formatAmount, isPaused, symbolFor } from '@xetral/client';
 import type { Balance, Transaction } from '@xetral/client';
 import { Icon } from '@/icon';
 import type { IconName } from '@/icon';
@@ -11,7 +11,7 @@ import { CurrencyMark } from '@/currency-mark';
 import { TxList } from '@/tx-list';
 import { TransactionSheet } from '@/transaction-sheet';
 import { useLoad, useRemembered, useXetral } from '@/hooks';
-import { cardShadow, font, space, useTheme } from '@/theme';
+import { cardShadow, font, gutter, space, useTheme } from '@/theme';
 import { BALANCE_VISIBILITY } from '@/preferences';
 
 /** A fixed mask. As many dots as the amount has digits would be a picture of
@@ -22,17 +22,15 @@ const isZero = (amount: string) => /^-?0(\.0+)?$/.test(amount);
 const looksLikeACurrency = (stored: string) => /^[A-Z]{3,6}$/.test(stored);
 
 /**
- * THE SHELL'S GUTTER, STATED ONCE.
+ * THE SHELL'S GUTTER — `gutter` in theme.ts, applied ONCE by `Shell`.
  *
- * 20px, READ OFF `docs/mockups/app.html` RATHER THAN CHOSEN — the header at
- * `12px 20px 4px`, the rail at `16px 20px 2px`, the Explore grid at `0 20px`.
- * Every block on this screen is inset by it and the currency rail and the
- * promo rail BLEED by exactly it. The web learned that four pixels of
- * disagreement between an inset and its bleed is not a rounding difference —
- * it is a rail hanging past the screen edge with no gutter under it while
- * every other block keeps one. One constant is what makes them agree.
+ * Every block on this screen already sits inside it. The currency rail BLEEDS
+ * by exactly it and puts the same inset back inside, so its first card lines
+ * up with Explore and Recent activity below — the web's `.ccy-rail`. These
+ * sections used to add a second 20px of their own on top of the Shell's, which
+ * is what made the lower half of the screen read as a narrower column.
  */
-const GUTTER = 20;
+const GUTTER = gutter;
 
 /** The four products, in the order the design puts them — same as the web. */
 const PRODUCTS: readonly {
@@ -118,6 +116,8 @@ export default function Home() {
   const dollars = useLoad(() => client.dollarTotal(), [client]);
   const headline = dollars.data;
 
+  const services = useLoad(() => client.services(), [client]);
+
   const history = useLoad(
     () => client.transactions(currency).catch(() => ({ entries: [], nextCursor: null })),
     [client, currency],
@@ -132,7 +132,7 @@ export default function Home() {
 
   return (
     <Shell greeting={{ name: session.data?.first_name }}>
-      <View style={{ paddingHorizontal: GUTTER }}>
+      <View>
         {/*
           THE TOTAL, WITH NO CARD AROUND IT — the web's `.hero`. Centred on
           the page in Jost Bold at 48 (the PayPal-style figure; see
@@ -313,11 +313,11 @@ export default function Home() {
       </ScrollView>
 
 
-      <View style={{ paddingHorizontal: GUTTER }}>
+      <View>
         <FormError error={balances.error} code={balances.code} />
       </View>
 
-      <View style={{ paddingHorizontal: GUTTER, marginTop: space.lg }}>
+      <View style={{ marginTop: space.lg }}>
         <SectionHead title="Explore" moreLabel="All services" moreHref="/more" />
         <View style={{ flexDirection: 'row', gap: 9 }}>
           {PRODUCTS.map((product) => (
@@ -356,6 +356,18 @@ export default function Home() {
                 >
                   {product.label}
                 </Text>
+                {/* Paused by an operator — the web's `.tile-soon`. */}
+                {isPaused(services.data, product.href) && (
+                  <View
+                    style={{
+                      position: 'absolute', top: 5, right: 5,
+                      paddingHorizontal: 6, paddingVertical: 1, borderRadius: 999,
+                      backgroundColor: colors.warnBg,
+                    }}
+                  >
+                    <Text style={{ color: colors.warn, fontFamily: font.sansBold, fontSize: 9.5 }}>Soon</Text>
+                  </View>
+                )}
               </Pressable>
             </Link>
           ))}
@@ -374,7 +386,7 @@ export default function Home() {
         not ask for.
       */}
 
-      <View style={{ paddingHorizontal: GUTTER, marginTop: space.lg }}>
+      <View style={{ marginTop: space.lg }}>
         <SectionHead title="Recent activity" moreLabel="See all" moreHref="/activity" />
 
         {history.loading && <Loading />}

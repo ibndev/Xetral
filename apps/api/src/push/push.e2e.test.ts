@@ -313,3 +313,37 @@ describe('the worker that drains a queued broadcast', () => {
     expect(row.rows[0]!.sent_at).not.toBeNull();
   });
 });
+
+describe('the bell’s feed', () => {
+  it('SHOWS A CUSTOMER WHAT WAS ANNOUNCED TO THEM, whatever their consent, and not another country’s', async () => {
+    // Registered with NO marketing grant: the feed is read on request, and
+    // declining product news must not hide "the app is down tonight".
+    const reader = await register('NG');
+    const staff = await register();
+    const everybody = `Everybody ${randomUUID()}`;
+    const ghanaOnly = `Accra ${randomUUID()}`;
+    await pool.query(
+      `INSERT INTO push_broadcasts (title, body, created_by, country)
+       SELECT t.title, 'Details inside.', u.id, t.country
+         FROM users u,
+              (VALUES ($2::text, NULL::char(2)), ($3::text, 'GH'::char(2))) AS t(title, country)
+        WHERE u.uuid = $1`,
+      [staff.uuid, everybody, ghanaOnly],
+    );
+
+    const feed = await request(app.getHttpServer())
+      .get('/v1/push/announcements')
+      .set('Authorization', `Bearer ${reader.token}`)
+      .expect(200);
+
+    const titles = (feed.body.announcements as { title: string }[]).map((a) => a.title);
+    expect(titles).toContain(everybody);
+    expect(titles).not.toContain(ghanaOnly);
+    // Nothing about the audience crosses to a customer.
+    expect(JSON.stringify(feed.body)).not.toMatch(/devices|accepted|created_by|without_consent/);
+  });
+
+  it('refuses without a session', async () => {
+    await request(app.getHttpServer()).get('/v1/push/announcements').expect(401);
+  });
+});

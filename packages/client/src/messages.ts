@@ -394,6 +394,8 @@ function sentenceFor(error: ApiError): string {
       return 'This spread priced a real trade, so it is part of that transaction\u2019s record and cannot be removed.';
     case 'price_is_live':
       return 'That rate is still in force. Retire it first — deleting a live rate would leave the corridor unpriced.';
+    case 'payout_amount_out_of_range':
+      return 'That amount is outside what this payment network accepts in one transfer. Mobile money to Kenya takes KSh 150 to KSh 100,000 at a time \u2014 send a smaller amount, or split it. Nothing has left your balance.';
     case 'insufficient_platform_liquidity':
       /*
        * NOT "you do not have enough". The shortfall is ours, and a customer
