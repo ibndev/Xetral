@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { XetralClient } from '@xetral/client';
-import { AdminClient } from '@xetral/client';
+import { AdminClient, retryOnNetwork } from '@xetral/client';
 import { xetral } from '@/lib/session';
 import { codeOf, messageFor } from '@/lib/errors';
 import { useElevating } from '@/lib/elevation';
@@ -179,7 +179,9 @@ export function useLoad<T>(
 
     void (async () => {
       try {
-        const result = await latest.current();
+        // A dropped connection is asked again before it is shown — see
+        // `retryOnNetwork`. Loads are reads, so asking again moves nothing.
+        const result = await retryOnNetwork(() => latest.current());
         if (!cancelled) setData(result);
       } catch (cause) {
         if (!cancelled) {

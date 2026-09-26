@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { router } from 'expo-router';
 import { randomUUID } from 'expo-crypto';
 import type { ApiErrorCode, XetralClient } from '@xetral/client';
-import { codeOf, messageFor } from '@xetral/client';
+import { codeOf, messageFor, retryOnNetwork } from '@xetral/client';
 import { xetral } from '@/session';
 import { readPreference, writePreference } from '@/preferences';
 
@@ -96,7 +96,9 @@ export function useLoad<T>(
 
     void (async () => {
       try {
-        const result = await latest.current();
+        // A dropped connection is asked again before it is shown — see
+        // `retryOnNetwork`. Loads are reads, so asking again moves nothing.
+        const result = await retryOnNetwork(() => latest.current());
         if (!cancelled) setData(result);
       } catch (cause) {
         if (!cancelled) {

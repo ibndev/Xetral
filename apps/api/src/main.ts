@@ -6,6 +6,7 @@ import { ExpressAdapter } from '@nestjs/platform-express';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module.js';
 import { loadConfig } from './config.js';
+import { applyDeploymentDefaults } from './deployment-defaults.js';
 
 /**
  * The adapter is constructed explicitly rather than left to NestFactory's lazy
@@ -16,6 +17,15 @@ import { loadConfig } from './config.js';
 async function bootstrap(): Promise<void> {
   // Loaded before anything else so a missing secret stops the process here,
   // with a message naming the variable, rather than at the first request.
+  // What production left out and this repository can be sure of — see
+  // `deployment-defaults.ts`. Before the config is read, so it reads them.
+  const defaulted = await applyDeploymentDefaults(process.env);
+  if (defaulted.length > 0) {
+    new Logger('bootstrap').warn(
+      `Not set in the environment, so the production defaults are in use: ${defaulted.join(', ')}. ` +
+        'Set them explicitly to silence this.',
+    );
+  }
   const config = loadConfig(process.env);
 
   const app = await NestFactory.create<NestExpressApplication>(

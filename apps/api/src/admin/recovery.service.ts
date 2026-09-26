@@ -287,12 +287,19 @@ export class RecoveryService {
   /* ------------------------------------------------------------------ */
 
   async #reversePayout(subjectUuid: string, reason: string): Promise<string> {
-    const rows = await this.pool.query<PayoutRow & { reserve_entry_id: string }>(
-      `SELECT id::text, uuid, user_id::text, reference, status::text, country,
-              bank_code, bank_name, account_number, account_name, narration,
-              currency, amount_minor::text, fee_minor::text, tax_minor::text,
-              provider_payout_id, failure_reason, reserve_entry_id::text, created_at
-         FROM bank_payouts WHERE uuid = $1::uuid`,
+    /*
+     * THE WHOLE ROW, the way `PayoutService` reads it — not a column list.
+     *
+     * This read named sixteen columns and left out `settle_entry_id`, which
+     * `fail()` reads to decide WHICH reversal is the true one. Absent, the
+     * field was `undefined`, `undefined !== null` read as "settled", and a
+     * merely-held payout was reversed as though it had been sent: an entry
+     * naming no target, refused by 023's CHECK, and "Something went wrong"
+     * on the one screen whose job is giving held money back. A second,
+     * shorter copy of a row is exactly how a field goes missing from it.
+     */
+    const rows = await this.pool.query<PayoutRow>(
+      `SELECT * FROM bank_payouts WHERE uuid = $1::uuid`,
       [subjectUuid],
     );
     const row = rows.rows[0];

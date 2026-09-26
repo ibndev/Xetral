@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import type { Pool } from 'pg';
 import { DATABASE } from '../tokens.js';
 import { CHECKLIST, type Failure, type Item } from './go-live-checklist.js';
+import { DEFAULTED_MARKER } from '../deployment-defaults.js';
 
 /**
  * WHAT THIS DEPLOYMENT HAS NOT BEEN TOLD YET.
@@ -111,6 +112,11 @@ export class ReadinessService {
         ...(item.flow === undefined ? {} : { flow: item.flow }),
       };
       const state = this.#stateOf(item, settings, credentials);
+      if (state === 'set' && this.#defaulted().has(item.name)) {
+        // Set, by the production default rather than by anybody — said so,
+        // because a green row must not claim somebody chose the value.
+        return { ...base, state, via: 'the production default' };
+      }
       if (state === 'set' || item.kind !== 'env') return { ...base, state };
       const via = this.#elsewhere(item, settings, stored);
       return via === undefined ? { ...base, state } : { ...base, state: 'set', via };
@@ -157,6 +163,12 @@ export class ReadinessService {
         return item.singleInstance === true ? 'unset-here' : 'unset';
       }
     }
+  }
+
+  #defaulted(): Set<string> {
+    return new Set(
+      (this.#env[DEFAULTED_MARKER] ?? '').split(',').filter((name) => name !== ''),
+    );
   }
 
   /**

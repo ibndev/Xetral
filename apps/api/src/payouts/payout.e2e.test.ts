@@ -26,6 +26,7 @@ import type { Currency, Money } from '@xetral/shared';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { PayoutReconciliationService } from './payout-reconciliation.service.js';
 import { PayoutService } from './payout.service.js';
+import { RecoveryService } from '../admin/recovery.service.js';
 import { ProviderLiquidityService } from './provider-liquidity.service.js';
 import { AppModule } from '../app.module.js';
 import type { ApiConfig } from '../config.js';
@@ -735,6 +736,36 @@ describe('the sweep that gives held money back', () => {
     const after = await nairaBalance(customer);
     expect(after.spendable).toBe('5000.00');
     expect(after.pending).toBe('5000.00');
+  });
+
+  it('A PERSON ON /admin/recovery CAN GIVE A HELD PAYOUT BACK', async () => {
+    /*
+     * The recovery read named its own columns and left out `settle_entry_id`,
+     * so `fail()` read `undefined !== null` as "settled", tried to undo a
+     * settlement that never happened, and the screen said "Something went
+     * wrong" — the one screen whose job is giving held money back.
+     */
+    const customer = await onboard();
+    await fund(customer.userId, 1_000_000n);
+    port.sendAnswer = new ProviderTimeoutError('bitnob', 'no answer');
+    await pay(customer).expect(200);
+
+    const held = await pool.query<{ uuid: string }>(
+      `SELECT uuid FROM bank_payouts WHERE user_id = $1::bigint AND status = 'reserved'`,
+      [customer.userId],
+    );
+    const actor = await pool.query<{ uuid: string }>(
+      `SELECT uuid FROM users WHERE id = $1::bigint`,
+      [customer.userId],
+    );
+    const record = await app
+      .get(RecoveryService)
+      .recover('bank_payout', held.rows[0]!.uuid, actor.rows[0]!.uuid, 'confirmed with the rail that nothing left');
+    expect(record).toBeDefined();
+
+    const after = await nairaBalance(customer);
+    expect(after.spendable).toBe('10000.00');
+    expect(after.pending).toBe('0.00');
   });
 
   it('SETTLES IT FROM THE RAIL’S EVENT, but only on the RAIL’S word for which payout it is', async () => {
