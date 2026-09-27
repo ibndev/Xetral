@@ -204,6 +204,55 @@ export class ReconciliationService implements OnApplicationShutdown {
    * Throws when the provider cannot be asked; the money stays held.
    */
   async resolveOne(purchaseUuid: string): Promise<'settled' | 'reversed' | 'pending'> {
+    const row = await this.#held(purchaseUuid);
+    if (row === undefined) return 'settled';
+    return this.#resolve(row);
+  }
+
+  /**
+   * WHAT THE PROVIDER SAYS, AND NOTHING DONE ABOUT IT — the live status an
+   * operator reads when they open a held purchase on /admin/recovery. A
+   * provider that cannot be asked is `unknown`, never "not delivered".
+   */
+  async peek(
+    purchaseUuid: string,
+  ): Promise<{ status: 'delivered' | 'failed' | 'pending' | 'unknown'; detail: string }> {
+    const row = await this.#held(purchaseUuid);
+    if (row === undefined) return { status: 'unknown', detail: 'This purchase is no longer held.' };
+    const port = this.ports.get(row.service as ServiceKind);
+    if (port === undefined) {
+      return { status: 'unknown', detail: `No ${row.service} provider is configured here to ask.` };
+    }
+    try {
+      const result = await port.status({ reference: row.reference, initiatedAt: new Date(row.created_at) });
+      if (result.status === 'delivered') return { status: 'delivered', detail: 'The provider says it was delivered.' };
+      if (result.status === 'failed') {
+        return { status: 'failed', detail: result.failureReason ?? 'The provider says it failed.' };
+      }
+      return { status: 'pending', detail: 'The provider says it is still being processed.' };
+    } catch (error) {
+      return {
+        status: 'unknown',
+        detail: `The provider could not be asked: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+  }
+
+  /**
+   * GIVE A HELD PURCHASE BACK ON A PERSON'S DECISION — refused when the
+   * provider says it was DELIVERED, because that pays for the same thing
+   * twice. Allowed when the provider says it failed or cannot answer.
+   */
+  async refund(purchaseUuid: string, reason: string): Promise<'reversed' | 'delivered'> {
+    const row = await this.#held(purchaseUuid);
+    if (row === undefined) return 'reversed';
+    const said = await this.peek(purchaseUuid);
+    if (said.status === 'delivered') return 'delivered';
+    await this.outcomes.reverse(row, `refunded by staff: ${reason}`);
+    return 'reversed';
+  }
+
+  async #held(purchaseUuid: string): Promise<HeldPurchase | undefined> {
     const result = await this.pool.query<HeldPurchase>(
       `SELECT id, user_id, reference, service, amount_minor, currency,
               reserve_entry_id, created_at
@@ -211,9 +260,7 @@ export class ReconciliationService implements OnApplicationShutdown {
         WHERE uuid = $1::uuid AND status = 'reserved'`,
       [purchaseUuid],
     );
-    const row = result.rows[0];
-    if (row === undefined) return 'settled';
-    return this.#resolve(row);
+    return result.rows[0];
   }
 
   /** Asks the provider what happened, and does only what they said. */

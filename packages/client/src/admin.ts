@@ -714,23 +714,55 @@ export interface AdminRecoveryOutcome {
   readonly record?: AdminRecoveryRecord;
 }
 
-/** A payout given back that its provider says was ALSO paid. */
-export interface AdminRefundAuditRow {
+/**
+ * ONE LIST, THREE STATES. `stuck`: held, waiting on the provider, asked again
+ * automatically. `needs_review`: a person has to look. `resolved`: closed in
+ * the last seven days.
+ */
+export type AdminRecoveryState = 'stuck' | 'needs_review' | 'resolved';
+
+export interface AdminRecoveryItem {
+  readonly kind: 'bank_payout' | 'purchase';
   readonly subject_uuid: string;
-  readonly reference: string;
+  readonly name: string | null;
   readonly email: string | null;
   readonly currency: string;
-  /** MINOR units: the amount and the fee given back together. */
+  /** MINOR units. */
   readonly amount_minor: string;
   readonly destination: string;
   readonly created_at: string;
-  readonly provider: string;
+  readonly state: AdminRecoveryState;
+  readonly note: string;
+  readonly resolved_at: string | null;
 }
 
-export interface AdminRefundAudit {
-  readonly checked: number;
-  readonly unconfirmed: number;
-  readonly paid_twice: readonly AdminRefundAuditRow[];
+/** What the screen may offer for one row, the first being the default. */
+export type AdminRecoveryAction = 'mark_resolved' | 'refund' | 'send' | 'mark_delivered';
+
+export interface AdminRecoveryDetail {
+  readonly kind: 'bank_payout' | 'purchase';
+  readonly subject_uuid: string;
+  readonly reference: string;
+  readonly status: string;
+  readonly provider: string | null;
+  readonly destination: string;
+  readonly currency: string;
+  readonly amount_minor: string;
+  readonly created_at: string;
+  readonly failure_reason: string | null;
+  /** Asked of the provider when the row was opened. */
+  readonly provider_status: {
+    readonly verdict: 'delivered' | 'failed' | 'not_found' | 'pending' | 'unknown';
+    readonly detail: string;
+  };
+  readonly actions: readonly AdminRecoveryAction[];
+  /** The append-only record of what people did to it, oldest first. */
+  readonly history: readonly {
+    readonly at: string;
+    readonly what: string;
+    readonly who: string | null;
+    readonly reason: string | null;
+  }[];
 }
 
 /**
@@ -1404,21 +1436,48 @@ export class AdminClient {
   }
 
   /**
-   * Money waiting for a person, and what has already been given back.
-   *
-   * Both in one call, because "has somebody already dealt with this?" is asked
-   * in the same breath as "what is waiting?".
+   * The recovery list. Loading it asks the provider about every row held past
+   * the review threshold and closes what they answer for.
    */
   async recoveryQueue(): Promise<{
-    readonly waiting: readonly AdminHeldMoney[];
-    readonly recovered: readonly AdminRecoveryRecord[];
+    readonly items: readonly AdminRecoveryItem[];
     readonly summary: AdminRecoverySummary;
   }> {
     return this.#get('/v1/admin/recovery');
   }
 
+  /** One row opened: the provider is asked about it on this request. */
+  async recoveryDetail(kind: 'bank_payout' | 'purchase', subjectUuid: string): Promise<AdminRecoveryDetail> {
+    return this.#get(`/v1/admin/recovery/${encodeURIComponent(kind)}/${encodeURIComponent(subjectUuid)}`);
+  }
+
   /**
-   * Give one held row back to the customer.
+   * Refund a held row to the customer's wallet. Refused with
+   * `refund_refused_delivered` when the provider says it arrived.
+   */
+  async refundHeld(
+    kind: 'bank_payout' | 'purchase',
+    subjectUuid: string,
+    reason: string,
+    pin: string,
+  ): Promise<AdminRecoveryOutcome> {
+    return this.#post(
+      `/v1/admin/recovery/${encodeURIComponent(kind)}/${encodeURIComponent(subjectUuid)}/refund`,
+      { reason, transaction_pin: pin },
+    );
+  }
+
+  /** Send a held payout to its recipient again, under its own reference. */
+  async resendPayout(subjectUuid: string, reason: string, pin: string): Promise<AdminRecoveryOutcome> {
+    return this.#post(`/v1/admin/recovery/bank_payout/${encodeURIComponent(subjectUuid)}/send`, {
+      reason,
+      transaction_pin: pin,
+    });
+  }
+
+  /**
+   * Close one held row on the provider's answer: delivered settles, failed
+   * gives it back, anything else moves nothing.
    *
    * THERE IS NO AMOUNT PARAMETER, deliberately. The sum comes from the held
    * row on the server, so this cannot credit an arbitrary customer an
@@ -1452,11 +1511,6 @@ export class AdminClient {
       provider_payout_id: providerPayoutId,
       transaction_pin: pin,
     });
-  }
-
-  /** Every payout given back, asked of its provider again. Changes nothing. */
-  async recoveryAudit(): Promise<AdminRefundAudit> {
-    return this.#get('/v1/admin/recovery/audit');
   }
 
   /** Whether anything is actually being sent. Carries no message body. */

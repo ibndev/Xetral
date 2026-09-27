@@ -887,6 +887,80 @@ describe('the sweep that gives held money back', () => {
     expect(audit.paid_twice.map((r) => r.subject_uuid)).toContain(uuid);
   });
 
+  /*
+   * THE ONE-LIST SCREEN'S BUTTONS. The owner's decisions: refunding a payout
+   * the provider says ARRIVED is BLOCKED rather than warned about, and
+   * "Return to Xetral" is the refund to the customer's wallet.
+   */
+  it('REFUSES TO REFUND A PAYOUT THE PROVIDER SAYS ARRIVED', async () => {
+    const { customer, uuid, actor, reference } = await heldPayout();
+    port.byReferenceAnswer = { providerPayoutId: 'TRF_arrived', state: 'completed', reference };
+    await expect(
+      app.get(RecoveryService).refund('bank_payout', uuid, actor, 'customer insists it never came'),
+    ).rejects.toMatchObject({ response: { error: 'refund_refused_delivered' } });
+    const after = await nairaBalance(customer);
+    expect(after.spendable).toBe('5000.00');
+    expect(after.pending).toBe('5000.00');
+  });
+
+  it('REFUNDS ON A PERSON’S DECISION where the provider cannot say, and records who', async () => {
+    const { customer, uuid, actor } = await heldPayout();
+    port.byReferenceAnswer = undefined;
+    const result = await app
+      .get(RecoveryService)
+      .refund('bank_payout', uuid, actor, 'confirmed with the bank it never arrived');
+    expect(result.outcome).toBe('reversed');
+    const after = await nairaBalance(customer);
+    expect(after.spendable).toBe('10000.00');
+    expect(after.pending).toBe('0.00');
+    const detail = await app.get(RecoveryService).detail('bank_payout', uuid);
+    expect(detail.actions).toEqual([]);
+    expect(detail.history.map((h) => h.what)).toContain('Refunded to the customer');
+    // And it cannot be given back twice.
+    await expect(
+      app.get(RecoveryService).refund('bank_payout', uuid, actor, 'pressed it a second time'),
+    ).rejects.toThrow();
+  });
+
+  it('SENDS A HELD PAYOUT AGAIN UNDER ITS OWN REFERENCE, and a refused resend leaves it held', async () => {
+    const { customer, uuid, actor, reference } = await heldPayout();
+    port.byReferenceAnswer = undefined;
+    port.sends.length = 0;
+    port.sendAnswer = new ProviderRejectedError('bitnob', 'Duplicate reference', 'http_400');
+    const refused = await app.get(RecoveryService).send(uuid, actor, 'recipient asked us to try again');
+    expect(refused.outcome).toBe('held');
+    expect(port.sends.map((s) => s.reference)).toEqual([reference]);
+    expect((await nairaBalance(customer)).pending).toBe('5000.00');
+
+    port.sendAnswer = { providerPayoutId: 'po_resent', state: 'sent' };
+    const sent = await app.get(RecoveryService).send(uuid, actor, 'recipient asked us to try again');
+    expect(sent.outcome).toBe('delivered');
+    expect(port.sends.map((s) => s.reference)).toEqual([reference, reference]);
+    const row = await pool.query<{ status: string }>(`SELECT status FROM bank_payouts WHERE uuid = $1::uuid`, [uuid]);
+    expect(row.rows[0]?.status).toBe('sent');
+  });
+
+  it('THE LIST CLOSES A DELIVERED PAYOUT ITSELF, so no person is shown it', async () => {
+    const { customer, uuid, reference } = await heldPayout();
+    await pool.query(`UPDATE bank_payouts SET created_at = now() - interval '1 hour' WHERE uuid = $1::uuid`, [uuid]);
+    port.byReferenceAnswer = { providerPayoutId: 'TRF_listed', state: 'completed', reference };
+    const { items } = await app.get(RecoveryService).list();
+    expect(items.some((i) => i.subject_uuid === uuid && i.state !== 'resolved')).toBe(false);
+    const row = await pool.query<{ status: string }>(`SELECT status FROM bank_payouts WHERE uuid = $1::uuid`, [uuid]);
+    expect(row.rows[0]?.status).toBe('completed');
+    expect((await nairaBalance(customer)).pending).toBe('0.00');
+  });
+
+  it('THE LIST SHOWS ONE NOBODY CAN ANSWER FOR, once it has waited half an hour', async () => {
+    const { uuid } = await heldPayout();
+    port.byReferenceAnswer = undefined;
+    const early = await app.get(RecoveryService).list();
+    expect(early.items.some((i) => i.subject_uuid === uuid)).toBe(false);
+    await pool.query(`UPDATE bank_payouts SET created_at = now() - interval '1 hour' WHERE uuid = $1::uuid`, [uuid]);
+    const late = await app.get(RecoveryService).list();
+    expect(late.items.find((i) => i.subject_uuid === uuid)?.state).toMatch(/stuck|needs_review/);
+  });
+
   it('A PAYSTACK TRANSFER EVENT IS READ — and its body decides nothing', async () => {
     /*
      * `transfer.success` and `transfer.failed` fell into the deposit path and

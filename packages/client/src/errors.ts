@@ -417,6 +417,11 @@ const API_ERROR_CODES = [
    */
   'not_recoverable',
   /**
+   * A refund refused because the provider says the payout or purchase
+   * ARRIVED. Giving it back as well would be paying the same money twice.
+   */
+  'refund_refused_delivered',
+  /**
    * The recovery console asked a database that has not applied 049.
    *
    * ITS OWN CODE rather than a bare 500, because the screen it belongs to is

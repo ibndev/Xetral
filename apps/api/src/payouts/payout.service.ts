@@ -138,6 +138,8 @@ export interface PayoutRow {
    * one the postings have to agree with.
    */
   settle_entry_id: string | null;
+  /** Ghana's branch, where the corridor needs one. */
+  branch_code?: string | null;
   created_at: Date;
 }
 
@@ -1023,6 +1025,54 @@ export class PayoutService {
   async markDelivered(row: PayoutRow, providerPayoutId: string): Promise<void> {
     if (row.status !== 'reserved') return;
     await this.applyReceipt(row, { providerPayoutId, state: 'sent', reference: row.reference });
+  }
+
+  /**
+   * SEND A HELD PAYOUT AGAIN — the same transfer, under the SAME reference, on
+   * the rail recorded on the row. For a payout the provider has no record of,
+   * or one nobody can say anything about.
+   *
+   * THE REFERENCE IS WHAT MAKES THIS SAFE. Every rail refuses a second transfer
+   * under a reference it has already seen, so if the first one did go out the
+   * provider answers "duplicate" and nothing is paid twice.
+   *
+   * AND THEREFORE NO ANSWER HERE GIVES MONEY BACK — not even a refusal. A
+   * refusal to a resend is very often exactly that "duplicate", which means the
+   * first transfer EXISTS; reversing on it would refund money that left. On
+   * any error the payout stays held and the provider's own sentence is
+   * returned to the operator who pressed the button.
+   */
+  async resend(row: PayoutRow): Promise<{ sent: boolean; detail: string }> {
+    if (row.status !== 'reserved') {
+      return { sent: false, detail: 'Only a held payout can be sent again.' };
+    }
+    const currency = row.currency as Currency;
+    const sender = await this.#senderFor(row.user_id);
+    const debitCurrency = await this.settings.payoutDebitCurrency(currency);
+    const request = {
+      country: row.country,
+      bankCode: row.bank_code,
+      accountNumber: row.account_number,
+      ...(row.branch_code == null ? {} : { branchCode: row.branch_code }),
+      ...(sender === undefined ? {} : { sender }),
+      ...(debitCurrency === undefined ? {} : { debitCurrency }),
+      accountName: row.account_name ?? undefined,
+      amount: money(BigInt(row.amount_minor), currency),
+      narration: row.narration ?? undefined,
+      reference: row.reference,
+    };
+    let receipt: PayoutReceipt;
+    try {
+      receipt =
+        this.port.sendVia === undefined
+          ? await this.port.send(request)
+          : await this.port.sendVia(row.provider, request);
+    } catch (error) {
+      this.#logger.warn(`payout ${row.reference}: resend by staff did not go out (${describe(error)})`);
+      return { sent: false, detail: `The provider did not accept it: ${describe(error)}. Nothing was given back.` };
+    }
+    await this.applyReceipt(await this.#reload(row.id), receipt);
+    return { sent: true, detail: 'The provider accepted the transfer.' };
   }
 
   async #byReference(rail: string, reference: string): Promise<PayoutReceipt | undefined> {

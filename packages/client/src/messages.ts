@@ -355,6 +355,8 @@ function sentenceFor(error: ApiError): string {
       return 'Recovery is not available on this deployment yet — migration 049 has not been applied.';
     case 'not_recoverable':
       return 'That is no longer waiting to be recovered. Reload the queue.';
+    case 'refund_refused_delivered':
+      return 'The provider says this was delivered, so it cannot be refunded as well. Mark it resolved instead.';
 
     /* purchases */
     case 'purchase_failed':

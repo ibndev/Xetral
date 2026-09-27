@@ -245,9 +245,8 @@ describe('the privileged surface is declared as privileged', () => {
       // Money waiting for a person. `support`, because it names the customers
       // whose money is held — exactly who support is fielding calls from.
       'GET /v1/admin/recovery (support)',
-      // Every refunded payout asked of its provider again. `finance`: it is a
-      // question about money the business may have paid out twice.
-      'GET /v1/admin/recovery/audit (finance)',
+      // One held row opened, the provider asked on this request. A read.
+      'GET /v1/admin/recovery/:kind/:id (support)',
       'GET /v1/admin/risk/cases (compliance)',
       'GET /v1/admin/risk/cases/:id (compliance)',
       'GET /v1/admin/risk/signals (compliance)',
@@ -305,9 +304,13 @@ describe('the privileged surface is declared as privileged', () => {
       // that can post a reversal.
       'POST /v1/admin/prices/giftcard (finance)',
       'POST /v1/admin/recovery/:kind/:id (finance)',
+      // Refunding on a person's decision; refused when the provider says delivered.
+      'POST /v1/admin/recovery/:kind/:id/refund (finance)',
       // Recording a held payout as DELIVERED, with the provider's transfer id.
       // Gives nothing back, so it is the one resolution a person may make.
       'POST /v1/admin/recovery/bank_payout/:id/delivered (finance)',
+      // Sending a held payout again under its own reference.
+      'POST /v1/admin/recovery/bank_payout/:id/send (finance)',
       // Opening and noting take no PIN; closing does, because it resolves
       // every signal the case covers.
       'POST /v1/admin/risk/cases (compliance)',

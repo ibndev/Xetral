@@ -2482,6 +2482,44 @@ th.right { font-family: var(--font-sans); }
 .admin-frame tr.detail p { margin: 0 0 8px; }
 
 /*
+ * RECOVERY: ONE LIST, EACH ROW OPENS IN PLACE. The whole row is the control,
+ * so it looks like one — a pointer and a hover wash — and the opened row keeps
+ * the wash so the eye can find which one the panel below belongs to.
+ */
+.admin-frame .rec-row { cursor: pointer; }
+.admin-frame .rec-row:hover > td, .admin-frame .rec-row.open > td { background: var(--surface-2); }
+.admin-frame .rec-row:focus-visible { outline: 2px solid var(--iris); outline-offset: -2px; }
+.admin-frame .rec-who { display: block; }
+.admin-frame .rec-sub { display: block; color: var(--text-3); font-size: 12px; font-weight: 500; }
+.admin-frame .rec-verdict { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.admin-frame .rec-h { margin: 14px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-3); }
+.admin-frame .rec-history { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.admin-frame .rec-history li { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 8px; font-size: 13px; }
+.admin-frame .rec-when { color: var(--text-3); font-variant-numeric: tabular-nums; }
+.admin-frame .rec-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+/*
+ * ON A PHONE THE ROW IS A CARD. A five-column table inside a sideways scroll
+ * put the opened panel wider than the screen, so its values sat off the edge
+ * behind a scroll nobody could see was there — the retention table's fault.
+ */
+@media (max-width: 640px) {
+  .admin-frame .rec-table thead { display: none; }
+  .admin-frame .rec-table, .admin-frame .rec-table tbody,
+  .admin-frame .rec-table tr.detail, .admin-frame .rec-table tr.detail > td { display: block; }
+  .admin-frame .rec-table tr.rec-row {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px;
+    padding: 12px 14px; border-bottom: 1px solid var(--line);
+  }
+  .admin-frame .rec-table tr.rec-row > td { padding: 0; border: none; background: none; }
+  .admin-frame .rec-table tr.rec-row > td:nth-child(1) { grid-column: 1; grid-row: 1; }
+  .admin-frame .rec-table tr.rec-row > td:nth-child(3) { grid-column: 2; grid-row: 1; }
+  .admin-frame .rec-table tr.rec-row > td:nth-child(2) { grid-column: 1; grid-row: 2 / span 2; }
+  .admin-frame .rec-table tr.rec-row > td:nth-child(4) { grid-column: 2; grid-row: 2; text-align: right; }
+  .admin-frame .rec-table tr.rec-row > td:nth-child(5) { grid-column: 2; grid-row: 3; }
+  .admin-frame .rec-table tr.rec-row:hover, .admin-frame .rec-table tr.rec-row.open { background: var(--surface-2); }
+}
+
+/*
  * THE SIDEBAR ITSELF NEVER SCROLLS; ITS NAV DOES.
  *
  * This was one `overflow-y: auto` column at `height: 100vh` holding the brand,

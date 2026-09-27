@@ -97,6 +97,63 @@ export interface RefundAudit {
   readonly paid_twice: readonly RefundAuditRow[];
 }
 
+/**
+ * ONE LIST, THREE STATES. The screen used to be three sections — held,
+ * refunded-but-paid, already given back — and an operator had to read all
+ * three to answer one question about one transfer.
+ *
+ *   stuck         held, and the provider has not answered yet; asked again
+ *                 automatically on every sweep and every time this list loads
+ *   needs_review  a person has to look: held and the provider CANNOT say, or
+ *                 given back and the provider says it was ALSO paid
+ *   resolved      closed in the last seven days, by the provider's answer or
+ *                 by a person
+ */
+export type RecoveryState = 'stuck' | 'needs_review' | 'resolved';
+
+export interface RecoveryItem {
+  readonly kind: RecoveryKind;
+  readonly subject_uuid: string;
+  readonly name: string | null;
+  readonly email: string | null;
+  readonly currency: string;
+  readonly amount_minor: string;
+  readonly destination: string;
+  readonly created_at: string;
+  readonly state: RecoveryState;
+  /** One line saying why it is in this state. */
+  readonly note: string;
+  readonly resolved_at: string | null;
+}
+
+export type RecoveryAction = 'mark_resolved' | 'refund' | 'send' | 'mark_delivered';
+
+export interface RecoveryDetail {
+  readonly kind: RecoveryKind;
+  readonly subject_uuid: string;
+  readonly reference: string;
+  readonly status: string;
+  readonly provider: string | null;
+  readonly destination: string;
+  readonly currency: string;
+  readonly amount_minor: string;
+  readonly created_at: string;
+  readonly failure_reason: string | null;
+  /** Asked of the provider on THIS request. */
+  readonly provider_status: {
+    readonly verdict: 'delivered' | 'failed' | 'not_found' | 'pending' | 'unknown';
+    readonly detail: string;
+  };
+  /** What the screen may offer, first one being the default. */
+  readonly actions: readonly RecoveryAction[];
+  readonly history: readonly { readonly at: string; readonly what: string; readonly who: string | null; readonly reason: string | null }[];
+}
+
+/** Held this long before a person is shown it: the webhook and the sweep own it until then. */
+const REVIEW_AFTER_HOURS = 0.5;
+/** How long this list will wait on providers before drawing what it has. */
+const LIST_BUDGET_MS = 6_000;
+
 export interface RecoveryRecord {
   readonly uuid: string;
   readonly kind: string;
@@ -153,6 +210,226 @@ export class RecoveryService {
       );
       throw new ServiceUnavailableException({ error: 'recovery_unavailable' });
     }
+  }
+
+  /**
+   * THE ONE LIST.
+   *
+   * IT ASKS FIRST. Every held payout and purchase old enough to show is put
+   * to its provider before the list is drawn, and a definite answer closes it
+   * — delivered is settled, failed is given back — so a transfer the provider
+   * has confirmed is never on this screen. That is the webhook's job and the
+   * sweep's; doing it here as well means a missed event or a worker that is
+   * not running cannot put a delivered payout in front of somebody with a
+   * refund button. Bounded in time: what the providers have not answered by
+   * then is drawn as stuck and asked again next time.
+   */
+  async list(): Promise<{ items: readonly RecoveryItem[]; summary: RecoverySummary }> {
+    const due = (await this.waiting()).filter((row) => row.hours_held >= REVIEW_AFTER_HOURS).slice(0, 25);
+    const unanswerable = new Set<string>();
+    const asking = Promise.all(
+      due.map(async (row) => {
+        try {
+          if (row.kind === 'bank_payout') {
+            const verdict = await this.payouts.resolveWithRail(await this.#payout(row.subject_uuid));
+            if (verdict.kind === 'unknown' && !verdict.retryable) unanswerable.add(row.subject_uuid);
+          } else {
+            await this.reconciliation.resolveOne(row.subject_uuid);
+          }
+        } catch (error) {
+          this.#logger.warn(`recovery list could not ask about ${row.kind} ${row.subject_uuid}: ${describe(error)}`);
+        }
+      }),
+    );
+    const auditing = this.auditRefunded(25).catch(() => undefined);
+    const [, audit] = await Promise.all([withinBudget(asking), withinBudget(auditing)]);
+
+    const held = (await this.waiting()).filter((row) => row.hours_held >= REVIEW_AFTER_HOURS);
+    const items: RecoveryItem[] = held.map((row) => ({
+      kind: row.kind,
+      subject_uuid: row.subject_uuid,
+      name: row.name,
+      email: row.email,
+      currency: row.currency,
+      amount_minor: row.amount_minor,
+      destination: row.destination,
+      created_at: new Date(row.created_at).toISOString(),
+      state: unanswerable.has(row.subject_uuid) ? 'needs_review' : 'stuck',
+      note: unanswerable.has(row.subject_uuid)
+        ? 'The provider cannot say what happened. Check their dashboard.'
+        : 'Waiting for the provider to confirm.',
+      resolved_at: null,
+    }));
+    for (const paid of audit?.paid_twice ?? []) {
+      items.push({
+        kind: 'bank_payout',
+        subject_uuid: paid.subject_uuid,
+        name: null,
+        email: paid.email,
+        currency: paid.currency,
+        amount_minor: paid.amount_minor,
+        destination: paid.destination,
+        created_at: paid.created_at,
+        state: 'needs_review',
+        note: 'Given back to the customer, but the provider says it was ALSO paid.',
+        resolved_at: null,
+      });
+    }
+    items.push(...(await this.#resolvedRecently()));
+    return { items, summary: await this.summary() };
+  }
+
+  /** Closed in the last seven days, by a person or by the provider's answer on this screen. */
+  async #resolvedRecently(): Promise<RecoveryItem[]> {
+    const rows = await this.pool.query<{
+      kind: RecoveryKind; subject_uuid: string; name: string | null; email: string | null;
+      currency: string; amount_minor: string; destination: string; created_at: Date;
+      resolved_at: Date; how: string;
+    }>(
+      `SELECT r.kind::text AS kind, r.subject_uuid, u.full_name AS name, u.email, r.currency,
+              r.amount_minor::text AS amount_minor,
+              COALESCE(p.bank_name || ' ' || p.account_number, pu.service::text, '') AS destination,
+              COALESCE(p.created_at, pu.created_at, r.created_at) AS created_at,
+              r.created_at AS resolved_at, 'refunded' AS how
+         FROM recovery_actions r
+         JOIN users u ON u.id = r.user_id
+         LEFT JOIN bank_payouts p ON r.kind = 'bank_payout' AND p.uuid = r.subject_uuid
+         LEFT JOIN purchases pu ON r.kind = 'purchase' AND pu.uuid = r.subject_uuid
+        WHERE r.created_at > now() - interval '7 days'
+       UNION ALL
+       SELECT 'bank_payout', p.uuid, u.full_name, u.email, p.currency, p.amount_minor::text,
+              p.bank_name || ' ' || p.account_number, p.created_at, l.created_at, 'delivered'
+         FROM admin_audit_log l
+         JOIN bank_payouts p ON p.uuid::text = l.subject_id
+         JOIN users u ON u.id = p.user_id
+        WHERE l.action = 'recovery.delivered' AND l.created_at > now() - interval '7 days'
+        ORDER BY resolved_at DESC
+        LIMIT 50`,
+    );
+    return rows.rows.map((row) => ({
+      kind: row.kind,
+      subject_uuid: row.subject_uuid,
+      name: row.name,
+      email: row.email,
+      currency: row.currency,
+      amount_minor: row.amount_minor,
+      destination: row.destination,
+      created_at: new Date(row.created_at).toISOString(),
+      state: 'resolved' as const,
+      note: row.how === 'refunded' ? 'Refunded to the customer’s wallet.' : 'Confirmed delivered.',
+      resolved_at: new Date(row.resolved_at).toISOString(),
+    }));
+  }
+
+  /**
+   * ONE TRANSACTION, OPENED: its detail, what the provider says NOW, what may
+   * be pressed, and everything that has been done to it. Reads only.
+   */
+  async detail(kind: RecoveryKind, subjectUuid: string): Promise<RecoveryDetail> {
+    const history = await this.#history(subjectUuid);
+    if (kind === 'bank_payout') {
+      const payout = await this.#payout(subjectUuid);
+      const held = payout.status === 'reserved';
+      let verdict: RecoveryDetail['provider_status'];
+      let actions: RecoveryAction[] = [];
+      try {
+        const said = await this.payouts.confirmWithRail(payout);
+        if (said.kind === 'arrived') {
+          verdict = { verdict: 'delivered', detail: 'The provider says this was delivered.' };
+          actions = held ? ['mark_resolved'] : [];
+        } else if (said.kind === 'failed') {
+          verdict = { verdict: 'failed', detail: `The provider says this failed: ${said.reason}` };
+          actions = held ? ['refund'] : [];
+        } else if (said.kind === 'never_sent') {
+          verdict = { verdict: 'not_found', detail: 'The provider has no transfer with this reference.' };
+          actions = held ? ['refund', 'send'] : [];
+        } else {
+          verdict = { verdict: 'unknown', detail: `The provider cannot say: ${said.why}` };
+          actions = held ? ['send', 'refund', 'mark_delivered'] : [];
+        }
+      } catch (error) {
+        verdict = { verdict: 'unknown', detail: `The provider could not be asked: ${describe(error)}` };
+        actions = held ? ['send', 'refund', 'mark_delivered'] : [];
+      }
+      return {
+        kind,
+        subject_uuid: payout.uuid,
+        reference: payout.reference,
+        status: payout.status,
+        provider: payout.provider,
+        destination: `${payout.bank_name} ${payout.account_number}`,
+        currency: payout.currency,
+        amount_minor: payout.amount_minor,
+        created_at: new Date(payout.created_at).toISOString(),
+        failure_reason: payout.failure_reason,
+        provider_status: verdict,
+        actions,
+        history,
+      };
+    }
+    const rows = await this.pool.query<{
+      uuid: string; reference: string; status: string; service: string; target: string | null;
+      currency: string; amount_minor: string; created_at: Date; failure_reason: string | null;
+    }>(
+      `SELECT uuid, reference, status::text AS status, service::text AS service,
+              NULL::text AS target, currency, amount_minor::text AS amount_minor, created_at,
+              NULL::text AS failure_reason
+         FROM purchases WHERE uuid = $1::uuid`,
+      [subjectUuid],
+    );
+    const purchase = rows.rows[0];
+    if (purchase === undefined) throw new NotFoundException({ error: 'not_recoverable' });
+    const held = purchase.status === 'reserved';
+    const said = await this.reconciliation.peek(subjectUuid);
+    const actions: RecoveryAction[] = !held
+      ? []
+      : said.status === 'delivered'
+        ? ['mark_resolved']
+        : said.status === 'failed'
+          ? ['refund']
+          : said.status === 'pending'
+            ? []
+            : ['refund'];
+    return {
+      kind,
+      subject_uuid: purchase.uuid,
+      reference: purchase.reference,
+      status: purchase.status,
+      provider: null,
+      destination: purchase.service,
+      currency: purchase.currency,
+      amount_minor: purchase.amount_minor,
+      created_at: new Date(purchase.created_at).toISOString(),
+      failure_reason: purchase.failure_reason,
+      provider_status: { verdict: said.status, detail: said.detail },
+      actions,
+      history,
+    };
+  }
+
+  /** Everything a person did to this transaction, oldest first — the append-only record. */
+  async #history(subjectUuid: string): Promise<RecoveryDetail['history']> {
+    const rows = await this.pool.query<{ at: Date; what: string; who: string | null; reason: string | null }>(
+      `SELECT l.created_at AS at, l.action AS what, u.email AS who, l.reason
+         FROM admin_audit_log l
+         LEFT JOIN users u ON u.id = l.actor_id
+        WHERE l.subject_id = $1 AND l.action LIKE 'recovery.%'
+        ORDER BY l.created_at`,
+      [subjectUuid],
+    );
+    return rows.rows.map((row) => ({
+      at: new Date(row.at).toISOString(),
+      what:
+        row.what === 'recovery.reverse'
+          ? 'Refunded to the customer'
+          : row.what === 'recovery.delivered'
+            ? 'Marked delivered'
+            : row.what === 'recovery.resend'
+              ? 'Sent to the recipient again'
+              : row.what,
+      who: row.who,
+      reason: row.reason,
+    }));
   }
 
   /**
@@ -325,6 +602,21 @@ export class RecoveryService {
       entryId = await this.#reversalEntryFor(`purchase-reverse:${purchase.rows[0]?.reference ?? ''}`);
     }
 
+    return this.#recordReversal(kind, subjectUuid, row, actorUuid, actorId, entryId, reason, ip,
+      'The provider says this failed, so the money is back in the customer’s wallet.');
+  }
+
+  async #recordReversal(
+    kind: RecoveryKind,
+    subjectUuid: string,
+    row: HeldMoney,
+    actorUuid: string,
+    actorId: string,
+    entryId: string,
+    reason: string,
+    ip: string | undefined,
+    detail: string,
+  ): Promise<RecoveryOutcome> {
     /*
      * THE RECORD, AFTER THE REVERSAL. `post()` owns its own transaction, so a
      * crash between the two leaves a reversal with no recovery row; the
@@ -356,15 +648,116 @@ export class RecoveryService {
 
     this.#logger.warn(
       `RECOVERED ${row.amount_minor} ${row.currency} for user ${row.user_id} ` +
-        `(${kind} ${subjectUuid}) by ${actorUuid}, the provider having said it failed: ${reason}`,
+        `(${kind} ${subjectUuid}) by ${actorUuid}: ${reason}`,
     );
 
     const record = written.rows[0];
     return {
       outcome: 'reversed',
-      detail: 'The provider says this failed, so the money is back in the customer’s wallet.',
+      detail,
       ...(record === undefined ? {} : { record: { ...record, email: row.email, actioned_by: actorUuid } }),
     };
+  }
+
+  /**
+   * REFUND A HELD ROW TO THE CUSTOMER'S WALLET ON A PERSON'S DECISION — for a
+   * payout or purchase the provider says failed, or cannot say anything about.
+   *
+   * REFUSED WHEN THE PROVIDER SAYS IT WAS DELIVERED. That is paying the same
+   * money twice, which is exactly what this screen once did to the owner's own
+   * payout; the owner's standing decision is that it is blocked, not merely
+   * warned about. The provider is asked on THIS request, never trusted from
+   * whatever the screen showed a minute ago.
+   */
+  async refund(
+    kind: RecoveryKind,
+    subjectUuid: string,
+    actorUuid: string,
+    reason: string,
+    ip?: string,
+  ): Promise<RecoveryOutcome> {
+    const actorId = await this.#userId(actorUuid);
+    const row = await this.#held(kind, subjectUuid);
+    let entryId: string;
+    if (kind === 'bank_payout') {
+      const payout = await this.#payout(subjectUuid);
+      const verdict = await this.payouts.confirmWithRail(payout);
+      if (verdict.kind === 'arrived') {
+        throw new ConflictException({ error: 'refund_refused_delivered' });
+      }
+      await this.payouts.fail(payout, `refunded by staff: ${reason}`);
+      entryId = await this.#reversalEntryFor(`bank-payout-reverse:${payout.reference}`);
+    } else {
+      const done = await this.reconciliation.refund(subjectUuid, reason);
+      if (done === 'delivered') throw new ConflictException({ error: 'refund_refused_delivered' });
+      const purchase = await this.pool.query<{ reference: string }>(
+        `SELECT reference FROM purchases WHERE uuid = $1::uuid`,
+        [subjectUuid],
+      );
+      entryId = await this.#reversalEntryFor(`purchase-reverse:${purchase.rows[0]?.reference ?? ''}`);
+    }
+    return this.#recordReversal(kind, subjectUuid, row, actorUuid, actorId, entryId, reason, ip,
+      'Refunded to the customer’s Xetral wallet.');
+  }
+
+  /**
+   * SEND A HELD PAYOUT TO ITS RECIPIENT AGAIN, under its own reference — see
+   * `PayoutService.resend` for why that cannot pay twice. Asked first: a
+   * payout the provider says ARRIVED is settled instead, and one it says
+   * FAILED is refused here (the reference is spent; refund it instead).
+   */
+  async send(subjectUuid: string, actorUuid: string, reason: string, ip?: string): Promise<RecoveryOutcome> {
+    const row = await this.#held('bank_payout', subjectUuid);
+    const payout = await this.#payout(subjectUuid);
+    const verdict = await this.payouts.confirmWithRail(payout);
+    if (verdict.kind === 'arrived') {
+      await this.payouts.applyReceipt(payout, verdict.receipt);
+      await this.#noteDelivered(subjectUuid, row, actorUuid, reason, ip, 'provider');
+      return { outcome: 'delivered', detail: 'The provider says this was already delivered. Nothing was sent again.' };
+    }
+    if (verdict.kind === 'failed') {
+      return {
+        outcome: 'held',
+        detail: 'The provider says this transfer failed, so its reference cannot be used again. Refund it to the customer instead.',
+      };
+    }
+    const result = await this.payouts.resend(payout);
+    await this.audit.record({
+      actorId: actorUuid,
+      action: 'recovery.resend',
+      subjectType: 'user',
+      subjectId: subjectUuid,
+      detail: { kind: 'bank_payout', amount_minor: row.amount_minor, currency: row.currency, sent: result.sent },
+      reason,
+      ...(ip === undefined ? {} : { ip }),
+    });
+    return { outcome: result.sent ? 'delivered' : 'held', detail: result.detail };
+  }
+
+  async #noteDelivered(
+    subjectUuid: string,
+    row: HeldMoney,
+    actorUuid: string,
+    reason: string,
+    ip: string | undefined,
+    by: 'provider' | 'staff',
+    providerPayoutId?: string,
+  ): Promise<void> {
+    await this.audit.record({
+      actorId: actorUuid,
+      action: 'recovery.delivered',
+      subjectType: 'user',
+      subjectId: subjectUuid,
+      detail: {
+        kind: row.kind,
+        amount_minor: row.amount_minor,
+        currency: row.currency,
+        by,
+        ...(providerPayoutId === undefined ? {} : { provider_payout_id: providerPayoutId }),
+      },
+      reason,
+      ...(ip === undefined ? {} : { ip }),
+    });
   }
 
   /**
@@ -430,30 +823,33 @@ export class RecoveryService {
     );
     const paidTwice: RefundAuditRow[] = [];
     let unconfirmed = 0;
-    for (const row of rows.rows) {
-      let verdict;
-      try {
-        verdict = await this.payouts.confirmWithRail(row);
-      } catch (error) {
-        this.#logger.warn(`audit could not ask about payout ${row.reference}: ${describe(error)}`);
-        unconfirmed += 1;
-        continue;
-      }
-      if (verdict.kind === 'arrived') {
-        paidTwice.push({
-          subject_uuid: row.uuid,
-          reference: row.reference,
-          email: row.email,
-          currency: row.currency,
-          amount_minor: String(BigInt(row.amount_minor) + BigInt(row.fee_minor)),
-          destination: `${row.bank_name} ${row.account_number}`,
-          created_at: new Date(row.created_at).toISOString(),
-          provider: row.provider,
-        });
-      } else if (verdict.kind === 'unknown') {
-        unconfirmed += 1;
-      }
-    }
+    // In parallel: this runs while an operator's screen is loading.
+    await Promise.all(
+      rows.rows.map(async (row) => {
+        let verdict;
+        try {
+          verdict = await this.payouts.confirmWithRail(row);
+        } catch (error) {
+          this.#logger.warn(`audit could not ask about payout ${row.reference}: ${describe(error)}`);
+          unconfirmed += 1;
+          return;
+        }
+        if (verdict.kind === 'arrived') {
+          paidTwice.push({
+            subject_uuid: row.uuid,
+            reference: row.reference,
+            email: row.email,
+            currency: row.currency,
+            amount_minor: String(BigInt(row.amount_minor) + BigInt(row.fee_minor)),
+            destination: `${row.bank_name} ${row.account_number}`,
+            created_at: new Date(row.created_at).toISOString(),
+            provider: row.provider,
+          });
+        } else if (verdict.kind === 'unknown') {
+          unconfirmed += 1;
+        }
+      }),
+    );
     if (paidTwice.length > 0) {
       this.#logger.error(
         `REFUND AUDIT: ${paidTwice.length} payout(s) were given back although the provider ` +
@@ -535,4 +931,17 @@ export class RecoveryService {
  *  trace on a screen they opened during an incident. */
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Resolves with the work's value, or undefined once the list's time budget is spent. */
+async function withinBudget<T>(work: Promise<T>): Promise<T | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => resolve(undefined), LIST_BUDGET_MS);
+  });
+  try {
+    return await Promise.race([work, deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
 }

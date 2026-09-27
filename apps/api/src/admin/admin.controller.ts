@@ -37,10 +37,10 @@ import { ErrorRecorder } from '../observability/error-recorder.service.js';
 import { ReadinessService, type Readiness } from '../golive/readiness.service.js';
 import {
   RecoveryService,
-  type HeldMoney,
+  type RecoveryDetail,
+  type RecoveryItem,
+  type RecoveryKind,
   type RecoveryOutcome,
-  type RefundAudit,
-  type RecoveryRecord,
   type RecoverySummary,
 } from './recovery.service.js';
 import { EarningsService, type EarningsReport } from './earnings.service.js';
@@ -113,6 +113,24 @@ const recoverySchema = z
     transaction_pin: z.string().optional(),
   })
   .strict();
+
+function parseReason(body: unknown): string {
+  const parsed = recoverySchema.safeParse(body);
+  if (!parsed.success) {
+    throw new BadRequestException({
+      error: 'invalid_request',
+      fields: parsed.error.issues.map((i) => i.path.join('.')),
+    });
+  }
+  return parsed.data.reason;
+}
+
+function recoveryKind(kind: string): RecoveryKind {
+  if (kind !== 'bank_payout' && kind !== 'purchase') {
+    throw new BadRequestException({ error: 'invalid_request', fields: ['kind'] });
+  }
+  return kind;
+}
 
 /** Recording a delivery: the provider's own transfer id is the evidence. */
 const deliveredSchema = z
@@ -439,29 +457,28 @@ export class AdminController {
   /* ------------------------------ recovery ----------------------------- */
 
   /**
-   * Money held against something that never completed, and what has already
-   * been given back.
-   *
-   * Both in one response, because "has somebody already dealt with this?" is
-   * asked in the same breath as "what is waiting?" — and an operator who
-   * cannot see the answer presses the button again.
+   * ONE LIST: what is stuck, what needs a person, and what was closed this
+   * week. Loading it asks the provider about every row held past the review
+   * threshold and closes what they answer for, so a delivered payout never
+   * reaches a person with a refund button.
    */
   @Get('recovery')
-  async recoveryQueue(): Promise<{
-    waiting: readonly HeldMoney[];
-    recovered: readonly RecoveryRecord[];
-    summary: RecoverySummary;
-  }> {
-    const [waiting, recovered, summary] = await Promise.all([
-      this.recovery.waiting(),
-      this.recovery.recovered(),
-      this.recovery.summary(),
-    ]);
-    return { waiting, recovered, summary };
+  async recoveryQueue(): Promise<{ items: readonly RecoveryItem[]; summary: RecoverySummary }> {
+    return this.recovery.list();
+  }
+
+  /** One row, opened: its detail, the provider's answer NOW, and its history. */
+  @Get('recovery/:kind/:id')
+  async recoveryDetail(
+    @Param('kind') kind: string,
+    @Param('id', uuidOr404('not_recoverable')) id: string,
+  ): Promise<RecoveryDetail> {
+    return this.recovery.detail(recoveryKind(kind), id);
   }
 
   /**
-   * Give one held row back.
+   * Close one held row ON THE PROVIDER'S ANSWER: delivered is settled, failed
+   * is given back, anything else moves nothing.
    *
    * THE AMOUNT IS NOT A PARAMETER. It comes from the held row, so this cannot
    * credit an arbitrary customer an arbitrary sum — which is what a
@@ -474,33 +491,34 @@ export class AdminController {
     @Body() body: unknown,
     @Req() request: AuthenticatedRequest,
   ): Promise<RecoveryOutcome> {
-    const parsed = recoverySchema.safeParse(body);
-    if (!parsed.success) {
-      throw new BadRequestException({
-        error: 'invalid_request',
-        fields: parsed.error.issues.map((i) => i.path.join('.')),
-      });
-    }
-    if (kind !== 'bank_payout' && kind !== 'purchase') {
-      throw new BadRequestException({ error: 'invalid_request', fields: ['kind'] });
-    }
-
-    return this.recovery.recover(
-      kind,
-      id,
-      claims(request).sub,
-      parsed.data.reason,
-      request.ip,
-    );
+    const reason = parseReason(body);
+    return this.recovery.recover(recoveryKind(kind), id, claims(request).sub, reason, request.ip);
   }
 
   /**
-   * Every refunded payout asked of its provider again — the ones it says were
-   * paid are money given out twice. Reads only; changes nothing.
+   * Refund a held row to the customer's wallet on a person's decision.
+   * Refused with `refund_refused_delivered` when the provider says it arrived.
    */
-  @Get('recovery/audit')
-  async recoveryAudit(): Promise<RefundAudit> {
-    return this.recovery.auditRefunded();
+  @Post('recovery/:kind/:id/refund')
+  async recoverRefund(
+    @Param('kind') kind: string,
+    @Param('id', uuidOr404('not_recoverable')) id: string,
+    @Body() body: unknown,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<RecoveryOutcome> {
+    const reason = parseReason(body);
+    return this.recovery.refund(recoveryKind(kind), id, claims(request).sub, reason, request.ip);
+  }
+
+  /** Send a held payout to its recipient again, under the SAME reference. */
+  @Post('recovery/bank_payout/:id/send')
+  async recoverSend(
+    @Param('id', uuidOr404('not_recoverable')) id: string,
+    @Body() body: unknown,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<RecoveryOutcome> {
+    const reason = parseReason(body);
+    return this.recovery.send(id, claims(request).sub, reason, request.ip);
   }
 
   /**

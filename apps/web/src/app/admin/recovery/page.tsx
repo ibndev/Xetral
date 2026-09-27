@@ -1,8 +1,14 @@
 'use client';
 
-import { Fragment, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { formatMinor } from '@xetral/client';
-import type { AdminHeldMoney, AdminRecoveryOutcome, AdminRefundAudit } from '@xetral/client';
+import type {
+  AdminRecoveryAction,
+  AdminRecoveryDetail,
+  AdminRecoveryItem,
+  AdminRecoveryOutcome,
+  AdminRecoveryState,
+} from '@xetral/client';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
 import { AdminError } from '../access';
@@ -11,32 +17,22 @@ import { ago } from '../age';
 import { Kpis, MoneyFigure, shortRef } from '../queue';
 
 /**
- * Money that left a customer's balance and never reached where it was going.
+ * Money that left a customer's balance and has not been confirmed either way.
  *
- * A payout reserves BEFORE the provider is asked, and a purchase does the
- * same: the money moves out of the wallet into `customer_pending`, and only
- * then does anybody call anyone. That ordering is deliberate — the overdraft
- * guard has to decide before we commit to something we cannot recall — and the
- * cost of it is this queue. When the provider never answers, the row stays
- * `reserved` for ever and the customer's money sits in pending, which reads on
- * their screen as simply gone.
+ * ONE LIST. It was three sections — held, refunded-but-paid, already given
+ * back — and an operator had to read all three to answer one question about
+ * one transfer. Every row now says which of three states it is in, and opens
+ * in place to show the rest.
  *
- * `PayoutReconciliationService` resolves the ones the provider will answer
- * for. This screen is for the rest: the ones where a person has to look,
- * establish that nothing left, and give it back.
+ * A PROVIDER'S ANSWER CLOSES A ROW WITHOUT A PERSON. The webhook, the sweep
+ * and loading this list all ask; delivered is settled and failed is given
+ * back. So what a person sees is what no provider has answered for in half an
+ * hour — and a delivered payout never reaches somebody holding a refund
+ * button, which is how the owner's own ₦10 was once refunded after it had
+ * arrived.
  *
- * THE AMOUNT IS NOT ON THIS FORM, and that is the whole safety argument. It
- * comes from the held row on the server, so this screen cannot credit an
- * arbitrary customer an arbitrary sum.
- *
- * AND THE BUTTON NO LONGER GIVES ANYTHING BACK ON A PERSON'S WORD. It was
- * "Reverse", and it reversed — including the owner's own payout, delivered
- * to their own bank, whose send had merely answered in a shape we could not
- * read. That is the business paying twice with every entry balanced. The
- * button now ASKS THE PROVIDER: delivered settles it, failed gives it back,
- * and "cannot say" moves nothing. A person who has SEEN a transfer arrive on
- * the provider's dashboard can record it as delivered — the one direction a
- * person may decide on their own, because it gives nothing away.
+ * THE AMOUNT IS NOT ON THIS FORM. It comes from the held row on the server,
+ * so this screen cannot credit an arbitrary customer an arbitrary sum.
  */
 export default function Recovery() {
   const admin = useAdmin();
@@ -44,11 +40,11 @@ export default function Recovery() {
   const [open, setOpen] = useState<string | undefined>();
   const [said, setSaid] = useState<AdminRecoveryOutcome | undefined>();
 
-  const waiting = queue.data?.waiting ?? [];
-  const recovered = queue.data?.recovered ?? [];
+  const items = [...(queue.data?.items ?? [])].sort((a, b) => ORDER[a.state] - ORDER[b.state]);
   const summary = queue.data?.summary;
+  const review = items.filter((i) => i.state === 'needs_review').length;
 
-  const reload = (outcome?: AdminRecoveryOutcome): void => {
+  const done = (outcome: AdminRecoveryOutcome): void => {
     setSaid(outcome);
     setOpen(undefined);
     queue.reload();
@@ -59,13 +55,14 @@ export default function Recovery() {
       <AdminTitle>Recovery</AdminTitle>
       <Kpis
         items={[
-          { label: 'Stuck payouts', count: summary?.stuck, tone: 'danger' },
+          { label: 'Stuck', count: summary?.stuck, tone: 'warn' },
+          { label: 'Needs review', count: queue.data === undefined ? undefined : review, tone: 'danger' },
           {
-            label: 'Value stuck',
+            label: 'Value held',
             value: summary === undefined ? undefined : <MoneyFigure totals={summary.held} />,
           },
           {
-            label: 'Recovered · 7d',
+            label: 'Refunded · 7d',
             value: summary === undefined ? undefined : <MoneyFigure totals={summary.recovered_7d} />,
           },
         ]}
@@ -76,9 +73,9 @@ export default function Recovery() {
           <p>
             <strong>
               {said.outcome === 'reversed'
-                ? 'Given back.'
+                ? 'Refunded.'
                 : said.outcome === 'delivered'
-                  ? 'Delivered — nothing given back.'
+                  ? 'Resolved — delivered.'
                   : 'Still held — nothing moved.'}
             </strong>{' '}
             {said.detail}
@@ -87,61 +84,62 @@ export default function Recovery() {
       )}
 
       <div className="panel tbl-panel">
-        <span className="tbl-note">
-          Money that left a wallet and has not been confirmed either way. Resolve
-          asks the provider; money goes back only if they say it failed.
-        </span>
         <AdminError error={queue.error} code={queue.code} role="support" />
-        {queue.loading && <p className="spinner">Loading…</p>}
-        {queue.data !== undefined && waiting.length === 0 && (
-          <p className="empty">Nothing is held. Every reservation has resolved.</p>
+        {queue.loading && queue.data === undefined && <p className="spinner">Asking providers…</p>}
+        {queue.data !== undefined && items.length === 0 && (
+          <p className="empty">Nothing is held, and nothing was resolved this week.</p>
         )}
 
-        {waiting.length > 0 && (
+        {items.length > 0 && (
           <div className="scroll">
-            <table>
+            <table className="rec-table">
               <thead>
                 <tr>
                   <th>Reference</th>
                   <th>Customer</th>
                   <th className="r">Amount</th>
-                  <th>Rail</th>
-                  {/* HELD, not "failed": a timeout settles nothing, and the
-                      money may still be on its way — 043's rule. */}
-                  <th>Held</th>
-                  <th className="r" aria-label="Action" />
+                  <th>Status</th>
+                  <th className="r">When</th>
                 </tr>
               </thead>
               <tbody>
-                {waiting.map((row) => {
-                  const key = `${row.kind}:${row.subject_uuid}`;
+                {items.map((item) => {
+                  const key = `${item.state}:${item.kind}:${item.subject_uuid}`;
+                  const expanded = open === key;
+                  const toggle = (): void => setOpen(expanded ? undefined : key);
                   return (
                     <Fragment key={key}>
-                      <tr>
+                      <tr
+                        className={expanded ? 'rec-row open' : 'rec-row'}
+                        tabIndex={0}
+                        aria-expanded={expanded}
+                        onClick={toggle}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            toggle();
+                          }
+                        }}
+                      >
                         <td className="ref">
-                          {shortRef(row.kind === 'bank_payout' ? 'PO' : 'PU', row.subject_uuid)}
+                          {shortRef(item.kind === 'bank_payout' ? 'PO' : 'PU', item.subject_uuid)}
                         </td>
-                        <td>{row.name ?? row.email ?? `customer ${row.user_id}`}</td>
-                        <td className="r amount soft">{formatMinor(row.amount_minor, row.currency)}</td>
-                        <td className="quiet">{railOf(row)}</td>
-                        <td className={row.hours_held >= 24 ? 'alarm' : 'quiet'}>
-                          {heldFor(row.hours_held)}
+                        <td>
+                          <span className="rec-who">{item.name ?? item.email ?? '—'}</span>
+                          {item.name !== null && item.email !== null && (
+                            <span className="rec-sub">{item.email}</span>
+                          )}
                         </td>
-                        <td className="r">
-                          <button
-                            type="button"
-                            className={open === key ? 'ghost' : undefined}
-                            aria-expanded={open === key}
-                            onClick={() => setOpen(open === key ? undefined : key)}
-                          >
-                            {open === key ? 'Close' : 'Resolve'}
-                          </button>
+                        <td className="r amount soft">{formatMinor(item.amount_minor, item.currency)}</td>
+                        <td>
+                          <span className={`badge ${TONE[item.state]}`}>{LABEL[item.state]}</span>
                         </td>
+                        <td className="r quiet nowrap">{ago(item.resolved_at ?? item.created_at)}</td>
                       </tr>
-                      {open === key && (
+                      {expanded && (
                         <tr className="detail">
-                          <td colSpan={6}>
-                            <Held row={row} onDone={reload} />
+                          <td colSpan={5}>
+                            <Opened item={item} onDone={done} />
                           </td>
                         </tr>
                       )}
@@ -153,276 +151,197 @@ export default function Recovery() {
           </div>
         )}
       </div>
-
-      <RefundAuditPanel />
-
-      {recovered.length > 0 && (
-        <div className="panel tbl-panel">
-          <span className="tbl-note">
-            Already given back. Append-only — a mistake here is corrected by a
-            further entry, the same rule the ledger follows.
-          </span>
-          <div className="scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>When</th>
-                  <th>Customer</th>
-                  <th>What</th>
-                  <th className="r">Amount</th>
-                  <th>Who did it</th>
-                  <th>Why</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recovered.map((row) => (
-                  <tr key={row.uuid}>
-                    <td className="quiet nowrap">{ago(row.created_at)}</td>
-                    <td>{row.email ?? '—'}</td>
-                    <td className="quiet">{row.kind === 'bank_payout' ? 'Bank transfer' : 'Purchase'}</td>
-                    <td className="r amount soft">{formatMinor(row.amount_minor, row.currency)}</td>
-                    <td className="quiet">{row.actioned_by ?? '—'}</td>
-                    <td className="quiet">{row.reason}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
     </>
   );
 }
 
-/**
- * The rail, as the comp names it — "GTBank", "MTN MoMo" — and never the full
- * account number in a table that sits on an operator's screen all day. The
- * whole destination is in the opened row, where somebody is checking it.
- */
-function railOf(row: AdminHeldMoney): string {
-  if (row.kind === 'purchase') return row.destination;
-  const match = /^(.*?)\s+([0-9]{4,})$/.exec(row.destination);
-  return match === null ? row.destination : `${match[1]} ··${match[2]?.slice(-4)}`;
-}
+const ORDER: Record<AdminRecoveryState, number> = { needs_review: 0, stuck: 1, resolved: 2 };
+const LABEL: Record<AdminRecoveryState, string> = {
+  stuck: 'Stuck',
+  needs_review: 'Needs review',
+  resolved: 'Resolved',
+};
+const TONE: Record<AdminRecoveryState, string> = { stuck: 'warn', needs_review: 'danger', resolved: 'ok' };
 
-function heldFor(hours: number): string {
-  const whole = Math.floor(hours);
-  if (whole < 1) return 'under 1h';
-  return whole < 48 ? `${whole}h` : `${Math.floor(whole / 24)}d`;
-}
+const VERDICT: Record<AdminRecoveryDetail['provider_status']['verdict'], { label: string; tone: string }> = {
+  delivered: { label: 'Delivered', tone: 'ok' },
+  failed: { label: 'Failed', tone: 'danger' },
+  not_found: { label: 'Not found', tone: 'warn' },
+  pending: { label: 'Pending', tone: 'info' },
+  unknown: { label: 'No answer', tone: 'warn' },
+};
+
+const ACTION_LABEL: Record<AdminRecoveryAction, string> = {
+  mark_resolved: 'Mark resolved',
+  refund: 'Refund to customer’s wallet',
+  send: 'Send to recipient',
+  mark_delivered: 'Mark delivered',
+};
 
 /**
- * One held row: ask the provider, or record what you saw on their dashboard.
- *
- * The age is shown as hours because that is the question being asked: a
- * payout held for twenty minutes is a provider taking its time, and one held
- * for three days is one nobody is coming back to answer for.
+ * One row, opened. The provider is asked on opening — never trusted from
+ * whatever the list said a minute ago — and the buttons offered follow its
+ * answer, the first being the default. Every press is recorded with the
+ * person and the reason, and that record is the history at the bottom.
  */
-function Held({ row, onDone }: { row: AdminHeldMoney; onDone: (said: AdminRecoveryOutcome) => void }) {
+function Opened({ item, onDone }: { item: AdminRecoveryItem; onDone: (said: AdminRecoveryOutcome) => void }) {
   const admin = useAdmin();
+  const [detail, setDetail] = useState<AdminRecoveryDetail | undefined>();
+  const [loadError, setLoadError] = useState<string | undefined>();
   const [reason, setReason] = useState('');
   const [pin, setPin] = useState('');
   const [transferId, setTransferId] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<AdminRecoveryAction | undefined>();
   const [error, setError] = useState<string | undefined>();
 
-  const hours = Math.floor(row.hours_held);
-  const age =
-    hours < 1 ? 'under an hour' : hours < 48 ? `${hours} hours` : `${Math.floor(hours / 24)} days`;
+  useEffect(() => {
+    let live = true;
+    admin.recoveryDetail(item.kind, item.subject_uuid).then(
+      (found) => live && setDetail(found),
+      (cause: unknown) => live && setLoadError(messageFor(cause)),
+    );
+    return () => {
+      live = false;
+    };
+  }, [admin, item.kind, item.subject_uuid]);
 
-  const act = (work: () => Promise<AdminRecoveryOutcome>): void => {
-    setBusy(true);
+  const run = (action: AdminRecoveryAction): void => {
+    const work = (): Promise<AdminRecoveryOutcome> => {
+      switch (action) {
+        case 'mark_resolved':
+          return admin.recover(item.kind, item.subject_uuid, reason, pin);
+        case 'refund':
+          return admin.refundHeld(item.kind, item.subject_uuid, reason, pin);
+        case 'send':
+          return admin.resendPayout(item.subject_uuid, reason, pin);
+        case 'mark_delivered':
+          return admin.markPayoutDelivered(item.subject_uuid, transferId.trim(), reason, pin);
+      }
+    };
+    setBusy(action);
     setError(undefined);
-    void (async () => {
-      try {
-        const said = await work();
+    void work().then(
+      (said) => {
         setPin('');
         onDone(said);
-      } catch (cause) {
-        setError(messageFor(cause));
-      } finally {
-        setBusy(false);
-      }
-    })();
+      },
+      (cause: unknown) => setError(messageFor(cause)),
+    ).finally(() => setBusy(undefined));
   };
 
-  const ready = reason.trim().length >= 8 && pin !== '' && !busy;
+  if (loadError !== undefined) return <p className="error">{loadError}</p>;
+  if (detail === undefined) return <p className="spinner">Asking the provider…</p>;
+
+  const verdict = VERDICT[detail.provider_status.verdict];
+  const ready = reason.trim().length >= 8 && pin !== '' && busy === undefined;
+  const [first, ...rest] = detail.actions;
+  // A DEFAULT ONLY WHERE THE PROVIDER GAVE ONE. With no answer every button
+  // is a person's judgement, so none of them is drawn as the obvious one.
+  const primary = detail.provider_status.verdict !== 'unknown';
 
   return (
-    <form
-      className="review-grid"
-      onSubmit={(event) => {
-        event.preventDefault();
-        act(() => admin.recover(row.kind, row.subject_uuid, reason, pin));
-      }}
-    >
+    <div className="review-grid">
       <div>
-        <p>
-          <strong>{formatMinor(row.amount_minor, row.currency)}</strong>{' '}
-          <span className="hint">
-            {row.email ?? `customer ${row.user_id}`} ·{' '}
-            {row.kind === 'bank_payout' ? 'bank transfer' : 'purchase'} · held {age}
-          </span>
-        </p>
-        <div className="row">
-          <span className="muted">Where it was going</span>
-          <span>{row.destination}</span>
+        <div className="rec-verdict">
+          <span className="muted">Provider says</span>
+          <span className={`badge ${verdict.tone}`}>{verdict.label}</span>
         </div>
-        <div className="row">
-          <span className="muted">Started</span>
-          <span>{new Date(row.created_at).toLocaleString()}</span>
-        </div>
-        <div className="row">
-          <span className="muted">Reference</span>
-          <span className="mono">{row.subject_uuid}</span>
-        </div>
-        <div className="row">
-          <span className="muted">State here</span>
-          <span>{row.status}</span>
-        </div>
-      </div>
-
-      <div>
-        <label>
-          What you are doing, and why
-          <textarea
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            required
-            minLength={8}
-            maxLength={500}
-          />
-          <span className="hint">
-            Kept on the record with your name. The provider decides the outcome, not this box.
-          </span>
-        </label>
-
-        <label>
-          Your transaction PIN
-          <input
-            type="password"
-            inputMode="numeric"
-            autoComplete="off"
-            value={pin}
-            onChange={(e) => setPin(e.target.value)}
-            required
-          />
-        </label>
-
-        <button type="submit" disabled={!ready}>
-          {busy ? 'Asking the provider…' : 'Ask the provider and resolve'}
-        </button>
-        <span className="hint">
-          Delivered: settled, nothing given back. Failed: given back to the
-          customer. No answer: nothing moves.
-        </span>
-
-        {row.kind === 'bank_payout' && (
-          <>
-            <label>
-              Seen it arrive? Provider transfer id
-              <input
-                value={transferId}
-                onChange={(e) => setTransferId(e.target.value)}
-                placeholder="e.g. TRF_1ptvuv321ahaa7q"
-                autoComplete="off"
-              />
-              <span className="hint">
-                From the provider&rsquo;s own dashboard. Records it as delivered and gives nothing back.
-              </span>
-            </label>
-            <button
-              type="button"
-              className="ghost"
-              disabled={!ready || transferId.trim().length < 2}
-              onClick={() =>
-                act(() => admin.markPayoutDelivered(row.subject_uuid, transferId.trim(), reason, pin))
-              }
-            >
-              Mark as delivered
-            </button>
-          </>
+        <p className="hint">{detail.provider_status.detail}</p>
+        <div className="row"><span className="muted">Amount</span><span>{formatMinor(detail.amount_minor, detail.currency)}</span></div>
+        <div className="row"><span className="muted">Going to</span><span>{detail.destination}</span></div>
+        {detail.provider !== null && (
+          <div className="row"><span className="muted">Rail</span><span>{detail.provider}</span></div>
+        )}
+        <div className="row"><span className="muted">Reference</span><span className="mono">{detail.reference}</span></div>
+        <div className="row"><span className="muted">Started</span><span>{new Date(detail.created_at).toLocaleString()}</span></div>
+        <div className="row"><span className="muted">State here</span><span>{detail.status}</span></div>
+        {detail.failure_reason !== null && (
+          <div className="row"><span className="muted">Last error</span><span>{detail.failure_reason}</span></div>
         )}
 
+        <h4 className="rec-h">History</h4>
+        {detail.history.length === 0 ? (
+          <p className="hint">Nobody has acted on this yet.</p>
+        ) : (
+          <ol className="rec-history">
+            {detail.history.map((entry, index) => (
+              <li key={`${entry.at}:${index}`}>
+                <span className="rec-when">{ago(entry.at)}</span>
+                <span>
+                  <strong>{entry.what}</strong>
+                  {entry.who !== null && <> · {entry.who}</>}
+                  {entry.reason !== null && <span className="rec-sub">{entry.reason}</span>}
+                </span>
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+
+      <div>
+        {first === undefined ? (
+          <p className="hint">
+            {item.state === 'needs_review'
+              ? 'Already refunded, and the provider says it was also paid. Recovering it is a conversation with the customer, not a button.'
+              : 'Closed. Nothing left to do.'}
+          </p>
+        ) : (
+          <>
+            <label>
+              Reason
+              <textarea
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                minLength={8}
+                maxLength={500}
+              />
+            </label>
+            {detail.actions.includes('mark_delivered') && (
+              <label>
+                Provider transfer id <span className="hint">(only for Mark delivered)</span>
+                <input
+                  value={transferId}
+                  onChange={(e) => setTransferId(e.target.value)}
+                  placeholder="e.g. TRF_1ptvuv321ahaa7q"
+                  autoComplete="off"
+                />
+              </label>
+            )}
+            <label>
+              Transaction PIN
+              <input
+                type="password"
+                inputMode="numeric"
+                autoComplete="off"
+                value={pin}
+                onChange={(e) => setPin(e.target.value)}
+              />
+            </label>
+            <div className="rec-actions">
+              <button
+                type="button"
+                className={primary ? undefined : 'ghost'}
+                disabled={!ready || (first === 'mark_delivered' && transferId.trim().length < 2)}
+                onClick={() => run(first)}
+              >
+                {busy === first ? 'Working…' : ACTION_LABEL[first]}
+              </button>
+              {rest.map((action) => (
+                <button
+                  key={action}
+                  type="button"
+                  className="ghost"
+                  disabled={!ready || (action === 'mark_delivered' && transferId.trim().length < 2)}
+                  onClick={() => run(action)}
+                >
+                  {busy === action ? 'Working…' : ACTION_LABEL[action]}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
         {error !== undefined && <p className="error">{error}</p>}
       </div>
-    </form>
-  );
-}
-
-/**
- * EVERY PAYOUT WE GAVE BACK, ASKED AGAIN.
- *
- * Before the provider was asked first, this screen's own button — and the
- * sweep, on any refused status question — could give back a payout that had
- * arrived. A reversal of a delivered transfer balances exactly like one of a
- * failed transfer, so nothing in the ledger can find them; only the provider
- * can. On demand rather than on load, because it asks a provider per row.
- */
-function RefundAuditPanel() {
-  const admin = useAdmin();
-  const [audit, setAudit] = useState<AdminRefundAudit | undefined>();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | undefined>();
-
-  return (
-    <div className="panel tbl-panel">
-      <span className="tbl-note">
-        Payouts already given back, checked against the provider. Any listed
-        here were paid to the beneficiary AND refunded to the customer.
-      </span>
-      <div className="tbl-actions">
-        <button
-          type="button"
-          className="small"
-          disabled={busy}
-          onClick={() => {
-            setBusy(true);
-            setError(undefined);
-            void admin
-              .recoveryAudit()
-              .then(setAudit, (cause: unknown) => setError(messageFor(cause)))
-              .finally(() => setBusy(false));
-          }}
-        >
-          {busy ? 'Checking with providers…' : 'Check refunded payouts'}
-        </button>
-      </div>
-      {error !== undefined && <p className="error">{error}</p>}
-      {audit !== undefined && (
-        <p className={audit.paid_twice.length > 0 ? 'error' : 'ok'}>
-          {audit.paid_twice.length > 0
-            ? `${audit.paid_twice.length} of ${audit.checked} refunded payouts were also paid.`
-            : `None of ${audit.checked} refunded payouts was also paid.`}
-          {audit.unconfirmed > 0 && ` ${audit.unconfirmed} could not be confirmed with the provider.`}
-        </p>
-      )}
-      {audit !== undefined && audit.paid_twice.length > 0 && (
-        <div className="scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>Reference</th>
-                <th>Customer</th>
-                <th className="r">Given back</th>
-                <th>Destination</th>
-                <th>Rail</th>
-              </tr>
-            </thead>
-            <tbody>
-              {audit.paid_twice.map((row) => (
-                <tr key={row.subject_uuid}>
-                  <td className="ref mono">{row.reference}</td>
-                  <td>{row.email ?? '—'}</td>
-                  <td className="r amount soft">{formatMinor(row.amount_minor, row.currency)}</td>
-                  <td className="quiet">{row.destination}</td>
-                  <td className="quiet">{row.provider}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
     </div>
   );
 }
