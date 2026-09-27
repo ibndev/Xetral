@@ -44,6 +44,7 @@ import {
   type RecoverySummary,
 } from './recovery.service.js';
 import { EarningsService, type EarningsReport } from './earnings.service.js';
+import { NotificationService } from '../notifications/notification.service.js';
 import {
   FundingDiagnosticsService,
   type FundingDiagnosis,
@@ -357,6 +358,7 @@ export class AdminController {
     @Inject(FundingDiagnosticsService)
     private readonly diagnostics: FundingDiagnosticsService,
     @Inject(RecoveryService) private readonly recovery: RecoveryService,
+    @Inject(NotificationService) private readonly outbox: NotificationService,
     @Inject(StaffService) private readonly staffRoles: StaffService,
     @Inject(PushService) private readonly push: PushService,
     @Inject(ProviderRoutesService) private readonly providerRoutes: ProviderRoutesService,
@@ -452,6 +454,22 @@ export class AdminController {
   @Get('notifications')
   async notifications(): Promise<Record<string, unknown>> {
     return this.admin.notifications();
+  }
+
+  /**
+   * What the email provider did with one message after accepting it —
+   * delivered, blocked, bounced, spam. The outbox can only say "sent", and a
+   * reset code that never arrived was, by then, somewhere only this answers.
+   */
+  @Get('notifications/:outbox/delivery')
+  async notificationDelivery(@Param('outbox') id: string): Promise<Record<string, unknown>> {
+    // An OUTBOX id is a bigint, not a uuid, so `uuidOr404` does not apply —
+    // the same rule held by hand: a malformed id answers 404, never a 500
+    // from a failed cast.
+    if (!/^[0-9]{1,18}$/.test(id)) throw new NotFoundException({ error: 'not_found' });
+    const found = await this.outbox.deliveryOf(id);
+    if (found === undefined) throw new NotFoundException({ error: 'not_found' });
+    return found;
   }
 
   /* ------------------------------ recovery ----------------------------- */

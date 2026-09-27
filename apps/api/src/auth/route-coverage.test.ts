@@ -230,6 +230,8 @@ describe('the privileged surface is declared as privileged', () => {
       // arrived — and it carries no message body: 012 seals every payload and
       // erases it on send.
       'GET /v1/admin/notifications (support)',
+      // The provider's own event log for one message.
+      'GET /v1/admin/notifications/:outbox/delivery (support)',
       'GET /v1/admin/overview (support)',
       'GET /v1/admin/prices (finance)',
       // What a currency is WORTH, as against `prices` above which lists the

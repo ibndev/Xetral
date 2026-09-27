@@ -8,7 +8,7 @@ import { AdminError } from '../access';
 import { Select } from '@/ui/select';
 import { AdminTitle } from '@/app/admin/nav';
 import { Kpis } from '../queue';
-import { ageSince } from '../age';
+import { ageSince, ago } from '../age';
 
 /**
  * Who can do what.
@@ -122,7 +122,7 @@ export default function Staff() {
                         )}
                       </td>
                       <td className="quiet">
-                        {person.lastActive == null ? 'never' : `${ageSince(person.lastActive)} ago`}
+                        {person.lastActive == null ? 'never' : `${ago(person.lastActive)}`}
                       </td>
                       <td className="r">
                         <button

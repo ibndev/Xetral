@@ -2,7 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { Pool, PoolClient } from 'pg';
 import { seal } from '@xetral/identity';
 import { API_CONFIG, DATABASE, NOTIFICATION_PORT } from '../tokens.js';
-import type { NotificationPort } from '@xetral/providers';
+import type { DeliveryEvent, NotificationPort } from '@xetral/providers';
 import type { ApiConfig } from '../config.js';
 import { classOf, render } from './templates.js';
 import type { NotificationRequest } from './templates.js';
@@ -178,5 +178,58 @@ export class NotificationService {
         }`,
       );
     }
+  }
+
+  /**
+   * WHAT THE PROVIDER DID WITH ONE MESSAGE AFTER ACCEPTING IT.
+   *
+   * The outbox knows only that the provider said yes. "The reset code never
+   * arrived" after that is a bounce, a block, spam or a deferral — each of
+   * which only the provider's own log records. By the stored message id where
+   * there is one, and by the address where the message never got that far.
+   * The address itself is not returned: the screen already lists it, and
+   * what this adds is the message's fate.
+   */
+  async deliveryOf(outboxId: string): Promise<{
+    readonly status: string;
+    readonly provider: string | null;
+    readonly provider_message_id: string | null;
+    readonly last_error: string | null;
+    readonly events: readonly DeliveryEvent[];
+    readonly events_unavailable: string | null;
+  } | undefined> {
+    const row = await this.pool.query<{
+      status: string; provider: string | null; provider_message_id: string | null;
+      last_error: string | null; recipient: string;
+    }>(
+      `SELECT status::text AS status, provider, provider_message_id, last_error, recipient
+         FROM notification_outbox WHERE id = $1::bigint`,
+      [outboxId],
+    );
+    const found = row.rows[0];
+    if (found === undefined) return undefined;
+    let events: readonly DeliveryEvent[] = [];
+    let unavailable: string | null = null;
+    if (this.port?.deliveryEvents === undefined) {
+      unavailable = 'This provider cannot be asked what happened after it accepted a message.';
+    } else {
+      try {
+        events = await this.port.deliveryEvents(
+          found.provider_message_id !== null
+            ? { messageId: found.provider_message_id }
+            : { email: found.recipient },
+        );
+      } catch (error) {
+        unavailable = error instanceof Error ? error.message : String(error);
+      }
+    }
+    return {
+      status: found.status,
+      provider: found.provider,
+      provider_message_id: found.provider_message_id,
+      last_error: found.last_error,
+      events,
+      events_unavailable: unavailable,
+    };
   }
 }

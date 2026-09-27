@@ -16,6 +16,8 @@ const MESSAGE: NotificationMessage = {
   idempotencyKey: 'outbox:4412',
 };
 
+const VERIFIED_AS_CONFIGURED = { senders: [{ email: 'no-reply@xetral.com', name: 'Xetral', active: true }] };
+
 function adapterWith(
   reply: { status: number; body: unknown } | Error,
 ): { adapter: BrevoNotificationAdapter; calls: { url: string; init: RequestInit }[] } {
@@ -28,6 +30,11 @@ function adapterWith(
       replyTo: 'support@xetral.com',
       baseUrl: 'https://api.brevo.test',
       fetch: async (url, init) => {
+        // The sender check before the first send: the configured sender IS
+        // verified here, so it changes nothing these tests are about.
+        if (url.endsWith('/v3/senders')) {
+          return new Response(JSON.stringify(VERIFIED_AS_CONFIGURED), { status: 200 });
+        }
         calls.push({ url, init });
         if (reply instanceof Error) throw reply;
         return new Response(JSON.stringify(reply.body), {
@@ -167,7 +174,10 @@ describe('the API key is resolved per send', () => {
     const adapter = new BrevoNotificationAdapter({
       apiKey: () => Promise.resolve(keys.shift()),
       from: 'Xetral <no-reply@xetral.test>',
-      fetch: (_url, init) => {
+      fetch: (url, init) => {
+        if (url.endsWith('/v3/senders')) {
+          return Promise.resolve(new Response(JSON.stringify(VERIFIED_AS_CONFIGURED), { status: 200 }));
+        }
         seen.push(String((init?.headers as Record<string, string>)['api-key']));
         return Promise.resolve(
           new Response(JSON.stringify({ messageId: 'm1' }), { status: 201 }),
@@ -222,60 +232,95 @@ describe('a sender Brevo has not verified', () => {
     return { adapter, calls };
   }
   const refused = { status: 400, body: { code: 'invalid_parameter', message: 'Sender is not valid' } };
+  const listed = (...senders: { email: string; name?: string; active?: boolean }[]) => ({
+    status: 200,
+    body: { senders },
+  });
 
-  it('sends again from a verified sender on the same domain, and keeps it', async () => {
+  it('SENDS AS CONFIGURED when Brevo lists that exact sender as verified', async () => {
     const { adapter, calls } = scripted([
-      refused,
-      {
-        status: 200,
-        body: {
-          senders: [
-            { email: 'olawale@gmail.com', name: 'Olawale', active: true },
-            { email: 'hello@xetral.com', name: 'Xetral', active: true },
-          ],
-        },
-      },
+      listed({ email: 'no-reply@xetral.com', active: true }),
+      { status: 201, body: { messageId: '<ok@brevo>' } },
+    ]);
+    await adapter.send(MESSAGE);
+    expect(calls[0]!.url).toBe('https://api.brevo.test/v3/senders');
+    expect(bodyOf(calls[1]!.init)['sender']).toEqual({ name: 'Xetral', email: 'no-reply@xetral.com' });
+  });
+
+  it('USES A VERIFIED SENDER FROM THE FIRST MESSAGE when the configured one is not listed', async () => {
+    /*
+     * Brevo does not always REFUSE an unverified sender: it can accept the
+     * message and not deliver it, and the outbox then says "sent" about a
+     * reset code nobody received. So the list is read before the first send,
+     * not only after a refusal.
+     */
+    const { adapter, calls } = scripted([
+      listed({ email: 'olawale@gmail.com', name: 'Olawale', active: true }, { email: 'hello@xetral.com', name: 'Xetral', active: true }),
       { status: 201, body: { messageId: '<ok@brevo>' } },
       { status: 201, body: { messageId: '<ok2@brevo>' } },
     ]);
     await expect(adapter.send(MESSAGE)).resolves.toEqual({ providerMessageId: '<ok@brevo>' });
-    expect(calls[1]!.url).toBe('https://api.brevo.test/v3/senders');
-    expect(bodyOf(calls[2]!.init)['sender']).toEqual({ name: 'Xetral', email: 'hello@xetral.com' });
+    expect(bodyOf(calls[1]!.init)['sender']).toEqual({ name: 'Xetral', email: 'hello@xetral.com' });
 
-    // The next message goes straight out from the verified sender.
+    // Asked once per process, not per message.
     await adapter.send(MESSAGE);
-    expect(calls).toHaveLength(4);
-    expect(bodyOf(calls[3]!.init)['sender']).toEqual({ name: 'Xetral', email: 'hello@xetral.com' });
+    expect(calls).toHaveLength(3);
+    expect(bodyOf(calls[2]!.init)['sender']).toEqual({ name: 'Xetral', email: 'hello@xetral.com' });
   });
 
-  it('uses any active verified sender when none shares the domain, and skips inactive ones', async () => {
+  it('still recovers from a refusal when the list could not be read up front, using any active sender', async () => {
     const { adapter, calls } = scripted([
+      { status: 500, body: {} },
       refused,
-      {
-        status: 200,
-        body: {
-          senders: [
-            { email: 'old@elsewhere.com', active: false },
-            { email: 'owner@gmail.com', active: true },
-          ],
-        },
-      },
+      listed({ email: 'old@elsewhere.com', active: false }, { email: 'owner@gmail.com', active: true }),
       { status: 201, body: { messageId: '<ok@brevo>' } },
     ]);
     await adapter.send(MESSAGE);
-    expect(bodyOf(calls[2]!.init)['sender']).toEqual({ name: 'Xetral', email: 'owner@gmail.com' });
+    expect(bodyOf(calls[3]!.init)['sender']).toEqual({ name: 'Xetral', email: 'owner@gmail.com' });
   });
 
   it('raises the original refusal when the account has no verified sender', async () => {
-    const { adapter } = scripted([refused, { status: 200, body: { senders: [] } }]);
+    const { adapter } = scripted([listed(), refused, listed()]);
     await expect(adapter.send(MESSAGE)).rejects.toThrow(/Sender is not valid/);
   });
 
   it('does not ask about senders for a refusal about something else', async () => {
     const { adapter, calls } = scripted([
+      listed({ email: 'no-reply@xetral.com', active: true }),
       { status: 400, body: { code: 'invalid_parameter', message: 'email is not valid in to' } },
     ]);
     await expect(adapter.send(MESSAGE)).rejects.toBeInstanceOf(ProviderRejectedError);
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(2);
+  });
+});
+
+describe('what Brevo did after accepting a message', () => {
+  it('READS ITS EVENT LOG by message id, so "sent" can be told from "delivered"', async () => {
+    const calls: string[] = [];
+    const adapter = new BrevoNotificationAdapter({
+      apiKey: 'xkeysib-test',
+      from: 'Xetral <no-reply@xetral.com>',
+      baseUrl: 'https://api.brevo.test',
+      fetch: async (url) => {
+        calls.push(url);
+        return new Response(
+          JSON.stringify({
+            events: [
+              { email: 'ada@example.ng', date: '2026-09-27T10:00:02Z', messageId: '<m@b>', event: 'blocked', reason: 'blocked : due to a previous hard bounce' },
+              { email: 'ada@example.ng', date: '2026-09-27T10:00:01Z', messageId: '<m@b>', event: 'requests', from: 'no-reply@xetral.com' },
+            ],
+          }),
+          { status: 200 },
+        );
+      },
+    });
+    const events = await adapter.deliveryEvents({ messageId: '<m@b>' });
+    expect(calls[0]).toContain('/v3/smtp/statistics/events?');
+    expect(calls[0]).toContain('messageId=%3Cm%40b%3E');
+    expect(events[0]).toEqual({
+      at: '2026-09-27T10:00:02Z',
+      event: 'blocked',
+      reason: 'blocked : due to a previous hard bounce',
+    });
   });
 });

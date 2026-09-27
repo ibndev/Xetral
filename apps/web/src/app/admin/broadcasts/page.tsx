@@ -7,7 +7,7 @@ import { messageFor } from '@/lib/errors';
 import { Select } from '@/ui/select';
 import { AdminError } from '../access';
 import { AdminTitle } from '@/app/admin/nav';
-import { ageSince } from '../age';
+import { ageSince, ago } from '../age';
 
 /**
  * TELLING CUSTOMERS SOMETHING, ON THE DEVICE THEY ALREADY CARRY.
@@ -225,7 +225,7 @@ export default function Broadcasts() {
                       )}
                     </td>
                     <td className="r mono quiet">{row.sent_at === null ? '—' : row.without_consent}</td>
-                    <td className="r quiet nowrap">{ageSince(row.created_at)} ago</td>
+                    <td className="r quiet nowrap">{ago(row.created_at)}</td>
                   </tr>
                 ))}
               </tbody>

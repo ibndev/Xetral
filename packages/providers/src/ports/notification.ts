@@ -60,8 +60,24 @@ export interface NotificationReceipt {
   readonly providerMessageId: string;
 }
 
+/** One thing the provider did with a message after accepting it. */
+export interface DeliveryEvent {
+  readonly at: string;
+  /** The provider's own word: delivered, blocked, hardBounces, spam, deferred… */
+  readonly event: string;
+  readonly reason?: string;
+  /** The sender it actually went out as. */
+  readonly from?: string;
+}
+
 export interface NotificationPort {
   readonly provider: string;
+  /**
+   * OPTIONAL: what the provider did with a message after accepting it. A
+   * capability rather than a method every adapter must fake, the way
+   * `supportsVerification()` is on the fulfilment port.
+   */
+  deliveryEvents?(ref: { messageId?: string; email?: string }): Promise<readonly DeliveryEvent[]>;
   /**
    * Throws a `ProviderError` on failure, classified by whether a retry could
    * help — the worker reads `retryable` and nothing else.

@@ -911,6 +911,18 @@ export interface AdminBroadcast {
   readonly failure_reason: string | null;
 }
 
+/** One outbox row, and the provider's own log of what became of it. */
+export interface AdminNotificationDelivery {
+  readonly status: string;
+  readonly provider: string | null;
+  readonly provider_message_id: string | null;
+  readonly last_error: string | null;
+  /** Newest first, in the provider's words: delivered, blocked, hardBounces, spam… */
+  readonly events: readonly { readonly at: string; readonly event: string; readonly reason?: string; readonly from?: string }[];
+  /** Why the log could not be read, when it could not. */
+  readonly events_unavailable: string | null;
+}
+
 export interface AdminAudienceEstimate {
   /** Phones a push reaches. */
   readonly devices: number;
@@ -1519,6 +1531,11 @@ export class AdminClient {
   /** Whether anything is actually being sent. Carries no message body. */
   async notifications(): Promise<AdminNotifications> {
     return this.#get<AdminNotifications>('/v1/admin/notifications');
+  }
+
+  /** What the email provider did with one message after accepting it. */
+  async notificationDelivery(id: string): Promise<AdminNotificationDelivery> {
+    return this.#get<AdminNotificationDelivery>(`/v1/admin/notifications/${encodeURIComponent(id)}/delivery`);
   }
 
   /** What the platform has earned, and why it might be nothing. */

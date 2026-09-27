@@ -7,7 +7,7 @@ import { messageFor } from '@/lib/errors';
 import { AdminError } from '../access';
 import { AdminTitle } from '@/app/admin/nav';
 import { Kpis } from '../queue';
-import { ageSince } from '../age';
+import { ageSince, ago } from '../age';
 
 /**
  * Where an operator pastes a provider key.
@@ -114,7 +114,7 @@ export default function Credentials() {
                             ? credential.is_set
                               ? 'from environment'
                               : 'never'
-                            : `${ageSince(credential.updated_at)} ago`}
+                            : `${ago(credential.updated_at)}`}
                         </td>
                         <td className="r">
                           <button

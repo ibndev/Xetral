@@ -48,7 +48,7 @@ export function ageSince(iso: string | undefined | null): string {
 }
 
 /**
- * "5m ago", or "just now" on its own — `${ageSince(x)} ago` printed "just
+ * "5m ago", or "just now" on its own — `${ago(x)}` printed "just
  * now ago" on the authenticator screen, which is how a sentence built from
  * two helpers reads when neither knew about the other.
  */

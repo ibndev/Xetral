@@ -465,6 +465,9 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
        * of pending mail is not a list of live account-takeover links.
        */
       .staff('GET', '/v1/admin/notifications', { pin: false, role: 'support' })
+      // What the email provider did with one message: delivered, blocked,
+      // bounced. A read, support's, because "I never got the code" is theirs.
+      .staff('GET', '/v1/admin/notifications/:outbox/delivery', { pin: false, role: 'support' })
       /*
        * MONEY WAITING FOR A PERSON. A READ, on `support` — it names customers
        * whose money is held, which is exactly who support is fielding calls

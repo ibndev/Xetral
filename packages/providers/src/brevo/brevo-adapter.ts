@@ -5,6 +5,7 @@ import {
   ProviderUnavailableError,
 } from '../ports/errors.js';
 import type {
+  DeliveryEvent,
   NotificationMessage,
   NotificationPort,
   NotificationReceipt,
@@ -67,6 +68,13 @@ export const BREVO_ENDPOINTS = {
   send: '/v3/smtp/email',
   /** "Get the list of all your senders": `{ senders: [{ email, name, active }] }`. */
   senders: '/v3/senders',
+  /**
+   * "Get all your transactional email activity (unaggregated events)":
+   * `{ events: [{ email, date, messageId, event, reason?, from? }] }`, filtered
+   * by `messageId` or `email`. Events: requests, delivered, hardBounces,
+   * softBounces, blocked, spam, invalid, deferred, opened, clicks, error.
+   */
+  events: '/v3/smtp/statistics/events',
 } as const;
 
 /**
@@ -123,6 +131,8 @@ export class BrevoNotificationAdapter implements NotificationPort {
   readonly #timeoutMs: number;
   /** A sender Brevo has VERIFIED, used once the configured one was refused. */
   #verified: { name?: string; email: string } | undefined;
+  /** Whether the configured sender has been checked against Brevo's list. */
+  #checked = false;
 
   constructor(options: BrevoAdapterOptions) {
     this.#apiKey = options.apiKey;
@@ -154,6 +164,26 @@ export class BrevoNotificationAdapter implements NotificationPort {
     }
 
     const configured = senderOf(this.#from);
+    /*
+     * CHECKED BEFORE THE FIRST SEND, NOT ONLY AFTER A REFUSAL. Brevo does not
+     * always refuse a sender it has not verified: it can accept the message
+     * and then not deliver it, and an accepted message is one the outbox
+     * marks sent. So the configured address is looked up in the account's
+     * own list of verified senders once per process, and a verified one on
+     * the same domain — or any verified one — is used when it is not there.
+     * A list that cannot be read changes nothing.
+     */
+    if (!this.#checked && this.#verified === undefined) {
+      this.#checked = true;
+      const listed = await this.#verifiedSender(apiKey, configured.email);
+      if (listed !== undefined && !listed.matchedExactly) {
+        this.#verified = {
+          ...(configured.name === undefined ? {} : { name: configured.name }),
+          ...(listed.name === undefined ? {} : { name: listed.name }),
+          email: listed.email,
+        };
+      }
+    }
     try {
       return await this.#attempt(apiKey, this.#verified ?? configured, message);
     } catch (error) {
@@ -172,9 +202,13 @@ export class BrevoNotificationAdapter implements NotificationPort {
        * caller through the rejection it would otherwise have raised.
        */
       if (this.#verified !== undefined || !isSenderRefusal(error)) throw error;
-      const verified = await this.#verifiedSender(apiKey, configured.email);
-      if (verified === undefined || verified.email === configured.email) throw error;
-      this.#verified = { ...(configured.name === undefined ? {} : { name: configured.name }), ...verified };
+      const found = await this.#verifiedSender(apiKey, configured.email);
+      if (found === undefined || found.email === configured.email) throw error;
+      this.#verified = {
+        ...(configured.name === undefined ? {} : { name: configured.name }),
+        ...(found.name === undefined ? {} : { name: found.name }),
+        email: found.email,
+      };
       return this.#attempt(apiKey, this.#verified, message);
     }
   }
@@ -182,7 +216,7 @@ export class BrevoNotificationAdapter implements NotificationPort {
   async #verifiedSender(
     apiKey: string,
     preferredEmail: string,
-  ): Promise<{ name?: string; email: string } | undefined> {
+  ): Promise<{ name?: string; email: string; matchedExactly: boolean } | undefined> {
     let payload: unknown;
     try {
       const response = await this.#fetch(`${this.#baseUrl}${BREVO_ENDPOINTS.senders}`, {
@@ -201,12 +235,56 @@ export class BrevoNotificationAdapter implements NotificationPort {
       .filter((row): row is { email: string; name?: unknown; active?: unknown } =>
         typeof row.email === 'string' && row.email.includes('@') && row.active !== false,
       );
+    const exact = active.find((row) => row.email.toLowerCase() === preferredEmail.toLowerCase());
     const domain = preferredEmail.split('@')[1]?.toLowerCase();
-    const pick = active.find((row) => row.email.split('@')[1]?.toLowerCase() === domain) ?? active[0];
+    const pick =
+      exact ?? active.find((row) => row.email.split('@')[1]?.toLowerCase() === domain) ?? active[0];
     if (pick === undefined) return undefined;
+    const matchedExactly = exact !== undefined;
     return typeof pick.name === 'string' && pick.name.trim() !== ''
-      ? { name: pick.name.trim(), email: pick.email }
-      : { email: pick.email };
+      ? { name: pick.name.trim(), email: pick.email, matchedExactly }
+      : { email: pick.email, matchedExactly };
+  }
+
+  /**
+   * WHAT BREVO DID WITH A MESSAGE AFTER ACCEPTING IT.
+   *
+   * The outbox knows only that Brevo said 201. A reset code that "never
+   * arrives" after that was delivered to spam, blocked because the address
+   * once bounced, deferred, or refused by the recipient's server — and every
+   * one of those is only in Brevo's own event log. This reads it, by the
+   * message id the outbox stored, or by the address when there is none.
+   * Read-only; never throws for a log that cannot be read.
+   */
+  async deliveryEvents(ref: { messageId?: string; email?: string }): Promise<readonly DeliveryEvent[]> {
+    const apiKey = typeof this.#apiKey === 'string' ? this.#apiKey : await this.#apiKey();
+    if (apiKey === undefined || apiKey === '') {
+      throw new ProviderRejectedError(PROVIDER, 'no Brevo API key is set', 'no_api_key');
+    }
+    const query = new URLSearchParams({ limit: '50', sort: 'desc', days: '30' });
+    if (ref.messageId !== undefined) query.set('messageId', ref.messageId);
+    else if (ref.email !== undefined) query.set('email', ref.email);
+    const response = await this.#fetch(`${this.#baseUrl}${BREVO_ENDPOINTS.events}?${query.toString()}`, {
+      method: 'GET',
+      headers: { 'api-key': apiKey, accept: 'application/json' },
+    });
+    if (!response.ok) {
+      throw new ProviderRejectedError(PROVIDER, `Brevo answered ${response.status} reading its event log`, `http_${response.status}`);
+    }
+    const payload = (await response.json()) as { events?: unknown };
+    if (!Array.isArray(payload.events)) return [];
+    return payload.events.flatMap((row): DeliveryEvent[] => {
+      const event = row as { date?: unknown; event?: unknown; reason?: unknown; from?: unknown };
+      if (typeof event.event !== 'string' || typeof event.date !== 'string') return [];
+      return [
+        {
+          at: event.date,
+          event: event.event,
+          ...(typeof event.reason === 'string' && event.reason !== '' ? { reason: event.reason } : {}),
+          ...(typeof event.from === 'string' ? { from: event.from } : {}),
+        },
+      ];
+    });
   }
 
   async #attempt(

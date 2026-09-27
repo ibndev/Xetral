@@ -5,7 +5,7 @@ import { formatMinor } from '@xetral/client';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
 import { AdminError } from '../access';
-import { ageSince } from '../age';
+import { ageSince, ago } from '../age';
 import { Kpis, MoneyFigure } from '../queue';
 import { AdminTitle } from '@/app/admin/nav';
 
@@ -103,7 +103,7 @@ export default function Suspense() {
                         <div className="cell-sub">{deposit.suspense_reason ?? 'no matching account'}</div>
                       </td>
                       <td className="r mono soft">{formatMinor(deposit.amount_minor, deposit.currency)}</td>
-                      <td className="quiet">{ageSince(deposit.created_at)} ago</td>
+                      <td className="quiet">{ago(deposit.created_at)}</td>
                       <td className="r">
                         <button
                           type="button"

@@ -1,10 +1,13 @@
 'use client';
 
+import { Fragment, useEffect, useState } from 'react';
+import type { AdminNotificationDelivery } from '@xetral/client';
+import { messageFor } from '@/lib/errors';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { AdminError } from '../access';
 import { AdminTitle } from '@/app/admin/nav';
 import { Kpis } from '../queue';
-import { ageSince } from '../age';
+import { ageSince, ago } from '../age';
 import { Icon } from '@/ui/icon';
 
 /**
@@ -40,6 +43,7 @@ export default function Notifications() {
   const backlog = data.data?.backlog ?? [];
   const abandoned = data.data?.abandoned ?? [];
   const recent = data.data?.recent ?? [];
+  const [open, setOpen] = useState<string | undefined>();
 
   const waiting = backlog.reduce((sum, row) => sum + Number(row.waiting), 0);
   const security = backlog.filter((row) => row.class === 'security');
@@ -63,7 +67,7 @@ export default function Notifications() {
         items={[
           { label: 'Queued', count: data.data === undefined ? undefined : waiting, tone: 'warn' },
           { label: 'Sent · 24h', count: data.data?.sent_24h, tone: 'ok' },
-          { label: 'Last sent', value: data.data === undefined ? undefined : lastSent === null ? 'never' : `${ageSince(lastSent)} ago` },
+          { label: 'Last sent', value: data.data === undefined ? undefined : lastSent === null ? 'never' : `${ago(lastSent)}` },
         ]}
       />
       <AdminError error={data.error} code={data.code} role="support" />
@@ -91,7 +95,7 @@ export default function Notifications() {
                   : 'Check that exactly one instance has NOTIFICATION_INTERVAL_SECONDS set.'
                 : lastSent === null
                   ? 'No message has been sent yet.'
-                  : `Last message left ${ageSince(lastSent)} ago. Nothing here sends inline — a worker drains the outbox.`}
+                  : `Last message left ${ago(lastSent)}. Nothing here sends inline — a worker drains the outbox.`}
             </small>
           </span>
         </div>
@@ -115,26 +119,50 @@ export default function Notifications() {
                 </tr>
               </thead>
               <tbody>
-                {recent.map((row) => (
-                  <tr key={row.id}>
-                    <td>Email</td>
-                    <td>
-                      <strong>{kindName(row.kind)}</strong>
-                      {row.class === 'security' && <div className="cell-sub">security</div>}
-                    </td>
-                    <td className="quiet">{row.recipient}</td>
-                    <td>
-                      <span
-                        className={`badge ${
-                          row.status === 'sent' ? 'ok' : row.status === 'abandoned' ? 'danger' : 'warn'
-                        }`}
+                {recent.map((row) => {
+                  const expanded = open === row.id;
+                  const toggle = (): void => setOpen(expanded ? undefined : row.id);
+                  return (
+                    <Fragment key={row.id}>
+                      <tr
+                        className={expanded ? 'rec-row open' : 'rec-row'}
+                        tabIndex={0}
+                        aria-expanded={expanded}
+                        onClick={toggle}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            toggle();
+                          }
+                        }}
                       >
-                        {row.status === 'pending' ? 'Queued' : kindName(row.status)}
-                      </span>
-                    </td>
-                    <td className="r quiet nowrap">{ageSince(row.sent_at ?? row.created_at)} ago</td>
-                  </tr>
-                ))}
+                        <td>Email</td>
+                        <td>
+                          <strong>{kindName(row.kind)}</strong>
+                          {row.class === 'security' && <div className="cell-sub">security</div>}
+                        </td>
+                        <td className="quiet">{row.recipient}</td>
+                        <td>
+                          <span
+                            className={`badge ${
+                              row.status === 'sent' ? 'ok' : row.status === 'abandoned' ? 'danger' : 'warn'
+                            }`}
+                          >
+                            {row.status === 'pending' ? 'Queued' : kindName(row.status)}
+                          </span>
+                        </td>
+                        <td className="r quiet nowrap">{ago(row.sent_at ?? row.created_at)}</td>
+                      </tr>
+                      {expanded && (
+                        <tr className="detail">
+                          <td colSpan={5}>
+                            <Delivery id={row.id} />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -167,7 +195,7 @@ export default function Notifications() {
                     <td className="r mono">{row.waiting}</td>
                     {/* AGE AS WELL AS DEPTH — a queue of three that has been
                         three since Tuesday is a queue nobody is working. */}
-                    <td className="quiet nowrap">{row.oldest === null ? '—' : `${ageSince(row.oldest)} ago`}</td>
+                    <td className="quiet nowrap">{row.oldest === null ? '—' : `${ago(row.oldest)}`}</td>
                     <td className="r mono">{row.worst_attempts}</td>
                   </tr>
                 ))}
@@ -201,5 +229,79 @@ export default function Notifications() {
         </div>
       )}
     </>
+  );
+}
+
+/** Brevo's words for what happened, in an operator's. */
+const EVENT_LABEL: Record<string, { label: string; tone: string }> = {
+  requests: { label: 'Accepted by Brevo', tone: 'info' },
+  delivered: { label: 'Delivered to the inbox server', tone: 'ok' },
+  opened: { label: 'Opened', tone: 'ok' },
+  clicks: { label: 'Clicked', tone: 'ok' },
+  deferred: { label: 'Deferred — retrying', tone: 'warn' },
+  softBounces: { label: 'Soft bounce', tone: 'warn' },
+  hardBounces: { label: 'Hard bounce — address refused', tone: 'danger' },
+  blocked: { label: 'Blocked by Brevo', tone: 'danger' },
+  spam: { label: 'Marked as spam', tone: 'danger' },
+  invalid: { label: 'Invalid address', tone: 'danger' },
+  error: { label: 'Error', tone: 'danger' },
+};
+
+/**
+ * WHAT BECAME OF ONE MESSAGE after Brevo said yes. "Sent" on this screen
+ * means only that; a reset code that never arrived was delivered to spam,
+ * blocked after an earlier bounce, or refused by the inbox — and each of
+ * those is only in Brevo's own log, which this asks when the row is opened.
+ */
+function Delivery({ id }: { id: string }) {
+  const admin = useAdmin();
+  const [found, setFound] = useState<AdminNotificationDelivery | undefined>();
+  const [error, setError] = useState<string | undefined>();
+  useEffect(() => {
+    let live = true;
+    admin.notificationDelivery(id).then(
+      (answer) => live && setFound(answer),
+      (cause: unknown) => live && setError(messageFor(cause)),
+    );
+    return () => {
+      live = false;
+    };
+  }, [admin, id]);
+
+  if (error !== undefined) return <p className="error">{error}</p>;
+  if (found === undefined) return <p className="spinner">Asking Brevo…</p>;
+  return (
+    <div>
+      {found.last_error !== null && (
+        <p className="error">Last refusal: {found.last_error}</p>
+      )}
+      {found.events_unavailable !== null && (
+        <p className="hint">Brevo&rsquo;s log could not be read: {found.events_unavailable}</p>
+      )}
+      {found.events_unavailable === null && found.events.length === 0 && (
+        <p className="hint">
+          {found.status === 'sent'
+            ? 'Brevo has no record of this message yet. Its log can lag a few minutes.'
+            : 'Not sent yet, so Brevo has nothing to report.'}
+        </p>
+      )}
+      {found.events.length > 0 && (
+        <ol className="rec-history">
+          {found.events.map((event, index) => {
+            const known = EVENT_LABEL[event.event] ?? { label: event.event, tone: 'info' };
+            return (
+              <li key={`${event.at}:${index}`}>
+                <span className="rec-when">{ageSince(event.at)}</span>
+                <span>
+                  <span className={`badge ${known.tone}`}>{known.label}</span>
+                  {event.from !== undefined && <span className="rec-sub">from {event.from}</span>}
+                  {event.reason !== undefined && <span className="rec-sub">{event.reason}</span>}
+                </span>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </div>
   );
 }
