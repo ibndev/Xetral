@@ -132,7 +132,6 @@ export function Shell({
     };
   }, [pathname]);
   const paused = pausedMode(services, pathname);
-  const [scrolled, setScrolled] = useState(false);
 
   /*
    * NOBODY SEES THE DASHBOARD BEFORE THEY ARE SIGNED IN, not even for a frame.
@@ -180,15 +179,6 @@ export function Shell({
       live = false;
     };
   }, [router]);
-
-  // The appbar grows a hairline border once the page moves under it, so the
-  // header separates from the content only when there is content behind it.
-  useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 4);
-    onScroll();
-    window.addEventListener('scroll', onScroll, { passive: true });
-    return () => window.removeEventListener('scroll', onScroll);
-  }, []);
 
   async function signOut() {
     await xetral().session.signOut();
@@ -256,27 +246,29 @@ export function Shell({
           Rendered HERE rather than by each screen, so a screen cannot pick —
           the same argument as the sign-in gate and the keyboard handling.
         */}
-        {back === undefined && onBack === undefined && bare !== true && (
-        <header className={scrolled ? 'appbar scrolled' : 'appbar'}>
-          {greeting !== undefined ? (
-            <>
-              {/* The initials are DERIVED, never stored — see `initialsOf`. A
-                  customer with no name yet gets the mark rather than a blank
-                  disc, because an empty circle reads as something that failed
-                  to load. */}
-              <span className="avatar" aria-hidden="true">
-                {initialsOf(greeting.name) ?? <Logo size={18} />}
-              </span>
-              <span className="home-hello">
-                <span className="lead">Welcome back</span>
-                <span className="name">{greeting.name ?? 'there'}</span>
-              </span>
-            </>
-          ) : (
-            <Link href="/wallet" className="appbar-brand" aria-label="Xetral home">
-              <Logo size={26} />
-            </Link>
-          )}
+        {/*
+          THE HOME SCREEN'S HEADER, AND ONLY THE HOME SCREEN'S.
+
+          Every top-level screen carried a bar holding the brand, the theme
+          toggle and the bell, pinned to the top. The brand was a static logo
+          repeated on every page; the toggle and the bell are for the screen a
+          customer opens the app on. So the bar is drawn where there is a
+          greeting, and it is NOT sticky — it scrolls away with the page, the
+          way the comp's does, instead of holding 56px of a handset for ever.
+        */}
+        {greeting !== undefined && back === undefined && onBack === undefined && bare !== true && (
+        <header className="appbar">
+          {/* The initials are DERIVED, never stored — see `initialsOf`. A
+              customer with no name yet gets a person glyph rather than a blank
+              disc. It was the brand LOCKUP — the mark and "etral" — which is
+              wider than the disc and ran across the greeting beside it. */}
+          <span className="avatar" aria-hidden="true">
+            {initialsOf(greeting.name) ?? <Icon name="user" size={19} />}
+          </span>
+          <span className="home-hello">
+            <span className="lead">Welcome back</span>
+            <span className="name">{greeting.name ?? 'there'}</span>
+          </span>
           <span className="spacer" />
           <ThemeToggle />
           {/*
@@ -293,7 +285,7 @@ export function Shell({
           */}
           <Link href="/notifications" className="icon-btn has-dot" aria-label="Notifications">
             <Icon name="bell" size={20} />
-            {greeting !== undefined && <span className="dot" aria-hidden="true" />}
+            <span className="dot" aria-hidden="true" />
           </Link>
         </header>
         )}

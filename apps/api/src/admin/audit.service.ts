@@ -41,6 +41,10 @@ export type AdminAction =
      a recovery queue cleared with one-word reasons is indistinguishable from
      one nobody worked. */
   | 'recovery.reverse'
+  /* A held payout the PROVIDER described as delivered — settled, nothing
+     given back — or one a person recorded as delivered, with the provider's
+     own transfer id as the evidence. */
+  | 'recovery.delivered'
   /* A dispute resolved. Recorded whichever way it went: an upheld one moved
      money, and a rejected one is a decision a customer may come back about. */
   | 'dispute.accept'

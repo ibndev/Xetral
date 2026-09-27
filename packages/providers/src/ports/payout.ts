@@ -255,6 +255,26 @@ export interface PayoutPort {
   /** A named rail's `limits` for one currency, asked of a switch. */
   limitsVia?(provider: string, currency: string): TransferLimit | undefined;
 
+  /**
+   * WHAT THIS RAIL SAYS ABOUT A TRANSFER, ASKED BY **OUR** REFERENCE.
+   *
+   * `status()` takes the rail's own id, and the payouts that most need asking
+   * are exactly the ones that never got one: a send that timed out, answered
+   * 5xx or answered in a shape we could not read — after the money may have
+   * left. Without this, such a payout could only be settled by the rail's
+   * event or reversed by a person guessing, and a guess on the direction that
+   * cannot be recalled is how a delivered transfer gets refunded.
+   *
+   * Throws `ProviderRejectedError` with `NO_SUCH_TRANSFER` ONLY for the rail's
+   * definite "no transfer with that reference". Optional: a rail with no such
+   * lookup leaves it out, and a caller must treat that as "cannot say".
+   */
+  statusByReference?(reference: string): Promise<PayoutReceipt>;
+
+  /** `statusByReference` on a NAMED rail, asked of a switch. Undefined when
+   *  that rail has no lookup by reference. */
+  statusByReferenceVia?(provider: string, reference: string): Promise<PayoutReceipt | undefined>;
+
   /** Sends on the NAMED rail, never on whichever the routing reads now. */
   sendVia?<C extends Currency>(provider: string, request: PayoutRequest<C>): Promise<PayoutReceipt>;
 

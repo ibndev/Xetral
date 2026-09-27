@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { xetral } from '@/lib/session';
 import { useSubmit } from '@/lib/hooks';
 import { Logo } from '@/ui/logo';
@@ -32,6 +32,8 @@ import { AuthAside } from '@/ui/auth-aside';
  * So the second step appears for an address with no account too, and the
  * refusal comes when a code is presented rather than when one is asked for.
  */
+const RESEND_AFTER_SECONDS = 60;
+
 export default function Forgot() {
   const router = useRouter();
   const [identifier, setIdentifier] = useState('');
@@ -51,6 +53,20 @@ export default function Forgot() {
   const [mismatch, setMismatch] = useState(false);
   const [show, setShow] = useState(false);
   const { busy, error, run } = useSubmit();
+  /*
+   * RESEND, ON A COOLDOWN. There was no way to ask again short of going back
+   * a step, so a code that was slow to arrive — or never came — left the
+   * customer on a screen that could only wait. The cooldown matches what the
+   * server will take: the reset bucket is tight on purpose, and a button that
+   * could be pressed every second would spend it in a minute.
+   */
+  const [wait, setWait] = useState(0);
+  const [resent, setResent] = useState(false);
+  useEffect(() => {
+    if (wait <= 0) return;
+    const timer = setTimeout(() => setWait((w) => w - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [wait]);
 
   async function ask(event: React.FormEvent) {
     event.preventDefault();
@@ -58,6 +74,19 @@ export default function Forgot() {
       const wanted = identifier.trim();
       await xetral().session.forgotPassword(wanted);
       setAsked(wanted);
+      setWait(RESEND_AFTER_SECONDS);
+      return undefined;
+    });
+  }
+
+  async function resend() {
+    if (asked === undefined) return;
+    setResent(false);
+    await run(async () => {
+      await xetral().session.forgotPassword(asked);
+      setCode('');
+      setResent(true);
+      setWait(RESEND_AFTER_SECONDS);
       return undefined;
     });
   }
@@ -150,6 +179,16 @@ export default function Forgot() {
                 <p className="hint">
                   It expires in thirty minutes and works once. Five wrong tries
                   and you will need a new one.
+                </p>
+                <p className="resend">
+                  {resent ? 'A new code is on its way. ' : 'Didn’t get it? '}
+                  {wait > 0 ? (
+                    <span>Resend code in {wait}s</span>
+                  ) : (
+                    <button type="button" className="link" disabled={busy} onClick={() => void resend()}>
+                      Resend code
+                    </button>
+                  )}
                 </p>
               </div>
 

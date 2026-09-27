@@ -41,6 +41,9 @@ const INTERNAL: Readonly<Record<string, string>> = {
   // The deny-by-default guard's own refusal, for a route that does not exist
   // in any client.
   route_not_declared: 'raised for an undeclared route, which no shipped client calls',
+  // A payout webhook answered 503 so the RAIL retries while it cannot say what
+  // happened. Only a provider ever receives it.
+  payout_unconfirmed: 'answered to a provider webhook, never to a customer',
 };
 
 function sourceFiles(dir: string): string[] {

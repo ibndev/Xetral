@@ -9,7 +9,7 @@ import {
 import type { Pool } from 'pg';
 import { DATABASE } from '../tokens.js';
 import { PayoutService, type PayoutRow } from '../payouts/payout.service.js';
-import { PurchaseOutcome, type ReservedPurchase } from '../purchases/purchase-outcome.js';
+import { ReconciliationService } from '../purchases/reconciliation.service.js';
 import { AuditService } from './audit.service.js';
 
 /**
@@ -67,6 +67,36 @@ export interface RecoverySummary {
   readonly recovered_7d: readonly { readonly currency: string; readonly amount_minor: string }[];
 }
 
+/**
+ * What pressing the button did. Only `reversed` gave money back, and only
+ * because the provider said the payout or purchase failed.
+ */
+export interface RecoveryOutcome {
+  readonly outcome: 'reversed' | 'delivered' | 'held';
+  readonly detail: string;
+  readonly record?: RecoveryRecord;
+}
+
+/** A payout refunded to the customer that the provider says was ALSO paid. */
+export interface RefundAuditRow {
+  readonly subject_uuid: string;
+  readonly reference: string;
+  readonly email: string | null;
+  readonly currency: string;
+  readonly amount_minor: string;
+  readonly destination: string;
+  readonly created_at: string;
+  readonly provider: string;
+}
+
+export interface RefundAudit {
+  /** Refunded payouts looked at. */
+  readonly checked: number;
+  /** Of those, how many no provider could answer for. */
+  readonly unconfirmed: number;
+  readonly paid_twice: readonly RefundAuditRow[];
+}
+
 export interface RecoveryRecord {
   readonly uuid: string;
   readonly kind: string;
@@ -86,7 +116,7 @@ export class RecoveryService {
   constructor(
     @Inject(DATABASE) private readonly pool: Pool,
     @Inject(PayoutService) private readonly payouts: PayoutService,
-    @Inject(PurchaseOutcome) private readonly purchases: PurchaseOutcome,
+    @Inject(ReconciliationService) private readonly reconciliation: ReconciliationService,
     @Inject(AuditService) private readonly audit: AuditService,
   ) {}
 
@@ -201,10 +231,28 @@ export class RecoveryService {
   }
 
   /**
-   * Give one held row back.
+   * RESOLVE ONE HELD ROW — BY ASKING, NEVER BY GUESSING.
    *
-   * `subjectUuid` names WHICH held row, and the amount is read from it. The
-   * reason is required by the table, not merely by this method.
+   * THIS BUTTON USED TO GIVE THE MONEY BACK ON A REASON ALONE. A payout held
+   * because its send timed out, answered 5xx or answered in a shape we could
+   * not read has very often ARRIVED — and reversing it credits the customer a
+   * second time for money already in the beneficiary's account. That is the
+   * business paying twice with every ledger entry balanced, and it is exactly
+   * what the owner found: their own payout, delivered to their own bank,
+   * listed here as money to hand back.
+   *
+   * NOW THE PROVIDER IS ASKED FIRST, through the same `confirmWithRail` the
+   * sweep and both rails' events use:
+   *   - delivered → settled to the float; NOTHING is given back.
+   *   - failed, or the sending rail has no transfer with our reference →
+   *     the flow's own reversal, recorded here with the person and reason.
+   *   - anything else → nothing moves, and the screen says the provider could
+   *     not confirm it. A person who has SEEN the transfer on the provider's
+   *     dashboard records it with `markDelivered` — the safe direction.
+   *
+   * There is deliberately no way from this screen to give money back while
+   * the provider cannot say what happened. The customer's money waits; the
+   * business does not pay twice on a guess.
    */
   async recover(
     kind: RecoveryKind,
@@ -212,46 +260,77 @@ export class RecoveryService {
     actorUuid: string,
     reason: string,
     ip?: string,
-  ): Promise<RecoveryRecord> {
+  ): Promise<RecoveryOutcome> {
     const actorId = await this.#userId(actorUuid);
+    const row = await this.#held(kind, subjectUuid);
 
-    const held = await this.pool.query<HeldMoney>(
-      `SELECT kind::text AS kind, subject_uuid, user_id::text AS user_id, email,
-              currency, amount_minor::text AS amount_minor, status, created_at,
-              hours_held, destination
-         FROM money_awaiting_recovery
-        WHERE kind = $1::recovery_kind AND subject_uuid = $2::uuid`,
-      [kind, subjectUuid],
-    );
-    const row = held.rows[0];
-    if (row === undefined) {
-      /*
-       * ALREADY RECOVERED, ALREADY SETTLED, OR NEVER HELD — one answer.
-       *
-       * The view excludes anything with a recovery against it, so a second
-       * press lands here rather than posting a second reversal. Distinguishing
-       * the three would tell whoever pressed it what the other two states look
-       * like, and none of them is a different action for them to take.
-       */
-      throw new NotFoundException({ error: 'not_recoverable' });
+    let entryId: string;
+    if (kind === 'bank_payout') {
+      const payout = await this.#payout(subjectUuid);
+      const verdict = await this.payouts.resolveWithRail(payout);
+      if (verdict.kind === 'arrived') {
+        await this.audit.record({
+          actorId: actorUuid,
+          action: 'recovery.delivered',
+          subjectType: 'user',
+          subjectId: subjectUuid,
+          detail: { kind, amount_minor: row.amount_minor, currency: row.currency, by: 'provider' },
+          reason,
+          ...(ip === undefined ? {} : { ip }),
+        });
+        return {
+          outcome: 'delivered',
+          detail:
+            'The provider says this payout was delivered, so it has been marked as sent. ' +
+            'Nothing was given back.',
+        };
+      }
+      if (verdict.kind === 'unknown') {
+        this.#logger.warn(`recovery of payout ${subjectUuid} held: ${verdict.why}`);
+        return {
+          outcome: 'held',
+          detail:
+            'The provider could not confirm what happened to this payout, so nothing was ' +
+            'given back. Check it on the provider’s dashboard: if it arrived, mark it ' +
+            'delivered with their transfer id; if it failed, ask again once they can answer.',
+        };
+      }
+      entryId = await this.#reversalEntryFor(`bank-payout-reverse:${payout.reference}`);
+    } else {
+      let result: 'settled' | 'reversed' | 'pending';
+      try {
+        result = await this.reconciliation.resolveOne(subjectUuid);
+      } catch (error) {
+        this.#logger.warn(`recovery of purchase ${subjectUuid} held: ${describe(error)}`);
+        result = 'pending';
+      }
+      if (result === 'settled') {
+        return {
+          outcome: 'delivered',
+          detail: 'The provider says this purchase was delivered, so it has been settled. Nothing was given back.',
+        };
+      }
+      if (result === 'pending') {
+        return {
+          outcome: 'held',
+          detail:
+            'The provider has not said this purchase failed, so nothing was given back. ' +
+            'It stays held until they answer.',
+        };
+      }
+      const purchase = await this.pool.query<{ reference: string }>(
+        `SELECT reference FROM purchases WHERE uuid = $1::uuid`,
+        [subjectUuid],
+      );
+      entryId = await this.#reversalEntryFor(`purchase-reverse:${purchase.rows[0]?.reference ?? ''}`);
     }
 
-    const entryId =
-      kind === 'bank_payout'
-        ? await this.#reversePayout(subjectUuid, reason)
-        : await this.#reversePurchase(subjectUuid, reason);
-
     /*
-     * THE RECORD, ON THE SAME TRANSACTION AS NOTHING.
-     *
-     * Written after the reversal rather than with it, and that is a real
-     * limitation worth stating: `post()` owns its own transaction, so a crash
-     * between the two leaves a reversal with no recovery row. The unique
-     * constraint means the retry cannot double-reverse — the ledger's
-     * idempotency key refuses the second posting — so the recoverable state is
-     * "money returned, record missing", which the audit log still describes.
-     * The alternative is a posting written by this service, which breaks
-     * rule 1.
+     * THE RECORD, AFTER THE REVERSAL. `post()` owns its own transaction, so a
+     * crash between the two leaves a reversal with no recovery row; the
+     * ledger's idempotency key means a retry cannot double-reverse, and the
+     * audit log still describes it. A posting written here instead would
+     * break rule 1.
      */
     const written = await this.pool.query<RecoveryRecord>(
       `INSERT INTO recovery_actions
@@ -259,6 +338,7 @@ export class RecoveryService {
           reversal_entry_id, actioned_by, reason)
        VALUES ($1::recovery_kind, $2::uuid, $3::bigint, $4::bigint, $5, $6::bigint,
                $7::bigint, $8)
+       ON CONFLICT DO NOTHING
        RETURNING uuid, kind::text AS kind, subject_uuid, amount_minor::text AS amount_minor,
                  currency, reason, created_at`,
       [kind, subjectUuid, row.user_id, row.amount_minor, row.currency, entryId, actorId, reason],
@@ -276,53 +356,143 @@ export class RecoveryService {
 
     this.#logger.warn(
       `RECOVERED ${row.amount_minor} ${row.currency} for user ${row.user_id} ` +
-        `(${kind} ${subjectUuid}) by ${actorUuid}: ${reason}`,
+        `(${kind} ${subjectUuid}) by ${actorUuid}, the provider having said it failed: ${reason}`,
     );
 
     const record = written.rows[0];
-    if (record === undefined) throw new Error('recovery insert returned no row');
-    return { ...record, email: row.email, actioned_by: actorUuid };
+    return {
+      outcome: 'reversed',
+      detail: 'The provider says this failed, so the money is back in the customer’s wallet.',
+      ...(record === undefined ? {} : { record: { ...record, email: row.email, actioned_by: actorUuid } }),
+    };
   }
 
-  /* ------------------------------------------------------------------ */
+  /**
+   * A PERSON RECORDS THAT A HELD PAYOUT ARRIVED, with the provider's own
+   * transfer id — for the payout no rail will describe. Settles the hold to
+   * the float, which moves nothing to the customer: the one direction a
+   * person may decide on their own.
+   */
+  async markDelivered(
+    subjectUuid: string,
+    actorUuid: string,
+    providerPayoutId: string,
+    reason: string,
+    ip?: string,
+  ): Promise<RecoveryOutcome> {
+    const row = await this.#held('bank_payout', subjectUuid);
+    const payout = await this.#payout(subjectUuid);
+    await this.payouts.markDelivered(payout, providerPayoutId);
+    await this.audit.record({
+      actorId: actorUuid,
+      action: 'recovery.delivered',
+      subjectType: 'user',
+      subjectId: subjectUuid,
+      detail: {
+        kind: 'bank_payout',
+        amount_minor: row.amount_minor,
+        currency: row.currency,
+        by: 'staff',
+        provider_payout_id: providerPayoutId,
+      },
+      reason,
+      ...(ip === undefined ? {} : { ip }),
+    });
+    return {
+      outcome: 'delivered',
+      detail: 'Recorded as delivered and settled. Nothing was given back.',
+    };
+  }
 
-  async #reversePayout(subjectUuid: string, reason: string): Promise<string> {
-    /*
-     * THE WHOLE ROW, the way `PayoutService` reads it — not a column list.
-     *
-     * This read named sixteen columns and left out `settle_entry_id`, which
-     * `fail()` reads to decide WHICH reversal is the true one. Absent, the
-     * field was `undefined`, `undefined !== null` read as "settled", and a
-     * merely-held payout was reversed as though it had been sent: an entry
-     * naming no target, refused by 023's CHECK, and "Something went wrong"
-     * on the one screen whose job is giving held money back. A second,
-     * shorter copy of a row is exactly how a field goes missing from it.
-     */
+  /**
+   * THE AUDIT: EVERY PAYOUT WE GAVE BACK, ASKED AGAIN.
+   *
+   * Before the provider was asked first, two paths could refund a payout that
+   * had arrived — this screen's own button, and the sweep reading a refused
+   * status question as "no such payout". Neither left a trace in the ledger,
+   * because a reversal of a real transfer balances exactly like a reversal of
+   * a failed one. So this reads the provider's own answer for each refunded
+   * payout, most recent first, and lists any the provider says was PAID:
+   * money the business has paid out twice.
+   *
+   * IT CHANGES NOTHING. Getting that money back is a conversation with a
+   * customer, not a posting a screen should make on its own.
+   */
+  async auditRefunded(limit = 100): Promise<RefundAudit> {
+    const rows = await this.pool.query<PayoutRow & { email: string | null }>(
+      `SELECT p.*, u.email
+         FROM bank_payouts p
+         JOIN users u ON u.id = p.user_id
+        WHERE p.status = 'failed'
+        ORDER BY p.created_at DESC
+        LIMIT $1`,
+      [Math.min(Math.max(limit, 1), 200)],
+    );
+    const paidTwice: RefundAuditRow[] = [];
+    let unconfirmed = 0;
+    for (const row of rows.rows) {
+      let verdict;
+      try {
+        verdict = await this.payouts.confirmWithRail(row);
+      } catch (error) {
+        this.#logger.warn(`audit could not ask about payout ${row.reference}: ${describe(error)}`);
+        unconfirmed += 1;
+        continue;
+      }
+      if (verdict.kind === 'arrived') {
+        paidTwice.push({
+          subject_uuid: row.uuid,
+          reference: row.reference,
+          email: row.email,
+          currency: row.currency,
+          amount_minor: String(BigInt(row.amount_minor) + BigInt(row.fee_minor)),
+          destination: `${row.bank_name} ${row.account_number}`,
+          created_at: new Date(row.created_at).toISOString(),
+          provider: row.provider,
+        });
+      } else if (verdict.kind === 'unknown') {
+        unconfirmed += 1;
+      }
+    }
+    if (paidTwice.length > 0) {
+      this.#logger.error(
+        `REFUND AUDIT: ${paidTwice.length} payout(s) were given back although the provider ` +
+          `says they were paid: ${paidTwice.map((r) => `${r.reference} ${r.amount_minor} ${r.currency}`).join(', ')}`,
+      );
+    }
+    return { checked: rows.rows.length, unconfirmed, paid_twice: paidTwice };
+  }
+
+  async #held(kind: RecoveryKind, subjectUuid: string): Promise<HeldMoney> {
+    const held = await this.pool.query<HeldMoney>(
+      `SELECT kind::text AS kind, subject_uuid, user_id::text AS user_id, email,
+              currency, amount_minor::text AS amount_minor, status, created_at,
+              hours_held, destination
+         FROM money_awaiting_recovery
+        WHERE kind = $1::recovery_kind AND subject_uuid = $2::uuid`,
+      [kind, subjectUuid],
+    );
+    const row = held.rows[0];
+    // ALREADY RESOLVED, ALREADY SETTLED, OR NEVER HELD — one answer, so a
+    // second press cannot post a second anything.
+    if (row === undefined) throw new NotFoundException({ error: 'not_recoverable' });
+    return row;
+  }
+
+  /**
+   * THE WHOLE ROW, the way `PayoutService` reads it — not a column list. A
+   * shorter copy named sixteen columns and left out `settle_entry_id`, which
+   * `fail()` reads to decide which reversal is true; absent, a merely-held
+   * payout was reversed as though it had been sent.
+   */
+  async #payout(subjectUuid: string): Promise<PayoutRow> {
     const rows = await this.pool.query<PayoutRow>(
       `SELECT * FROM bank_payouts WHERE uuid = $1::uuid`,
       [subjectUuid],
     );
     const row = rows.rows[0];
     if (row === undefined) throw new NotFoundException({ error: 'not_recoverable' });
-
-    // The flow's OWN reversal. It guards on `status IN ('reserved','sent')` and
-    // posts under a derived idempotency key, so a repeat is a replay.
-    await this.payouts.fail(row, `recovered by staff: ${reason}`);
-    return this.#reversalEntryFor(`bank-payout-reverse:${row.reference}`);
-  }
-
-  async #reversePurchase(subjectUuid: string, reason: string): Promise<string> {
-    const rows = await this.pool.query<ReservedPurchase & { uuid: string }>(
-      `SELECT id::text, uuid, user_id::text, reference, service::text,
-              amount_minor::text, currency, reserve_entry_id::text
-         FROM purchases WHERE uuid = $1::uuid`,
-      [subjectUuid],
-    );
-    const row = rows.rows[0];
-    if (row === undefined) throw new NotFoundException({ error: 'not_recoverable' });
-
-    await this.purchases.reverse(row, `recovered by staff: ${reason}`);
-    return this.#reversalEntryFor(`purchase-reverse:${row.reference}`);
+    return row;
   }
 
   /**

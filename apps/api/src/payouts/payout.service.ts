@@ -10,7 +10,14 @@ import {
 } from '@nestjs/common';
 import type { Pool, PoolClient } from 'pg';
 import { InsufficientFundsError, LedgerService, posting } from '@xetral/ledger';
-import { ProviderError, ProviderRejectedError, providerDidNothing } from '@xetral/providers';
+import {
+  ProviderError,
+  ProviderRejectedError,
+  ProviderTimeoutError,
+  ProviderUnavailableError,
+  providerDidNothing,
+  saysNoSuchTransfer,
+} from '@xetral/providers';
 import type { PayoutBank, PayoutBranch, PayoutPort, PayoutReceipt } from '@xetral/providers';
 import { applyBasisPoints, fromMajor, money, toMajor } from '@xetral/shared';
 import type { Currency, Money } from '@xetral/shared';
@@ -867,71 +874,178 @@ export class PayoutService {
       [reference],
     );
     const row = rows.rows[0];
-    // NOT OURS. Flutterwave fires events for everything on the integration,
-    // and refusing one would make them retry an event that will never become
-    // a payout of ours — the rule the deposit handler already follows.
+    // NOT OURS. A rail fires events for everything on the integration, and
+    // refusing one would make them retry an event that will never become a
+    // payout of ours — the rule the deposit handler already follows.
     if (row === undefined) return 'unknown';
 
     // Already decided. A redelivery must not reopen it, and `applyReceipt`
     // guards on `reserved` anyway — this just saves a provider call.
     if (row.status !== 'reserved' && row.status !== 'sent') return 'resolved';
 
-    if (row.provider_payout_id === null) {
-      /*
-       * THE CASE THIS EVENT IS MOST OFTEN FOR. A send that timed out, or
-       * came back as a 502, recorded no payout id — and it is exactly the
-       * payout whose outcome only the rail's event will tell us.
-       *
-       * The event's transfer id is a CLAIM: the body is unsigned. So it is
-       * only ever used to ASK, and the answer is accepted only if the
-       * transfer the rail describes carries OUR reference. An id pointing at
-       * some other real transfer settles nothing, because the reference that
-       * decides comes from the provider's response and never from here.
-       */
-      if (transactionId === undefined) {
-        this.#logger.warn(
-          `payout ${reference}: a transfer event arrived with no transfer id and ` +
-            `we recorded none; leaving it held for the sweep and a person`,
-        );
-        return 'held';
+    /*
+     * THE EVENT'S TRANSFER ID IS A CLAIM — the body of a Flutterwave event is
+     * unsigned — so it is only ever used to ASK, and an answer counts only if
+     * the transfer the rail describes carries OUR reference. That rule lives
+     * in `confirmWithRail`, the one place every caller decides from.
+     */
+    const verdict = await this.resolveWithRail(row, transactionId);
+    if (verdict.kind === 'unknown') {
+      // Unreachable is not an answer: failing the delivery makes the rail
+      // send it again, which is the retry an outage needs. A refused question
+      // or an id that is not ours is acknowledged and left for the sweep.
+      if (verdict.retryable) throw new ServiceUnavailableException({ error: 'payout_unconfirmed' });
+      this.#logger.warn(`payout ${reference}: the rail could not confirm it (${verdict.why}); held`);
+      return 'held';
+    }
+    if (verdict.kind === 'arrived' && verdict.receipt.state === 'sent' && row.status === 'sent') {
+      return 'held';
+    }
+    return 'resolved';
+  }
+
+  /**
+   * DID THIS PAYOUT HAPPEN? The one decision every path reads before money is
+   * given back — the sweep, both rails' `transfer.*` events, and a person on
+   * /admin/recovery.
+   *
+   * WHY ONE FUNCTION. A payout whose send timed out, answered 5xx or answered
+   * in a shape we could not read has NO provider id and may well have paid
+   * the beneficiary. The recovery screen offered to "give it back" with
+   * nothing but a reason, and the sweep read ANY refusal of a status question
+   * — a rotated key, the other environment's key — as "no such payout" and
+   * reversed. Both ways a transfer that arrived is refunded, the business
+   * pays it twice, and nothing in the ledger looks wrong: the entries balance
+   * perfectly around money that has left twice.
+   *
+   * THE ANSWERS, and the only two that give money back:
+   *   arrived     the rail describes it, with OUR reference, as sent or paid
+   *   failed      the rail describes it, with OUR reference, as failed
+   *   never_sent  the rail that sent it says it has NO transfer with our
+   *               reference — `NO_SUCH_TRANSFER`, set by an adapter only for
+   *               its documented not-found answer to a lookup BY REFERENCE
+   *   unknown     anything else, including every other refusal: held
+   */
+  async confirmWithRail(row: PayoutRow, hintId?: string): Promise<RailVerdict> {
+    const reasons: string[] = [];
+    let retryable = false;
+    const noteError = (label: string, error: unknown): void => {
+      reasons.push(`${label}: ${describe(error)}`);
+      if (error instanceof ProviderUnavailableError || error instanceof ProviderTimeoutError) {
+        retryable = true;
       }
-      let found: PayoutReceipt | undefined;
+    };
+
+    // 1. By id — ours if we recorded one, or the event's, which must then
+    //    come back carrying our reference to count.
+    const id = row.provider_payout_id ?? hintId;
+    if (id !== undefined && id !== null) {
       try {
-        found = await this.askRail(row, transactionId, { requireReference: true });
+        const receipt = await this.askRail(row, id, {
+          requireReference: row.provider_payout_id === null,
+        });
+        if (receipt !== undefined) return verdictOf(receipt);
+        reasons.push(`transfer ${id} is not described with our reference`);
       } catch (error) {
-        // "No such transfer" is an answer about THEIR id, not about our
-        // payout — the event may be forged or for another integration.
-        if (!(error instanceof ProviderRejectedError)) throw error;
-        this.#logger.warn(`payout ${reference}: transfer ${transactionId} is unknown to the rail; ignored`);
-        return 'held';
+        noteError(`asking by id ${id}`, error);
       }
-      if (found === undefined || found.reference !== row.reference) {
-        this.#logger.warn(
-          `payout ${reference}: the event named transfer ${transactionId}, which the ` +
-            `rail says is ${found?.reference ?? 'unreferenced'}; ignored`,
-        );
-        return 'held';
-      }
-      await this.applyReceipt(row, found);
-      return 'resolved';
     }
 
-    // The rail that ISSUED the id, off the row — never the active one. 046
-    // put `provider` on `bank_payouts` for exactly this.
-    const receipt = await this.askRail(row, row.provider_payout_id);
-    if (receipt === undefined || receipt.state === 'sent') return 'held';
-    await this.applyReceipt(row, receipt);
-    return 'resolved';
+    // 2. By OUR reference, which even a payout with no id can be asked by.
+    //    Only the rail that SENT it may say "never sent": a rail that never saw
+    //    it would truthfully say the same about a transfer that happened
+    //    elsewhere.
+    const rails =
+      row.provider_known === false
+        ? [row.provider, ...((this.port as PayoutPort & { providers?: readonly string[] }).providers ?? []).filter((p) => p !== row.provider)]
+        : [row.provider];
+    for (const rail of rails) {
+      try {
+        const receipt = await this.#byReference(rail, row.reference);
+        if (receipt === undefined) {
+          reasons.push(`${rail} cannot be asked by reference`);
+          continue;
+        }
+        if (receipt.reference !== undefined && receipt.reference !== row.reference) {
+          reasons.push(`${rail} described a different transfer`);
+          continue;
+        }
+        return verdictOf(receipt);
+      } catch (error) {
+        if (saysNoSuchTransfer(error) && row.provider_known !== false && rail === row.provider) {
+          // A payout already `sent` has an id the rail issued; "no such
+          // transfer" by reference then contradicts the rail itself, and a
+          // contradiction is not a reason to give money back.
+          if (row.status === 'reserved') {
+            return { kind: 'never_sent', reason: `${rail} has no transfer with reference ${row.reference}` };
+          }
+        }
+        noteError(`${rail} by reference`, error);
+      }
+    }
+
+    return { kind: 'unknown', why: reasons.join('; ') || 'no rail could be asked', retryable };
+  }
+
+  /** `confirmWithRail`, then act on what it found — and ONLY on an answer. */
+  async resolveWithRail(row: PayoutRow, hintId?: string): Promise<RailVerdict> {
+    const verdict = await this.confirmWithRail(row, hintId);
+    switch (verdict.kind) {
+      case 'arrived':
+        await this.applyReceipt(row, verdict.receipt);
+        break;
+      case 'failed':
+        await this.fail(row, verdict.reason);
+        break;
+      case 'never_sent':
+        await this.fail(row, verdict.reason);
+        break;
+      case 'unknown':
+        break;
+    }
+    return verdict;
+  }
+
+  /**
+   * A PERSON SAYS IT ARRIVED — the safe direction, and still not on a word.
+   *
+   * For the payout no rail will describe (a rail with no lookup by reference,
+   * or one that cannot be reached), a person who has SEEN the transfer on the
+   * provider's own dashboard records it: this settles the hold to the float
+   * exactly as the rail's own answer would have. It moves no money to the
+   * customer, so a mistake here costs the business nothing it had not
+   * already paid; the opposite button is the one that must never be a guess.
+   *
+   * THE PROVIDER'S OWN TRANSFER ID IS REQUIRED — 043's CHECK says a sent
+   * payout carries one, and it is the evidence: the id a person copied off
+   * the dashboard they checked.
+   */
+  async markDelivered(row: PayoutRow, providerPayoutId: string): Promise<void> {
+    if (row.status !== 'reserved') return;
+    await this.applyReceipt(row, { providerPayoutId, state: 'sent', reference: row.reference });
+  }
+
+  async #byReference(rail: string, reference: string): Promise<PayoutReceipt | undefined> {
+    if (typeof this.port.statusByReferenceVia === 'function') {
+      return this.port.statusByReferenceVia(rail, reference);
+    }
+    if (this.port.provider === rail && typeof this.port.statusByReference === 'function') {
+      return this.port.statusByReference(reference);
+    }
+    return undefined;
   }
 
   /**
    * WHAT THE RAIL THAT SENT A PAYOUT SAYS ABOUT IT — or undefined when no rail
    * can say so with evidence.
    *
-   * A KNOWN RAIL is asked and believed, as since 046: its refusal propagates as
-   * `ProviderRejectedError`, which the sweep reads as "no such payout" and
-   * reverses. One thing is added — an answer carrying a reference that is not
-   * ours is not an answer about this payout, whoever gave it.
+   * A KNOWN RAIL is asked and believed, as since 046, and its refusal
+   * propagates — but a refusal is NOT "no such payout" any more. It used to
+   * be read that way by the sweep, so a 401 from a rotated key reversed
+   * payouts that had arrived. Only `confirmWithRail` decides, and only a
+   * definite answer gives money back. One thing is added here — an answer
+   * carrying a reference that is not ours is not an answer about this
+   * payout, whoever gave it.
    *
    * AN UNKNOWN RAIL — every row written before 080, whose `provider` is the
    * column default — is the dangerous case. Asking the recorded `bitnob` about
@@ -1553,3 +1667,17 @@ function refuseIfFailed(view: PayoutView): PayoutView {
    */
   throw new UnprocessableEntityException({ error: 'payout_failed' });
 }
+
+/** What a rail says about one payout — see `confirmWithRail`. */
+export type RailVerdict =
+  | { readonly kind: 'arrived'; readonly receipt: PayoutReceipt }
+  | { readonly kind: 'failed'; readonly reason: string }
+  | { readonly kind: 'never_sent'; readonly reason: string }
+  | { readonly kind: 'unknown'; readonly why: string; readonly retryable: boolean };
+
+function verdictOf(receipt: PayoutReceipt): RailVerdict {
+  return receipt.state === 'failed'
+    ? { kind: 'failed', reason: receipt.failureReason ?? 'the provider reported it failed' }
+    : { kind: 'arrived', receipt };
+}
+

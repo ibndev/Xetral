@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -30,6 +30,8 @@ import { space, useStyles, useTheme } from '@/theme';
  * the second step appears for an address with no account too, and the refusal
  * comes when a code is presented rather than when one is asked for.
  */
+const RESEND_AFTER_SECONDS = 60;
+
 export default function Forgot() {
   const styles = useStyles();
   const colors = useTheme();
@@ -47,6 +49,32 @@ export default function Forgot() {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
+  // RESEND, ON A COOLDOWN — the web's rule, for the web's reason: without it a
+  // code that never arrived left the customer on a screen that could only wait.
+  const [wait, setWait] = useState(0);
+  const [resent, setResent] = useState(false);
+  useEffect(() => {
+    if (wait <= 0) return;
+    const timer = setTimeout(() => setWait((w) => w - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [wait]);
+
+  async function resend() {
+    if (asked === undefined) return;
+    setBusy(true);
+    setError(undefined);
+    setResent(false);
+    try {
+      await xetral().session.forgotPassword(asked);
+      setCode('');
+      setResent(true);
+      setWait(RESEND_AFTER_SECONDS);
+    } catch (cause) {
+      setError(messageFor(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function ask() {
     setBusy(true);
@@ -55,6 +83,7 @@ export default function Forgot() {
       const wanted = identifier.trim();
       await xetral().session.forgotPassword(wanted);
       setAsked(wanted);
+      setWait(RESEND_AFTER_SECONDS);
     } catch (cause) {
       setError(messageFor(cause));
     } finally {
@@ -165,6 +194,18 @@ export default function Forgot() {
                 It expires in thirty minutes and works once. Five wrong tries and you will need a
                 new one.
               </Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', marginTop: 6 }}>
+                <Text style={styles.hint}>
+                  {resent ? 'A new code is on its way. ' : 'Didn’t get it? '}
+                </Text>
+                {wait > 0 ? (
+                  <Text style={styles.hint}>Resend code in {wait}s</Text>
+                ) : (
+                  <Pressable onPress={() => void resend()} disabled={busy} hitSlop={8}>
+                    <Text style={[styles.link, { marginTop: 0 }]}>Resend code</Text>
+                  </Pressable>
+                )}
+              </View>
 
               <Text style={[styles.label, { marginTop: space.sm }]}>New password</Text>
               <TextInput

@@ -20,7 +20,10 @@ export default function Layout() {
    * gets exactly what they had before, and one who has gets a single frame of
    * the other palette rather than a flash of the wrong content.
    */
-  const [choice, setChoice] = useState<ThemeChoice>('system');
+  // LIGHT UNTIL THE CUSTOMER SAYS OTHERWISE. It followed the phone, so every
+  // handset set to dark opened the app dark; the product's default is light,
+  // and dark — or following the phone — is a choice made in Settings.
+  const [choice, setChoice] = useState<ThemeChoice>('light');
 
   /*
    * THE BRAND FACES WERE NEVER LOADED.

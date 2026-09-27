@@ -114,6 +114,9 @@ export const PAYSTACK_ENDPOINTS = {
   createTransferRecipient: '/transferrecipient',
   createTransfer: '/transfer',
   getTransfer: (id: string) => `/transfer/${encodeURIComponent(id)}`,
+  /** Verify Transfer — by OUR reference, which is what a payout that never
+   *  got an id back can still be asked by. */
+  verifyTransfer: (reference: string) => `/transfer/verify/${encodeURIComponent(reference)}`,
   /**
    * WHAT WE HOLD WITH THEM — `GET /balance`, Paystack's "Check Balance"
    * (Transfer Control, read September 2026): `{ data: [{ currency, balance }] }`
@@ -223,7 +226,14 @@ export class PaystackClient {
         typeof envelope.message === 'string'
           ? envelope.message
           : `${method} ${path} returned ${response.status}`,
-        undefined,
+        /*
+         * THE HTTP STATUS, KEPT. A 401 (a wrong or other-environment key) and
+         * a 404 (no such thing) were the same undifferentiated refusal, and a
+         * caller asking "did this transfer happen?" must be able to tell
+         * "they do not know it" from "they would not answer me" — the second
+         * is not evidence of anything. A 200 with `status: false` carries none.
+         */
+        response.ok ? undefined : `http_${response.status}`,
         text,
       );
     }

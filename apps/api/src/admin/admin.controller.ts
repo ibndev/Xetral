@@ -35,7 +35,14 @@ import { CardService } from '../cards/card.service.js';
 import { KycService } from '../kyc/kyc.service.js';
 import { ErrorRecorder } from '../observability/error-recorder.service.js';
 import { ReadinessService, type Readiness } from '../golive/readiness.service.js';
-import { RecoveryService, type HeldMoney, type RecoveryRecord, type RecoverySummary } from './recovery.service.js';
+import {
+  RecoveryService,
+  type HeldMoney,
+  type RecoveryOutcome,
+  type RefundAudit,
+  type RecoveryRecord,
+  type RecoverySummary,
+} from './recovery.service.js';
 import { EarningsService, type EarningsReport } from './earnings.service.js';
 import {
   FundingDiagnosticsService,
@@ -103,6 +110,15 @@ const userTransactionsQuery = z.object({
 const recoverySchema = z
   .object({
     reason: z.string().trim().min(8).max(500),
+    transaction_pin: z.string().optional(),
+  })
+  .strict();
+
+/** Recording a delivery: the provider's own transfer id is the evidence. */
+const deliveredSchema = z
+  .object({
+    reason: z.string().trim().min(8).max(500),
+    provider_payout_id: z.string().trim().min(2).max(80),
     transaction_pin: z.string().optional(),
   })
   .strict();
@@ -457,7 +473,7 @@ export class AdminController {
     @Param('id', uuidOr404('not_recoverable')) id: string,
     @Body() body: unknown,
     @Req() request: AuthenticatedRequest,
-  ): Promise<RecoveryRecord> {
+  ): Promise<RecoveryOutcome> {
     const parsed = recoverySchema.safeParse(body);
     if (!parsed.success) {
       throw new BadRequestException({
@@ -473,6 +489,42 @@ export class AdminController {
       kind,
       id,
       claims(request).sub,
+      parsed.data.reason,
+      request.ip,
+    );
+  }
+
+  /**
+   * Every refunded payout asked of its provider again — the ones it says were
+   * paid are money given out twice. Reads only; changes nothing.
+   */
+  @Get('recovery/audit')
+  async recoveryAudit(): Promise<RefundAudit> {
+    return this.recovery.auditRefunded();
+  }
+
+  /**
+   * A held payout a person has SEEN arrive on the provider's dashboard, with
+   * that provider's transfer id as the evidence. Settles the hold; gives
+   * nothing back. For the payout no rail will describe on request.
+   */
+  @Post('recovery/bank_payout/:id/delivered')
+  async recoverDelivered(
+    @Param('id', uuidOr404('not_recoverable')) id: string,
+    @Body() body: unknown,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<RecoveryOutcome> {
+    const parsed = deliveredSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException({
+        error: 'invalid_request',
+        fields: parsed.error.issues.map((i) => i.path.join('.')),
+      });
+    }
+    return this.recovery.markDelivered(
+      id,
+      claims(request).sub,
+      parsed.data.provider_payout_id,
       parsed.data.reason,
       request.ip,
     );

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { Link } from 'expo-router';
-import { formatAmount, isPaused, symbolFor } from '@xetral/client';
+import { formatAmount, symbolFor } from '@xetral/client';
 import type { Balance, Transaction } from '@xetral/client';
 import { Icon } from '@/icon';
 import type { IconName } from '@/icon';
@@ -116,7 +116,6 @@ export default function Home() {
   const dollars = useLoad(() => client.dollarTotal(), [client]);
   const headline = dollars.data;
 
-  const services = useLoad(() => client.services(), [client]);
 
   const history = useLoad(
     () => client.transactions(currency).catch(() => ({ entries: [], nextCursor: null })),
@@ -356,18 +355,8 @@ export default function Home() {
                 >
                   {product.label}
                 </Text>
-                {/* Paused by an operator — the web's `.tile-soon`. */}
-                {isPaused(services.data, product.href) && (
-                  <View
-                    style={{
-                      position: 'absolute', top: 5, right: 5,
-                      paddingHorizontal: 6, paddingVertical: 1, borderRadius: 999,
-                      backgroundColor: colors.warnBg,
-                    }}
-                  >
-                    <Text style={{ color: colors.warn, fontFamily: font.sansBold, fontSize: 9.5 }}>Soon</Text>
-                  </View>
-                )}
+                {/* No "Soon" badge on a paused service's tile: the screen it
+                    opens says "Coming soon", the web's rule too. */}
               </Pressable>
             </Link>
           ))}

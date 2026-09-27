@@ -213,6 +213,15 @@ export class SwitchingPayoutPort implements PayoutPort {
     return this.#adapters.get(provider)?.limits?.[currency];
   }
 
+  /** What a named rail says about a transfer, by OUR reference — or undefined
+   *  where that rail has no such lookup (a caller must read that as "cannot
+   *  say", never as "never sent"). */
+  async statusByReferenceVia(provider: string, reference: string): Promise<PayoutReceipt | undefined> {
+    const adapter = this.#adapters.get(provider);
+    if (adapter?.statusByReference === undefined) return undefined;
+    return adapter.statusByReference(reference);
+  }
+
   /** The named rail and no other — the one recorded on the payout row. */
   async sendVia<C extends Currency>(
     provider: string,

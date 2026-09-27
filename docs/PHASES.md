@@ -36,6 +36,7 @@ shipped, that is called out explicitly.
 | 25 — Who carries the grid, and who really holds the money | ✅ | funding each provider's float is a transfer a person makes |
 | 26 — An account number nobody has to ask for | ✅ | Paystack key for tier 1 accounts; Bitnob NGN enabled for verified ones |
 | 27 — Who carries what, as the owner assigned it | ✅ | a confirmed Kenyan collection provider |
+| 28 — Recovery that asks first, and the requests that never arrived | ✅ | a verified Brevo sender, and a run of the refund audit |
 
 All eleven phases are built, a **pre-deployment audit** (Phase 12) closed what
 building them phase by phase had left between the phases, and **Phase 13** is
@@ -2585,4 +2586,29 @@ yet pasted — are decisions only an operator can make.
 re-apply **099**; open `/admin/diagnostics` after the next refused account and
 read the reason Paystack gave; and, the day a Kenyan collection provider is
 confirmed, add its coverage row by migration and route it on `/admin/providers`.
+
+---
+
+## Phase 28 — Recovery that asks first, and the requests that never arrived ✅
+
+| File | What it is |
+|---|---|
+| `apps/api/src/payouts/payout.service.ts` | `confirmWithRail`: arrived, failed, never sent, or unknown |
+| `apps/api/src/admin/recovery.service.ts` | resolve by asking; mark delivered; the refund audit |
+| `packages/providers/src/paystack/payout-adapter.ts` | verify by reference, a tolerant transfer read |
+| `apps/web/src/app/api/x/[...path]/route.ts` | DELETE forwarded at last |
+| `packages/providers/src/brevo/brevo-adapter.ts` | a verified sender when the configured one is refused |
+
+1. **A delivered payout was offered back to its sender**, and the button gave
+   it. Recovery, the sweep and both rails' events now give money back only on
+   the provider's own "failed" or "never sent".
+2. **Every delete on the dashboard was answered by Next**, never the API.
+3. **Every request could wait ten seconds** for a Redis that had gone away.
+4. **The reset code could be refused over its sender** on every message.
+
+**Before this goes live, an operator must:** open `/admin/recovery`, press
+**Check refunded payouts**, and speak to any customer it lists — each is a
+payout the provider says was paid and that the old button also refunded; and
+read `/admin/notifications` for the last Brevo error if reset codes still do
+not arrive (an unactivated transactional account is Brevo's to fix).
 

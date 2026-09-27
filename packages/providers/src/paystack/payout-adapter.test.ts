@@ -222,3 +222,66 @@ describe('what the Paystack balance can spend', () => {
   });
 });
 
+
+describe('knowing whether a transfer happened', () => {
+  function statusAdapter(status: number, body: unknown) {
+    const calls: string[] = [];
+    const fetch: PaystackFetch = async (url) => {
+      calls.push(url.replace('https://api.paystack.test', ''));
+      return new Response(JSON.stringify(body), { status });
+    };
+    const client = new PaystackClient({ baseUrl: 'https://api.paystack.test', secretKey: 'sk_test_key', fetch });
+    return { adapter: new PaystackPayoutAdapter({ client }), calls };
+  }
+
+  it('READS A TRANSFER WHOSE REASON IS NULL — the shape that stranded a delivered payout', async () => {
+    const { adapter } = statusAdapter(200, {
+      status: true,
+      data: { id: 77, status: 'success', reason: null, transfer_code: 'TRF_1', reference: 'po-1' },
+    });
+    const receipt = await adapter.status('77');
+    expect(receipt.state).toBe('completed');
+    expect(receipt.failureReason).toBeUndefined();
+  });
+
+  it('asks by OUR reference, and a 404 there is the one answer meaning it never left', async () => {
+    const { adapter, calls } = statusAdapter(404, { status: false, message: 'Transfer not found' });
+    const refused = await adapter.statusByReference('po-2').catch((e: unknown) => e);
+    expect(calls[0]).toBe('/transfer/verify/po-2');
+    expect(refused).toBeInstanceOf(ProviderRejectedError);
+    expect((refused as ProviderRejectedError).providerCode).toBe('no_such_transfer');
+  });
+
+  it('A REFUSED QUESTION IS NOT "NO SUCH TRANSFER" — a wrong key must never read as never-sent', async () => {
+    const { adapter } = statusAdapter(401, { status: false, message: 'Invalid key' });
+    const refused = await adapter.statusByReference('po-3').catch((e: unknown) => e);
+    expect(refused).toBeInstanceOf(ProviderRejectedError);
+    expect((refused as ProviderRejectedError).providerCode).not.toBe('no_such_transfer');
+  });
+
+  it('refuses an answer about somebody else’s transfer', async () => {
+    const { adapter } = statusAdapter(200, {
+      status: true,
+      data: { id: 9, status: 'success', reference: 'not-ours' },
+    });
+    await expect(adapter.statusByReference('po-4')).rejects.toBeInstanceOf(ProviderContractError);
+  });
+
+  it('WHEN THE TRANSFER ANSWER CANNOT BE READ, IT ASKS BY REFERENCE rather than leaving it unknown', async () => {
+    const { adapter, calls } = adapterWith([
+      { status: true, data: { recipient_code: 'RCP_1' } },
+      // 2xx, and a shape the schema refuses: no id at all.
+      { status: true, data: { status: 'pending' } },
+      { status: true, data: { id: 501, status: 'success', reference: 'po-5' } },
+    ]);
+    const receipt = await adapter.send({
+      amount: ngn(100_000n),
+      bankCode: '058',
+      accountNumber: '0123456789',
+      accountName: 'ADA OKONKWO',
+      reference: 'po-5',
+    } as never);
+    expect(calls.map((c) => c.path)).toEqual(['/transferrecipient', '/transfer', '/transfer/verify/po-5']);
+    expect(receipt).toMatchObject({ providerPayoutId: '501', state: 'completed', reference: 'po-5' });
+  });
+});

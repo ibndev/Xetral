@@ -199,3 +199,83 @@ describe('the API key is resolved per send', () => {
     await expect(adapter.send(MESSAGE)).rejects.toMatchObject({ retryable: false });
   });
 });
+
+describe('a sender Brevo has not verified', () => {
+  /*
+   * The reset code that never arrived: the default sender was refused on every
+   * message. The adapter asks Brevo which senders ARE verified and sends once
+   * more from one — same domain first — and keeps using it.
+   */
+  function scripted(replies: { status: number; body: unknown }[]) {
+    const calls: { url: string; init: RequestInit }[] = [];
+    const adapter = new BrevoNotificationAdapter({
+      apiKey: 'xkeysib-test',
+      from: 'Xetral <no-reply@xetral.com>',
+      baseUrl: 'https://api.brevo.test',
+      fetch: async (url, init) => {
+        calls.push({ url, init });
+        const reply = replies.shift();
+        if (reply === undefined) throw new Error('unexpected call');
+        return new Response(JSON.stringify(reply.body), { status: reply.status });
+      },
+    });
+    return { adapter, calls };
+  }
+  const refused = { status: 400, body: { code: 'invalid_parameter', message: 'Sender is not valid' } };
+
+  it('sends again from a verified sender on the same domain, and keeps it', async () => {
+    const { adapter, calls } = scripted([
+      refused,
+      {
+        status: 200,
+        body: {
+          senders: [
+            { email: 'olawale@gmail.com', name: 'Olawale', active: true },
+            { email: 'hello@xetral.com', name: 'Xetral', active: true },
+          ],
+        },
+      },
+      { status: 201, body: { messageId: '<ok@brevo>' } },
+      { status: 201, body: { messageId: '<ok2@brevo>' } },
+    ]);
+    await expect(adapter.send(MESSAGE)).resolves.toEqual({ providerMessageId: '<ok@brevo>' });
+    expect(calls[1]!.url).toBe('https://api.brevo.test/v3/senders');
+    expect(bodyOf(calls[2]!.init)['sender']).toEqual({ name: 'Xetral', email: 'hello@xetral.com' });
+
+    // The next message goes straight out from the verified sender.
+    await adapter.send(MESSAGE);
+    expect(calls).toHaveLength(4);
+    expect(bodyOf(calls[3]!.init)['sender']).toEqual({ name: 'Xetral', email: 'hello@xetral.com' });
+  });
+
+  it('uses any active verified sender when none shares the domain, and skips inactive ones', async () => {
+    const { adapter, calls } = scripted([
+      refused,
+      {
+        status: 200,
+        body: {
+          senders: [
+            { email: 'old@elsewhere.com', active: false },
+            { email: 'owner@gmail.com', active: true },
+          ],
+        },
+      },
+      { status: 201, body: { messageId: '<ok@brevo>' } },
+    ]);
+    await adapter.send(MESSAGE);
+    expect(bodyOf(calls[2]!.init)['sender']).toEqual({ name: 'Xetral', email: 'owner@gmail.com' });
+  });
+
+  it('raises the original refusal when the account has no verified sender', async () => {
+    const { adapter } = scripted([refused, { status: 200, body: { senders: [] } }]);
+    await expect(adapter.send(MESSAGE)).rejects.toThrow(/Sender is not valid/);
+  });
+
+  it('does not ask about senders for a refusal about something else', async () => {
+    const { adapter, calls } = scripted([
+      { status: 400, body: { code: 'invalid_parameter', message: 'email is not valid in to' } },
+    ]);
+    await expect(adapter.send(MESSAGE)).rejects.toBeInstanceOf(ProviderRejectedError);
+    expect(calls).toHaveLength(1);
+  });
+});

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ProviderContractError, ProviderRejectedError } from '../ports/errors.js';
+import { NO_SUCH_TRANSFER, ProviderContractError, ProviderRejectedError } from '../ports/errors.js';
 import { PAYSTACK_ENDPOINTS, type PaystackClient } from './client.js';
 import type {
   BeneficiaryLookup,
@@ -60,12 +60,22 @@ const recipientResponse = z.object({
   data: z.object({ recipient_code: z.string().min(1) }),
 });
 
+/*
+ * NULLISH, NOT OPTIONAL, on every field this adapter does not need to decide
+ * the outcome. `reason` is `null` on a transfer created without a narration,
+ * and `.optional()` refuses a null — so a transfer Paystack had ALREADY MADE
+ * answered in a shape this schema rejected, the send threw a contract error,
+ * and the payout sat `reserved` while the money was in the beneficiary's
+ * account: the exact row `/admin/recovery` then offered to "give back". A
+ * field we only pass through must never be able to fail the read of a
+ * transfer that has happened.
+ */
 const transferResponse = z.object({
   data: z.object({
     id: z.union([z.string(), z.number()]),
-    transfer_code: z.string().min(1).optional(),
-    status: z.string().optional(),
-    reason: z.string().optional(),
+    transfer_code: z.string().nullish(),
+    status: z.string().nullish(),
+    reason: z.string().nullish(),
     /** OUR reference, echoed on their transfer object — what lets a status
      *  answer be checked against the payout it claims to be about. */
     reference: z.string().nullish(),
@@ -256,7 +266,61 @@ export class PaystackPayoutAdapter implements PayoutPort {
       ...(request.narration === undefined ? {} : { reason: request.narration }),
     });
 
-    return this.#toReceipt(payload);
+    try {
+      return this.#toReceipt(payload);
+    } catch (error) {
+      /*
+       * THE TRANSFER CALL ANSWERED 2xx AND WE COULD NOT READ IT — so it has
+       * very probably HAPPENED. Throwing here leaves the payout held with no
+       * id, which is the state a person later sees on /admin/recovery with a
+       * button that gives the money back. Asked once by our own reference
+       * instead, which Paystack can answer whatever shape the create
+       * response took; if that cannot be read either, the original error
+       * stands and the payout is held — never refunded — until it can be.
+       */
+      if (!(error instanceof ProviderContractError)) throw error;
+      try {
+        return await this.statusByReference(request.reference);
+      } catch {
+        throw error;
+      }
+    }
+  }
+
+  /**
+   * Verify Transfer, by OUR reference — the one question a payout that never
+   * got an id back can still be asked.
+   *
+   * A 404 is Paystack saying it has no transfer with that reference: the
+   * money never left, and it is the ONLY refusal read that way. A 401, a 400
+   * or anything else is a refusal of the QUESTION — a wrong key, the other
+   * environment's key — and propagates as itself, which no caller may read
+   * as never-sent.
+   */
+  async statusByReference(reference: string): Promise<PayoutReceipt> {
+    let payload: unknown;
+    try {
+      payload = await this.#client.request('GET', PAYSTACK_ENDPOINTS.verifyTransfer(reference));
+    } catch (error) {
+      if (error instanceof ProviderRejectedError && error.providerCode === 'http_404') {
+        throw new ProviderRejectedError(
+          PROVIDER,
+          `Paystack has no transfer with reference ${reference}`,
+          NO_SUCH_TRANSFER,
+          error,
+        );
+      }
+      throw error;
+    }
+    const receipt = this.#toReceipt(payload);
+    // An answer about some OTHER transfer is not an answer about this one.
+    if (receipt.reference !== undefined && receipt.reference !== reference) {
+      throw new ProviderContractError(
+        PROVIDER,
+        `asked for transfer ${reference} and was described ${receipt.reference}`,
+      );
+    }
+    return { ...receipt, reference };
   }
 
   async status(providerPayoutId: string): Promise<PayoutReceipt> {
@@ -373,7 +437,7 @@ export class PaystackPayoutAdapter implements PayoutPort {
     return {
       providerPayoutId: String(row.id),
       state: mapped,
-      ...(reason === undefined ? {} : { failureReason: reason }),
+      ...(reason == null || reason === '' ? {} : { failureReason: reason }),
       ...(row.reference == null ? {} : { reference: row.reference }),
     };
   }

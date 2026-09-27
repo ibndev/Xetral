@@ -2197,6 +2197,113 @@ Schema: `packages/ledger/sql/082_refusals_and_details.sql`,
   another 20, while the currency rail's −20 bleed put its cards at 18 — two
   edges on one screen. One `gutter` (20, the web's `.shell`), applied once.
 
+### Recovery asks the provider first — non-obvious rules
+
+`apps/api/src/payouts/payout.service.ts` (`confirmWithRail`),
+`apps/api/src/admin/recovery.service.ts`, `/admin/recovery`.
+
+- **THE RECOVERY BUTTON GAVE MONEY BACK ON A PERSON'S WORD, AND THE OWNER'S
+  OWN DELIVERED PAYOUT WAS ON IT.** A payout whose send timed out, answered
+  5xx, or answered in a shape we could not read stays `reserved` — correctly —
+  and very often it ARRIVED. "Reverse" credited the customer a second time.
+  Every ledger entry balanced, because a reversal of a delivered transfer is
+  shaped exactly like a reversal of a failed one: the business paying twice is
+  invisible to `ledger_drift`, to every invariant and to every test.
+- **ONLY A DEFINITE ANSWER GIVES MONEY BACK, ANYWHERE.** `confirmWithRail`
+  returns `arrived`, `failed`, `never_sent` or `unknown`, and the sweep, both
+  rails' `transfer.*` webhooks and the recovery button all go through it.
+  `unknown` moves nothing. There is deliberately no way to give money back
+  while the provider cannot say what happened.
+- **A REFUSED STATUS QUESTION IS NOT "NO SUCH PAYOUT".** The sweep reversed on
+  ANY `ProviderRejectedError` from `status()` — so a 401 from a rotated or
+  wrong-environment key refunded delivered payouts in bulk. Paystack's client
+  keeps the HTTP status (`http_401`, `http_404`) and "never sent" is only
+  `NO_SUCH_TRANSFER`, from the rail that SENT it, about a row still `reserved`.
+  A `sent` row has an id the rail issued, so "not found" contradicts the rail
+  and decides nothing.
+- **A PAYOUT WITH NO ID IS ASKED BY OUR REFERENCE.** Paystack's
+  `GET /transfer/verify/:reference`. A send whose answer could not be read
+  asks it at once; the sweep and the button ask it later.
+- **PAYSTACK `transfer.*` EVENTS WERE NEVER READ.** They fell into the deposit
+  path and were acknowledged, so the one message saying a held payout had
+  arrived was dropped. The event is a doorbell — signed, and still re-read,
+  because a redelivered `transfer.failed` after a `transfer.success` would
+  otherwise refund money that arrived.
+- **`reason: null` FAILED A `z.string().optional()`**, which made a successful
+  transfer response unreadable and left it held. `.nullish()` now, and an
+  unreadable success is followed by a by-reference read.
+- **A PERSON MAY RECORD "DELIVERED", NEVER "FAILED".** Marking delivered
+  settles the hold to the float and moves nothing to the customer, so a mistake
+  costs nothing not already paid. It takes the provider's transfer id as
+  evidence, a PIN and a reason.
+- **`/admin/recovery/audit` ASKS AGAIN ABOUT EVERY PAYOUT ALREADY GIVEN BACK**
+  and lists the ones the provider says were paid: money paid out twice. It
+  changes nothing — recovering it is a conversation, not a posting.
+
+### The admin actions that never reached the server, and the ten seconds before every request — non-obvious rules
+
+`apps/web/src/app/api/x/[...path]/route.ts`, `packages/client/src/admin.ts`,
+`apps/api/src/auth/rate-limit.ts`.
+
+- **THE PROXY FORWARDED GET AND POST ONLY.** Next answered every DELETE itself
+  with a 405, so deleting a retired rate or spread, removing a recipient and
+  unlinking a wallet never reached the API. `proxy-methods.test.ts` fails the
+  build on a method the API declares that the proxy does not export.
+- **A WRITE AFTER A QUIET SPELL PROVES THE LINE FIRST.** An operator opens a
+  form, types a reason and a PIN, and presses a minute later; a phone that
+  slept or changed networks in that minute dropped the connection and the
+  write was the first to find out — "No connection" beside a correct PIN.
+  Reads retry; a write cannot. So after twenty seconds of silence the admin
+  client reads `/health` (retried like any read) and the write rides the
+  connection that just answered. If the line cannot be proved nothing is sent.
+- **IOREDIS DOES NOT FAIL FAST BY DEFAULT.** The comment said it did. The
+  default is twenty reconnect attempts, about ten seconds per command, and the
+  rate limiter runs on every request — so a Redis connection that dropped after
+  boot made every sign-in, registration and screen wait ten seconds before
+  being counted in-process anyway. No offline queue, one retry, a 500ms
+  command timeout, and `ResilientRateLimitStore` treats an answer slower than
+  250ms as a failure.
+- **AN UNSCOPED ADMIN RULE REDREW THE CUSTOMER SIGN-IN.** `.auth-head` was
+  given `display: flex` for the authenticator panel and the customer's sign-in,
+  sign-up and reset headings became a squeezed row. It is `.admin-frame .auth-head`.
+
+### The reset code, and a sender Brevo never verified — non-obvious rules
+
+`packages/providers/src/brevo/brevo-adapter.ts`, `/forgot` on both apps.
+
+- **A SENDER BREVO HAS NOT VERIFIED IS REFUSED ON EVERY MESSAGE.**
+  `NOTIFICATION_FROM` defaults to `no-reply@xetral.com` so mail is sent at all;
+  if that address or its domain is not verified in the Brevo account, every
+  reset code is refused with a sentence about the sender. A refusal ABOUT THE
+  SENDER now asks `GET /v3/senders` for the account's verified, active senders
+  — same domain first — and sends once more from one, keeping it. A refused
+  send sent nothing, so the second cannot be a duplicate. Anything else Brevo
+  refuses (an inactive transactional account, a bad key) is still on
+  `/admin/notifications` as the row's last error.
+- **"RESEND CODE", ON A SIXTY-SECOND COOLDOWN.** Without it a code that never
+  came left the customer on a screen that could only wait. The per-identifier
+  reset bucket is three an hour, so a button pressable every second would spend
+  it in a minute.
+
+### The home header, and the default theme — non-obvious rules
+
+`apps/web/src/ui/shell.tsx`, `apps/mobile/src/shell.tsx`, the theme bootstrap in
+`apps/web/src/app/layout.tsx`, `apps/mobile/app/_layout.tsx`.
+
+- **THE AVATAR WITH NO NAME DREW THE BRAND LOCKUP.** `<Logo>` defaults to the
+  mark AND "etral", which is wider than the 40px disc, so a customer with no
+  name saw "Xetral" run across "Welcome back there". A person glyph now.
+- **ONLY THE HOME SCREEN HAS A HEADER, AND IT SCROLLS AWAY.** Every top-level
+  screen carried a pinned bar with a static logo, the theme toggle and the
+  bell. The logo is gone; the toggle and the bell belong to the screen a
+  customer opens the app on. On the phone the header is inside the scroll view.
+  The admin dashboard's bar stays pinned — it is a working tool's chrome.
+- **A PAUSED SERVICE HAS NO "SOON" BADGE ON ITS TILE.** The screen it opens
+  says "Coming soon"; the badge said it twice on the home screen.
+- **LIGHT IS THE DEFAULT, NOT THE PHONE'S SETTING.** Both apps followed the OS,
+  so every handset set to dark opened the product dark. Dark, or following the
+  phone, is a choice the customer makes.
+
 ### Which rail opens an account — non-obvious rules
 
 Schema: `packages/ledger/sql/061_country_and_route_repair.sql`. Service in

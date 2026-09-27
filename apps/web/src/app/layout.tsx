@@ -146,8 +146,10 @@ export const viewport: Viewport = {
  */
 const THEME_BOOTSTRAP = `
 (function(){try{
+  // LIGHT unless the customer chose dark. It followed the OS, so every phone
+  // set to dark opened the app dark; the product's default is light.
   var t = localStorage.getItem('xetral-theme');
-  if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  if (t !== 'dark') t = 'light';
   document.documentElement.dataset.theme = t;
   // The status bar and the gesture bar, painted with the same decision and in
   // the same tick — so there is never a frame where the chrome says one theme

@@ -250,9 +250,31 @@ export class ResilientRateLimitStore implements RateLimitStore {
   readonly #fallback: RateLimitStore;
   #degradedSince: number | undefined;
 
-  constructor(primary: RateLimitStore, fallback: RateLimitStore = new InMemoryRateLimitStore()) {
+  readonly #timeoutMs: number;
+
+  /*
+   * A SLOW ANSWER IS AN OUTAGE TOO, and it was the one this did not catch.
+   *
+   * The fallback fired on an ERROR, and ioredis does not error on a dropped
+   * connection — it queues the command and reconnects, twenty times by
+   * default, backing off to two seconds, before it gives up: about ten
+   * seconds. Every request runs through this limiter, so a Redis that had
+   * gone away after boot made every sign-in, every registration and every
+   * screen wait ten seconds before it was counted in-process anyway. From a
+   * phone that reads as "the buttons are slower than they used to be".
+   *
+   * So the primary gets a deadline. A limiter answer is a single round trip on
+   * a private network; anything slower than this is treated exactly as a
+   * failure and the request is counted here.
+   */
+  constructor(
+    primary: RateLimitStore,
+    fallback: RateLimitStore = new InMemoryRateLimitStore(),
+    timeoutMs = 250,
+  ) {
     this.#primary = primary;
     this.#fallback = fallback;
+    this.#timeoutMs = timeoutMs;
   }
 
   async hit(
@@ -262,7 +284,10 @@ export class ResilientRateLimitStore implements RateLimitStore {
     nowMs: number,
   ): Promise<RateLimitDecision> {
     try {
-      const decision = await this.#primary.hit(key, max, windowSeconds, nowMs);
+      const decision = await withDeadline(
+        this.#primary.hit(key, max, windowSeconds, nowMs),
+        this.#timeoutMs,
+      );
       if (this.#degradedSince !== undefined) {
         this.#logger.log(
           `rate limiting is back on Redis after ${Math.round(
@@ -297,4 +322,15 @@ export class ResilientRateLimitStore implements RateLimitStore {
   get primary(): RateLimitStore {
     return this.#primary;
   }
+}
+
+function withDeadline<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`no answer within ${ms}ms`)), ms);
+  });
+  // A late answer (or a late refusal) is swallowed: the request was already
+  // counted in-process and must not become an unhandled rejection.
+  work.catch(() => undefined);
+  return Promise.race([work, deadline]).finally(() => clearTimeout(timer));
 }

@@ -471,6 +471,9 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
        * from.
        */
       .staff('GET', '/v1/admin/recovery', { pin: false, role: 'support' })
+      // The refund audit: every refunded payout asked of its provider again.
+      // A read, finance's, because what it lists is money owed back to us.
+      .staff('GET', '/v1/admin/recovery/audit', { pin: false, role: 'finance' })
       /*
        * AND GIVING IT BACK, which is not a read.
        *
@@ -480,6 +483,10 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
        * — a fresh second factor, like every other acting route.
        */
       .staff('POST', '/v1/admin/recovery/:kind/:id', { pin: true, role: 'finance' })
+      // A held payout recorded as DELIVERED, with the provider's transfer id.
+      // It settles and gives nothing back, and still takes the PIN: it closes
+      // a question about a customer's money on a person's word.
+      .staff('POST', '/v1/admin/recovery/bank_payout/:id/delivered', { pin: true, role: 'finance' })
 
       .staff('GET', '/v1/admin/users', { pin: false, role: 'support' })
       .staff('GET', '/v1/admin/users/:id', { pin: false, role: 'support' })

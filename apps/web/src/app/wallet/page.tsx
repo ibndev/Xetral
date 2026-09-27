@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { entryKindLabel, formatAmount, isPaused, symbolFor } from '@xetral/client';
+import { entryKindLabel, formatAmount, symbolFor } from '@xetral/client';
 import type { Balance, Transaction } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { Icon } from '@/ui/icon';
@@ -139,7 +139,6 @@ export default function Wallet() {
 
   const session = useLoad(() => client.currentSession(), [client]);
   const balances = useLoad(() => client.balances(), [client]);
-  const services = useLoad(() => client.services(), [client]);
   /*
    * THE HEADLINE IS IN DOLLARS, because the card spends in dollars and a
    * customer paid in naira or cedis should read one figure for "what can I
@@ -361,9 +360,9 @@ export default function Wallet() {
             <Link key={p.label} href={p.href} className={`tile ${p.tone}`}>
               <span className="tile-icon"><Icon name={p.icon} size={20} /></span>
               {p.label}
-              {/* Paused by an operator: the tile still opens a screen that
-                  says so, rather than vanishing from a grid of four. */}
-              {isPaused(services.data, p.href) && <span className="tile-soon">Soon</span>}
+              {/* A paused service is NOT badged here. The tile opens a screen
+                  that says "Coming soon"; a badge on the icon said it twice
+                  and was the first thing anybody saw on the home screen. */}
             </Link>
           ))}
         </div>

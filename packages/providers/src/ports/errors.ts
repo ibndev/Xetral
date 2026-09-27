@@ -141,3 +141,23 @@ export class ProviderContractError extends ProviderError {
 export function providerDidNothing(error: unknown): boolean {
   return error instanceof ProviderRejectedError || error instanceof ProviderNotSentError;
 }
+
+/**
+ * "THIS RAIL HAS NO TRANSFER WITH THAT REFERENCE" — the one refusal from a
+ * STATUS question that means the money never left.
+ *
+ * Every other refusal to a status question is about the QUESTION: a wrong or
+ * rotated key, the other environment's key, a malformed id, a rate limit.
+ * Reading those as "no such payout" is how a sweep refunds a transfer that
+ * arrived — the reconciliation sweep did exactly that for any
+ * `ProviderRejectedError`, so a key swapped to the wrong environment would
+ * have given back every payout it asked about. An adapter sets this code
+ * ONLY for its rail's documented not-found answer to a lookup by OUR
+ * reference, and nothing else may be read as never-sent.
+ */
+export const NO_SUCH_TRANSFER = 'no_such_transfer';
+
+export function saysNoSuchTransfer(error: unknown): boolean {
+  return error instanceof ProviderRejectedError && error.providerCode === NO_SUCH_TRANSFER;
+}
+

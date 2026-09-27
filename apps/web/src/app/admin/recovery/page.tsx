@@ -2,7 +2,7 @@
 
 import { Fragment, useState } from 'react';
 import { formatMinor } from '@xetral/client';
-import type { AdminHeldMoney } from '@xetral/client';
+import type { AdminHeldMoney, AdminRecoveryOutcome, AdminRefundAudit } from '@xetral/client';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
 import { AdminError } from '../access';
@@ -27,20 +27,29 @@ import { Kpis, MoneyFigure, shortRef } from '../queue';
  *
  * THE AMOUNT IS NOT ON THIS FORM, and that is the whole safety argument. It
  * comes from the held row on the server, so this screen cannot credit an
- * arbitrary customer an arbitrary sum — the worst it can do is give somebody
- * back exactly what was taken from them. What it takes instead is a reason,
- * which is the part a reviewer reads afterwards.
+ * arbitrary customer an arbitrary sum.
+ *
+ * AND THE BUTTON NO LONGER GIVES ANYTHING BACK ON A PERSON'S WORD. It was
+ * "Reverse", and it reversed — including the owner's own payout, delivered
+ * to their own bank, whose send had merely answered in a shape we could not
+ * read. That is the business paying twice with every entry balanced. The
+ * button now ASKS THE PROVIDER: delivered settles it, failed gives it back,
+ * and "cannot say" moves nothing. A person who has SEEN a transfer arrive on
+ * the provider's dashboard can record it as delivered — the one direction a
+ * person may decide on their own, because it gives nothing away.
  */
 export default function Recovery() {
   const admin = useAdmin();
   const queue = useLoad(() => admin.recoveryQueue(), [admin]);
   const [open, setOpen] = useState<string | undefined>();
+  const [said, setSaid] = useState<AdminRecoveryOutcome | undefined>();
 
   const waiting = queue.data?.waiting ?? [];
   const recovered = queue.data?.recovered ?? [];
   const summary = queue.data?.summary;
 
-  const reload = (): void => {
+  const reload = (outcome?: AdminRecoveryOutcome): void => {
+    setSaid(outcome);
     setOpen(undefined);
     queue.reload();
   };
@@ -62,9 +71,25 @@ export default function Recovery() {
         ]}
       />
 
+      {said !== undefined && (
+        <div className={`notice${said.outcome === 'held' ? ' warn' : ''}`} role="status">
+          <p>
+            <strong>
+              {said.outcome === 'reversed'
+                ? 'Given back.'
+                : said.outcome === 'delivered'
+                  ? 'Delivered — nothing given back.'
+                  : 'Still held — nothing moved.'}
+            </strong>{' '}
+            {said.detail}
+          </p>
+        </div>
+      )}
+
       <div className="panel tbl-panel">
         <span className="tbl-note">
-          Money that left a wallet and did not arrive — the mirror of Suspense.
+          Money that left a wallet and has not been confirmed either way. Resolve
+          asks the provider; money goes back only if they say it failed.
         </span>
         <AdminError error={queue.error} code={queue.code} role="support" />
         {queue.loading && <p className="spinner">Loading…</p>}
@@ -109,7 +134,7 @@ export default function Recovery() {
                             aria-expanded={open === key}
                             onClick={() => setOpen(open === key ? undefined : key)}
                           >
-                            {open === key ? 'Close' : 'Reverse'}
+                            {open === key ? 'Close' : 'Resolve'}
                           </button>
                         </td>
                       </tr>
@@ -128,6 +153,8 @@ export default function Recovery() {
           </div>
         )}
       </div>
+
+      <RefundAuditPanel />
 
       {recovered.length > 0 && (
         <div className="panel tbl-panel">
@@ -185,16 +212,17 @@ function heldFor(hours: number): string {
 }
 
 /**
- * One held row, and the button that gives it back.
+ * One held row: ask the provider, or record what you saw on their dashboard.
  *
  * The age is shown as hours because that is the question being asked: a
  * payout held for twenty minutes is a provider taking its time, and one held
  * for three days is one nobody is coming back to answer for.
  */
-function Held({ row, onDone }: { row: AdminHeldMoney; onDone: () => void }) {
+function Held({ row, onDone }: { row: AdminHeldMoney; onDone: (said: AdminRecoveryOutcome) => void }) {
   const admin = useAdmin();
   const [reason, setReason] = useState('');
   const [pin, setPin] = useState('');
+  const [transferId, setTransferId] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
 
@@ -202,24 +230,30 @@ function Held({ row, onDone }: { row: AdminHeldMoney; onDone: () => void }) {
   const age =
     hours < 1 ? 'under an hour' : hours < 48 ? `${hours} hours` : `${Math.floor(hours / 24)} days`;
 
+  const act = (work: () => Promise<AdminRecoveryOutcome>): void => {
+    setBusy(true);
+    setError(undefined);
+    void (async () => {
+      try {
+        const said = await work();
+        setPin('');
+        onDone(said);
+      } catch (cause) {
+        setError(messageFor(cause));
+      } finally {
+        setBusy(false);
+      }
+    })();
+  };
+
+  const ready = reason.trim().length >= 8 && pin !== '' && !busy;
+
   return (
     <form
       className="review-grid"
       onSubmit={(event) => {
         event.preventDefault();
-        setBusy(true);
-        setError(undefined);
-        void (async () => {
-          try {
-            await admin.recover(row.kind, row.subject_uuid, reason, pin);
-            setPin('');
-            onDone();
-          } catch (cause) {
-            setError(messageFor(cause));
-          } finally {
-            setBusy(false);
-          }
-        })();
+        act(() => admin.recover(row.kind, row.subject_uuid, reason, pin));
       }}
     >
       <div>
@@ -243,14 +277,14 @@ function Held({ row, onDone }: { row: AdminHeldMoney; onDone: () => void }) {
           <span className="mono">{row.subject_uuid}</span>
         </div>
         <div className="row">
-          <span className="muted">State at the provider</span>
+          <span className="muted">State here</span>
           <span>{row.status}</span>
         </div>
       </div>
 
       <div>
         <label>
-          Why you are giving this back
+          What you are doing, and why
           <textarea
             value={reason}
             onChange={(e) => setReason(e.target.value)}
@@ -259,8 +293,7 @@ function Held({ row, onDone }: { row: AdminHeldMoney; onDone: () => void }) {
             maxLength={500}
           />
           <span className="hint">
-            What you checked to establish the money never left. This is the record
-            somebody reads if the provider later says it did.
+            Kept on the record with your name. The provider decides the outcome, not this box.
           </span>
         </label>
 
@@ -276,12 +309,120 @@ function Held({ row, onDone }: { row: AdminHeldMoney; onDone: () => void }) {
           />
         </label>
 
-        <button type="submit" disabled={busy}>
-          {busy ? 'Working…' : 'Reverse and give it back'}
+        <button type="submit" disabled={!ready}>
+          {busy ? 'Asking the provider…' : 'Ask the provider and resolve'}
         </button>
+        <span className="hint">
+          Delivered: settled, nothing given back. Failed: given back to the
+          customer. No answer: nothing moves.
+        </span>
+
+        {row.kind === 'bank_payout' && (
+          <>
+            <label>
+              Seen it arrive? Provider transfer id
+              <input
+                value={transferId}
+                onChange={(e) => setTransferId(e.target.value)}
+                placeholder="e.g. TRF_1ptvuv321ahaa7q"
+                autoComplete="off"
+              />
+              <span className="hint">
+                From the provider&rsquo;s own dashboard. Records it as delivered and gives nothing back.
+              </span>
+            </label>
+            <button
+              type="button"
+              className="ghost"
+              disabled={!ready || transferId.trim().length < 2}
+              onClick={() =>
+                act(() => admin.markPayoutDelivered(row.subject_uuid, transferId.trim(), reason, pin))
+              }
+            >
+              Mark as delivered
+            </button>
+          </>
+        )}
 
         {error !== undefined && <p className="error">{error}</p>}
       </div>
     </form>
+  );
+}
+
+/**
+ * EVERY PAYOUT WE GAVE BACK, ASKED AGAIN.
+ *
+ * Before the provider was asked first, this screen's own button — and the
+ * sweep, on any refused status question — could give back a payout that had
+ * arrived. A reversal of a delivered transfer balances exactly like one of a
+ * failed transfer, so nothing in the ledger can find them; only the provider
+ * can. On demand rather than on load, because it asks a provider per row.
+ */
+function RefundAuditPanel() {
+  const admin = useAdmin();
+  const [audit, setAudit] = useState<AdminRefundAudit | undefined>();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | undefined>();
+
+  return (
+    <div className="panel tbl-panel">
+      <span className="tbl-note">
+        Payouts already given back, checked against the provider. Any listed
+        here were paid to the beneficiary AND refunded to the customer.
+      </span>
+      <div className="tbl-actions">
+        <button
+          type="button"
+          className="small"
+          disabled={busy}
+          onClick={() => {
+            setBusy(true);
+            setError(undefined);
+            void admin
+              .recoveryAudit()
+              .then(setAudit, (cause: unknown) => setError(messageFor(cause)))
+              .finally(() => setBusy(false));
+          }}
+        >
+          {busy ? 'Checking with providers…' : 'Check refunded payouts'}
+        </button>
+      </div>
+      {error !== undefined && <p className="error">{error}</p>}
+      {audit !== undefined && (
+        <p className={audit.paid_twice.length > 0 ? 'error' : 'ok'}>
+          {audit.paid_twice.length > 0
+            ? `${audit.paid_twice.length} of ${audit.checked} refunded payouts were also paid.`
+            : `None of ${audit.checked} refunded payouts was also paid.`}
+          {audit.unconfirmed > 0 && ` ${audit.unconfirmed} could not be confirmed with the provider.`}
+        </p>
+      )}
+      {audit !== undefined && audit.paid_twice.length > 0 && (
+        <div className="scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Reference</th>
+                <th>Customer</th>
+                <th className="r">Given back</th>
+                <th>Destination</th>
+                <th>Rail</th>
+              </tr>
+            </thead>
+            <tbody>
+              {audit.paid_twice.map((row) => (
+                <tr key={row.subject_uuid}>
+                  <td className="ref mono">{row.reference}</td>
+                  <td>{row.email ?? '—'}</td>
+                  <td className="r amount soft">{formatMinor(row.amount_minor, row.currency)}</td>
+                  <td className="quiet">{row.destination}</td>
+                  <td className="quiet">{row.provider}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   );
 }

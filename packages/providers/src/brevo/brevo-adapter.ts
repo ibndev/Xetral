@@ -65,6 +65,8 @@ export const BREVO_BASE_URL = 'https://api.brevo.com';
 
 export const BREVO_ENDPOINTS = {
   send: '/v3/smtp/email',
+  /** "Get the list of all your senders": `{ senders: [{ email, name, active }] }`. */
+  senders: '/v3/senders',
 } as const;
 
 /**
@@ -119,6 +121,8 @@ export class BrevoNotificationAdapter implements NotificationPort {
   readonly #baseUrl: string;
   readonly #fetch: BrevoFetchLike;
   readonly #timeoutMs: number;
+  /** A sender Brevo has VERIFIED, used once the configured one was refused. */
+  #verified: { name?: string; email: string } | undefined;
 
   constructor(options: BrevoAdapterOptions) {
     this.#apiKey = options.apiKey;
@@ -149,6 +153,67 @@ export class BrevoNotificationAdapter implements NotificationPort {
       );
     }
 
+    const configured = senderOf(this.#from);
+    try {
+      return await this.#attempt(apiKey, this.#verified ?? configured, message);
+    } catch (error) {
+      /*
+       * A SENDER BREVO HAS NOT VERIFIED IS REFUSED ON EVERY MESSAGE, and that
+       * was the reset code that never arrived. NOTIFICATION_FROM defaults to
+       * `no-reply@xetral.com` so that mail is sent at all; if that address or
+       * its domain was never verified in the Brevo account, every message —
+       * a reset code most of all — is refused with a sentence about the
+       * sender, and the customer waits for an email that is never coming.
+       *
+       * So a refusal ABOUT THE SENDER asks Brevo which senders this account
+       * HAS verified and sends once more from one of them — the same domain
+       * first. A refused send sent nothing, so the second attempt cannot be a
+       * duplicate. The choice is kept for later messages and logged by the
+       * caller through the rejection it would otherwise have raised.
+       */
+      if (this.#verified !== undefined || !isSenderRefusal(error)) throw error;
+      const verified = await this.#verifiedSender(apiKey, configured.email);
+      if (verified === undefined || verified.email === configured.email) throw error;
+      this.#verified = { ...(configured.name === undefined ? {} : { name: configured.name }), ...verified };
+      return this.#attempt(apiKey, this.#verified, message);
+    }
+  }
+
+  async #verifiedSender(
+    apiKey: string,
+    preferredEmail: string,
+  ): Promise<{ name?: string; email: string } | undefined> {
+    let payload: unknown;
+    try {
+      const response = await this.#fetch(`${this.#baseUrl}${BREVO_ENDPOINTS.senders}`, {
+        method: 'GET',
+        headers: { 'api-key': apiKey, accept: 'application/json' },
+      });
+      if (!response.ok) return undefined;
+      payload = await response.json();
+    } catch {
+      return undefined;
+    }
+    const list = (payload as { senders?: unknown }).senders;
+    if (!Array.isArray(list)) return undefined;
+    const active = list
+      .map((row) => row as { email?: unknown; name?: unknown; active?: unknown })
+      .filter((row): row is { email: string; name?: unknown; active?: unknown } =>
+        typeof row.email === 'string' && row.email.includes('@') && row.active !== false,
+      );
+    const domain = preferredEmail.split('@')[1]?.toLowerCase();
+    const pick = active.find((row) => row.email.split('@')[1]?.toLowerCase() === domain) ?? active[0];
+    if (pick === undefined) return undefined;
+    return typeof pick.name === 'string' && pick.name.trim() !== ''
+      ? { name: pick.name.trim(), email: pick.email }
+      : { email: pick.email };
+  }
+
+  async #attempt(
+    apiKey: string,
+    sender: { name?: string; email: string },
+    message: NotificationMessage,
+  ): Promise<NotificationReceipt> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.#timeoutMs);
 
@@ -164,7 +229,7 @@ export class BrevoNotificationAdapter implements NotificationPort {
           accept: 'application/json',
         },
         body: JSON.stringify({
-          sender: senderOf(this.#from),
+          sender,
           /*
            * A LIST OF OBJECTS, even though the port carries ONE address.
            *
@@ -272,4 +337,13 @@ export function senderOf(from: string): { name?: string; email: string } {
   const name = (match[1] ?? '').replace(/^"|"$/g, '').trim();
   const email = (match[2] ?? '').trim();
   return name === '' ? { email } : { name, email };
+}
+
+/** Is this Brevo's refusal of the SENDER, rather than of the recipient or the key? */
+function isSenderRefusal(error: unknown): boolean {
+  return (
+    error instanceof ProviderRejectedError &&
+    error.providerCode !== 'no_api_key' &&
+    /sender|from address|not (?:been )?(?:verified|validated)/i.test(error.message)
+  );
 }

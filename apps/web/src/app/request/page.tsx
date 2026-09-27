@@ -208,7 +208,7 @@ export default function Request() {
         </p>
       </div>
 
-      <span className="eyebrow">Or share what is always yours</span>
+      <span className="eyebrow">Accept money from Xetral user</span>
 
       {/*
         THE NUMBER GETS THE COMP'S ACCOUNT CARD, because it is the identifier
@@ -216,7 +216,7 @@ export default function Request() {
         for the reason it appears once on Add money.
       */}
       <div className="acct-card">
-        <span className="eyebrow" style={{ padding: 0 }}>From a Xetral account</span>
+        <span className="eyebrow" style={{ padding: 0 }}>Share your Xetral number</span>
         <div className="acct-card-row">
           <span className="acct-number">{local === '' ? 'Not set' : local}</span>
           <button

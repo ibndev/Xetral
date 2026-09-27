@@ -197,6 +197,25 @@ export class ReconciliationService implements OnApplicationShutdown {
 
   /* ------------------------------------------------------------------ */
 
+  /**
+   * ONE held purchase, asked of its provider — what /admin/recovery presses
+   * before anything is given back. The same `#resolve` the sweep runs, so a
+   * person and the worker cannot reach different answers about one purchase.
+   * Throws when the provider cannot be asked; the money stays held.
+   */
+  async resolveOne(purchaseUuid: string): Promise<'settled' | 'reversed' | 'pending'> {
+    const result = await this.pool.query<HeldPurchase>(
+      `SELECT id, user_id, reference, service, amount_minor, currency,
+              reserve_entry_id, created_at
+         FROM purchases
+        WHERE uuid = $1::uuid AND status = 'reserved'`,
+      [purchaseUuid],
+    );
+    const row = result.rows[0];
+    if (row === undefined) return 'settled';
+    return this.#resolve(row);
+  }
+
   /** Asks the provider what happened, and does only what they said. */
   async #resolve(row: HeldPurchase): Promise<'settled' | 'reversed' | 'pending'> {
     const port = this.ports.get(row.service as ServiceKind);

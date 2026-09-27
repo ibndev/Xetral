@@ -201,12 +201,12 @@ export default function Request() {
 
       {profile.data !== undefined && (
         <>
-          <Eyebrow>Or share what is always yours</Eyebrow>
+          <Eyebrow>Accept money from Xetral user</Eyebrow>
           {/* THE NUMBER GETS THE COMP'S ACCOUNT CARD, because it is the
               identifier a customer reads out — and the gradient panel appears
               once per screen for the reason it appears once on Add money. */}
           <AcctCard
-            eyebrow="From a Xetral account"
+            eyebrow="Share your Xetral number"
             value={local === '' ? 'Not set' : local}
             sub={
               local === ''

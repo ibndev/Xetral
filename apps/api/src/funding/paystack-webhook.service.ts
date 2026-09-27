@@ -16,6 +16,7 @@ import { SettingsService } from '../settings/settings.service.js';
 import { ProviderCredentialService } from '../settings/provider-credentials.service.js';
 import { NotificationService } from '../notifications/notification.service.js';
 import { PaymentLinkService } from '../pay/payment-link.service.js';
+import { PayoutService } from '../payouts/payout.service.js';
 
 const PROVIDER = 'paystack';
 
@@ -53,6 +54,7 @@ export class PaystackWebhookService {
     private readonly credentials: ProviderCredentialService,
     @Inject(NotificationService) private readonly notifications: NotificationService,
     @Inject(PaymentLinkService) private readonly links: PaymentLinkService,
+    @Inject(PayoutService) private readonly payouts: PayoutService,
   ) {}
 
   async handle(rawBody: string, headers: Record<string, string | undefined>): Promise<void> {
@@ -85,6 +87,28 @@ export class PaystackWebhookService {
     if (!verifyPaystackSignature(rawBody, headers['x-paystack-signature'], secret)) {
       this.#logger.warn('paystack webhook rejected: signature did not verify');
       throw new UnauthorizedException({ error: 'invalid_signature' });
+    }
+
+    /*
+     * A TRANSFER EVENT IS ABOUT MONEY GOING OUT, and it was never read.
+     *
+     * Paystack posts `transfer.success`, `transfer.failed` and
+     * `transfer.reversed` to this same URL. Every one fell into the deposit
+     * path, found no charge to credit and was acknowledged — so a payout whose
+     * send answered in a shape we could not read stayed `reserved` for ever
+     * while its money sat in the beneficiary's account, and it was exactly
+     * that row /admin/recovery offered to "give back". The event is a
+     * doorbell even though the body is signed: a signature proves Paystack
+     * sent it, not that it is the latest word, and a redelivered
+     * `transfer.failed` after a `transfer.success` would otherwise give back
+     * money that arrived. Its reference is all that is used; the outcome is
+     * re-read from Paystack by that reference in `confirmWithRail`.
+     */
+    const transfer = transferEventOf(rawBody);
+    if (transfer !== undefined) {
+      const outcome = await this.payouts.resolveByReference(transfer.reference, transfer.id);
+      this.#logger.log(`paystack ${transfer.event} for payout ${transfer.reference}: ${outcome}`);
+      return;
     }
 
     const event = parsePaystackWebhook(rawBody);
@@ -307,3 +331,27 @@ export class PaystackWebhookService {
     });
   }
 }
+
+/** `transfer.*` events, read for their reference and id only — never their
+ *  status, which is re-read from Paystack. */
+function transferEventOf(
+  rawBody: string,
+): { readonly event: string; readonly reference: string; readonly id?: string } | undefined {
+  let json: unknown;
+  try {
+    json = JSON.parse(rawBody);
+  } catch {
+    return undefined;
+  }
+  const body = json as { event?: unknown; data?: { reference?: unknown; id?: unknown } };
+  if (typeof body.event !== 'string' || !body.event.startsWith('transfer.')) return undefined;
+  const reference = body.data?.reference;
+  if (typeof reference !== 'string' || reference === '') return undefined;
+  const id = body.data?.id;
+  return {
+    event: body.event,
+    reference,
+    ...(typeof id === 'string' || typeof id === 'number' ? { id: String(id) } : {}),
+  };
+}
+

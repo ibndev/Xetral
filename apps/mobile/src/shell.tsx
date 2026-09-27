@@ -5,7 +5,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Link, router, usePathname } from 'expo-router';
 import { Icon } from '@/icon';
 import type { IconName } from '@/icon';
-import { Logo } from '@/logo';
 import { useXetral } from '@/hooks';
 import { pausedMode, serviceForPath } from '@xetral/client';
 import type { ServiceStates } from '@xetral/client';
@@ -285,6 +284,75 @@ export function Shell({
     }).start();
   }, [entrance, pathname]);
 
+  /*
+   * THE HOME SCREEN'S HEADER, AND ONLY THE HOME SCREEN'S — and it scrolls.
+   *
+   * Every top-level screen carried a bar pinned above the scroll view: the
+   * brand, the theme toggle and the bell. The brand was a static logo on every
+   * page; the toggle and the bell belong to the screen a customer opens the
+   * app on. So the header is drawn where there is a greeting, INSIDE the
+   * scrolling content, and leaves with the page — the web's `.appbar` makes
+   * the same change.
+   *
+   * The avatar with no name to draw initials from shows a person glyph. It
+   * showed the brand LOCKUP — the mark and "etral" — which is wider than the
+   * 40pt disc and ran across "Welcome back" beside it.
+   */
+  const header =
+    greeting !== undefined && back === undefined && onBack === undefined ? (
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: space.sm,
+          height: 56,
+          // Cancels the body's own top padding, so the header sits where the
+          // pinned bar used to and the content below it has not moved.
+          marginTop: -16,
+          marginBottom: 16,
+          // The icon buttons are 44pt around a 20pt glyph; this puts the
+          // GLYPH on the gutter, level with the right edge of every card.
+          marginRight: -12,
+        }}
+      >
+        <View
+          style={{
+            width: 40, height: 40, borderRadius: 999,
+            alignItems: 'center', justifyContent: 'center',
+            backgroundColor: colors.avatar,
+            borderWidth: 1, borderColor: colors.irisEdge,
+          }}
+        >
+          {initialsOf(greeting.name) === undefined ? (
+            <Icon name="user" size={19} color={colors.avatarText} />
+          ) : (
+            <Text style={{ color: colors.avatarText, fontFamily: font.sansBold, fontSize: 14 }}>
+              {initialsOf(greeting.name)}
+            </Text>
+          )}
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text
+            numberOfLines={1}
+            style={{ color: colors.text3, fontFamily: font.sansMedium, fontSize: 12.5 }}
+          >
+            Welcome back
+          </Text>
+          <Text
+            numberOfLines={1}
+            style={{
+              color: colors.text, fontFamily: font.sansBold,
+              fontSize: 16, letterSpacing: -0.2,
+            }}
+          >
+            {greeting.name ?? 'there'}
+          </Text>
+        </View>
+        <ThemeToggle />
+        <Bell dot />
+      </View>
+    ) : null;
+
   const body = (
     <Animated.View
       style={{
@@ -303,6 +371,7 @@ export function Shell({
         ],
       }}
     >
+      {header}
       {/*
         THE WAY BACK AND THE TITLE, in the page rather than in a bar — the
         comp's 40pt rounded square on `surface2` and a 20pt title. Rendered
@@ -371,80 +440,6 @@ export function Shell({
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg, paddingTop: insets.top }}>
-      {/*
-        NO HEADER BAR ON A SCREEN ONE LEVEL DOWN.
-
-        The comp opens such a screen directly on a 40px rounded-square back
-        button and a 20px title INSIDE the page — no mark, no theme toggle,
-        because those belong to the screen a customer opens the app on rather
-        than the one they stepped into. The bar was taking 56pt of a handset
-        permanently to show a chevron and a word; the comp spends that on the
-        thing the screen is for and puts the way back in the content, where it
-        scrolls with everything else.
-
-        The web's `Shell` makes the same change in the same place, so the two
-        apps cannot disagree about what a sub-screen looks like.
-      */}
-      {back === undefined && onBack === undefined && (
-      <View
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: space.sm,
-          height: 56,
-          // The web's `.appbar`, 16 either side.
-          paddingHorizontal: 16,
-        }}
-      >
-        {greeting !== undefined ? (
-          <>
-            {/* The initials are DERIVED, never stored — `initialsOf` returns
-                nothing rather than a placeholder letter, because an avatar
-                reading "T" for "there" is a made-up initial on the screen
-                that says who you are signed in as. */}
-            <View
-              style={{
-                width: 40, height: 40, borderRadius: 999,
-                alignItems: 'center', justifyContent: 'center',
-                backgroundColor: colors.avatar,
-                borderWidth: 1, borderColor: colors.irisEdge,
-              }}
-            >
-              {initialsOf(greeting.name) === undefined ? (
-                <Logo size={17} />
-              ) : (
-                <Text style={{ color: colors.avatarText, fontFamily: font.sansBold, fontSize: 14 }}>
-                  {initialsOf(greeting.name)}
-                </Text>
-              )}
-            </View>
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <Text
-                numberOfLines={1}
-                style={{ color: colors.text3, fontFamily: font.sansMedium, fontSize: 12.5 }}
-              >
-                Welcome back
-              </Text>
-              <Text
-                numberOfLines={1}
-                style={{
-                  color: colors.text, fontFamily: font.sansBold,
-                  fontSize: 16, letterSpacing: -0.2,
-                }}
-              >
-                {greeting.name ?? 'there'}
-              </Text>
-            </View>
-          </>
-        ) : (
-          <Logo size={22} />
-        )}
-        <View style={{ flex: 1 }} />
-        <ThemeToggle />
-        <Bell dot={greeting !== undefined} />
-      </View>
-      )}
-
       {/*
         THE KEYBOARD MUST NOT COVER THE FIELD BEING TYPED IN.
         

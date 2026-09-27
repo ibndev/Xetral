@@ -1009,10 +1009,17 @@ export function createRateLimitStore(config: ApiConfig): RateLimitStore {
   // their own money, and knocking over one Redis becomes a denial of service
   // against authentication itself. See ResilientRateLimitStore.
   //
-  // `maxRetriesPerRequest` is left at ioredis's default rather than raised:
-  // the point is to fail fast to the fallback, not to hold a login open while
-  // a dead connection is retried twenty times.
-  const redis = new Redis(config.redisUrl);
+  // FAIL FAST, stated rather than assumed. The old comment here said leaving
+  // `maxRetriesPerRequest` at ioredis's default "fails fast" — the default is
+  // TWENTY reconnect attempts, about ten seconds per command, and every
+  // request waited them out. With no offline queue a command on a dropped
+  // connection is refused at once, and the wrapper below counts it here.
+  const redis = new Redis(config.redisUrl, {
+    maxRetriesPerRequest: 1,
+    enableOfflineQueue: false,
+    connectTimeout: 2_000,
+    commandTimeout: 500,
+  });
 
   // ioredis emits `error` on every failed reconnect. Unhandled, those become
   // unhandled 'error' events on an EventEmitter, which crashes the process —

@@ -74,3 +74,20 @@ export async function POST(
 ): Promise<NextResponse> {
   return forward(request, (await context.params).path);
 }
+
+/*
+ * DELETE WAS NEVER FORWARDED, and every delete on the dashboard died here.
+ *
+ * This file exported GET and POST only, so Next answered a DELETE itself —
+ * 405, no body — before the API ever saw it. Deleting a retired FX rate or
+ * spread, removing a saved recipient and unlinking a mobile money wallet were
+ * all declared on the API, typed in the client and wired to buttons, and none
+ * of them could reach the server. `proxy-methods.test.ts` now fails the build
+ * on a method the API declares that this file does not forward.
+ */
+export async function DELETE(
+  request: Request,
+  context: { params: Promise<{ path: string[] }> },
+): Promise<NextResponse> {
+  return forward(request, (await context.params).path);
+}

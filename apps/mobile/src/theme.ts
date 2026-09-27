@@ -217,15 +217,15 @@ export function isThemeChoice(value: string): value is ThemeChoice {
  * and a module `const` cannot be swapped from outside its module anyway, so
  * every screen was pinned to light whatever the phone was set to.
  *
- * Defaults to `system` so a screen rendered outside the provider — which
- * should not happen, and did — follows the device rather than freezing on one
- * palette. `set` is a no-op there, which is visible in a way a wrong colour is
- * not.
+ * Defaults to `light`, the product's default, the same as the provider's own
+ * starting value — a screen rendered outside the provider (which should not
+ * happen, and did) then agrees with every other screen. `set` is a no-op
+ * there, which is visible in a way a wrong colour is not.
  */
 export const ThemeChoiceContext = createContext<{
   readonly choice: ThemeChoice;
   readonly set: (next: ThemeChoice) => void;
-}>({ choice: 'system', set: () => undefined });
+}>({ choice: 'light', set: () => undefined });
 
 export function useThemeChoice(): {
   readonly choice: ThemeChoice;

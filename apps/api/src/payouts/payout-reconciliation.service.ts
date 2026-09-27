@@ -1,7 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { OnApplicationShutdown } from '@nestjs/common';
 import type { Pool } from 'pg';
-import { ProviderRejectedError } from '@xetral/providers';
 import type { PayoutPort } from '@xetral/providers';
 import { API_CONFIG, DATABASE, PAYOUT_PORT } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
@@ -201,87 +200,40 @@ export class PayoutReconciliationService implements OnApplicationShutdown {
 
   async #resolve(row: HeldPayout): Promise<'settled' | 'reversed' | 'pending'> {
     /*
-     * NO PAYOUT ID MEANS WE DO NOT KNOW — IT DOES NOT MEAN NO PAYOUT.
+     * ONE DECISION, `PayoutService.confirmWithRail`, and it gives money back
+     * only on an ANSWER: the rail describing the transfer, with our
+     * reference, as failed — or the rail that sent it saying it has no
+     * transfer with our reference at all.
      *
-     * This branch used to reverse, on the reasoning that without the id the
-     * money-moving call "either never happened or never answered". The
-     * second half is the trouble: a send that TIMED OUT, or came back as a
-     * 502, records no id and may well have paid the beneficiary — and
-     * `send()` itself leaves such a row reserved precisely because reversing
-     * it would refund money that has left. So the sweep was undoing, one
-     * grace period later, the decision the send path had just made, and a
-     * transfer that arrived was also refunded to the customer.
-     *
-     * A definite refusal never reaches here — `send()` reversed it on the
-     * spot — so a held row with no id is always an unknown. There is nothing
-     * to ask the rail by (a payout id is the only handle `status()` takes),
-     * and the rail's own event resolves it when it lands. What remains is a
-     * person on `/admin/recovery`, who can ask the provider by our reference
-     * and give the money back with a reason: the rule a purchase held too
-     * long already follows, because by now both automated answers can be
-     * the wrong one.
+     * TWO WAYS THIS SWEEP USED TO REFUND A TRANSFER THAT ARRIVED. A payout
+     * with no id was escalated with nothing to ask it by, so a person
+     * reversed it on a guess; and ANY refusal of a status question was read
+     * as "no such payout" and reversed — including the refusal a rotated
+     * key, or the other environment's key, gives to every question. Both
+     * paid the beneficiary twice while every entry balanced. A payout with no
+     * id is now asked by OUR reference, and a refused question is held.
      */
-    if (row.provider_payout_id === null) {
-      this.#escalate(
-        row,
-        (Date.now() - row.created_at.getTime()) / 1000,
-        'the send did not return a payout id, so whether money left is unknown; ' +
-          'confirm with the provider by reference before reversing',
-      );
-      return 'pending';
-    }
-
-    let receipt;
-    try {
-      /*
-       * ASKED OF THE RAIL THAT ISSUED IT — `row.provider`, never the
-       * currently-configured one. See the port's own note: without it, a
-       * Flutterwave payout asked about at Paystack answers "no such transfer",
-       * which the branch below reads as a definite refusal and reverses.
-       */
-      receipt = await this.payouts.askRail(row, row.provider_payout_id);
-    } catch (error) {
-      /*
-       * A REJECTION IS AN ANSWER. "No such payout" from a provider that issued
-       * us the id is them saying it does not exist — reversible. Every other
-       * error is us being unable to ask, which is not an outcome.
-       */
-      if (error instanceof ProviderRejectedError) {
-        await this.payouts.fail(row, `the provider refused it: ${error.message}`);
+    const verdict = await this.payouts.resolveWithRail(row);
+    switch (verdict.kind) {
+      case 'failed':
+      case 'never_sent':
         return 'reversed';
-      }
-      throw error;
+      case 'arrived':
+        return verdict.receipt.state === 'completed' || row.status === 'reserved'
+          ? 'settled'
+          : 'pending';
+      case 'unknown':
+        if (!verdict.retryable) {
+          this.#escalate(
+            row,
+            (Date.now() - row.created_at.getTime()) / 1000,
+            `no rail could confirm it (${verdict.why}); it is held, never refunded on a guess`,
+          );
+        } else {
+          throw new Error(verdict.why);
+        }
+        return 'pending';
     }
-
-    /*
-     * NO RAIL COULD SAY, WITH EVIDENCE, WHAT HAPPENED — a row whose rail is
-     * unknown (before 080) and no answer carrying our reference. Reversing
-     * would refund money that may have left; it is held for a person.
-     */
-    if (receipt === undefined) {
-      this.#escalate(
-        row,
-        (Date.now() - row.created_at.getTime()) / 1000,
-        'no rail returned this payout with our reference, and the row predates ' +
-          'the provider being recorded; confirm with each provider by reference',
-      );
-      return 'pending';
-    }
-
-    // `state`, not `status`: the receipt describes what the PROVIDER did, and
-    // `bank_payouts.status` is what WE recorded. Naming them the same thing is
-    // how a settle gets written from the wrong one.
-    if (receipt.state === 'failed') {
-      await this.payouts.fail(row, receipt.failureReason ?? 'the provider reported it failed');
-      return 'reversed';
-    }
-    if (receipt.state === 'completed' || receipt.state === 'sent') {
-      // Settling is idempotent: `applyReceipt` guards on `status = 'reserved'`
-      // and the ledger key makes a repeated posting a replay.
-      await this.payouts.applyReceipt(row, receipt);
-      return 'settled';
-    }
-    return 'pending';
   }
 
   /**

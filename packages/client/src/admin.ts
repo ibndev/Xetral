@@ -1,5 +1,6 @@
 import { Session } from './session.js';
 import { ApiError, toApiError } from './errors.js';
+import { retryOnNetwork } from './retry.js';
 
 /**
  * The operations surface, as a separate client.
@@ -702,6 +703,37 @@ export interface AdminRecoveryRecord {
 }
 
 /**
+ * What pressing Resolve did. Only `reversed` gave money back, and only because
+ * the provider said the payout or purchase FAILED; `delivered` settled it
+ * because the provider said it arrived; `held` changed nothing because the
+ * provider could not say.
+ */
+export interface AdminRecoveryOutcome {
+  readonly outcome: 'reversed' | 'delivered' | 'held';
+  readonly detail: string;
+  readonly record?: AdminRecoveryRecord;
+}
+
+/** A payout given back that its provider says was ALSO paid. */
+export interface AdminRefundAuditRow {
+  readonly subject_uuid: string;
+  readonly reference: string;
+  readonly email: string | null;
+  readonly currency: string;
+  /** MINOR units: the amount and the fee given back together. */
+  readonly amount_minor: string;
+  readonly destination: string;
+  readonly created_at: string;
+  readonly provider: string;
+}
+
+export interface AdminRefundAudit {
+  readonly checked: number;
+  readonly unconfirmed: number;
+  readonly paid_twice: readonly AdminRefundAuditRow[];
+}
+
+/**
  * What the platform has earned, and why it might be nothing.
  *
  * Amounts are MINOR UNITS as strings, like every amount that crosses this
@@ -1016,6 +1048,16 @@ export interface AdminOpenError {
   readonly alerted_at: string | null;
   readonly last_reference: string | null;
 }
+
+/**
+ * When anything last came back from the server, across every AdminClient on
+ * the page — `useAdmin()` builds one per component, so an instance field
+ * would forget the moment a form mounted.
+ */
+let lastAnswerAt = 0;
+
+/** Longer than this without an answer and a write warms the line first. */
+const IDLE_BEFORE_WARMING_MS = 20_000;
 
 export class AdminClient {
   readonly #baseUrl: string;
@@ -1388,11 +1430,33 @@ export class AdminClient {
     subjectUuid: string,
     reason: string,
     pin: string,
-  ): Promise<AdminRecoveryRecord> {
+  ): Promise<AdminRecoveryOutcome> {
     return this.#post(
       `/v1/admin/recovery/${encodeURIComponent(kind)}/${encodeURIComponent(subjectUuid)}`,
       { reason, transaction_pin: pin },
     );
+  }
+
+  /**
+   * Record a held payout as DELIVERED, with the provider's own transfer id —
+   * for one the provider will not describe on request. Gives nothing back.
+   */
+  async markPayoutDelivered(
+    subjectUuid: string,
+    providerPayoutId: string,
+    reason: string,
+    pin: string,
+  ): Promise<AdminRecoveryOutcome> {
+    return this.#post(`/v1/admin/recovery/bank_payout/${encodeURIComponent(subjectUuid)}/delivered`, {
+      reason,
+      provider_payout_id: providerPayoutId,
+      transaction_pin: pin,
+    });
+  }
+
+  /** Every payout given back, asked of its provider again. Changes nothing. */
+  async recoveryAudit(): Promise<AdminRefundAudit> {
+    return this.#get('/v1/admin/recovery/audit');
   }
 
   /** Whether anything is actually being sent. Carries no message body. */
@@ -2012,6 +2076,9 @@ export class AdminClient {
   }
 
   async #request<T>(method: string, path: string, body?: unknown, retried = false): Promise<T> {
+    if (method !== 'GET' && Date.now() - lastAnswerAt > IDLE_BEFORE_WARMING_MS) {
+      await this.#warm();
+    }
     const token = await this.#session.accessToken();
 
     let response: Response;
@@ -2033,8 +2100,36 @@ export class AdminClient {
       return this.#request<T>(method, path, body, true);
     }
 
+    lastAnswerAt = Date.now();
     const payload: unknown = await response.json().catch(() => undefined);
     if (!response.ok) throw toApiError(response.status, payload);
     return payload as T;
+  }
+
+  /**
+   * A WRITE NEVER GOES OUT ON A LINE NOBODY HAS HEARD FROM.
+   *
+   * Every action on this dashboard is a form: an operator opens it, reads,
+   * types a reason and a PIN, and presses the button a minute later. A phone
+   * that changed networks or slept in that minute drops the connection, and
+   * the write was the first request to find out — "No connection" beside a
+   * correct PIN, on delete, on approve, on publish. Reads already ask again
+   * (`retryOnNetwork`); a write cannot, because its answer being lost is
+   * exactly when repeating it is unsafe.
+   *
+   * So after a quiet spell the line is proved first with the health probe —
+   * a read, retried like any read — and the write rides the connection that
+   * just answered. A probe that still cannot connect says so as `network`,
+   * and nothing was sent.
+   */
+  async #warm(): Promise<void> {
+    await retryOnNetwork(async () => {
+      try {
+        await this.#fetch(`${this.#baseUrl}/health`, { method: 'GET' });
+      } catch (cause) {
+        throw new ApiError('network', 0, [], String(cause));
+      }
+    });
+    lastAnswerAt = Date.now();
   }
 }

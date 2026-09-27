@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
 import { ExpressAdapter } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
@@ -9,6 +9,7 @@ import type { Pool } from 'pg';
 import { hashPassword } from '@xetral/identity';
 import { LedgerService, posting } from '@xetral/ledger';
 import {
+  NO_SUCH_TRANSFER,
   ProviderNotSentError,
   ProviderRejectedError,
   ProviderTimeoutError,
@@ -29,6 +30,10 @@ import { PayoutService } from './payout.service.js';
 import { RecoveryService } from '../admin/recovery.service.js';
 import { ProviderLiquidityService } from './provider-liquidity.service.js';
 import { AppModule } from '../app.module.js';
+// After AppModule: loaded first, these sit inside an import cycle that
+// resolves only in the order the running API loads it.
+import { PaystackWebhookService } from '../funding/paystack-webhook.service.js';
+import { ProviderCredentialService } from '../settings/provider-credentials.service.js';
 import type { ApiConfig } from '../config.js';
 import { systemClock } from '../tokens.js';
 import { testApiConfig } from '../test-support/api-config.js';
@@ -90,6 +95,14 @@ class FakePayoutPort implements PayoutPort {
   };
   sendAnswer: PayoutReceipt | Error = { providerPayoutId: 'po_1', state: 'sent' };
   statusAnswer: PayoutReceipt | Error = { providerPayoutId: 'po_1', state: 'completed' };
+  /*
+   * WHAT THE RAIL SAYS WHEN ASKED BY OUR REFERENCE. Undefined means this rail
+   * cannot be asked that way at all, which is the state every earlier test
+   * was written against — and the state in which recovery must give nothing
+   * back.
+   */
+  byReferenceAnswer: PayoutReceipt | Error | undefined;
+  readonly askedByReference: string[] = [];
 
   /*
    * WHETHER THIS RAIL SPENDS A BALANCE WE HAVE TO FUND. Mutable here, because
@@ -129,6 +142,14 @@ class FakePayoutPort implements PayoutPort {
       this.statusBy !== undefined && provider !== undefined
         ? (this.statusBy[provider] ?? new ProviderRejectedError(provider, 'no such payout', 'not_found'))
         : this.statusAnswer;
+    if (answer instanceof Error) throw answer;
+    return answer;
+  }
+
+  async statusByReferenceVia(provider: string, reference: string): Promise<PayoutReceipt | undefined> {
+    this.askedByReference.push(`${provider}:${reference}`);
+    const answer = this.byReferenceAnswer;
+    if (answer === undefined) return undefined;
     if (answer instanceof Error) throw answer;
     return answer;
   }
@@ -323,6 +344,8 @@ beforeEach(() => {
     bankCode: BANK,
   };
   port.sendAnswer = { providerPayoutId: 'po_1', state: 'sent' };
+  port.byReferenceAnswer = undefined;
+  port.askedByReference.length = 0;
 });
 
 describe('finding out who holds an account', () => {
@@ -738,34 +761,168 @@ describe('the sweep that gives held money back', () => {
     expect(after.pending).toBe('5000.00');
   });
 
-  it('A PERSON ON /admin/recovery CAN GIVE A HELD PAYOUT BACK', async () => {
-    /*
-     * The recovery read named its own columns and left out `settle_entry_id`,
-     * so `fail()` read `undefined !== null` as "settled", tried to undo a
-     * settlement that never happened, and the screen said "Something went
-     * wrong" — the one screen whose job is giving held money back.
-     */
+  /*
+   * THE RECOVERY BUTTON ASKS THE PROVIDER FIRST, AND ONLY A DEFINITE ANSWER
+   * MOVES MONEY.
+   *
+   * It used to give a held payout back on a person's reason alone. The owner
+   * then found their own payout — delivered to their own bank — listed here
+   * as money to hand back: a timed-out send that had ARRIVED. Reversing it is
+   * the business paying twice with every ledger entry balanced. These four
+   * pin every answer the rail can give.
+   */
+  async function heldPayout(): Promise<{ customer: Customer; uuid: string; actor: string; reference: string }> {
     const customer = await onboard();
     await fund(customer.userId, 1_000_000n);
     port.sendAnswer = new ProviderTimeoutError('bitnob', 'no answer');
     await pay(customer).expect(200);
+    const held = await pool.query<{ uuid: string; reference: string }>(
+      `SELECT uuid, reference FROM bank_payouts WHERE user_id = $1::bigint AND status = 'reserved'`,
+      [customer.userId],
+    );
+    const actor = await pool.query<{ uuid: string }>(`SELECT uuid FROM users WHERE id = $1::bigint`, [
+      customer.userId,
+    ]);
+    return { customer, uuid: held.rows[0]!.uuid, actor: actor.rows[0]!.uuid, reference: held.rows[0]!.reference };
+  }
 
-    const held = await pool.query<{ uuid: string }>(
-      `SELECT uuid FROM bank_payouts WHERE user_id = $1::bigint AND status = 'reserved'`,
-      [customer.userId],
-    );
-    const actor = await pool.query<{ uuid: string }>(
-      `SELECT uuid FROM users WHERE id = $1::bigint`,
-      [customer.userId],
-    );
-    const record = await app
+  it('RECOVERY GIVES NOTHING BACK WHEN THE PROVIDER SAYS IT ARRIVED', async () => {
+    const { customer, uuid, actor, reference } = await heldPayout();
+    port.byReferenceAnswer = { providerPayoutId: 'TRF_arrived', state: 'completed', reference };
+
+    const result = await app
       .get(RecoveryService)
-      .recover('bank_payout', held.rows[0]!.uuid, actor.rows[0]!.uuid, 'confirmed with the rail that nothing left');
-    expect(record).toBeDefined();
+      .recover('bank_payout', uuid, actor, 'customer says it never arrived');
+    expect(result.outcome).toBe('delivered');
+    expect(port.askedByReference).toContain(`bitnob:${reference}`);
 
+    // Spent, not returned — and gone from the queue.
     const after = await nairaBalance(customer);
+    expect(after.spendable).toBe('5000.00');
+    expect(after.pending).toBe('0.00');
+    const row = await pool.query<{ status: string }>(`SELECT status FROM bank_payouts WHERE uuid = $1::uuid`, [uuid]);
+    expect(row.rows[0]?.status).toBe('completed');
+  });
+
+  it('RECOVERY GIVES NOTHING BACK WHEN THE PROVIDER CANNOT BE ASKED', async () => {
+    const { customer, uuid, actor } = await heldPayout();
+    // Undefined: this rail cannot be asked by reference. Then unreachable.
+    for (const answer of [undefined, new ProviderUnavailableError('bitnob', '502'), new ProviderRejectedError('bitnob', 'Invalid key', 'http_401')]) {
+      port.byReferenceAnswer = answer;
+      const result = await app.get(RecoveryService).recover('bank_payout', uuid, actor, 'checked nothing, pressed it');
+      expect(result.outcome).toBe('held');
+      const after = await nairaBalance(customer);
+      expect(after.spendable).toBe('5000.00');
+      expect(after.pending).toBe('5000.00');
+    }
+  });
+
+  it('RECOVERY GIVES IT BACK ONLY ON THE PROVIDER’S OWN WORD THAT IT FAILED', async () => {
+    const failed = await heldPayout();
+    port.byReferenceAnswer = { providerPayoutId: 'TRF_x', state: 'failed', failureReason: 'account closed', reference: failed.reference };
+    const one = await app.get(RecoveryService).recover('bank_payout', failed.uuid, failed.actor, 'provider says failed');
+    expect(one.outcome).toBe('reversed');
+    expect((await nairaBalance(failed.customer)).spendable).toBe('10000.00');
+
+    // "No transfer with that reference" from the rail that SENT it is the
+    // other definite answer: nothing left.
+    const never = await heldPayout();
+    port.byReferenceAnswer = new ProviderRejectedError('bitnob', 'Transfer not found', NO_SUCH_TRANSFER);
+    const two = await app.get(RecoveryService).recover('bank_payout', never.uuid, never.actor, 'provider has no record');
+    expect(two.outcome).toBe('reversed');
+    const after = await nairaBalance(never.customer);
     expect(after.spendable).toBe('10000.00');
     expect(after.pending).toBe('0.00');
+
+    // A second press finds nothing held and cannot give it back twice.
+    await expect(
+      app.get(RecoveryService).recover('bank_payout', never.uuid, never.actor, 'pressed it again'),
+    ).rejects.toThrow();
+  });
+
+  it('A PERSON WHO SAW IT ARRIVE CAN SETTLE IT, and that gives nothing back', async () => {
+    const { customer, uuid, actor } = await heldPayout();
+    const result = await app
+      .get(RecoveryService)
+      .markDelivered(uuid, actor, 'TRF_seen_on_dashboard', 'seen on the Paystack dashboard as success');
+    expect(result.outcome).toBe('delivered');
+    const after = await nairaBalance(customer);
+    expect(after.spendable).toBe('5000.00');
+    expect(after.pending).toBe('0.00');
+    const row = await pool.query<{ status: string; provider_payout_id: string }>(
+      `SELECT status, provider_payout_id FROM bank_payouts WHERE uuid = $1::uuid`,
+      [uuid],
+    );
+    expect(row.rows[0]).toEqual({ status: 'sent', provider_payout_id: 'TRF_seen_on_dashboard' });
+  });
+
+  it('THE SWEEP NO LONGER REVERSES ON A REFUSED STATUS QUESTION', async () => {
+    /*
+     * A 401 from a rotated key, or any 4xx, used to be read as "no such
+     * payout" and REVERSED — refunding payouts that had arrived, in bulk, the
+     * afternoon somebody pasted a key from the wrong environment.
+     */
+    const customer = await onboard();
+    await fund(customer.userId, 1_000_000n);
+    port.sendAnswer = { providerPayoutId: 'po_refused_status', state: 'sent' };
+    await pay(customer).expect(200);
+    port.statusAnswer = new ProviderRejectedError('bitnob', 'Invalid key', 'http_401');
+    port.byReferenceAnswer = new ProviderRejectedError('bitnob', 'Invalid key', 'http_401');
+    try {
+      await app.get(PayoutReconciliationService).sweep();
+      const after = await nairaBalance(customer);
+      expect(after.spendable).toBe('5000.00');
+    } finally {
+      port.statusAnswer = { providerPayoutId: 'po_1', state: 'completed' };
+    }
+  });
+
+  it('THE REFUND AUDIT NAMES A PAYOUT GIVEN BACK THAT THE PROVIDER SAYS WAS PAID', async () => {
+    const { uuid, reference } = await heldPayout();
+    // Given back the old way — directly, with no question asked.
+    const row = await pool.query(`SELECT * FROM bank_payouts WHERE uuid = $1::uuid`, [uuid]);
+    await app.get(PayoutService).fail(row.rows[0], 'old recovery button');
+    port.byReferenceAnswer = { providerPayoutId: 'TRF_paid', state: 'completed', reference };
+    const audit = await app.get(RecoveryService).auditRefunded(200);
+    expect(audit.paid_twice.map((r) => r.subject_uuid)).toContain(uuid);
+  });
+
+  it('A PAYSTACK TRANSFER EVENT IS READ — and its body decides nothing', async () => {
+    /*
+     * `transfer.success` and `transfer.failed` fell into the deposit path and
+     * were acknowledged, so a payout whose send answered unreadably stayed
+     * held while its money sat in the beneficiary's account. The event is a
+     * doorbell: the outcome is re-read by OUR reference.
+     */
+    const { customer, uuid, reference } = await heldPayout();
+    const secret =
+      (await app.get(ProviderCredentialService).secretFor('paystack', 'secret_key', undefined)) ??
+      undefined;
+    const booted =
+      secret === undefined ? await boot(makeConfig({ paystackSecretKey: 'sk_test_transfer_events' })) : app;
+    const key = secret ?? 'sk_test_transfer_events';
+    const deliver = async (event: string): Promise<void> => {
+      const raw = JSON.stringify({ event, data: { reference, id: 99, status: 'failed' } });
+      await booted.get(PaystackWebhookService).handle(raw, {
+        'x-paystack-signature': createHmac('sha512', key).update(raw).digest('hex'),
+      });
+    };
+    try {
+      port.byReferenceAnswer = { providerPayoutId: 'TRF_ps', state: 'completed', reference };
+      await deliver('transfer.success');
+      expect((await nairaBalance(customer)).pending).toBe('0.00');
+
+      // A FAILED event for the same transfer — the body says failed, Paystack
+      // says completed. Paystack wins, and nothing is given back.
+      await deliver('transfer.failed');
+      const after = await nairaBalance(customer);
+      expect(after.spendable).toBe('5000.00');
+      expect(after.pending).toBe('0.00');
+      const row = await pool.query<{ status: string }>(`SELECT status FROM bank_payouts WHERE uuid = $1::uuid`, [uuid]);
+      expect(row.rows[0]?.status).toBe('completed');
+    } finally {
+      if (booted !== app) await booted.close();
+    }
   });
 
   it('SETTLES IT FROM THE RAIL’S EVENT, but only on the RAIL’S word for which payout it is', async () => {

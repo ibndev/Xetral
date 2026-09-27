@@ -628,21 +628,19 @@ h3 { font-size: 16px; }
 /* ═══════════════════════════ header ═══════════════════════════ */
 
 .appbar {
-  position: sticky;
-  top: 0;
+  /* NOT sticky: it scrolls away with the home screen it belongs to. */
+  position: relative;
   z-index: 30;
   display: flex;
   align-items: center;
   gap: 12px;
   height: var(--header-h);
-  padding: 0 16px;
-  background: color-mix(in srgb, var(--bg) 88%, transparent);
-  backdrop-filter: saturate(180%) blur(14px);
-  -webkit-backdrop-filter: saturate(180%) blur(14px);
-  border-bottom: 1px solid transparent;
-  transition: border-color var(--t) var(--ease);
+  /* The avatar on the page's 20px gutter, and 8px on the right so the bell's
+     GLYPH — inset 12px in its 44px button — lands on it too, level with the
+     right edge of every card below. */
+  padding: 0 8px 0 20px;
+  background: transparent;
 }
-.appbar.scrolled { border-bottom-color: var(--line); }
 .appbar .spacer { flex: 1; }
 
 .appbar-title {
@@ -911,9 +909,6 @@ h3 { font-size: 16px; }
 @media (min-width: 1000px) {
   .tabbar { display: none; }
   .shell { padding-bottom: 64px; }
-  /* The sidebar already carries the brand. A second one in the header is the
-     same mark twice on one screen. */
-  .appbar .appbar-brand { display: none; }
   .appbar { padding: 0 28px; }
 }
 
@@ -1697,6 +1692,10 @@ button.danger:hover:where(:not(:disabled)) { filter: brightness(.94); }
 }
 .btn.link:hover, button.link:hover { background: none; color: var(--link-600); }
 
+/* "Didn't get it? Resend code" under a one-time code field. */
+.resend { margin: 6px 0 0; font-size: 13.5px; color: var(--text-3); display: flex; gap: 4px; align-items: baseline; flex-wrap: wrap; }
+.resend button.link { font-size: inherit; }
+
 /* A row of buttons. It carries its own top margin because a button pressed
    against the paragraph explaining it was the most common of the reported
    collisions — and `.actions` is the one class every such row already had. */
@@ -2356,11 +2355,18 @@ th.right { font-family: var(--font-sans); }
 .admin-frame th:first-child, .admin-frame td:first-child { padding-left: 0; }
 .admin-frame th:last-child, .admin-frame td:last-child { padding-right: 0; }
 
-/* THE TOP BAR HAS A HAIRLINE UNDER IT, which is what separates the chrome
-   from the body. The customer app's `.appbar` grows one only once the page
-   has scrolled, because there it sits over content that moves under it; here
-   it is a fixed bar over a scrolling body and the line is always true. */
-.admin-frame .appbar { border-bottom-color: var(--line); }
+/* THE TOP BAR STAYS, WITH A HAIRLINE UNDER IT. The customer app's `.appbar`
+   belongs to the home screen and scrolls away with it; here it is the chrome
+   of a working tool over a scrolling body, so it is pinned and the line is
+   always true. */
+.admin-frame .appbar {
+  position: sticky;
+  top: 0;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: saturate(180%) blur(14px);
+  -webkit-backdrop-filter: saturate(180%) blur(14px);
+  border-bottom: 1px solid var(--line);
+}
 
 /*
  * THE DASHBOARD READS DENSER THAN THE PHONE, and that is the comp rather
@@ -6350,6 +6356,9 @@ html, body { overflow-x: hidden; overflow-x: clip; }
 }
 .cv-rate > :last-child { color: var(--text-2); font-variant-numeric: tabular-nums; }
 .admin-frame .tbl-note.danger { color: var(--danger); font-weight: 600; }
+/* An action that belongs to a table panel, on the note's own inset. */
+.admin-frame .tbl-actions { display: flex; gap: 10px; flex-wrap: wrap; padding: 12px 18px 16px; }
+.admin-frame .tbl-panel > p.ok, .admin-frame .tbl-panel > p.error { padding: 0 18px 14px; margin: 0; }
 /*
  * AN OPENED REVIEW IS TWO COLUMNS on a laptop: what was claimed on the left,
  * the decision on the right. Stacked full width it was a form 600px tall
@@ -6449,7 +6458,10 @@ html, body { overflow-x: hidden; overflow-x: clip; }
 .auth-tile.on { color: var(--ok); }
 .auth-secret { font-size: 12.5px; line-height: 1.7; text-align: center; color: var(--text); word-break: break-all; }
 .auth-body { flex: 1; min-width: 220px; }
-.auth-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+/* SCOPED. Unscoped, this made the customer sign-in, sign-up and reset
+   headings a flex ROW — "Enter your code" squeezed into three lines beside its
+   own subtitle on a phone. */
+.admin-frame .auth-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .auth-copy { margin: 0 0 10px; max-width: 420px; font-size: 13px; font-weight: 500; line-height: 1.6; color: var(--text-3); }
 .auth-line { margin: 14px 0 10px; font-size: 13px; font-weight: 600; color: var(--text-2); }
 /* An actor is a name to scan, so one line: a long address ends in an
@@ -7379,13 +7391,3 @@ html:not([data-theme='dark']) .tabbar {
 .coming-soon { gap: 6px; }
 .coming-soon-title { font-size: 17px; font-weight: 700; color: var(--text); letter-spacing: -0.01em; }
 .coming-soon-sub { font-size: 13.5px; color: var(--text-3); max-width: 34ch; text-align: center; line-height: 1.5; }
-/* A paused service's tile: still there, labelled, never a count. */
-.tile { position: relative; }
-.tile .tile-soon {
-  position: absolute; top: 5px; right: 5px;
-  padding: 1px 6px;
-  border-radius: var(--r-pill);
-  background: var(--warn-bg);
-  color: var(--warn);
-  font-size: 9.5px; font-weight: 700; letter-spacing: 0.02em;
-}

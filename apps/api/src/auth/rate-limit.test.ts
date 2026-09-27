@@ -43,6 +43,19 @@ describe('ResilientRateLimitStore', () => {
     expect(store.degraded).toBe(true);
   });
 
+  it('FALLS BACK ON A SLOW ANSWER, not only on an error', async () => {
+    // ioredis queues a command through a dropped connection and retries for
+    // about ten seconds before erroring — so every request waited that long.
+    const hanging: RateLimitStore = { hit: () => new Promise(() => undefined) };
+    const store = new ResilientRateLimitStore(hanging, new InMemoryRateLimitStore(), 20);
+
+    const started = Date.now();
+    const decision = await store.hit('k', 2, 60, 1_000);
+    expect(decision.allowed).toBe(true);
+    expect(Date.now() - started).toBeLessThan(500);
+    expect(store.degraded).toBe(true);
+  });
+
   it('returns to the primary store once it recovers', async () => {
     let failing = true;
     const inner = new InMemoryRateLimitStore();
