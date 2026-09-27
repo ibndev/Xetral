@@ -32,6 +32,11 @@ const API_ERROR_CODES = [
   'invalid_grant',
   'weak_password',
   'email_taken',
+  /* Proving a signup address: no code given, a wrong or spent one, and a
+     deployment with nothing able to send one. */
+  'email_code_required',
+  'email_code_invalid',
+  'email_unavailable',
   'registration_closed',
   'too_many_attempts',
   /* The general ceiling on request rate, distinct from `too_many_attempts` and
@@ -568,6 +573,8 @@ const USER_FIXABLE: ReadonlySet<ApiErrorCode> = new Set<ApiErrorCode>([
   'weak_password',
   'weak_pin',
   'email_taken',
+  'email_code_required',
+  'email_code_invalid',
   'cannot_transfer_to_self',
   'recipient_is_sender',
   'recipient_not_found',

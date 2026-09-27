@@ -33,6 +33,15 @@ export type NotificationClass = 'security' | 'transactional';
  */
 export type NotificationRequest =
   | {
+      /**
+       * The code that proves a signup address before an account is opened
+       * on it. No account exists yet, so no name and no footer about devices.
+       */
+      readonly kind: 'signup_code';
+      readonly code: string;
+      readonly expiresInMinutes: number;
+    }
+  | {
       readonly kind: 'password_reset';
       /**
        * THE SIX-DIGIT CODE ITSELF, not a link.
@@ -174,6 +183,9 @@ export type NotificationKind = NotificationRequest['kind'];
  * customer locked out of their own money.
  */
 const CLASS_OF: Record<NotificationKind, NotificationClass> = {
+  // Security: somebody is standing at a signup form waiting for six digits,
+  // and a receipt backlog must not sit in front of it.
+  signup_code: 'security',
   password_reset: 'security',
   password_changed: 'security',
   new_device: 'security',
@@ -304,6 +316,25 @@ const SECURITY_FOOTER =
 
 export function render(request: NotificationRequest): RenderedNotification {
   switch (request.kind) {
+    case 'signup_code':
+      return {
+        subject: `${request.code} is your Xetral verification code`,
+        text:
+          `Enter this code in Xetral to confirm your email address:\n\n` +
+          `${request.code}\n\n` +
+          `It expires in ${request.expiresInMinutes} minutes and can only be used once.\n\n` +
+          `If you did not start signing up for Xetral, you can ignore this email — ` +
+          `no account has been opened.`,
+        html: shell(
+          'Confirm your email',
+          h`<p style="margin:0 0 12px;">Enter this code in Xetral to confirm your email address.</p>` +
+            // The reset code's construction: large, spaced, nothing to click.
+            h`<p style="margin:0 0 14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:32px;font-weight:700;letter-spacing:6px;color:#101318;">${request.code}</p>` +
+            h`<p style="margin:0 0 12px;">It expires in ${request.expiresInMinutes} minutes and can only be used once.</p>` +
+            h`<p style="margin:0;font-size:13px;color:#7c8089;">If you did not start signing up for Xetral, you can ignore this email — no account has been opened.</p>`,
+          'Xetral will never ask you for your password, PIN or card details.',
+        ),
+      };
     case 'password_reset':
       return {
         subject: `${request.code} is your Xetral password reset code`,

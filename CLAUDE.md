@@ -4588,6 +4588,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/080_payout_provider_kno
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/081_privacy_republish.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/082_refusals_and_details.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/083_payment_assignment.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/084_signup_email_codes.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -4669,6 +4670,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/080_payout_provider_kno
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/081_privacy_republish.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/082_refusals_and_details.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/083_payment_assignment.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/084_signup_email_codes.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

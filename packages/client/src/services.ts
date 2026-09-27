@@ -61,3 +61,26 @@ export function pausedMode(
   const service = serviceForPath(path);
   return service === 'cards' || service === 'crypto' ? 'notice' : 'replace';
 }
+
+/**
+ * WHAT A SCREEN SHOWS WHILE THE SWITCHES ARE STILL BEING READ.
+ *
+ * A screen a pause would REPLACE (bills, eSIM, Convert) drew its whole form
+ * first and swapped it for "Coming soon" a moment later, when the read came
+ * back — the customer saw the service, then saw it taken away. So until the
+ * read has SETTLED such a screen shows nothing (`wait`). Settled includes a
+ * failed read, which still means "not paused": a courtesy read must not hide
+ * a working service for longer than it takes to fail. A `notice` screen keeps
+ * its content either way, so it never waits.
+ */
+export function screenGate(
+  states: ServiceStates | undefined,
+  settled: boolean,
+  path: string,
+): 'replace' | 'notice' | 'wait' | undefined {
+  const service = serviceForPath(path);
+  if (service === undefined) return undefined;
+  const replaces = service !== 'cards' && service !== 'crypto';
+  if (!settled && replaces) return 'wait';
+  return pausedMode(states, path);
+}

@@ -60,12 +60,23 @@ export const registerSchema = z.object({
    * column with a UNIQUE index on it.
    */
   phone: z.string().trim().regex(/^[0-9]{4,15}$/),
+  /**
+   * The six digits mailed to `email` by `POST /v1/auth/signup/email-code`.
+   * Optional in the SHAPE because a deployment can switch verification off;
+   * whether it is required is decided by `SignupEmailService`, not here.
+   */
+  email_code: z.string().trim().regex(/^[0-9]{6}$/).optional(),
   device: z.object({
     fingerprint: z.string().min(8).max(512),
     platform: z.enum(['ios', 'android', 'web']),
     displayName: z.string().max(120).optional(),
   }),
 });
+
+/** Asking for a signup code: the address, and nothing else. */
+export const signupCodeSchema = z
+  .object({ email: z.string().trim().toLowerCase().email().max(255) })
+  .strict();
 
 export const refreshSchema = z.object({
   refresh_token: z.string().min(1).max(512),

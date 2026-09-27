@@ -172,6 +172,27 @@ export function issuePasswordResetCode(userId: string, key: Buffer): IssuedReset
   return { code, hash: hashPasswordResetCode(userId, code, key) };
 }
 
+/**
+ * A code proving a SIGNUP address, before any account exists.
+ *
+ * 056's construction with the ADDRESS in the keyed digest where a reset code
+ * has the user id: there is no user yet, and binding the code to the address
+ * is what stops a code mailed to one address opening an account on another.
+ * A different prefix from the reset code's, so neither kind of code can ever
+ * verify as the other.
+ */
+export function hashSignupEmailCode(email: string, code: string, key: Buffer): string {
+  return createHmac('sha256', key)
+    .update(`xetral:signup-email-code:${email.toLowerCase()}:${code}`, 'utf8')
+    .digest('hex');
+}
+
+export function issueSignupEmailCode(email: string, key: Buffer): IssuedResetCode {
+  // `randomInt`, padded, for the reasons `issuePasswordResetCode` gives.
+  const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
+  return { code, hash: hashSignupEmailCode(email, code, key) };
+}
+
 /** The outcomes of `consume_password_reset_token`, mirrored from the SQL enum.
  *
  *  To the CLIENT all three failures are one response, deliberately: telling

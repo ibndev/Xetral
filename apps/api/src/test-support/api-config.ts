@@ -165,6 +165,9 @@ export function testApiConfig(databaseUrl: string, overrides: Partial<ApiConfig>
     // Off in the fixture: every suite registers somebody, and only the
     // funding suite is about what that does to a rail.
     openAccountOnRegistration: false,
+    // Off for the same reason: every suite registers somebody, and only the
+    // signup suite is about proving the address.
+    signupEmailVerification: false,
     ...overrides,
   };
 }

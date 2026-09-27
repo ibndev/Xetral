@@ -4,13 +4,16 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
-import { pausedMode, serviceForPath } from '@xetral/client';
+import { screenGate, serviceForPath } from '@xetral/client';
 import type { ServiceStates } from '@xetral/client';
 import { resetXetral, xetral } from '@/lib/session';
 import { Logo } from './logo';
 import { Icon } from './icon';
 import type { IconName } from './icon';
 import { ThemeToggle } from './theme-toggle';
+
+/** The last answer about which services are paused, shared by every screen of this visit. */
+let rememberedServices: ServiceStates | undefined;
 
 /**
  * One navigation, two shapes.
@@ -115,7 +118,12 @@ export function Shell({
    * refusal on the request is still the control; this only spares a customer
    * filling in a form that was never going to go through.
    */
-  const [services, setServices] = useState<ServiceStates | undefined>(undefined);
+  const [services, setServices] = useState<ServiceStates | undefined>(rememberedServices);
+  // Whether the read has come back — answered OR failed. Until then a screen
+  // a pause would replace draws nothing, rather than its form and then
+  // "Coming soon" over it. Remembered across screens, so only the first
+  // gated screen of a visit waits at all.
+  const [settled, setSettled] = useState(rememberedServices !== undefined);
   useEffect(() => {
     // Only a screen a switch covers asks: the home screen and Send never do.
     if (serviceForPath(pathname) === undefined) return undefined;
@@ -123,15 +131,21 @@ export function Shell({
     xetral()
       .client.services()
       .then((states) => {
-        if (live) setServices(states);
+        rememberedServices = states;
+        if (live) {
+          setServices(states);
+          setSettled(true);
+        }
       })
       // A failed courtesy read hides nothing: unknown is "not paused".
-      .catch(() => undefined);
+      .catch(() => {
+        if (live) setSettled(true);
+      });
     return () => {
       live = false;
     };
   }, [pathname]);
-  const paused = pausedMode(services, pathname);
+  const paused = screenGate(services, settled, pathname);
 
   /*
    * NOBODY SEES THE DASHBOARD BEFORE THEY ARE SIGNED IN, not even for a frame.
@@ -313,7 +327,11 @@ export function Shell({
               {title !== undefined && <h1>{title}</h1>}
             </div>
           )}
-          {paused === 'replace' ? (
+          {paused === 'wait' ? (
+            // Nothing, briefly: neither the form nor "Coming soon" is known
+            // to be true yet, and drawing either would be taken back.
+            <div aria-busy="true" />
+          ) : paused === 'replace' ? (
             <div className="empty coming-soon">
               <span className="empty-icon"><Icon name="clock" size={24} /></span>
               <span className="coming-soon-title">Coming soon</span>

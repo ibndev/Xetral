@@ -31,6 +31,7 @@ import { SignInEventService } from './sign-in-events.service.js';
 import { ConsentService } from '../consent/consent.service.js';
 import type { ConsentContext } from '../consent/consent.service.js';
 import type { SignInOrigin } from './sign-in-events.service.js';
+import { SignupEmailService } from './signup-email.service.js';
 import { CountriesService } from '../countries/countries.service.js';
 
 export interface TokenPair {
@@ -200,6 +201,7 @@ export class AuthService {
     @Inject(SignInEventService) private readonly signIns: SignInEventService,
     @Inject(ConsentService) private readonly consents: ConsentService,
     @Inject(CountriesService) private readonly countries: CountriesService,
+    @Inject(SignupEmailService) private readonly signupEmail: SignupEmailService,
   ) {}
 
   /**
@@ -268,6 +270,10 @@ export class AuthService {
     const national = input.phone.replace(/^0+/, '');
     const phone = `+${country.dial_code}${national}`;
 
+    // Checked BEFORE the transaction — see `SignupEmailService.check` for
+    // why a wrong code must be charged somewhere a rollback cannot undo.
+    const proved = await this.signupEmail.check(input.email, input.email_code);
+
     const passwordHash = await hashPassword(input.password);
     const client = await this.pool.connect();
 
@@ -310,6 +316,17 @@ export class AuthService {
         `INSERT INTO user_credentials (user_id, password_hash) VALUES ($1::bigint, $2)`,
         [user.id, passwordHash],
       );
+
+      /*
+       * THE ADDRESS IS PROVED ON THIS TRANSACTION: the code checked above is
+       * spent by the same COMMIT that opens the account, so a registration
+       * that fails afterwards has not used it up, and two racing on one code
+       * cannot both succeed.
+       */
+      if (proved !== undefined) {
+        await this.signupEmail.spend(client, input.email, proved);
+        await client.query(`UPDATE users SET email_verified_at = now() WHERE id = $1::bigint`, [user.id]);
+      }
 
       /*
        * ON THIS TRANSACTION, so an account cannot exist without a record of

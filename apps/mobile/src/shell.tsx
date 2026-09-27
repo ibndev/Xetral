@@ -6,9 +6,12 @@ import { Link, router, usePathname } from 'expo-router';
 import { Icon } from '@/icon';
 import type { IconName } from '@/icon';
 import { useXetral } from '@/hooks';
-import { pausedMode, serviceForPath } from '@xetral/client';
+import { screenGate, serviceForPath } from '@xetral/client';
 import type { ServiceStates } from '@xetral/client';
 import { font, gutter, space, useStyles, useTheme, useThemeChoice, useResolvedScheme } from '@/theme';
+
+/** The last answer about which services are paused, shared by every screen of this visit. */
+let rememberedServices: ServiceStates | undefined;
 
 /**
  * ONE NAVIGATION, THE SAME AS THE WEB'S.
@@ -237,21 +240,33 @@ export function Shell({
    * the path so no gated screen can forget it. The refusal on the request is
    * still the control; unknown (loading, or the read failed) is not paused.
    */
-  const [services, setServices] = useState<ServiceStates | undefined>(undefined);
+  const [services, setServices] = useState<ServiceStates | undefined>(rememberedServices);
+  // Whether the read has come back — answered OR failed. Until then a screen
+  // a pause would replace draws nothing, rather than its form and then
+  // "Coming soon" over it. Remembered across screens, so only the first
+  // gated screen of a visit waits at all.
+  const [settled, setSettled] = useState(rememberedServices !== undefined);
   useEffect(() => {
     if (serviceForPath(pathname) === undefined) return undefined;
     let live = true;
     client
       .services()
       .then((states) => {
-        if (live) setServices(states);
+        rememberedServices = states;
+        if (live) {
+          setServices(states);
+          setSettled(true);
+        }
       })
-      .catch(() => undefined);
+      // A failed courtesy read hides nothing: unknown is "not paused".
+      .catch(() => {
+        if (live) setSettled(true);
+      });
     return () => {
       live = false;
     };
   }, [client, pathname]);
-  const paused = pausedMode(services, pathname);
+  const paused = screenGate(services, settled, pathname);
 
   const isActive = (href: string) =>
     href === '/wallet' ? pathname === href : pathname.startsWith(href);
@@ -427,7 +442,11 @@ export function Shell({
           )}
         </View>
       )}
-      {paused === 'replace' ? (
+      {paused === 'wait' ? (
+        // Nothing, briefly: neither the form nor "Coming soon" is known to
+        // be true yet, and drawing either would be taken back.
+        <View accessibilityState={{ busy: true }} />
+      ) : paused === 'replace' ? (
         <ComingSoon />
       ) : (
         <>

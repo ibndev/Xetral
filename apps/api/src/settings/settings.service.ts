@@ -494,6 +494,11 @@ export class SettingsService implements OnApplicationBootstrap {
     return this.boolean('registration_enabled', true);
   }
 
+  /** Whether signup must prove the email address with a mailed code. ON when unread. */
+  async signupEmailVerification(): Promise<boolean> {
+    return this.boolean('signup_email_verification', true);
+  }
+
   async giftCardHoldDays(): Promise<number> {
     return this.integer('giftcard_hold_days', this.config.giftCardHoldDays);
   }

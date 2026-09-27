@@ -34,6 +34,7 @@ import { AuthService } from './auth/auth.service.js';
 import { SignInEventService } from './auth/sign-in-events.service.js';
 import { PinService } from './auth/pin.service.js';
 import { PasswordResetService } from './auth/password-reset.service.js';
+import { SignupEmailService } from './auth/signup-email.service.js';
 import { WalletController } from './wallet/wallet.controller.js';
 import { WalletService } from './wallet/wallet.service.js';
 import { RecipientService } from './wallet/recipient.service.js';
@@ -123,7 +124,11 @@ import { ErrorAlertService } from './observability/error-alert.service.js';
 import { NotificationWorker } from './notifications/notification.worker.js';
 import { BrevoNotificationAdapter, ExchangeRateAdapter, ExpoPushAdapter } from '@xetral/providers';
 import type { NotificationPort, PushPort, ReferenceRatePort } from '@xetral/providers';
-import { LoginRateLimitGuard, PasswordResetRateLimitGuard } from './auth/login-rate-limit.guard.js';
+import {
+  LoginRateLimitGuard,
+  PasswordResetRateLimitGuard,
+  SignupCodeRateLimitGuard,
+} from './auth/login-rate-limit.guard.js';
 import { RequestRateLimiter } from './auth/request-rate-limit.service.js';
 import { AdminDisputeController, DisputeController } from './disputes/dispute.controller.js';
 import { DisputeService } from './disputes/dispute.service.js';
@@ -1531,6 +1536,7 @@ export class AppModule {
         GiftCardLifecycle,
         LoginRateLimitGuard,
         PasswordResetRateLimitGuard,
+        SignupCodeRateLimitGuard,
         // Injected into AuthGuard rather than registered as a second global
         // guard: it has to run after the bearer check (so it has an account to
         // count against) and before the PIN (so a flood cannot spend scrypt).
@@ -1552,6 +1558,7 @@ export class AppModule {
         MonitoringLifecycle,
         RateFeedLifecycle,
         PasswordResetService,
+        SignupEmailService,
 
         // Registered globally, so it runs for every route including one whose
         // author never thought about authorisation. That is the whole point of

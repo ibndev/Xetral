@@ -550,6 +550,14 @@ export interface ApiConfig {
    * is something else — every one of them registers somebody.
    */
   readonly openAccountOnRegistration: boolean;
+  /**
+   * Require a mailed code to prove the signup address. Not an environment
+   * variable, for `openAccountOnRegistration`'s reason: it is how the product
+   * works, and the operator's switch for an email outage is the
+   * `signup_email_verification` setting. This exists so the e2e fixture can
+   * register people in suites whose subject is something else.
+   */
+  readonly signupEmailVerification: boolean;
 }
 
 export class ConfigError extends Error {
@@ -992,6 +1000,7 @@ export function loadConfig(env: Env): ApiConfig {
     errorAlertIntervalSeconds: optionalInteger(env, 'ERROR_ALERT_INTERVAL_SECONDS'),
     notificationAllowlist: parseAllowlist(env),
     openAccountOnRegistration: true,
+    signupEmailVerification: true,
   };
 }
 

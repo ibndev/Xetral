@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -58,6 +58,56 @@ export default function SignUp() {
   const [busy, setBusy] = useState(false);
 
   /*
+   * THE EMAIL IS PROVED BEFORE THE ACCOUNT EXISTS — the web form's flow. A
+   * well-formed address, on leaving the field or after a pause in typing, is
+   * sent a six-digit code and a box for it appears under it. `sentTo` is the
+   * address the code belongs to; a different address needs its own.
+   */
+  const [sentTo, setSentTo] = useState<string | undefined>();
+  const [codeState, setCodeState] = useState<'idle' | 'sending' | 'sent' | 'not_required'>('idle');
+  const [codeError, setCodeError] = useState<string | undefined>();
+  const [code, setCode] = useState('');
+  const [cooldown, setCooldown] = useState(0);
+  const pending = useRef<string | undefined>(undefined);
+  const address = email.trim().toLowerCase();
+  const wellFormed = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(address);
+
+  async function sendCode(to: string): Promise<void> {
+    if (pending.current === to) return;
+    pending.current = to;
+    setCodeState('sending');
+    setCodeError(undefined);
+    try {
+      const { required } = await xetral().session.requestSignupCode(to);
+      setSentTo(to);
+      setCode('');
+      setCodeState(required ? 'sent' : 'not_required');
+      // A minute between resends: the per-address limit is three an hour.
+      setCooldown(required ? 60 : 0);
+    } catch (cause) {
+      setCodeState('idle');
+      setCodeError(messageFor(cause));
+    } finally {
+      pending.current = undefined;
+    }
+  }
+
+  useEffect(() => {
+    if (!wellFormed || address === sentTo) return undefined;
+    const timer = setTimeout(() => void sendCode(address), 1200);
+    return () => clearTimeout(timer);
+  }, [address, wellFormed, sentTo]);
+
+  useEffect(() => {
+    if (cooldown <= 0) return undefined;
+    const timer = setTimeout(() => setCooldown((c) => c - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [cooldown]);
+
+  const codeNeeded = codeState === 'sent' && sentTo === address;
+  const codeReady = codeState === 'not_required' || (codeNeeded && code.length === 6);
+
+  /*
    * THE COUNTRY LIST COMES FROM THE SERVER, the same as the web's.
    *
    * A constant in this file would make "an operator opens a country without a
@@ -108,6 +158,7 @@ export default function SignUp() {
         fullName: `${firstName.trim()} ${lastName.trim()}`.trim(),
         country,
         phone,
+        ...(codeNeeded ? { emailCode: code } : {}),
         device: await deviceDescriptor(),
       });
       // Asked once the account exists rather than during the form: a
@@ -211,7 +262,43 @@ export default function SignUp() {
           // Tells a password manager this is the account being created, so it
           // offers to save the pair rather than autofilling an existing one.
           textContentType="username"
+          onBlur={() => {
+            if (wellFormed && address !== sentTo) void sendCode(address);
+          }}
         />
+        {codeState === 'sending' && <Text style={styles.muted}>Sending a code to {address}…</Text>}
+        {codeError !== undefined && <Text style={styles.error}>{codeError}</Text>}
+
+        {codeNeeded && (
+          <>
+            <Text style={styles.label}>Code from your email</Text>
+            <View style={{ flexDirection: 'row', gap: space.sm, alignItems: 'center' }}>
+              <TextInput
+                style={[styles.input, { flex: 1, letterSpacing: 6, fontWeight: '600' }]}
+                value={code}
+                onChangeText={(next) => setCode(next.replace(/[^0-9]/g, '').slice(0, 6))}
+                keyboardType="number-pad"
+                textContentType="oneTimeCode"
+                autoComplete="one-time-code"
+                maxLength={6}
+                placeholder="6-digit code"
+                placeholderTextColor={colors.text3}
+              />
+              <Pressable
+                accessibilityRole="button"
+                disabled={cooldown > 0}
+                onPress={() => {
+                  setSentTo(undefined);
+                  void sendCode(address);
+                }}
+                style={{ paddingHorizontal: space.md, paddingVertical: space.md, opacity: cooldown > 0 ? 0.5 : 1 }}
+              >
+                <Text style={styles.link}>{cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend code'}</Text>
+              </Pressable>
+            </View>
+            <Text style={styles.muted}>Sent to {sentTo}. Check spam if it is not there in a minute.</Text>
+          </>
+        )}
 
         {/*
           ONE COUNTRY CONTROL, AND IT IS THE ONE IN FRONT OF THE PHONE NUMBER.
@@ -287,7 +374,8 @@ export default function SignUp() {
             email.trim() === '' ||
             country === '' ||
             phone === '' ||
-            password === ''
+            password === '' ||
+            !codeReady
           }
         >
           <Text style={styles.buttonText}>

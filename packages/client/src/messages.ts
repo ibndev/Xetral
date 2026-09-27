@@ -254,6 +254,12 @@ function sentenceFor(error: ApiError): string {
       return error.detail ?? 'That password is too easy to guess. Use at least eight characters with a mix of letters and numbers.';
     case 'email_taken':
       return 'An account already exists for that email address. Sign in, or reset your password.';
+    case 'email_code_required':
+      return 'Enter the six-digit code we emailed you.';
+    case 'email_code_invalid':
+      return 'That code is not right, or it has expired. Check the email, or send a new code.';
+    case 'email_unavailable':
+      return 'We cannot send email right now, so new accounts cannot be confirmed. Try again shortly.';
     case 'registration_closed':
       return 'New accounts are not being accepted at the moment.';
     case 'too_many_requests':

@@ -2,12 +2,13 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FALLBACK_COUNTRY } from '@xetral/client';
 import type { XetralCountry } from '@xetral/client';
 import { resetXetral, xetral } from '@/lib/session';
 import { deviceFingerprint } from '@/lib/device';
 import { useSubmit } from '@/lib/hooks';
+import { messageFor } from '@/lib/errors';
 import { Logo } from '@/ui/logo';
 import { Icon } from '@/ui/icon';
 import { Select } from '@/ui/select';
@@ -56,6 +57,59 @@ export default function SignUp() {
   const [confirm, setConfirm] = useState('');
   const { busy, error, run } = useSubmit();
   const [mismatch, setMismatch] = useState(false);
+
+  /*
+   * THE EMAIL IS PROVED BEFORE THE ACCOUNT EXISTS. Once a well-formed address
+   * has been entered — on leaving the field, or after a pause in typing — a
+   * six-digit code is mailed to it and a box for it appears under the field.
+   * `sentTo` is the address the code belongs to: change the address and the
+   * code no longer applies, so a new one is sent for the new address.
+   */
+  const [sentTo, setSentTo] = useState<string | undefined>();
+  const [codeState, setCodeState] = useState<'idle' | 'sending' | 'sent' | 'not_required'>('idle');
+  const [codeError, setCodeError] = useState<string | undefined>();
+  const [code, setCode] = useState('');
+  const [cooldown, setCooldown] = useState(0);
+  const pending = useRef<string | undefined>(undefined);
+
+  const address = email.trim().toLowerCase();
+  const wellFormed = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(address);
+
+  async function sendCode(to: string): Promise<void> {
+    if (pending.current === to) return;
+    pending.current = to;
+    setCodeState('sending');
+    setCodeError(undefined);
+    try {
+      const { required } = await xetral().session.requestSignupCode(to);
+      setSentTo(to);
+      setCode('');
+      setCodeState(required ? 'sent' : 'not_required');
+      // "Resend" waits a minute: the per-address limit is three an hour, and a
+      // button pressable every second would spend it before the mail lands.
+      setCooldown(required ? 60 : 0);
+    } catch (cause) {
+      setCodeState('idle');
+      setCodeError(messageFor(cause));
+    } finally {
+      pending.current = undefined;
+    }
+  }
+
+  // After a pause in typing, not on every keystroke: each send is a real email.
+  useEffect(() => {
+    if (!wellFormed || address === sentTo) return undefined;
+    const timer = setTimeout(() => void sendCode(address), 1200);
+    return () => clearTimeout(timer);
+  }, [address, wellFormed, sentTo]);
+
+  useEffect(() => {
+    if (cooldown <= 0) return undefined;
+    const timer = setTimeout(() => setCooldown((c) => c - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [cooldown]);
+
+  const codeNeeded = codeState === 'sent' && sentTo === address;
 
   /*
    * THE COUNTRY LIST COMES FROM THE SERVER, not from a constant in this file.
@@ -116,6 +170,14 @@ export default function SignUp() {
     }
     setMismatch(false);
 
+    if (codeState !== 'not_required' && (sentTo !== address || code.length !== 6)) {
+      setCodeError(
+        sentTo === address ? 'Enter the six-digit code we emailed you.' : 'We need to confirm your email first.',
+      );
+      if (sentTo !== address && wellFormed) void sendCode(address);
+      return;
+    }
+
     await run(async () => {
       resetXetral();
       const { session } = xetral();
@@ -129,6 +191,7 @@ export default function SignUp() {
         fullName: `${firstName.trim()} ${lastName.trim()}`.trim(),
         country,
         phone,
+        ...(codeNeeded ? { emailCode: code } : {}),
         device: { fingerprint: deviceFingerprint(), platform: 'web' },
       });
       // The WALLET, not the identity form.
@@ -200,9 +263,45 @@ export default function SignUp() {
             value={email}
             autoComplete="email"
             onChange={(e) => setEmail(e.target.value)}
+            onBlur={() => {
+              if (wellFormed && address !== sentTo) void sendCode(address);
+            }}
             required
           />
+          {codeState === 'sending' && <p className="hint">Sending a code to {address}…</p>}
+          {codeError !== undefined && (
+            <p className="error"><Icon name="alert" size={16} /> {codeError}</p>
+          )}
         </div>
+
+        {codeNeeded && (
+          <div className="field">
+            <label htmlFor="email-code">Code from your email</label>
+            <div className="email-code-row">
+              <input
+                id="email-code"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                placeholder="6-digit code"
+                maxLength={6}
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
+              />
+              <button
+                type="button"
+                className="ghost"
+                disabled={cooldown > 0 || codeState !== 'sent'}
+                onClick={() => {
+                  setSentTo(undefined);
+                  void sendCode(address);
+                }}
+              >
+                {cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend code'}
+              </button>
+            </div>
+            <p className="hint">Sent to {sentTo}. Check spam if it is not there in a minute.</p>
+          </div>
+        )}
 
         {/*
           ONE COUNTRY CONTROL, AND IT IS THE ONE IN FRONT OF THE PHONE NUMBER.

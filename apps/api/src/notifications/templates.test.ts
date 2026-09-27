@@ -3,6 +3,7 @@ import { classOf, escapeHtml, groupDigits, render } from './templates.js';
 import type { NotificationKind, NotificationRequest } from './templates.js';
 
 const ALL_KINDS: readonly NotificationKind[] = [
+  'signup_code',
   'password_reset',
   'password_changed',
   'new_device',
@@ -21,6 +22,8 @@ const ALL_KINDS: readonly NotificationKind[] = [
  *  the escaping and shape assertions below covering it. */
 function example(kind: NotificationKind, injected: string): NotificationRequest {
   switch (kind) {
+    case 'signup_code':
+      return { kind, code: injected, expiresInMinutes: 15 };
     case 'password_reset':
       return { kind, code: injected, expiresInMinutes: 30 };
     case 'password_changed':

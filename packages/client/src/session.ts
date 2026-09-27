@@ -155,8 +155,26 @@ export class Session {
     }
   }
 
+  /**
+   * Mail a six-digit code to the address being signed up with. `required`
+   * false means this deployment is not asking for one, and Create account can
+   * go ahead without it.
+   */
+  async requestSignupCode(email: string): Promise<{ readonly required: boolean }> {
+    const response = await this.#fetch(`${this.#baseUrl}/v1/auth/signup/email-code`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    const body: unknown = await response.json().catch(() => undefined);
+    if (!response.ok) throw toApiError(response.status, body);
+    return { required: (body as { required?: unknown } | undefined)?.required !== false };
+  }
+
   async register(input: {
     email: string;
+    /** The six digits `requestSignupCode` mailed, where one was required. */
+    emailCode?: string;
     password: string;
     fullName: string;
     /** ISO 3166-1 alpha-2, from `countries()`. */
@@ -175,6 +193,7 @@ export class Session {
         full_name: input.fullName,
         country: input.country,
         phone: input.phone,
+        ...(input.emailCode === undefined || input.emailCode === '' ? {} : { email_code: input.emailCode }),
         device: input.device,
       }),
     });

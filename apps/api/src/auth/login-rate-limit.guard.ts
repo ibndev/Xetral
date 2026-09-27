@@ -25,6 +25,7 @@ async function enforce(
   clock: Clock,
   bucket: string,
   rules: { readonly perIdentifier: RateLimitRule; readonly perIp: RateLimitRule },
+  field: 'identifier' | 'email' = 'identifier',
 ): Promise<boolean> {
   const request = context.switchToHttp().getRequest<Request>();
   const now = clock.nowMs();
@@ -36,8 +37,8 @@ async function enforce(
 
   const body: unknown = request.body;
   const identifier =
-    typeof body === 'object' && body !== null && 'identifier' in body
-      ? (body as { identifier?: unknown }).identifier
+    typeof body === 'object' && body !== null && field in body
+      ? (body as Record<string, unknown>)[field]
       : undefined;
 
   const decisions = [
@@ -119,6 +120,34 @@ export class PasswordResetRateLimitGuard implements CanActivate {
       this.clock,
       'password_reset',
       this.config.passwordResetRateLimit,
+    );
+  }
+}
+
+/**
+ * Applied to `POST /v1/auth/signup/email-code`.
+ *
+ * The reset endpoint's ceiling and for its reason: each accepted request
+ * mails an address the caller typed, so without a per-address limit it is a
+ * mail bomb aimed at anybody, sent from our own domain. Its own bucket, so a
+ * signup never spends somebody's reset allowance or the reverse.
+ */
+@Injectable()
+export class SignupCodeRateLimitGuard implements CanActivate {
+  constructor(
+    @Inject(RATE_LIMIT_STORE) private readonly store: RateLimitStore,
+    @Inject(API_CONFIG) private readonly config: ApiConfig,
+    @Inject(CLOCK) private readonly clock: Clock,
+  ) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    return await enforce(
+      context,
+      this.store,
+      this.clock,
+      'signup_code',
+      this.config.passwordResetRateLimit,
+      'email',
     );
   }
 }

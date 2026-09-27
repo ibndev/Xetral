@@ -11,19 +11,27 @@ import {
   Req,
   UnauthorizedException,
   UseGuards,
+  ForbiddenException,
 } from '@nestjs/common';
 import type { AuthenticatedRequest } from './auth.guard.js';
 import { AuthService } from './auth.service.js';
 import { PinService } from './pin.service.js';
 import { setPinSchema } from '../wallet/dto.js';
 import type { SessionSummary, TokenPair } from './auth.service.js';
-import { LoginRateLimitGuard, PasswordResetRateLimitGuard } from './login-rate-limit.guard.js';
+import {
+  LoginRateLimitGuard,
+  PasswordResetRateLimitGuard,
+  SignupCodeRateLimitGuard,
+} from './login-rate-limit.guard.js';
+import { SignupEmailService } from './signup-email.service.js';
+import { SettingsService } from '../settings/settings.service.js';
 import { countryFrom } from './sign-in-events.service.js';
 import {
   changePasswordSchema,
   forgotPasswordSchema,
   loginSchema,
   registerSchema,
+  signupCodeSchema,
   refreshSchema,
   updateProfileSchema,
   resetPasswordSchema,
@@ -61,6 +69,8 @@ export class AuthController {
     @Inject(ProfileService) private readonly profile: ProfileService,
     @Inject(FundingService) private readonly funding: FundingService,
     @Inject(API_CONFIG) private readonly config: ApiConfig,
+    @Inject(SignupEmailService) private readonly signupEmail: SignupEmailService,
+    @Inject(SettingsService) private readonly settings: SettingsService,
   ) {}
 
   /**
@@ -297,6 +307,31 @@ export class AuthController {
       parsed.data.current_password,
       parsed.data.new_password,
     );
+  }
+
+  /**
+   * Mail a six-digit code to the address somebody is signing up with.
+   *
+   * `required: false` means this deployment is not asking for one (the switch
+   * is off), so the form can go straight to Create account. 409 `email_taken`
+   * for an address that already has an account — the trade registration
+   * itself already makes.
+   */
+  @Post('signup/email-code')
+  @HttpCode(200)
+  @UseGuards(SignupCodeRateLimitGuard)
+  async signupEmailCode(@Body() body: unknown): Promise<{ readonly required: boolean }> {
+    const parsed = signupCodeSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException({
+        error: 'invalid_request',
+        fields: parsed.error.issues.map((issue) => issue.path.join('.')),
+      });
+    }
+    if (!(await this.settings.registrationEnabled())) {
+      throw new ForbiddenException({ error: 'registration_closed' });
+    }
+    return this.signupEmail.sendCode(parsed.data.email);
   }
 
   /**

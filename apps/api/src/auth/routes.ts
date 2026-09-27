@@ -119,6 +119,14 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       )
       .public(
         'POST',
+        '/v1/auth/signup/email-code',
+        'somebody signing up has no account and no session yet; requiring one would be ' +
+          'circular. It mails a six-digit code to the address given and says only whether ' +
+          'one is needed, and is rate limited per address because each accepted request ' +
+          'sends mail to somebody who may not have asked for it',
+      )
+      .public(
+        'POST',
         '/v1/auth/password/reset',
         'authenticated by the single-use token from the reset email, which is checked ' +
           'by consume_password_reset_token under a row lock; the caller has no session ' +

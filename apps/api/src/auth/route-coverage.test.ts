@@ -120,6 +120,9 @@ describe('the public surface is small and justified', () => {
       'POST /v1/auth/password/reset',
       'POST /v1/auth/refresh',
       'POST /v1/auth/register',
+      // Proving a signup address. Public because nobody signing up has a
+      // session; limited per address, like the reset request.
+      'POST /v1/auth/signup/email-code',
       // The public checkout. Public IS the feature: a payment link payable
       // only by an existing customer is a shortcut, not a payment link.
       'POST /v1/pay/:slug/charge',
