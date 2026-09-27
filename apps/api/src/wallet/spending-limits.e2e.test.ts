@@ -16,6 +16,7 @@ import { testApiConfig } from '../test-support/api-config.js';
 import { pinListener } from '../test-support/listener.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { SpendingLimitService } from './spending-limits.service.js';
+import { reviewedIdentity } from '../test-support/kyc-fixture.js';
 
 /**
  * The daily ceiling, against a real database.
@@ -73,6 +74,7 @@ async function onboard(): Promise<Customer> {
   // is the one that showed it: tier 0 may move no dollars at all, so the
   // transfer was refused by a real USD limit rather than by the kobo one the
   // test exists to prove is not applied.
+  await reviewedIdentity(pool, { id: userId });
   await pool.query(`UPDATE users SET kyc_tier = 1 WHERE id = $1::bigint`, [userId]);
 
   const login = await request(app.getHttpServer())

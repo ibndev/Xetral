@@ -33,6 +33,7 @@ import type { ConsentContext } from '../consent/consent.service.js';
 import type { SignInOrigin } from './sign-in-events.service.js';
 import { SignupEmailService } from './signup-email.service.js';
 import { CountriesService } from '../countries/countries.service.js';
+import { personNameProblem } from '@xetral/shared';
 
 export interface TokenPair {
   readonly access_token: string;
@@ -253,6 +254,14 @@ export class AuthService {
      * the same answer for "no such country", because the two together would
      * be a way to read the roadmap off a signup form.
      */
+    // NOT FILLER. "Other Things" and "Let's Create" opened accounts; a name
+    // is printed on a card and sent to the bank that opens the account
+    // number. See `personNameProblem` for why English words as such are not
+    // refused — so many real names are one.
+    if (personNameProblem(input.full_name) !== undefined) {
+      throw new BadRequestException({ error: 'name_invalid' });
+    }
+
     const country = await this.countries.requireOpen(input.country);
 
     /*

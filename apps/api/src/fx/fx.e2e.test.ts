@@ -18,6 +18,7 @@ import type { ApiConfig } from '../config.js';
 import { systemClock } from '../tokens.js';
 import { testApiConfig } from '../test-support/api-config.js';
 import { SettingsService } from '../settings/settings.service.js';
+import { reviewedIdentity } from '../test-support/kyc-fixture.js';
 
 /**
  * FX and remittance, end to end.
@@ -126,6 +127,7 @@ async function onboard(): Promise<Customer> {
   // at the default so this fixture describes a customer who could actually
   // reach these routes — a suite whose fixture is in a state production
   // refuses is a suite asserting on behaviour nobody will ever see.
+  await reviewedIdentity(pool, { id: userId });
   await pool.query(`UPDATE users SET kyc_tier = 1 WHERE id = $1::bigint`, [userId]);
 
   const login = await request(app.getHttpServer())

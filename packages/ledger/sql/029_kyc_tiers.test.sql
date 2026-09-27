@@ -12,6 +12,20 @@ INSERT INTO users (email, status) VALUES
   ('p29-step@example.ng',  'active'),
   ('p29-staff@example.ng', 'active');
 
+-- A REVIEWED IDENTITY for the two customers these blocks raise. 085 refuses a
+-- tier above 0 without one, and a suite about tiers must describe a state
+-- production can reach — a verified ceiling with nobody's identity behind it
+-- is exactly the state 085 closed.
+INSERT INTO kyc_submissions
+  (user_id, full_name, date_of_birth, phone, bvn_sealed, bvn_last4, bvn_fingerprint,
+   address, status, reviewed_by, reviewed_at)
+SELECT u.id, 'Adaeze Okonkwo', '1990-01-01', '+2348031234567', 'v1:p29-sealed', '1234',
+       'v1:' || encode(sha256(convert_to('p29:' || u.email, 'UTF8')), 'hex'),
+       '1 Test Street, Lagos', 'approved', s.id, now()
+  FROM users u, users s
+ WHERE u.email IN ('p29-new@example.ng', 'p29-step@example.ng')
+   AND s.email = 'p29-staff@example.ng';
+
 \echo '=== 1. EVERY TIER AND CURRENCY HAS A LIMIT ==='
 -- The coverage argument, one layer up from 027's. A limits table is a list of
 -- what somebody thought of, and the combination nobody thought of is where an

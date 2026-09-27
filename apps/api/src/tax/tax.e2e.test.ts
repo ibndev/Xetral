@@ -14,6 +14,7 @@ import { AppModule } from '../app.module.js';
 import type { ApiConfig } from '../config.js';
 import { systemClock } from '../tokens.js';
 import { testApiConfig } from '../test-support/api-config.js';
+import { reviewedIdentity } from '../test-support/kyc-fixture.js';
 
 /**
  * Tax, over HTTP and into the ledger.
@@ -178,6 +179,7 @@ async function verify(userId: string, tier = 1): Promise<void> {
   // due diligence to somebody whose identity was never checked makes the higher
   // ceiling rest on nothing. A fixture that jumps straight to 2 is describing a
   // state production cannot reach, and the trigger says so.
+  if (tier >= 1) await reviewedIdentity(pool, { id: userId });
   for (let step = 1; step <= tier; step += 1) {
     await pool.query(`UPDATE users SET kyc_tier = $2 WHERE id = $1`, [userId, step]);
   }

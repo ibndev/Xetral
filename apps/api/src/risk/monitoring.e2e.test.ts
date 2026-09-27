@@ -15,6 +15,7 @@ import { testApiConfig } from '../test-support/api-config.js';
 import { enrolAndElevate } from '../test-support/staff-totp.js';
 import { MonitoringService } from './monitoring.service.js';
 import { SettingsService } from '../settings/settings.service.js';
+import { reviewedIdentity } from '../test-support/kyc-fixture.js';
 
 /**
  * That the monitoring rules see money that moved THROUGH THE REAL FLOWS.
@@ -78,7 +79,7 @@ async function register(): Promise<Person> {
       password: PASSWORD,
       // 040 made these required. A registration is now a name, a place
       // and a reachable number as well as an address.
-      full_name: 'E2E Test Person',
+      full_name: 'Chidinma Eze',
       country: 'NG',
       phone: String(8000000000 + Math.floor(Math.random() * 999999999)),
       device: { fingerprint: `fp-${randomUUID()}`, platform: 'web' },
@@ -109,6 +110,7 @@ async function register(): Promise<Person> {
   // which is a coherent policy and is also why this fixture is tier 2.
   //
   // One step at a time: the trigger refuses a jump that skips the evidence.
+  await reviewedIdentity(pool, { id: found.id });
   for (const tier of [1, 2]) {
     await pool.query(`UPDATE users SET kyc_tier = $2 WHERE id = $1::bigint`, [found.id, tier]);
   }

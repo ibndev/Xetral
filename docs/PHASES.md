@@ -37,6 +37,7 @@ shipped, that is called out explicitly.
 | 26 — An account number nobody has to ask for | ✅ | Paystack key for tier 1 accounts; Bitnob NGN enabled for verified ones |
 | 27 — Who carries what, as the owner assigned it | ✅ | a confirmed Kenyan collection provider |
 | 28 — Recovery that asks first, and the requests that never arrived | ✅ | a verified Brevo sender, and a run of the refund audit |
+| 29 — One recovery list, a proved signup address, and verified meaning reviewed | ✅ | migrations 084 and 085, and an EAS projectId for push |
 
 All eleven phases are built, a **pre-deployment audit** (Phase 12) closed what
 building them phase by phase had left between the phases, and **Phase 13** is
@@ -2612,3 +2613,31 @@ payout the provider says was paid and that the old button also refunded; and
 read `/admin/notifications` for the last Brevo error if reset codes still do
 not arrive (an unactivated transactional account is Brevo's to fix).
 
+
+---
+
+## Phase 29 — One recovery list, a proved signup address, and verified meaning reviewed ✅
+
+| File | What it is |
+|---|---|
+| `apps/api/src/admin/recovery.service.ts` | one list; closes what providers answer for; refund refused when delivered |
+| `apps/web/src/app/admin/recovery/page.tsx` | Stuck / Needs review / Resolved, opened in place |
+| `packages/ledger/sql/084_signup_email_codes.sql` | a code proves the signup address |
+| `packages/ledger/sql/085_verified_rests_on_identity.sql` | a tier above 0 needs a reviewed identity |
+| `packages/shared/src/names/person-name.ts` | filler is not a name |
+| `packages/providers/src/brevo/brevo-adapter.ts` | a verified sender up front; the event log per message |
+
+1. **A delivered payout stayed on Recovery** because nothing asked; the list
+   now asks, and a refund the provider says arrived is refused.
+2. **Every web picker ignored a tap** — the portalled sheet counted as outside.
+3. **Announcements counted only push phones**, and no build can register one.
+4. **Paystack refused customers a checkout had created** without a name.
+5. **A reset code Brevo accepted and did not deliver** is now visible per
+   message on `/admin/notifications`.
+6. **Accounts were "Verified" with no BVN**, through a tier set by hand.
+
+**Before this goes live, an operator must:** apply **084** and **085** and
+re-apply **099** (085 moves any account verified without a reviewed identity
+back to tier 0 — a ceiling, not a balance); open `/admin/notifications`,
+press a password-reset row and read what Brevo says happened to it; and, for
+push, run `eas init` in `apps/mobile` and rebuild.

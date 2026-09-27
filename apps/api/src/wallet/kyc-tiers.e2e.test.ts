@@ -14,6 +14,7 @@ import { systemClock } from '../tokens.js';
 import { testApiConfig } from '../test-support/api-config.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { KycService } from '../kyc/kyc.service.js';
+import { reviewedIdentity } from '../test-support/kyc-fixture.js';
 
 /**
  * That a customer's ceiling comes from what we know about them.
@@ -80,7 +81,7 @@ async function register(): Promise<Person> {
       password: PASSWORD,
       // 040 made these required. A registration is now a name, a place
       // and a reachable number as well as an address.
-      full_name: 'E2E Test Person',
+      full_name: 'Chidinma Eze',
       country: 'NG',
       phone: String(8000000000 + Math.floor(Math.random() * 999999999)),
       device: { fingerprint: `fp-${randomUUID()}`, platform: 'web' },
@@ -135,6 +136,7 @@ const setTier = async (userId: string, tier: number): Promise<void> => {
   // Straight to the column, climbing one step at a time — the trigger refuses
   // a jump that skips the evidence below it, which is block 5 of the invariant
   // suite rather than something to work around here.
+  if (tier >= 1) await reviewedIdentity(pool, { id: userId });
   for (let step = 1; step <= tier; step += 1) {
     await pool.query(`UPDATE users SET kyc_tier = $2 WHERE id = $1::bigint`, [userId, step]);
   }
@@ -273,11 +275,23 @@ describe('what verifying changes', () => {
     );
     await app.get(KycService).approve(submission.rows[0]?.uuid ?? '', reviewer.uuid);
 
-    const after = await pool.query<{ kyc_tier: number }>(
-      `SELECT kyc_tier FROM users WHERE id = $1::bigint`,
+    const after = await pool.query<{ kyc_tier: number; full_name: string | null }>(
+      `SELECT kyc_tier, full_name FROM users WHERE id = $1::bigint`,
       [person.userId],
     );
     expect(after.rows[0]?.kyc_tier).toBe(1);
+    // The account now carries the name a reviewer checked against the BVN,
+    // over whatever was typed at signup.
+    expect(after.rows[0]?.full_name).toBe('Adaeze Okonkwo');
+  });
+
+  it('REFUSES A VERIFIED TIER WITH NO REVIEWED IDENTITY BEHIND IT (085)', async () => {
+    // How accounts came to read "Verified" with no BVN on file: a tier raised
+    // directly. The database refuses it now, whoever asks.
+    const person = await register();
+    await expect(
+      pool.query(`UPDATE users SET kyc_tier = 1 WHERE id = $1::bigint`, [person.userId]),
+    ).rejects.toThrow(/rests on an approved identity/);
   });
 
   it('does not demote an enhanced customer on a routine re-approval', async () => {

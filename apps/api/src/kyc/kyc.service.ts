@@ -10,7 +10,7 @@ import {
 } from '@nestjs/common';
 import type { Pool } from 'pg';
 import { blindIndex, seal } from '@xetral/identity';
-import { toMajor } from '@xetral/shared';
+import { personNameProblem, toMajor } from '@xetral/shared';
 import type { Currency } from '@xetral/shared';
 import type { BlindIndexKey, Keyring } from '@xetral/identity';
 import { API_CONFIG, DATABASE } from '../tokens.js';
@@ -133,6 +133,11 @@ export class KycService {
   }
 
   async submit(userUuid: string, body: KycBody): Promise<KycView> {
+    // The name a reviewer compares with the BVN record — and, once approved,
+    // the name on the account. Filler is refused before anybody reads it.
+    if (personNameProblem(body.full_name) !== undefined) {
+      throw new BadRequestException({ error: 'name_invalid' });
+    }
     const userId = await this.#userId(userUuid);
 
     const dob = new Date(`${body.date_of_birth}T00:00:00Z`);
@@ -272,6 +277,24 @@ export class KycService {
       await client.query(
         `UPDATE users SET kyc_tier = 1 WHERE id = $1::bigint AND kyc_tier < 1`,
         [row.user_id],
+      );
+
+      /*
+       * THE ACCOUNT NAME BECOMES THE NAME A REVIEWER CHECKED AGAINST THE BVN.
+       *
+       * 040 kept `users.full_name` apart from the reviewed name so a greeting
+       * could be personal on day one. That is still true before approval.
+       * After it, the owner's decision is that the account carries the
+       * verified name — it is what is printed on a card and shown to whoever
+       * is about to pay them — and the profile locks it from then on. Over
+       * whatever was typed at signup, not only a blank.
+       */
+      await client.query(
+        `UPDATE users u SET full_name = btrim(k.full_name)
+           FROM kyc_submissions k
+          WHERE k.uuid = $1::uuid AND u.id = k.user_id
+            AND length(btrim(k.full_name)) BETWEEN 2 AND 120`,
+        [submissionUuid],
       );
 
       /*

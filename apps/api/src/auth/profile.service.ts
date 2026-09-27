@@ -1,4 +1,12 @@
-import { ConflictException, ForbiddenException, Inject, Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
+import { personNameProblem } from '@xetral/shared';
 import type { Pool } from 'pg';
 import type { ApiConfig } from '../config.js';
 import { API_CONFIG, DATABASE } from '../tokens.js';
@@ -311,6 +319,10 @@ export class ProfileService {
     userUuid: string,
     input: { full_name?: string | undefined; phone?: string | undefined; country?: string | undefined },
   ): Promise<AccountDetails> {
+    // Registration's rule, on the one other path that writes a name.
+    if (input.full_name !== undefined && personNameProblem(input.full_name) !== undefined) {
+      throw new BadRequestException({ error: 'name_invalid' });
+    }
     const current = await this.details(userUuid);
 
     /*

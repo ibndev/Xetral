@@ -258,6 +258,8 @@ function sentenceFor(error: ApiError): string {
       return 'Enter the six-digit code we emailed you.';
     case 'email_code_invalid':
       return 'That code is not right, or it has expired. Check the email, or send a new code.';
+    case 'name_invalid':
+      return 'Enter your real first and last name, as it appears on your ID.';
     case 'email_unavailable':
       return 'We cannot send email right now, so new accounts cannot be confirmed. Try again shortly.';
     case 'registration_closed':
@@ -319,6 +321,8 @@ function sentenceFor(error: ApiError): string {
       return 'You cannot review your own submission. Another member of staff has to approve it.';
     case 'bvn_already_verified':
       return 'That BVN is already verified on another account. Open the collisions list before deciding.';
+    case 'tier_needs_identity':
+      return 'This customer has no approved identity. Review and approve their KYC, with their BVN, before raising their tier.';
     case 'tier_skips_evidence':
       return 'A tier rests on the one below it. Verify their identity before granting enhanced limits.';
 

@@ -2240,6 +2240,86 @@ Schema: `packages/ledger/sql/082_refusals_and_details.sql`,
   and lists the ones the provider says were paid: money paid out twice. It
   changes nothing — recovering it is a conversation, not a posting.
 
+### One recovery list, and a delivered payout nobody is shown — non-obvious rules
+
+`apps/api/src/admin/recovery.service.ts` (`list`, `detail`, `refund`, `send`),
+`/admin/recovery`.
+
+- **A DELIVERED PAYOUT SAT ON THE SCREEN BECAUSE NOTHING ASKED.** Paystack
+  `transfer.*` events were dropped until round 28 and the sweep runs only
+  where its interval is set, so a payout whose send had timed out stayed
+  `reserved` after it arrived. LOADING THE LIST now asks the provider about
+  every row held past thirty minutes and settles or refunds on its answer,
+  within a six-second budget; what is left is what no provider has answered.
+- **ONE LIST, THREE STATES.** Stuck (held, waiting on the provider), Needs
+  review (the provider cannot say, or a refund the provider says was ALSO
+  paid), Resolved (closed this week). A row opens in place and asks the
+  provider AGAIN on opening — the list's answer is never trusted a minute on.
+- **REFUNDING A PAYOUT THE PROVIDER SAYS ARRIVED IS REFUSED**,
+  `refund_refused_delivered`, asked on the request itself. The owner's
+  decision: blocked, not warned. "Return to Xetral" IS the refund to the
+  customer's wallet; there is no third destination.
+- **"SEND TO RECIPIENT" REUSES THE PAYOUT'S OWN REFERENCE**, so the provider
+  refuses a duplicate of one that landed. A failed resend never reverses —
+  the money stays held and the row stays on the list.
+- **THE CORRECTION LOG IS THE ROW'S HISTORY**, read from `admin_audit_log`,
+  not a section of its own. Every action is still recorded there.
+
+### Pickers, announcements and the Paystack refusal — non-obvious rules
+
+- **THE SHEET IS PORTALLED, SO "OUTSIDE" MUST NAME IT.** `ui/select.tsx`'s
+  pointerdown listener only knew the trigger; a tap on an option closed the
+  list, React re-rendered, and the option's mousedown never arrived. Every web
+  picker looked tappable and changed nothing.
+- **AN ANNOUNCEMENT REACHES EVERYBODY IN THE BELL FEED.** The audience counted
+  only push handsets, and NO BUILD HAS AN EAS `projectId`, so no phone has ever
+  registered a token — "0 customers" about a message every customer reads.
+  The count says both, and Send waits only on the feed's. Push needs
+  `eas init` and a rebuild; nothing in code can invent the id.
+- **PAYSTACK'S "Customer has not been identified" WAS A CUSTOMER A CHECKOUT
+  MADE.** Created from an email alone, it has no name or phone, and
+  `POST /customer` returns it unchanged. The dedicated-account call carries
+  `first_name`, `last_name` and `phone` now. If it persists, the business is
+  one Paystack requires BVN validation for — a Paystack setting, and one the
+  privacy notice would have to name before a BVN is sent.
+- **`test:082` ROWS ARE THE SQL SUITE'S**, reaching production only when a
+  `.test.sql` file was run against it by hand. Nothing in the deploy runs one.
+
+### Proving a signup address, and what "verified" rests on — non-obvious rules
+
+Schema: `packages/ledger/sql/084_signup_email_codes.sql`,
+`085_verified_rests_on_identity.sql`. `apps/api/src/auth/signup-email.service.ts`,
+`packages/shared/src/names/person-name.ts`.
+
+- **A CODE IS MAILED ONCE A WELL-FORMED ADDRESS IS ENTERED**, and registration
+  opens the account only with it. HMAC-keyed, five wrong guesses across the
+  address's live codes, limited per address like the reset request.
+- **A WRONG CODE IS CHARGED BEFORE THE REGISTRATION'S TRANSACTION OPENS.** The
+  refusal rolls that transaction back and would take the charge with it, so
+  the ceiling would never accrue. Checked on its own connection
+  (`p_consume` false), then SPENT by the same COMMIT that opens the account.
+- **A DATABASE BEHIND 084 LETS SIGNUPS THROUGH UNPROVED**, loudly in the log,
+  rather than failing every registration. `signup_email_verification` ships
+  ON and is the operator's switch for an email outage — with it on and mail
+  not delivered, nobody can sign up.
+- **A TIER ABOVE 0 REQUIRES AN APPROVED SUBMISSION, BY TRIGGER.** An admin
+  could raise a tier directly and both apps read tier 1 as "Verified" — with
+  no BVN anywhere. 085 refuses the raise and put every such account back to 0
+  (a ceiling, never a balance). No automatic approval exists: there is no
+  identity-verification adapter, so a person approves every one.
+- **APPROVAL MAKES THE REVIEWED NAME THE ACCOUNT NAME**, over whatever was
+  typed at signup — the owner's decision, reversing 040's separation after
+  approval only. An account number already issued keeps the name its bank
+  was given.
+- **A NAME IS REFUSED FOR FILLER, NEVER FOR BEING A WORD.** Blessing, Favour,
+  Precious, Goodluck, Sunday are real names, so `personNameProblem` refuses a
+  short list of words that are never names ("other", "things", "create",
+  "test"), the form's placeholders, digits, symbols and keyboard-mash — at
+  registration, the profile and KYC alike.
+- **A PAUSED SCREEN DRAWS NOTHING UNTIL THE SWITCHES ARE KNOWN** (`screenGate`),
+  instead of its form and then "Coming soon" over it. The answer is kept for
+  the visit, so only the first gated screen waits at all.
+
 ### The admin actions that never reached the server, and the ten seconds before every request — non-obvious rules
 
 `apps/web/src/app/api/x/[...path]/route.ts`, `packages/client/src/admin.ts`,
@@ -4589,6 +4669,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/081_privacy_republish.s
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/082_refusals_and_details.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/083_payment_assignment.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/084_signup_email_codes.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/085_verified_rests_on_identity.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -4671,6 +4752,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/081_privacy_republish.t
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/082_refusals_and_details.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/083_payment_assignment.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/084_signup_email_codes.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/085_verified_rests_on_identity.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

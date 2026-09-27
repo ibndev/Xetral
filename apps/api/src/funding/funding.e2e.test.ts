@@ -665,7 +665,7 @@ describe('an account number without asking for one', () => {
         .send({
           email,
           password: PASSWORD,
-          full_name: 'Registered Customer',
+          full_name: 'Ngozi Adeyemi',
           country: 'NG',
           phone: String(8000000000 + Math.floor(Math.random() * 999999999)),
           device: { fingerprint: `fp-${randomUUID()}`, platform: 'web' },
@@ -703,7 +703,7 @@ describe('an account number without asking for one', () => {
         .send({
           email: `fund-reg-${randomUUID()}@example.ng`,
           password: PASSWORD,
-          full_name: 'Registered Customer',
+          full_name: 'Ngozi Adeyemi',
           country: 'NG',
           phone: String(8000000000 + Math.floor(Math.random() * 999999999)),
           device: { fingerprint: `fp-${randomUUID()}`, platform: 'web' },

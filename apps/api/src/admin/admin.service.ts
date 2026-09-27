@@ -662,6 +662,16 @@ export class AdminService {
       ) {
         throw new UnprocessableEntityException({ error: 'tier_skips_evidence' });
       }
+      // 085: a verified tier needs a reviewed identity with its BVN behind it.
+      // Said as its own code, so the screen can say "approve their KYC first"
+      // rather than something about skipping.
+      if (
+        error !== null &&
+        typeof error === 'object' &&
+        String((error as { message?: string }).message ?? '').includes('rests on an approved identity')
+      ) {
+        throw new UnprocessableEntityException({ error: 'tier_needs_identity' });
+      }
       throw error;
     } finally {
       client.release();

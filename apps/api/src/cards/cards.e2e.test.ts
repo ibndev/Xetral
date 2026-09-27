@@ -1370,7 +1370,7 @@ describe('replacing a card', () => {
       .post(`/v1/cards/${card.id}/reissue`)
       .set('Authorization', `Bearer ${stranger.token}`)
       .send({
-        name_on_card: 'Someone Else',
+        name_on_card: 'Segun Arinze',
         transaction_pin: PIN,
         idempotency_key: randomUUID(),
       });

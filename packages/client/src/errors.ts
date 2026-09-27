@@ -36,7 +36,10 @@ const API_ERROR_CODES = [
      deployment with nothing able to send one. */
   'email_code_required',
   'email_code_invalid',
+  'name_invalid',
   'email_unavailable',
+  /* A name that is filler rather than a person's: "Other Things". */
+  'name_invalid',
   'registration_closed',
   'too_many_attempts',
   /* The general ceiling on request rate, distinct from `too_many_attempts` and
@@ -158,6 +161,7 @@ const API_ERROR_CODES = [
   /* A tier granted without the evidence of the one below it. Each tier rests
      on the one under it, so enhanced due diligence cannot be given to somebody
      whose identity was never checked. */
+  'tier_needs_identity',
   'tier_skips_evidence',
   'device_not_found',
   'below_minimum_age',

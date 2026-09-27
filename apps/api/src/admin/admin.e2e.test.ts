@@ -59,7 +59,7 @@ async function register(): Promise<Person> {
       password: PASSWORD,
       // 040 made these required. A registration is now a name, a place
       // and a reachable number as well as an address.
-      full_name: 'E2E Test Person',
+      full_name: 'Chidinma Eze',
       country: 'NG',
       phone: String(8000000000 + Math.floor(Math.random() * 999999999)),
       device: { fingerprint: `fp-${randomUUID()}`, platform: 'web' },
@@ -157,7 +157,7 @@ describe('opening an account', () => {
         password: PASSWORD,
         // 040 made these required. A registration is now a name, a place
         // and a reachable number as well as an address.
-        full_name: 'E2E Test Person',
+        full_name: 'Chidinma Eze',
         country: 'NG',
         phone: String(8000000000 + Math.floor(Math.random() * 999999999)),
         device: { fingerprint: `fp-${randomUUID()}`, platform: 'web' },
@@ -180,7 +180,7 @@ describe('opening an account', () => {
     const base = {
       email,
       password: PASSWORD,
-      full_name: 'E2E Test Person',
+      full_name: 'Chidinma Eze',
       country: 'NG',
       device: { fingerprint: `fp-${randomUUID()}`, platform: 'web' },
     };
@@ -213,7 +213,7 @@ describe('opening an account', () => {
     const phone = String(8300000000 + Math.floor(Math.random() * 99999999));
     const base = {
       password: PASSWORD,
-      full_name: 'E2E Test Person',
+      full_name: 'Chidinma Eze',
       country: 'NG',
       phone,
       device: { fingerprint: `fp-${randomUUID()}`, platform: 'web' },
@@ -239,7 +239,7 @@ describe('opening an account', () => {
       .send({
         email: `closed-${randomUUID()}@example.ng`,
         password: PASSWORD,
-        full_name: 'E2E Test Person',
+        full_name: 'Chidinma Eze',
         // Seeded, and deliberately closed. It was 'GB' until 055 opened the
         // United Kingdom — which is why this names the country rather than
         // asking the database for one that happens to be shut: a test whose
@@ -261,7 +261,7 @@ describe('opening an account', () => {
         password: 'short',
         // 040 made these required. A registration is now a name, a place
         // and a reachable number as well as an address.
-        full_name: 'E2E Test Person',
+        full_name: 'Chidinma Eze',
         country: 'NG',
         phone: String(8000000000 + Math.floor(Math.random() * 999999999)),
         device: { fingerprint: `fp-${randomUUID()}`, platform: 'web' },

@@ -88,6 +88,23 @@ const register = (email: string, code?: string) =>
       device: { fingerprint: `fp-${randomUUID()}`, platform: 'web' },
     });
 
+describe('a name, not filler', () => {
+  it.each(['Other Things', "Let's Create", 'Test User'])('REFUSES %j as a name', async (name) => {
+    const refused = await request(app.getHttpServer())
+      .post('/v1/auth/register')
+      .send({
+        email: address(),
+        password: 'a-long-enough-password',
+        full_name: name,
+        country: 'NG',
+        phone: String(8000000000 + Math.floor(Math.random() * 999999999)),
+        device: { fingerprint: `fp-${randomUUID()}`, platform: 'web' },
+      })
+      .expect(400);
+    expect(refused.body.error).toBe('name_invalid');
+  });
+});
+
 describe('proving the address before the account', () => {
   it('MAILS A CODE, and the account opens only with it', async () => {
     const email = address();

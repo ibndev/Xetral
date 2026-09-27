@@ -10,6 +10,7 @@ import { SpendingLimitService } from './spending-limits.service.js';
 import type { LimitScope } from './spending-limits.service.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { testApiConfig } from '../test-support/api-config.js';
+import { reviewedIdentity } from '../test-support/kyc-fixture.js';
 
 /**
  * The ceilings on crypto withdrawals, conversions and gift card payouts.
@@ -45,6 +46,7 @@ async function customer(): Promise<string> {
   //
   // Climbed one step at a time: the trigger refuses a jump that skips the
   // evidence below it.
+  await reviewedIdentity(pool, { id });
   for (const tier of [1, 2]) {
     await pool.query(`UPDATE users SET kyc_tier = $2 WHERE id = $1::bigint`, [id, tier]);
   }

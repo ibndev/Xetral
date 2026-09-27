@@ -77,3 +77,36 @@ export async function approveKyc(
     options.tier ?? 1,
   ]);
 }
+
+/**
+ * A REVIEWED IDENTITY AND NOTHING ELSE — for a suite about tiers or limits
+ * that raises `kyc_tier` itself. 085 refuses a tier above 0 without an
+ * approved submission, because "verified" with nobody's BVN behind it is the
+ * state the owner found in production. Idempotent: a customer who already has
+ * one is left alone.
+ */
+export async function reviewedIdentity(pool: Pool, user: { readonly id?: string; readonly uuid?: string }): Promise<void> {
+  const found = await pool.query<{ id: string }>(
+    user.id !== undefined ? `SELECT id FROM users WHERE id = $1::bigint` : `SELECT id FROM users WHERE uuid = $1::uuid`,
+    [user.id ?? user.uuid],
+  );
+  const userId = found.rows[0]?.id;
+  if (userId === undefined) throw new Error('reviewedIdentity: no such user');
+  const has = await pool.query(
+    `SELECT 1 FROM kyc_submissions WHERE user_id = $1::bigint AND status = 'approved'`,
+    [userId],
+  );
+  if ((has.rowCount ?? 0) > 0) return;
+  const reviewer = await pool.query<{ id: string }>(
+    `INSERT INTO users (email, status) VALUES ($1, 'active') RETURNING id`,
+    [`reviewer-${randomUUID()}@example.ng`],
+  );
+  await pool.query(
+    `INSERT INTO kyc_submissions
+       (user_id, full_name, date_of_birth, phone, bvn_sealed, bvn_last4,
+        bvn_fingerprint, address, status, reviewed_by, reviewed_at)
+     VALUES ($1::bigint, 'Ada Obi', '1990-01-01', '+2348031234567', 'v1:fixture-sealed-bvn',
+             '1234', $2, '1 Test Street, Lagos', 'approved', $3::bigint, now())`,
+    [userId, `v1:${createHash('sha256').update(`fixture:${userId}`).digest('hex')}`, reviewer.rows[0]?.id],
+  );
+}

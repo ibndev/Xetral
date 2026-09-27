@@ -55,7 +55,7 @@ async function register(): Promise<Person> {
     .send({
       email,
       password: PASSWORD,
-      full_name: 'Payment Link Person',
+      full_name: 'Tunde Bakare',
       country: 'NG',
       phone: national,
       device: { fingerprint: `fp-${randomUUID()}`, platform: 'web' },
@@ -154,7 +154,7 @@ describe('a customer asking to be paid', () => {
 
     const seen = await request(app.getHttpServer()).get(`/v1/pay/${slug}`).expect(200);
 
-    expect(seen.body.name).toBe('Payment Link Person');
+    expect(seen.body.name).toBe('Tunde Bakare');
     expect(seen.body.currency).toBe('NGN');
     /*
      * And the currencies a payer may CHOOSE, which is what makes the picker

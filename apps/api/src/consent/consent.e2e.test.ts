@@ -44,7 +44,7 @@ async function register(): Promise<Customer> {
       email: identifier,
       password: PASSWORD,
       // 040 made these required: a name, a place and a reachable number.
-      full_name: 'E2E Test Person',
+      full_name: 'Chidinma Eze',
       country: 'NG',
       phone: String(8000000000 + Math.floor(Math.random() * 999999999)),
       device: { fingerprint: `fp-${randomUUID()}`, platform: 'ios' },
@@ -131,7 +131,7 @@ describe('registering', () => {
         password: 'short',
         // 040 made these required. A registration is now a name, a place
         // and a reachable number as well as an address.
-        full_name: 'E2E Test Person',
+        full_name: 'Chidinma Eze',
         country: 'NG',
         phone: String(8000000000 + Math.floor(Math.random() * 999999999)),
         device: { fingerprint: `fp-${randomUUID()}`, platform: 'ios' },

@@ -69,7 +69,7 @@ async function register(country = 'NG'): Promise<Person> {
     .send({
       email,
       password: PASSWORD,
-      full_name: 'Push Person',
+      full_name: 'Kofi Mensah',
       country,
       phone: country === 'NG' ? national : undefined,
       device: { fingerprint: `fp-${randomUUID()}`, platform: 'android' },

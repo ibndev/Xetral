@@ -10,6 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../app.module.js';
 import { systemClock } from '../tokens.js';
 import { testApiConfig } from '../test-support/api-config.js';
+import { reviewedIdentity } from '../test-support/kyc-fixture.js';
 
 /**
  * The customer's own account, over HTTP, against a real database.
@@ -52,7 +53,7 @@ async function register(): Promise<Person> {
     .send({
       email,
       password: PASSWORD,
-      full_name: 'Original Name',
+      full_name: 'Yemi Alade',
       country: 'NG',
       phone: national,
       device: { fingerprint: `fp-${randomUUID()}`, platform: 'web' },
@@ -93,7 +94,7 @@ describe('a customer reading their own account', () => {
 
     const res = await details(person).expect(200);
 
-    expect(res.body.full_name).toBe('Original Name');
+    expect(res.body.full_name).toBe('Yemi Alade');
     expect(res.body.email).toBe(person.email);
     expect(res.body.phone).toBe(person.phone);
     expect(res.body.country).toBe('NG');
@@ -221,7 +222,7 @@ describe('an UNVERIFIED customer filling in what is missing', () => {
     }
 
     const read = await details(person).expect(200);
-    expect(read.body.full_name).toBe('Original Name');
+    expect(read.body.full_name).toBe('Yemi Alade');
   });
 
   it('REFUSES A SMUGGLED EMAIL rather than ignoring one', async () => {
@@ -237,12 +238,12 @@ describe('an UNVERIFIED customer filling in what is missing', () => {
     await request(app.getHttpServer())
       .post('/v1/auth/profile')
       .set('Authorization', `Bearer ${person.token}`)
-      .send({ full_name: 'Someone Else', email: 'attacker@example.com' })
+      .send({ full_name: 'Segun Arinze', email: 'attacker@example.com' })
       .expect(400);
 
     const read = await details(person).expect(200);
     expect(read.body.email).toBe(person.email);
-    expect(read.body.full_name).toBe('Original Name');
+    expect(read.body.full_name).toBe('Yemi Alade');
   });
 
   it('changes only this customer, never another', async () => {
@@ -252,11 +253,11 @@ describe('an UNVERIFIED customer filling in what is missing', () => {
     await request(app.getHttpServer())
       .post('/v1/auth/profile')
       .set('Authorization', `Bearer ${mine.token}`)
-      .send({ full_name: 'Only Mine' })
+      .send({ full_name: 'Emeka Obi' })
       .expect(201);
 
     const other = await details(theirs).expect(200);
-    expect(other.body.full_name).toBe('Original Name');
+    expect(other.body.full_name).toBe('Yemi Alade');
   });
 
   it('takes NO transaction PIN, because it moves no money', async () => {
@@ -266,7 +267,7 @@ describe('an UNVERIFIED customer filling in what is missing', () => {
     await request(app.getHttpServer())
       .post('/v1/auth/profile')
       .set('Authorization', `Bearer ${person.token}`)
-      .send({ full_name: 'No Pin Needed' })
+      .send({ full_name: 'Bola Ahmed' })
       .expect(201);
   });
 });
@@ -283,6 +284,7 @@ describe('a VERIFIED customer', () => {
      * The screen hiding the fields is a courtesy. This is the rule.
      */
     const person = await register();
+    await reviewedIdentity(pool, { uuid: person.uuid });
     await pool.query(`UPDATE users SET kyc_tier = 1 WHERE uuid = $1`, [person.uuid]);
 
     const read = await details(person).expect(200);
@@ -292,7 +294,7 @@ describe('a VERIFIED customer', () => {
     expect(read.body.editable).toEqual([]);
 
     for (const body of [
-      { full_name: 'A New Name' },
+      { full_name: 'Amaka Nwosu' },
       { phone: '8039999999' },
       { country: 'GH' },
     ]) {
@@ -305,7 +307,7 @@ describe('a VERIFIED customer', () => {
     }
 
     const after = await details(person).expect(200);
-    expect(after.body.full_name).toBe('Original Name');
+    expect(after.body.full_name).toBe('Yemi Alade');
     expect(after.body.phone).toBe(person.phone);
     expect(after.body.country).toBe('NG');
   });
@@ -325,6 +327,7 @@ describe('a VERIFIED customer', () => {
      * empty, so there is nothing for filling it in to contradict.
      */
     const person = await register();
+    await reviewedIdentity(pool, { uuid: person.uuid });
     await pool.query(`UPDATE users SET kyc_tier = 1, phone = NULL WHERE uuid = $1`, [person.uuid]);
 
     const read = await details(person).expect(200);
