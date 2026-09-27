@@ -121,6 +121,8 @@ export function Select({
   const trigger = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLUListElement>(null);
   const search = useRef<HTMLInputElement>(null);
+  /** The portalled sheet. It is NOT inside `root`, so "outside" must name it too. */
+  const sheet = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState('');
   /** Typeahead buffer, cleared by a pause rather than by a keystroke count. */
   const typed = useRef<{ text: string; at: number }>({ text: '', at: 0 });
@@ -181,10 +183,23 @@ export function Select({
   useEffect(() => {
     if (!open) return;
 
-    // Pointerdown rather than click: a click elsewhere that removes its own
-    // target from the document never reaches a click listener here.
+    /*
+     * Pointerdown rather than click: a click elsewhere that removes its own
+     * target from the document never reaches a click listener here.
+     *
+     * THE SHEET COUNTS AS INSIDE. It is portalled to `document.body`, so it is
+     * not a descendant of `root` — and this handler, written when the list
+     * still hung off the trigger, read a tap on an OPTION as a tap outside.
+     * It closed the list on pointerdown, React re-rendered before the
+     * option's mousedown arrived, and the option that would have committed
+     * was already gone. Every picker in the product looked tappable and
+     * changed nothing: the announcement audience, the Convert currencies.
+     * The backdrop closes itself on its own mousedown, so nothing is lost.
+     */
     const onPointerDown = (event: PointerEvent): void => {
-      if (!root.current?.contains(event.target as Node)) setOpen(false);
+      const target = event.target as Node;
+      if (root.current?.contains(target) || sheet.current?.contains(target)) return;
+      setOpen(false);
     };
     /*
      * A WIDTH CHANGE CLOSES THE LIST. A HEIGHT CHANGE MUST NOT.
@@ -401,6 +416,7 @@ export function Select({
         mounted &&
         createPortal(
           <div
+            ref={sheet}
             className="xsheet-backdrop"
             role="presentation"
             onMouseDown={(event) => {

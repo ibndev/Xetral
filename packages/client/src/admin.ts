@@ -912,8 +912,11 @@ export interface AdminBroadcast {
 }
 
 export interface AdminAudienceEstimate {
+  /** Phones a push reaches. */
   readonly devices: number;
   readonly customers: number;
+  /** Customers who see it in the app's notification feed. */
+  readonly in_app: number;
 }
 
 export interface AdminProviderHealth {

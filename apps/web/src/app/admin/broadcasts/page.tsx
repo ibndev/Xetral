@@ -97,10 +97,22 @@ export default function Broadcasts() {
       <AdminTitle>Announcements</AdminTitle>
       <div className="panel announce">
         <span className="sec">New announcement</span>
-        <p className="sub">
-          To every customer who has opted in to product news. Security and transaction messages are
-          sent by the flows that owe them, never from here.
-        </p>
+        {/* THE EXPLANATIONS ARE ONE TAP AWAY, not on the form. The owner's
+            call: the counters and the lock-screen warning stay, the
+            paragraphs go behind the help button. A <details> rather than a
+            tooltip, because a tooltip does not exist on a touch screen. */}
+        <details className="announce-help">
+          <summary aria-label="How announcements work">?</summary>
+          <p>
+            Every customer in the audience sees it in the app&rsquo;s notification feed. It also goes
+            by push to phones whose owner has the app installed and product news switched on.
+            Security and transaction messages are sent by the flows that owe them, never from here.
+          </p>
+          <p>
+            Skipped counts customers with the app installed who have not opted in to product news. If
+            one stays queued, no instance has PUSH_BROADCAST_INTERVAL_SECONDS set.
+          </p>
+        </details>
 
         <label>
           <span>Title</span>
@@ -122,10 +134,7 @@ export default function Broadcasts() {
             rows={3}
             placeholder="Kept short — push copy carries no amount, ever."
           />
-          <span className="hint">
-            {240 - body.length} left. No balances or amounts — a notification is read off a lock
-            screen by anybody holding the phone.
-          </span>
+          <span className="hint">{240 - body.length} left. No amounts — it shows on a lock screen.</span>
         </label>
 
         {/* THE COMP'S SEND ROW: who, how many that is, and the button — the
@@ -146,8 +155,8 @@ export default function Broadcasts() {
             <span className="quiet-text">
               {audience === undefined
                 ? ''
-                : `${audience.devices} device${audience.devices === 1 ? '' : 's'} · ` +
-                  `${audience.customers} customer${audience.customers === 1 ? '' : 's'}`}
+                : `${audience.in_app} customer${audience.in_app === 1 ? '' : 's'} in the app · ` +
+                  `${audience.devices} phone${audience.devices === 1 ? '' : 's'} by push`}
             </span>
           </span>
           <input
@@ -162,21 +171,13 @@ export default function Broadcasts() {
           />
           <button
             type="button"
-            disabled={busy || tooShort || pin === '' || (audience?.devices ?? 0) === 0}
+            disabled={busy || tooShort || pin === '' || (audience?.in_app ?? 0) === 0}
             onClick={() => void send()}
           >
             {busy ? 'Queueing…' : 'Send announcement'}
           </button>
         </div>
 
-        {/* Said on the page rather than in a tooltip, which does not exist on
-            a touch screen — the lesson the rate-generation button records. */}
-        {(audience?.devices ?? 0) === 0 && (
-          <p className="hint">
-            Nobody to tell: no customer in this audience has both the app installed and product news
-            switched on.
-          </p>
-        )}
         {error !== undefined && <p className="error">{error}</p>}
         {report !== undefined && <p className="ok">{report}</p>}
       </div>
@@ -231,10 +232,6 @@ export default function Broadcasts() {
             </table>
           </div>
         )}
-        <span className="tbl-note">
-          Skipped counts customers with the app installed who have not opted in to product news. If
-          one stays queued, no instance has PUSH_BROADCAST_INTERVAL_SECONDS set — nothing errors.
-        </span>
       </div>
     </>
   );

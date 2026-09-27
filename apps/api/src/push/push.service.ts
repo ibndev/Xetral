@@ -35,8 +35,17 @@ export interface AnnouncementView {
 }
 
 export interface AudienceEstimate {
+  /** Handsets a PUSH reaches: a live token and a live marketing grant. */
   readonly devices: number;
+  /** The customers holding those handsets. */
   readonly customers: number;
+  /**
+   * Customers who will see it in the app's bell feed — every active customer
+   * in the audience, because that feed is not consent-gated. This is the
+   * figure that was missing: with no push token registered anywhere, the
+   * screen read "0 customers" about an announcement every customer would see.
+   */
+  readonly in_app: number;
 }
 
 /**
@@ -126,16 +135,20 @@ export class PushService {
    * is the one that runs unattended.
    */
   async estimate(country: string | undefined): Promise<AudienceEstimate> {
-    const result = await this.pool.query<{ devices: string; customers: string }>(
-      `SELECT count(*) AS devices, count(DISTINCT user_id) AS customers
-         FROM push_audience
-        WHERE $1::char(2) IS NULL OR country = $1::char(2)`,
+    const result = await this.pool.query<{ devices: string; customers: string; in_app: string }>(
+      `SELECT (SELECT count(*) FROM push_audience
+                WHERE $1::char(2) IS NULL OR country = $1::char(2)) AS devices,
+              (SELECT count(DISTINCT user_id) FROM push_audience
+                WHERE $1::char(2) IS NULL OR country = $1::char(2)) AS customers,
+              (SELECT count(*) FROM users
+                WHERE status = 'active' AND ($1::char(2) IS NULL OR country = $1::char(2))) AS in_app`,
       [country ?? null],
     );
     const row = result.rows[0];
     return {
       devices: Number(row?.devices ?? 0),
       customers: Number(row?.customers ?? 0),
+      in_app: Number(row?.in_app ?? 0),
     };
   }
 

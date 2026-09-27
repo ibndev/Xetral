@@ -7059,6 +7059,23 @@ html[data-theme='dark'] .admin-frame {
 .admin-frame .announce-send { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; }
 .admin-frame .announce-who { flex: 1 1 320px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .admin-frame .announce-who .xselect { flex: 0 0 180px; }
+.admin-frame .panel.announce { position: relative; }
+/* The help is a round "?" in the panel's corner; opened, its text sits under
+   the heading. Explanations on demand, counters always. */
+.admin-frame .announce-help > summary {
+  position: absolute; top: 14px; right: 16px;
+  width: 26px; height: 26px; border-radius: 50%;
+  display: grid; place-items: center; list-style: none; cursor: pointer;
+  border: 1px solid var(--edge); color: var(--text-3); font-size: 12.5px; font-weight: 700;
+}
+.admin-frame .announce-help > summary::-webkit-details-marker { display: none; }
+.admin-frame .announce-help[open] > summary { color: var(--text); border-color: var(--text-3); }
+.admin-frame .announce-help[open] {
+  margin: 10px 0 2px; padding: 10px 12px; border-radius: 10px;
+  background: var(--surface-2); color: var(--text-2); font-size: 12.5px; font-weight: 500;
+}
+.admin-frame .announce-help p { margin: 0; }
+.admin-frame .announce-help p + p { margin-top: 6px; }
 .admin-frame .quiet-text { font-size: 12.5px; font-weight: 500; color: var(--text-3); }
 
 /* Readiness as the comp lists it: a mark, the name, its state. */
@@ -7385,13 +7402,16 @@ html:not([data-theme='dark']) .tabbar {
  * "the app is down between 22:00 and…" cut at the ellipsis says nothing.
  */
 .announce-list { list-style: none; margin: 0; padding: 4px 16px; }
-.announce {
+/* SCOPED TO THE LIST. Unscoped, this made the admin announcement FORM — a
+   `.panel.announce` — a flex row, so the heading, the help and every field
+   sat side by side in columns a few characters wide. */
+.announce-list > .announce {
   display: flex;
   gap: 12px;
   padding: 14px 0;
   border-bottom: 1px solid var(--line);
 }
-.announce:last-child { border-bottom: 0; }
+.announce-list > .announce:last-child { border-bottom: 0; }
 .announce-icon {
   display: grid; place-items: center;
   width: 38px; height: 38px;
