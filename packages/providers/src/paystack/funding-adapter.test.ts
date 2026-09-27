@@ -77,6 +77,9 @@ const NEW_CUSTOMER: CreateVirtualAccountRequest = {
   },
 };
 
+/** What the account call carries, so a customer a checkout created can be identified. */
+const IDENTITY = { first_name: 'Ada', last_name: 'Obi', phone: '+2348031234567' };
+
 const CUSTOMER_CREATED = { status: true, data: { customer_code: 'CUS_abc' } };
 const NO_ACCOUNTS = { status: true, data: [] };
 const ACCOUNT_CREATED = {
@@ -182,11 +185,28 @@ describe('opening an account for somebody who has not been verified', () => {
       preferredBank: 'wema-bank',
     });
     await withBank.adapter.createVirtualAccount(NEW_CUSTOMER);
-    expect(withBank.calls[2]?.body).toEqual({ customer: 'CUS_abc', preferred_bank: 'wema-bank' });
+    expect(withBank.calls[2]?.body).toEqual({ customer: 'CUS_abc', preferred_bank: 'wema-bank', ...IDENTITY });
 
     const without = adapterWith([CUSTOMER_CREATED, NO_ACCOUNTS, ACCOUNT_CREATED]);
     await without.adapter.createVirtualAccount(NEW_CUSTOMER);
-    expect(without.calls[2]?.body).toEqual({ customer: 'CUS_abc' });
+    expect(without.calls[2]?.body).toEqual({ customer: 'CUS_abc', ...IDENTITY });
+  });
+
+  it('SENDS THE NAME AND PHONE WITH THE ACCOUNT, not only with the customer', async () => {
+    /*
+     * "Customer has not been identified", twice in production. The Paystack
+     * customer had been created earlier by a checkout, from an email alone,
+     * and `POST /customer` answered that record without the name or the
+     * number — so an account asked for with only the customer code was
+     * refused. The account call carries them now.
+     */
+    const known = adapterWith([NO_ACCOUNTS, ACCOUNT_CREATED]);
+    await known.adapter.createVirtualAccount({
+      ...NEW_CUSTOMER,
+      customer: { ...NEW_CUSTOMER.customer, providerCustomerId: 'CUS_from_checkout' },
+    });
+    const create = known.calls.find((c) => c.path === '/dedicated_account' && c.method === 'POST');
+    expect(create?.body).toMatchObject({ customer: 'CUS_from_checkout', ...IDENTITY });
   });
 });
 

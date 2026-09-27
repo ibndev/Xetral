@@ -212,6 +212,18 @@ export class PaystackFundingAdapter implements FundingPort {
         {
           customer: customerCode,
           ...(preferredBank === undefined ? {} : { preferred_bank: preferredBank }),
+          /*
+           * THE NAME AND PHONE GO ON THIS CALL TOO, and their absence was
+           * "Customer has not been identified". A Paystack customer is often
+           * created FIRST by a checkout, from an email address alone; `POST
+           * /customer` then answers that existing record without adding the
+           * name or the number, and a dedicated account asked for against it
+           * was refused. Paystack takes `first_name`, `last_name` and `phone`
+           * here for exactly that case.
+           */
+          first_name: request.customer.firstName,
+          last_name: request.customer.lastName,
+          ...(request.customer.phone === undefined ? {} : { phone: request.customer.phone }),
         },
       );
     } catch (error) {
