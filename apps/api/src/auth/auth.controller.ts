@@ -22,6 +22,7 @@ import {
   LoginRateLimitGuard,
   PasswordResetRateLimitGuard,
   SignupCodeRateLimitGuard,
+  SignupPhoneRateLimitGuard,
 } from './login-rate-limit.guard.js';
 import { SignupEmailService } from './signup-email.service.js';
 import { SettingsService } from '../settings/settings.service.js';
@@ -32,6 +33,7 @@ import {
   loginSchema,
   registerSchema,
   signupCodeSchema,
+  signupPhoneSchema,
   refreshSchema,
   updateProfileSchema,
   resetPasswordSchema,
@@ -332,6 +334,27 @@ export class AuthController {
       throw new ForbiddenException({ error: 'registration_closed' });
     }
     return this.signupEmail.sendCode(parsed.data.email);
+  }
+
+  /**
+   * Whether a phone number is free, asked as it is typed.
+   *
+   * 409 `phone_taken` when it already belongs to an account — the refusal
+   * registration gives, moved to where somebody is still looking at the box,
+   * so they are told to use another number before filling in the rest.
+   */
+  @Post('signup/phone-check')
+  @HttpCode(200)
+  @UseGuards(SignupPhoneRateLimitGuard)
+  async signupPhoneCheck(@Body() body: unknown): Promise<{ readonly available: true }> {
+    const parsed = signupPhoneSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException({
+        error: 'invalid_request',
+        fields: parsed.error.issues.map((issue) => issue.path.join('.')),
+      });
+    }
+    return this.auth.phoneAvailable(parsed.data.country, parsed.data.phone);
   }
 
   /**

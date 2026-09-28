@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { FALLBACK_COUNTRY } from '@xetral/client';
+import { ApiError, FALLBACK_COUNTRY } from '@xetral/client';
 import type { XetralCountry } from '@xetral/client';
 import { resetXetral, xetral } from '@/lib/session';
 import { deviceFingerprint } from '@/lib/device';
@@ -112,6 +112,33 @@ export default function SignUp() {
   const codeNeeded = codeState === 'sent' && sentTo === address;
 
   /*
+   * A NUMBER ALREADY ON AN ACCOUNT IS SAID WHILE THEY ARE AT THE BOX, not
+   * after the whole form. Asked after a pause in typing, for the number in the
+   * country chosen — the server normalises it exactly as registration does, so
+   * "free" here is a number registration will not then refuse.
+   */
+  const [phoneError, setPhoneError] = useState<string | undefined>();
+  useEffect(() => {
+    setPhoneError(undefined);
+    if (phone.length < 7 || country === '') return undefined;
+    let live = true;
+    const timer = setTimeout(() => {
+      xetral()
+        .session.checkSignupPhone(country, phone)
+        .catch((cause: unknown) => {
+          // Only the one answer that is about the NUMBER is shown here; a
+          // limit or an outage is not the customer's number being wrong, and
+          // registration still refuses a duplicate either way.
+          if (live && cause instanceof ApiError && cause.code === 'phone_taken') setPhoneError(messageFor(cause));
+        });
+    }, 700);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [country, phone]);
+
+  /*
    * THE COUNTRY LIST COMES FROM THE SERVER, not from a constant in this file.
    *
    * That is the whole point of 040: an operator opens a country from the
@@ -169,6 +196,7 @@ export default function SignUp() {
       return;
     }
     setMismatch(false);
+    if (phoneError !== undefined) return;
 
     if (codeState !== 'not_required' && (sentTo !== address || code.length !== 6)) {
       setCodeError(
@@ -299,7 +327,7 @@ export default function SignUp() {
                 {cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend code'}
               </button>
             </div>
-            <p className="hint">Sent to {sentTo}. Check spam if it is not there in a minute.</p>
+            <p className="hint">Sent to {sentTo}. It expires in five minutes.</p>
           </div>
         )}
 
@@ -354,9 +382,13 @@ export default function SignUp() {
               // plus, a space, a bracket — is stripped rather than refused,
               // because a number copied from a contact card is not a mistake.
               onChange={(e) => setPhone(e.target.value.replace(/[^0-9]/g, ''))}
+              aria-invalid={phoneError !== undefined}
               required
             />
           </div>
+          {phoneError !== undefined && (
+            <p className="error"><Icon name="alert" size={16} /> {phoneError}</p>
+          )}
         </div>
 
         <div className="field">
@@ -370,7 +402,7 @@ export default function SignUp() {
             onChange={(e) => setPassword(e.target.value)}
             required
           />
-          <p className="hint">Length beats punctuation — a phrase you remember is stronger than P@ssw0rd.</p>
+          <p className="hint">Use a strong password.</p>
         </div>
 
         <div className="field">

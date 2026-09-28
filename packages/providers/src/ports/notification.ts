@@ -58,6 +58,9 @@ export interface NotificationReceipt {
   /** The provider's own id, kept so a deliverability question can be traced
    *  back to one specific message rather than to "some email that day". */
   readonly providerMessageId: string;
+  /** The address it was actually sent FROM, where the adapter chose one —
+   *  Brevo's may replace a configured sender it has not verified. */
+  readonly from?: string;
 }
 
 /** One thing the provider did with a message after accepting it. */

@@ -38,6 +38,7 @@ shipped, that is called out explicitly.
 | 27 — Who carries what, as the owner assigned it | ✅ | a confirmed Kenyan collection provider |
 | 28 — Recovery that asks first, and the requests that never arrived | ✅ | a verified Brevo sender, and a run of the refund audit |
 | 29 — One recovery list, a proved signup address, and verified meaning reviewed | ✅ | migrations 084 and 085, and an EAS projectId for push |
+| 30 — Mail from app.xetral.com, a bell that means something, counts that go away | ✅ | the Brevo key and authorised IPs, and an EAS projectId for push |
 
 All eleven phases are built, a **pre-deployment audit** (Phase 12) closed what
 building them phase by phase had left between the phases, and **Phase 13** is
@@ -2641,3 +2642,29 @@ re-apply **099** (085 moves any account verified without a reviewed identity
 back to tier 0 — a ceiling, not a balance); open `/admin/notifications`,
 press a password-reset row and read what Brevo says happened to it; and, for
 push, run `eas init` in `apps/mobile` and rebuild.
+
+---
+
+## Phase 30 — Mail from app.xetral.com, a bell that means something, counts that go away ✅
+
+| File | What it is |
+|---|---|
+| `apps/api/src/notifications/notification.service.ts` | `sendTest`: one message to yourself, the provider's own answer |
+| `apps/web/src/app/admin/notifications/page.tsx` | the Send test panel |
+| `apps/api/src/auth/auth.service.ts` | `phoneAvailable`, behind `POST /v1/auth/signup/phone-check` |
+| `packages/client/src/announcements.ts` | whether the bell has something new |
+| `apps/api/src/admin/recovery.service.ts` | `openCount`, and asking about day-old sent payouts |
+
+1. **Brevo's only sender was on an unauthenticated domain**; it is
+   `hello@app.xetral.com` now, and Brevo delivered a test from it at once.
+2. **Brevo had logged no Xetral request in thirty days**, so the app's calls are
+   refused before Brevo records them. The Send test button shows why.
+3. **The bell's dot was drawn always**; it is red and means unread.
+4. **The recovery badge counted payouts the page never showed.**
+
+**Before this goes live, an operator must:** open `/admin/notifications`, press
+**Send test**, and act on what Brevo says — most likely paste the API key from
+the Brevo account that owns `app.xetral.com` at `/admin/credentials`, or add the
+server's address under Brevo → Security → Authorised IPs; remove any
+`PASSWORD_RESET_TTL_MINUTES=30` from the environment; and, for push, run
+`eas init` in `apps/mobile`, add the Firebase key to Expo, and rebuild.

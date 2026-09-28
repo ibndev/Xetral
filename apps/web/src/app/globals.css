@@ -1694,7 +1694,12 @@ button.danger:hover:where(:not(:disabled)) { filter: brightness(.94); }
 
 /* "Didn't get it? Resend code" under a one-time code field. */
 .resend { margin: 6px 0 0; font-size: 13.5px; color: var(--text-3); display: flex; gap: 4px; align-items: baseline; flex-wrap: wrap; }
-.resend button.link { font-size: inherit; }
+/* RESEND IS BLUE, NOT THE LINK INK. In light the link colour is near-black,
+   and beside the grey hint it read as more of the sentence — the owner asked
+   for it clearly highlighted. Counting down it keeps the colour, so it still
+   reads as the thing to press once the wait is over. */
+.resend button.link, .resend button.link:hover { font-size: inherit; color: var(--info); }
+.resend button.link:disabled { opacity: 1; color: var(--info); cursor: default; }
 
 /* A row of buttons. It carries its own top margin because a button pressed
    against the paragraph explaining it was the most common of the reported
@@ -5959,7 +5964,8 @@ html, body { overflow-x: hidden; overflow-x: clip; }
   top: 8px; right: 9px;
   width: 8px; height: 8px;
   border-radius: 50%;
-  background: var(--iris);
+  /* Red: it means an announcement nobody on this device has read yet. */
+  background: var(--danger);
   border: 2px solid var(--bg);
   pointer-events: none;
 }
@@ -6344,10 +6350,17 @@ html, body { overflow-x: hidden; overflow-x: clip; }
   border: 0;
   border-radius: 0;
   background: none;
+  box-shadow: none;
+  outline: none;
   color: var(--text);
 }
 .cv-figure::placeholder { color: var(--text-3); }
-.cv-figure:focus, .cv-figure:focus-visible { outline: none; border: 0; background: none; }
+/* NO BOX AROUND THE FIGURE, IN ANY STATE. The bare input rule draws a focus
+   RING as a box-shadow, and restating the border and background here left
+   the ring standing — a square around the amount on every tap. */
+.cv-figure:hover, .cv-figure:focus, .cv-figure:focus-visible {
+  outline: none; border: 0; background: none; box-shadow: none;
+}
 /* THE LANDED FIGURE IS QUIETER THAN THE TYPED ONE, which is the comp's own
    distinction: one is what the customer said and the other is what we are
    answering. */
@@ -7048,6 +7061,11 @@ html[data-theme='dark'] .admin-frame {
 .admin-frame .status-bar.warn .status-icon { background: var(--warn-bg); color: var(--warn); }
 .admin-frame .status-bar strong { display: block; font-size: 14px; font-weight: 700; }
 .admin-frame .status-bar small { display: block; margin-top: 2px; font-size: 12px; font-weight: 500; color: var(--text-3); }
+.admin-frame .panel.mail-test { display: flex; flex-direction: column; gap: 10px; padding: 14px 18px; }
+.admin-frame .mail-test-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.admin-frame .mail-test-head strong { display: block; font-size: 14px; font-weight: 700; }
+.admin-frame .mail-test-head small { display: block; margin-top: 2px; font-size: 12px; font-weight: 500; color: var(--text-3); }
+.admin-frame .mail-test .notice { margin: 0; }
 .admin-frame td.owed { color: var(--warn); font-weight: 700; }
 .admin-frame td.paid { color: var(--ok); font-weight: 700; }
 .admin-frame .tbl-head .xselect { flex: 0 0 170px; }

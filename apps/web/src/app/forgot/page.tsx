@@ -176,19 +176,20 @@ export default function Forgot() {
                   onChange={(e) => setCode(e.target.value)}
                   required
                 />
-                <p className="hint">
-                  It expires in thirty minutes and works once. Five wrong tries
-                  and you will need a new one.
-                </p>
+                <p className="hint">It expires in five minutes.</p>
                 <p className="resend">
                   {resent ? 'A new code is on its way. ' : 'Didn’t get it? '}
-                  {wait > 0 ? (
-                    <span>Resend code in {wait}s</span>
-                  ) : (
-                    <button type="button" className="link" disabled={busy} onClick={() => void resend()}>
-                      Resend code
-                    </button>
-                  )}
+                  {/* ALWAYS THE LINK COLOUR, counting down or not: in the
+                      hint's grey it read as a sentence, not as something to
+                      press. It becomes pressable when the countdown ends. */}
+                  <button
+                    type="button"
+                    className="link"
+                    disabled={busy || wait > 0}
+                    onClick={() => void resend()}
+                  >
+                    {wait > 0 ? `Resend code in ${wait}s` : 'Resend code'}
+                  </button>
                 </p>
               </div>
 
@@ -213,10 +214,7 @@ export default function Forgot() {
                     <Icon name={show ? 'eyeOff' : 'eye'} size={19} />
                   </button>
                 </div>
-                <p className="hint">
-                  Length beats punctuation — a phrase you remember is stronger
-                  than P@ssw0rd.
-                </p>
+                <p className="hint">Use a strong password.</p>
               </div>
 
               <div className="field">

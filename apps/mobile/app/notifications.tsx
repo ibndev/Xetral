@@ -3,7 +3,9 @@ import type { Announcement } from '@xetral/client';
 import { Shell } from '@/shell';
 import { Icon } from '@/icon';
 import { Empty, FormError, Loading } from '@/ui';
+import { useEffect } from 'react';
 import { useLoad, useXetral } from '@/hooks';
+import { markAnnouncementsSeen } from '@/announcements-seen';
 import { cardShadow, font, useTheme } from '@/theme';
 
 /**
@@ -11,14 +13,17 @@ import { cardShadow, font, useTheme } from '@/theme';
  *
  * The announcements `/admin/broadcasts` publishes, read on request: the same
  * rows the worker pushes to a lock screen, so a customer who declined product
- * news, or whose handset never registered, can still read them here. No count
- * and no unread state, because nothing records what a customer has read.
+ * news, or whose handset never registered, can still read them here. Opening
+ * it clears the bell's red dot up to the newest one drawn. Never a count.
  */
 export default function Notifications() {
   const client = useXetral();
   const colors = useTheme();
   const feed = useLoad(() => client.announcements(), [client]);
   const items = feed.data?.announcements ?? [];
+  useEffect(() => {
+    if (feed.data !== undefined) void markAnnouncementsSeen(feed.data.announcements);
+  }, [feed.data]);
 
   return (
     <Shell back="/wallet" title="Notifications">

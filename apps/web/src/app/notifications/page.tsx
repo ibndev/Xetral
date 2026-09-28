@@ -2,7 +2,9 @@
 
 import { Shell } from '@/ui/shell';
 import { Icon } from '@/ui/icon';
+import { useEffect } from 'react';
 import { useLoad, useXetral } from '@/lib/hooks';
+import { markAnnouncementsSeen } from '@/lib/announcements-seen';
 
 /**
  * WHAT THE BELL OPENS: the announcements the platform has published.
@@ -13,14 +15,17 @@ import { useLoad, useXetral } from '@/lib/hooks';
  * had declined product news, never saw "the app is down tonight" at all.
  *
  * The same rows `/admin/broadcasts` writes and the worker pushes, read on
- * request. No count and no unread state: nothing records what a customer has
- * read, and a badge reading a number nothing counted is the fault the bell's
- * dot comment already records.
+ * request. Opening it is what "read" means: the bell's red dot is cleared up
+ * to the newest announcement drawn here. Still no count — a badge reading a
+ * number nothing counted is the fault the bell's comment records.
  */
 export default function Notifications() {
   const client = useXetral();
   const feed = useLoad(() => client.announcements(), [client]);
   const items = feed.data?.announcements ?? [];
+  useEffect(() => {
+    if (feed.data !== undefined) markAnnouncementsSeen(feed.data.announcements);
+  }, [feed.data]);
 
   return (
     <Shell back="/wallet" title="Notifications">

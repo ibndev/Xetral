@@ -158,7 +158,7 @@ export function testApiConfig(databaseUrl: string, overrides: Partial<ApiConfig>
     adminBootstrapEmail: undefined,
     // No provider reaches a test suite, so there is nothing to publish.
     webhookBaseUrl: undefined,
-    passwordResetTtlMinutes: 30,
+    passwordResetTtlMinutes: 5,
     operationsEmail: 'ops@xetral.test',
     errorAlertIntervalSeconds: undefined,
     notificationAllowlist: [],

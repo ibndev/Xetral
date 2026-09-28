@@ -457,6 +457,16 @@ export class AdminController {
   }
 
   /**
+   * One test email to the caller's own address, and the provider's own
+   * answer — the question "why does the code never arrive?" put directly.
+   */
+  @Post('notifications/test')
+  @HttpCode(200)
+  async notificationTest(@Req() request: AuthenticatedRequest): Promise<Record<string, unknown>> {
+    return this.outbox.sendTest(claims(request).sub);
+  }
+
+  /**
    * What the email provider did with one message after accepting it —
    * delivered, blocked, bounced, spam. The outbox can only say "sent", and a
    * reset code that never arrived was, by then, somewhere only this answers.
@@ -483,6 +493,12 @@ export class AdminController {
   @Get('recovery')
   async recoveryQueue(): Promise<{ items: readonly RecoveryItem[]; summary: RecoverySummary }> {
     return this.recovery.list();
+  }
+
+  /** How many rows the list would show as open, for the sidebar badge. No provider is asked. */
+  @Get('recovery/count')
+  async recoveryCount(): Promise<{ readonly open: number }> {
+    return this.recovery.openCount();
   }
 
   /** One row, opened: its detail, the provider's answer NOW, and its history. */

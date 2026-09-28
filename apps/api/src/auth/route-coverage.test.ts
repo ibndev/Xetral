@@ -123,6 +123,7 @@ describe('the public surface is small and justified', () => {
       // Proving a signup address. Public because nobody signing up has a
       // session; limited per address, like the reset request.
       'POST /v1/auth/signup/email-code',
+      'POST /v1/auth/signup/phone-check',
       // The public checkout. Public IS the feature: a payment link payable
       // only by an existing customer is a shortcut, not a payment link.
       'POST /v1/pay/:slug/charge',
@@ -252,6 +253,7 @@ describe('the privileged surface is declared as privileged', () => {
       'GET /v1/admin/recovery (support)',
       // One held row opened, the provider asked on this request. A read.
       'GET /v1/admin/recovery/:kind/:id (support)',
+      'GET /v1/admin/recovery/count (support)',
       'GET /v1/admin/risk/cases (compliance)',
       'GET /v1/admin/risk/cases/:id (compliance)',
       'GET /v1/admin/risk/signals (compliance)',
@@ -296,6 +298,7 @@ describe('the privileged surface is declared as privileged', () => {
       'POST /v1/admin/giftcards/:id/reveal (giftcard_reviewer)',
       'POST /v1/admin/giftcards/:id/review (giftcard_reviewer)',
       'POST /v1/admin/kyc/:id/review (compliance)',
+      'POST /v1/admin/notifications/test (support)',
       // Publishing a price. `finance`, and every write takes a PIN — nothing
       // in the application ever wrote either price table before this.
       'POST /v1/admin/prices/:id/retire (finance)',

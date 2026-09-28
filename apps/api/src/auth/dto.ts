@@ -78,6 +78,14 @@ export const signupCodeSchema = z
   .object({ email: z.string().trim().toLowerCase().email().max(255) })
   .strict();
 
+/** Asking whether a phone number is free before the form is submitted. */
+export const signupPhoneSchema = z
+  .object({
+    country: z.string().trim().toUpperCase().length(2).regex(/^[A-Z]{2}$/),
+    phone: z.string().trim().regex(/^[0-9]{4,15}$/),
+  })
+  .strict();
+
 export const refreshSchema = z.object({
   refresh_token: z.string().min(1).max(512),
 });

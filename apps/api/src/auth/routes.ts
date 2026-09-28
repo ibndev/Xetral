@@ -127,6 +127,14 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       )
       .public(
         'POST',
+        '/v1/auth/signup/phone-check',
+        'somebody signing up has no session yet. It answers only whether a number already ' +
+          'has an account — the fact registration itself states on a collision — so a ' +
+          'newcomer is told to use another number while still at the box; limited per ' +
+          'number and per address on its own bucket',
+      )
+      .public(
+        'POST',
         '/v1/auth/password/reset',
         'authenticated by the single-use token from the reset email, which is checked ' +
           'by consume_password_reset_token under a row lock; the caller has no session ' +
@@ -476,12 +484,17 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // What the email provider did with one message: delivered, blocked,
       // bounced. A read, support's, because "I never got the code" is theirs.
       .staff('GET', '/v1/admin/notifications/:outbox/delivery', { pin: false, role: 'support' })
+      // One test email to the CALLER'S OWN address, answered with the
+      // provider's sentence. Mails nobody else, moves nothing: no PIN.
+      .staff('POST', '/v1/admin/notifications/test', { pin: false, role: 'support' })
       /*
        * MONEY WAITING FOR A PERSON. A READ, on `support` — it names customers
        * whose money is held, which is exactly who support is fielding calls
        * from.
        */
       .staff('GET', '/v1/admin/recovery', { pin: false, role: 'support' })
+      // The sidebar's count of it: a number, no provider asked.
+      .staff('GET', '/v1/admin/recovery/count', { pin: false, role: 'support' })
       // One row opened: the provider is asked about it on this request. Still
       // a read, and support's for the same reason as the list.
       .staff('GET', '/v1/admin/recovery/:kind/:id', { pin: false, role: 'support' })

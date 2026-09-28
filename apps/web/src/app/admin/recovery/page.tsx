@@ -12,7 +12,7 @@ import type {
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
 import { AdminError } from '../access';
-import { AdminTitle } from '@/app/admin/nav';
+import { AdminTitle, QUEUES_CHANGED } from '@/app/admin/nav';
 import { ago } from '../age';
 import { Kpis, MoneyFigure, shortRef } from '../queue';
 
@@ -43,6 +43,19 @@ export default function Recovery() {
   const items = [...(queue.data?.items ?? [])].sort((a, b) => ORDER[a.state] - ORDER[b.state]);
   const summary = queue.data?.summary;
   const review = items.filter((i) => i.state === 'needs_review').length;
+  const stuck = items.filter((i) => i.state === 'stuck').length;
+  /*
+   * THE COUNTS ARE FOR WHEN SOMETHING IS WRONG. With nothing stuck and
+   * nothing to review there is nothing to count, and a row of zeros over an
+   * empty list read as four problems waiting to be found.
+   */
+  const attention = stuck + review > 0;
+
+  // Loading this list closes what providers answer for, so the sidebar's
+  // count is re-read the moment it arrives.
+  useEffect(() => {
+    if (queue.data !== undefined) window.dispatchEvent(new Event(QUEUES_CHANGED));
+  }, [queue.data]);
 
   const done = (outcome: AdminRecoveryOutcome): void => {
     setSaid(outcome);
@@ -53,10 +66,11 @@ export default function Recovery() {
   return (
     <>
       <AdminTitle>Recovery</AdminTitle>
+      {attention && (
       <Kpis
         items={[
-          { label: 'Stuck', count: summary?.stuck, tone: 'warn' },
-          { label: 'Needs review', count: queue.data === undefined ? undefined : review, tone: 'danger' },
+          { label: 'Stuck', count: stuck, tone: 'warn' },
+          { label: 'Needs review', count: review, tone: 'danger' },
           {
             label: 'Value held',
             value: summary === undefined ? undefined : <MoneyFigure totals={summary.held} />,
@@ -67,6 +81,7 @@ export default function Recovery() {
           },
         ]}
       />
+      )}
 
       {said !== undefined && (
         <div className={`notice${said.outcome === 'held' ? ' warn' : ''}`} role="status">
@@ -87,9 +102,12 @@ export default function Recovery() {
         <AdminError error={queue.error} code={queue.code} role="support" />
         {queue.loading && queue.data === undefined && <p className="spinner">Asking providers…</p>}
         {queue.data !== undefined && items.length === 0 && (
-          <p className="empty">Nothing is held, and nothing was resolved this week.</p>
+          <p className="empty">Nothing needs attention.</p>
         )}
 
+        {queue.data !== undefined && !attention && items.length > 0 && (
+          <p className="empty">Nothing needs attention. Closed this week:</p>
+        )}
         {items.length > 0 && (
           <div className="scroll">
             <table className="rec-table">

@@ -171,6 +171,21 @@ export class Session {
     return { required: (body as { required?: unknown } | undefined)?.required !== false };
   }
 
+  /**
+   * Whether a phone number is free, asked while the customer is still at the
+   * box. Throws `phone_taken` when it belongs to an existing account.
+   */
+  async checkSignupPhone(country: string, phone: string): Promise<void> {
+    const response = await this.#fetch(`${this.#baseUrl}/v1/auth/signup/phone-check`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ country, phone }),
+    });
+    if (response.ok) return;
+    const body: unknown = await response.json().catch(() => undefined);
+    throw toApiError(response.status, body);
+  }
+
   async register(input: {
     email: string;
     /** The six digits `requestSignupCode` mailed, where one was required. */

@@ -25,7 +25,7 @@ async function enforce(
   clock: Clock,
   bucket: string,
   rules: { readonly perIdentifier: RateLimitRule; readonly perIp: RateLimitRule },
-  field: 'identifier' | 'email' = 'identifier',
+  field: 'identifier' | 'email' | 'phone' = 'identifier',
 ): Promise<boolean> {
   const request = context.switchToHttp().getRequest<Request>();
   const now = clock.nowMs();
@@ -149,5 +149,27 @@ export class SignupCodeRateLimitGuard implements CanActivate {
       this.config.passwordResetRateLimit,
       'email',
     );
+  }
+}
+
+/**
+ * Applied to the signup phone check.
+ *
+ * A check answers whether a number already has an account, which is the same
+ * fact registration itself reveals — but asked on its own it costs nothing,
+ * so it is limited per number AND per address on its own bucket, the login
+ * rules: generous enough for somebody correcting a typo, tight enough that
+ * walking a number range is slow.
+ */
+@Injectable()
+export class SignupPhoneRateLimitGuard implements CanActivate {
+  constructor(
+    @Inject(RATE_LIMIT_STORE) private readonly store: RateLimitStore,
+    @Inject(API_CONFIG) private readonly config: ApiConfig,
+    @Inject(CLOCK) private readonly clock: Clock,
+  ) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    return await enforce(context, this.store, this.clock, 'signup_phone', this.config.loginRateLimit, 'phone');
   }
 }

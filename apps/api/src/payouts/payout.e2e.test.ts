@@ -961,6 +961,44 @@ describe('the sweep that gives held money back', () => {
     expect(late.items.find((i) => i.subject_uuid === uuid)?.state).toMatch(/stuck|needs_review/);
   });
 
+  it('THE SIDEBAR COUNT IS THE LIST\'S: nothing under half an hour, and zero once it is closed', async () => {
+    const { uuid, reference } = await heldPayout();
+    port.byReferenceAnswer = undefined;
+    const recovery = app.get(RecoveryService);
+    const before = (await recovery.openCount()).open;
+    // Fresh: in flight, not stuck — not counted, not in the summary.
+    await pool.query(`UPDATE bank_payouts SET created_at = now() - interval '1 hour' WHERE uuid = $1::uuid`, [uuid]);
+    expect((await recovery.openCount()).open).toBe(before + 1);
+    // The provider answers: the list closes it, and the count goes with it.
+    port.byReferenceAnswer = { providerPayoutId: 'TRF_counted', state: 'completed', reference };
+    const { summary } = await recovery.list();
+    const after = (await recovery.openCount()).open;
+    // Other suites' held rows may be closed by the same pass, never added.
+    expect(after).toBeLessThanOrEqual(before);
+    expect(summary.stuck).toBe(after);
+  });
+
+  it('THE LIST ASKS ABOUT A PAYOUT SENT A DAY AGO WITH NO FINAL WORD, and completes it', async () => {
+    const customer = await onboard();
+    await fund(customer.userId, 1_000_000n);
+    port.sendAnswer = { providerPayoutId: 'po_day_old', state: 'sent' };
+    await pay(customer).expect(200);
+    const sent = await pool.query<{ uuid: string }>(
+      `SELECT uuid FROM bank_payouts WHERE user_id = $1::bigint AND status = 'sent'`,
+      [customer.userId],
+    );
+    const uuid = sent.rows[0]!.uuid;
+    await pool.query(`UPDATE bank_payouts SET created_at = now() - interval '25 hours' WHERE uuid = $1::uuid`, [uuid]);
+    port.statusAnswer = { providerPayoutId: 'po_day_old', state: 'completed' };
+    try {
+      await app.get(RecoveryService).list();
+    } finally {
+      port.statusAnswer = { providerPayoutId: 'po_1', state: 'completed' };
+    }
+    const row = await pool.query<{ status: string }>(`SELECT status FROM bank_payouts WHERE uuid = $1::uuid`, [uuid]);
+    expect(row.rows[0]?.status).toBe('completed');
+  });
+
   it('A PAYSTACK TRANSFER EVENT IS READ — and its body decides nothing', async () => {
     /*
      * `transfer.success` and `transfer.failed` fell into the deposit path and

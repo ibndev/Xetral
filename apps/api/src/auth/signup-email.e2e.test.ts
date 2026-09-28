@@ -12,6 +12,7 @@ import { AppModule } from '../app.module.js';
 import { systemClock } from '../tokens.js';
 import { testApiConfig } from '../test-support/api-config.js';
 import { SettingsService } from '../settings/settings.service.js';
+import { NotificationService } from '../notifications/notification.service.js';
 
 /**
  * AN ACCOUNT IS OPENED ONLY ON AN ADDRESS SOMEBODY HAS PROVED.
@@ -75,7 +76,7 @@ async function codeMailedTo(email: string): Promise<string> {
   throw new Error(`no code was mailed to ${email}`);
 }
 
-const register = (email: string, code?: string) =>
+const register = (email: string, code?: string, phone?: string) =>
   request(app.getHttpServer())
     .post('/v1/auth/register')
     .send({
@@ -83,7 +84,7 @@ const register = (email: string, code?: string) =>
       password: 'a-long-enough-password',
       full_name: 'Adaeze Okonkwo',
       country: 'NG',
-      phone: String(8000000000 + Math.floor(Math.random() * 999999999)),
+      phone: phone ?? String(8000000000 + Math.floor(Math.random() * 999999999)),
       ...(code === undefined ? {} : { email_code: code }),
       device: { fingerprint: `fp-${randomUUID()}`, platform: 'web' },
     });
@@ -102,6 +103,42 @@ describe('a name, not filler', () => {
       })
       .expect(400);
     expect(refused.body.error).toBe('name_invalid');
+  });
+});
+
+describe('a phone number already on an account', () => {
+  it('IS SAID AT THE BOX, before the form is sent, in the country chosen', async () => {
+    const email = address();
+    await request(app.getHttpServer()).post('/v1/auth/signup/email-code').send({ email }).expect(200);
+    const phone = String(8000000000 + Math.floor(Math.random() * 999999999));
+    await register(email, await codeMailedTo(email), phone).expect(201);
+
+    const taken = await request(app.getHttpServer())
+      .post('/v1/auth/signup/phone-check')
+      .send({ country: 'NG', phone: `0${phone}` })
+      .expect(409);
+    expect(taken.body.error).toBe('phone_taken');
+
+    const free = await request(app.getHttpServer())
+      .post('/v1/auth/signup/phone-check')
+      .send({ country: 'NG', phone: String(Number(phone) + 1) })
+      .expect(200);
+    expect(free.body).toEqual({ available: true });
+  });
+});
+
+describe('the operator\'s test email', () => {
+  it('GOES TO THE CALLER\'S OWN ADDRESS and reports the provider\'s answer', async () => {
+    const email = address();
+    await request(app.getHttpServer()).post('/v1/auth/signup/email-code').send({ email }).expect(200);
+    await register(email, await codeMailedTo(email)).expect(201);
+    const who = await pool.query<{ uuid: string }>(`SELECT uuid FROM users WHERE email = $1`, [email]);
+
+    const result = await app.get(NotificationService).sendTest(who.rows[0]!.uuid);
+    expect(result.sent).toBe(true);
+    expect(result.to).toBe(email);
+    expect(result.error).toBeNull();
+    expect(mailer.sent.at(-1)?.to).toBe(email);
   });
 });
 

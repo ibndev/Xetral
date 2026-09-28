@@ -206,6 +206,21 @@ export class AuthService {
   ) {}
 
   /**
+   * Whether a national number, in a country, is free to register.
+   *
+   * Normalised exactly as `register` does — the same E.164 the unique index
+   * holds — so a number this answers "free" for is one registration will not
+   * then refuse, and "taken" here is the same fact registration would state.
+   */
+  async phoneAvailable(countryCode: string, nationalPhone: string): Promise<{ readonly available: true }> {
+    const country = await this.countries.requireOpen(countryCode);
+    const phone = `+${country.dial_code}${nationalPhone.replace(/^0+/, '')}`;
+    const found = await this.pool.query(`SELECT 1 FROM users WHERE phone = $1`, [phone]);
+    if ((found.rowCount ?? 0) > 0) throw new ConflictException({ error: 'phone_taken' });
+    return { available: true };
+  }
+
+  /**
    * Opens an account and signs the customer straight in.
    *
    * One transaction: the user, their credential, and the first session. A

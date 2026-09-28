@@ -15,7 +15,7 @@ import { NotificationWorker } from '../notifications/notification.worker.js';
 import { SettingsService } from '../settings/settings.service.js';
 
 /** Minutes a signup code lives. Long enough to find the email, short enough to be worthless later. */
-const CODE_TTL_MINUTES = 15;
+const CODE_TTL_MINUTES = 5;
 /** Wrong guesses across an address's live codes before even the right one is refused. */
 const MAX_ATTEMPTS = 5;
 

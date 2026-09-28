@@ -241,8 +241,35 @@ export class RecoveryService {
         }
       }),
     );
+    /*
+     * AND A PAYOUT SENT A DAY AGO WITH NO FINAL WORD. Not held — the money
+     * left — so it is not a row here; but it is what `bank_payouts_stuck`
+     * counts, and a missed webhook leaves it there for ever. Asked on the
+     * same terms: arrived completes it, failed gives it back, and silence
+     * changes nothing.
+     */
+    const unfinished = this.pool
+      .query<PayoutRow>(
+        `SELECT * FROM bank_payouts
+          WHERE status = 'sent' AND created_at < now() - interval '24 hours'
+          ORDER BY created_at LIMIT 10`,
+      )
+      .then((rows) =>
+        Promise.all(
+          rows.rows.map((row) =>
+            this.payouts.resolveWithRail(row).catch((error: unknown) => {
+              this.#logger.warn(`recovery list could not ask about sent payout ${row.uuid}: ${describe(error)}`);
+            }),
+          ),
+        ),
+      )
+      .catch(() => undefined);
     const auditing = this.auditRefunded(25).catch(() => undefined);
-    const [, audit] = await Promise.all([withinBudget(asking), withinBudget(auditing)]);
+    const [, audit] = await Promise.all([
+      withinBudget(asking),
+      withinBudget(auditing),
+      withinBudget(unfinished),
+    ]);
 
     const held = (await this.waiting()).filter((row) => row.hours_held >= REVIEW_AFTER_HOURS);
     const items: RecoveryItem[] = held.map((row) => ({
@@ -461,14 +488,31 @@ export class RecoveryService {
    * integers and their sum is nothing. Largest first, so the tile leads with
    * the figure that matters most.
    */
+  /**
+   * How many rows the list would show as open — for the sidebar badge, which
+   * must say nothing when the list has nothing. Cheap: no provider is asked.
+   */
+  async openCount(): Promise<{ readonly open: number }> {
+    const rows = await this.pool.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM money_awaiting_recovery WHERE hours_held >= $1`,
+      [REVIEW_AFTER_HOURS],
+    );
+    return { open: Number(rows.rows[0]?.n ?? 0) };
+  }
+
   async summary(): Promise<RecoverySummary> {
     try {
       const [held, recovered] = await Promise.all([
         this.pool.query<{ currency: string; amount_minor: string; n: string }>(
+          // ONLY WHAT THE LIST SHOWS. A payout sent a minute ago is in
+          // flight, not stuck; counting it put a figure on this screen above
+          // a list with nothing in it, and the figure never went away.
           `SELECT currency, sum(amount_minor)::text AS amount_minor, count(*)::text AS n
              FROM money_awaiting_recovery
+            WHERE hours_held >= $1
             GROUP BY currency
             ORDER BY sum(amount_minor) DESC`,
+          [REVIEW_AFTER_HOURS],
         ),
         this.pool.query<{ currency: string; amount_minor: string }>(
           `SELECT currency, sum(amount_minor)::text AS amount_minor

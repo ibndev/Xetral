@@ -128,6 +128,7 @@ import {
   LoginRateLimitGuard,
   PasswordResetRateLimitGuard,
   SignupCodeRateLimitGuard,
+  SignupPhoneRateLimitGuard,
 } from './auth/login-rate-limit.guard.js';
 import { RequestRateLimiter } from './auth/request-rate-limit.service.js';
 import { AdminDisputeController, DisputeController } from './disputes/dispute.controller.js';
@@ -1537,6 +1538,7 @@ export class AppModule {
         LoginRateLimitGuard,
         PasswordResetRateLimitGuard,
         SignupCodeRateLimitGuard,
+        SignupPhoneRateLimitGuard,
         // Injected into AuthGuard rather than registered as a second global
         // guard: it has to run after the bearer check (so it has an account to
         // count against) and before the PIN (so a flood cannot spend scrypt).

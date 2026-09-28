@@ -10,7 +10,7 @@ describe('what production left out', () => {
     const applied = await applyDeploymentDefaults(env, up);
     expect(applied).toEqual(['APP_BASE_URL', 'NOTIFICATION_FROM', 'REDIS_URL']);
     expect(env['APP_BASE_URL']).toBe('https://app.xetral.com');
-    expect(env['NOTIFICATION_FROM']).toBe('Xetral <no-reply@xetral.com>');
+    expect(env['NOTIFICATION_FROM']).toBe('Xetral <hello@app.xetral.com>');
     expect(env['REDIS_URL']).toBe('redis://redis:6379');
     expect(env[DEFAULTED_MARKER]).toBe('APP_BASE_URL,NOTIFICATION_FROM,REDIS_URL');
   });

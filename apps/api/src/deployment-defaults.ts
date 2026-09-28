@@ -33,7 +33,7 @@ import { createConnection } from 'node:net';
  */
 export const PRODUCTION_DEFAULTS = {
   APP_BASE_URL: 'https://app.xetral.com',
-  NOTIFICATION_FROM: 'Xetral <no-reply@xetral.com>',
+  NOTIFICATION_FROM: 'Xetral <hello@app.xetral.com>',
 } as const;
 
 export const COMPOSE_REDIS = { host: 'redis', port: 6379 } as const;

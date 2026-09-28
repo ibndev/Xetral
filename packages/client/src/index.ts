@@ -15,3 +15,4 @@ export * from './portfolio.js';
 export * from './request-link.js';
 export * from './retry.js';
 export * from './services.js';
+export * from './announcements.js';

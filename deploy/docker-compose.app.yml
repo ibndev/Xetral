@@ -39,7 +39,7 @@ services:
       # domain states its own. The sender's domain must be verified at Brevo.
       REDIS_URL: '${REDIS_URL:-redis://redis:6379}'
       APP_BASE_URL: '${APP_BASE_URL:-https://app.xetral.com}'
-      NOTIFICATION_FROM: '${NOTIFICATION_FROM:-Xetral <no-reply@xetral.com>}'
+      NOTIFICATION_FROM: '${NOTIFICATION_FROM:-Xetral <hello@app.xetral.com>}'
       # SET IT, or /metrics answers 404 and nothing is watching. Unset is the
       # deliberate default rather than an oversight: an open metrics endpoint
       # publishes queue depths, provider health and what is owed to customers
@@ -107,7 +107,7 @@ services:
       # receipt and alert lost even where the API has one.
       REDIS_URL: '${REDIS_URL:-redis://redis:6379}'
       APP_BASE_URL: '${APP_BASE_URL:-https://app.xetral.com}'
-      NOTIFICATION_FROM: '${NOTIFICATION_FROM:-Xetral <no-reply@xetral.com>}'
+      NOTIFICATION_FROM: '${NOTIFICATION_FROM:-Xetral <hello@app.xetral.com>}'
       # Read from .env for every other worker; named here too because this is
       # the one that DELETES, and the blank on `api` above is what stops a
       # scaled API running it from four processes at once.

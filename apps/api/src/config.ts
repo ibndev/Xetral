@@ -991,7 +991,7 @@ export function loadConfig(env: Env): ApiConfig {
     appBaseUrl: appBaseUrl(env),
     adminBootstrapEmail: adminBootstrapEmail(env),
     webhookBaseUrl: webhookBaseUrl(env),
-    passwordResetTtlMinutes: integer(env, 'PASSWORD_RESET_TTL_MINUTES', 30),
+    passwordResetTtlMinutes: integer(env, 'PASSWORD_RESET_TTL_MINUTES', 5),
     // THE FIRST ADMINISTRATOR, when nobody named an operations inbox. Alerts
     // composed and addressed to nobody are the silent failure; the bootstrap
     // address is the one this deployment is certain belongs to somebody

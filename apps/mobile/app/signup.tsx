@@ -9,7 +9,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { FALLBACK_COUNTRY } from '@xetral/client';
+import { ApiError, FALLBACK_COUNTRY } from '@xetral/client';
 import type { XetralCountry } from '@xetral/client';
 import { Link, router } from 'expo-router';
 import { deviceDescriptor } from '@/device';
@@ -106,6 +106,25 @@ export default function SignUp() {
 
   const codeNeeded = codeState === 'sent' && sentTo === address;
   const codeReady = codeState === 'not_required' || (codeNeeded && code.length === 6);
+
+  // A number already on an account is said at the box, as on the web.
+  const [phoneError, setPhoneError] = useState<string | undefined>();
+  useEffect(() => {
+    setPhoneError(undefined);
+    if (phone.length < 7 || country === '') return undefined;
+    let live = true;
+    const timer = setTimeout(() => {
+      xetral()
+        .session.checkSignupPhone(country, phone)
+        .catch((cause: unknown) => {
+          if (live && cause instanceof ApiError && cause.code === 'phone_taken') setPhoneError(messageFor(cause));
+        });
+    }, 700);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [country, phone]);
 
   /*
    * THE COUNTRY LIST COMES FROM THE SERVER, the same as the web's.
@@ -296,7 +315,7 @@ export default function SignUp() {
                 <Text style={styles.link}>{cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend code'}</Text>
               </Pressable>
             </View>
-            <Text style={styles.muted}>Sent to {sentTo}. Check spam if it is not there in a minute.</Text>
+            <Text style={styles.muted}>Sent to {sentTo}. It expires in five minutes.</Text>
           </>
         )}
 
@@ -345,6 +364,7 @@ export default function SignUp() {
             placeholderTextColor={colors.text3}
           />
         </View>
+        {phoneError !== undefined && <Text style={styles.error}>{phoneError}</Text>}
 
         <Text style={styles.label}>Password</Text>
         <TextInput
@@ -358,9 +378,7 @@ export default function SignUp() {
           // will not suggest an existing credential for this field.
           textContentType="newPassword"
         />
-        <Text style={styles.muted}>
-          The server decides what is strong enough and will say if it is not.
-        </Text>
+        <Text style={styles.muted}>Use a strong password.</Text>
 
         <Pressable
           style={styles.button}
@@ -374,6 +392,7 @@ export default function SignUp() {
             email.trim() === '' ||
             country === '' ||
             phone === '' ||
+            phoneError !== undefined ||
             password === '' ||
             !codeReady
           }

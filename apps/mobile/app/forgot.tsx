@@ -190,21 +190,18 @@ export default function Forgot() {
                 placeholder="123456"
                 placeholderTextColor={colors.text3}
               />
-              <Text style={styles.hint}>
-                It expires in thirty minutes and works once. Five wrong tries and you will need a
-                new one.
-              </Text>
+              <Text style={styles.hint}>It expires in five minutes.</Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', marginTop: 6 }}>
                 <Text style={styles.hint}>
                   {resent ? 'A new code is on its way. ' : 'Didn’t get it? '}
                 </Text>
-                {wait > 0 ? (
-                  <Text style={styles.hint}>Resend code in {wait}s</Text>
-                ) : (
-                  <Pressable onPress={() => void resend()} disabled={busy} hitSlop={8}>
-                    <Text style={[styles.link, { marginTop: 0 }]}>Resend code</Text>
-                  </Pressable>
-                )}
+                {/* The link colour throughout, so it reads as the thing to
+                    press; pressable once the countdown ends. */}
+                <Pressable onPress={() => void resend()} disabled={busy || wait > 0} hitSlop={8}>
+                  <Text style={[styles.link, { marginTop: 0, color: colors.info }]}>
+                    {wait > 0 ? `Resend code in ${wait}s` : 'Resend code'}
+                  </Text>
+                </Pressable>
               </View>
 
               <Text style={[styles.label, { marginTop: space.sm }]}>New password</Text>
@@ -219,6 +216,7 @@ export default function Forgot() {
                 placeholder="At least 10 characters"
                 placeholderTextColor={colors.text3}
               />
+              <Text style={styles.hint}>Use a strong password.</Text>
 
               <Pressable
                 style={styles.button}

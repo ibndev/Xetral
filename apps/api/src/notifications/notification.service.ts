@@ -181,6 +181,76 @@ export class NotificationService {
   }
 
   /**
+   * SEND ONE TEST MESSAGE, NOW, AND SAY EXACTLY WHAT THE PROVIDER ANSWERED.
+   *
+   * "The code never arrived" has had five different causes in this codebase,
+   * and every one of them was visible only in a log line or a row nobody
+   * opened. This asks the question directly: the provider's own sentence on a
+   * refusal — a key it does not recognise, a server address it has not
+   * authorised, a sender it has not verified — and, on acceptance, the
+   * address it went out from and what its event log says a few seconds later.
+   *
+   * NOT THROUGH THE OUTBOX, deliberately: the outbox would retry a refusal
+   * and turn the answer into a row. It goes only to the caller's own
+   * address, so it cannot be used to mail anybody else, and it carries no
+   * code, token or amount.
+   */
+  async sendTest(userUuid: string): Promise<{
+    readonly sent: boolean;
+    readonly to: string;
+    readonly provider: string | null;
+    readonly from: string | null;
+    readonly message_id: string | null;
+    readonly error: string | null;
+    readonly events: readonly DeliveryEvent[];
+  }> {
+    const who = await this.pool.query<{ email: string }>(
+      `SELECT email FROM users WHERE uuid = $1::uuid`,
+      [userUuid],
+    );
+    const to = who.rows[0]?.email ?? '';
+    if (this.port === undefined) {
+      return {
+        sent: false, to, provider: null, from: null, message_id: null, events: [],
+        error:
+          'No email provider is configured on this server: NOTIFICATION_FROM is unset, ' +
+          'so nothing can be sent at all.',
+      };
+    }
+    let receipt;
+    try {
+      receipt = await this.port.send({
+        to,
+        subject: 'Xetral email test',
+        text: 'This is a test from the Xetral operations dashboard. If you can read it, email is being delivered.',
+        html:
+          '<p>This is a test from the Xetral operations dashboard.</p>' +
+          '<p>If you can read it, email is being delivered.</p>',
+        idempotencyKey: `admin-test:${Date.now()}`,
+      });
+    } catch (error) {
+      return {
+        sent: false, to, provider: this.port.provider, from: null, message_id: null, events: [],
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+    // A few seconds for the provider to log it, then ask what happened.
+    let events: readonly DeliveryEvent[] = [];
+    if (this.port.deliveryEvents !== undefined) {
+      await new Promise((resolve) => setTimeout(resolve, 4000));
+      try {
+        events = await this.port.deliveryEvents({ messageId: receipt.providerMessageId });
+      } catch {
+        events = [];
+      }
+    }
+    return {
+      sent: true, to, provider: this.port.provider, from: receipt.from ?? null,
+      message_id: receipt.providerMessageId, error: null, events,
+    };
+  }
+
+  /**
    * WHAT THE PROVIDER DID WITH ONE MESSAGE AFTER ACCEPTING IT.
    *
    * The outbox knows only that the provider said yes. "The reset code never

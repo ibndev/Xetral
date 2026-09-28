@@ -923,6 +923,19 @@ export interface AdminNotificationDelivery {
   readonly events_unavailable: string | null;
 }
 
+/** One test email to the caller, and exactly what the provider answered. */
+export interface AdminNotificationTest {
+  readonly sent: boolean;
+  readonly to: string;
+  readonly provider: string | null;
+  /** The address it went out from, where the provider reports one. */
+  readonly from: string | null;
+  readonly message_id: string | null;
+  /** The provider's own sentence when it refused. */
+  readonly error: string | null;
+  readonly events: AdminNotificationDelivery['events'];
+}
+
 export interface AdminAudienceEstimate {
   /** Phones a push reaches. */
   readonly devices: number;
@@ -1454,6 +1467,11 @@ export class AdminClient {
    * The recovery list. Loading it asks the provider about every row held past
    * the review threshold and closes what they answer for.
    */
+  /** How many recovery rows are open — the sidebar badge. */
+  async recoveryCount(): Promise<{ readonly open: number }> {
+    return this.#get<{ readonly open: number }>('/v1/admin/recovery/count');
+  }
+
   async recoveryQueue(): Promise<{
     readonly items: readonly AdminRecoveryItem[];
     readonly summary: AdminRecoverySummary;
@@ -1536,6 +1554,11 @@ export class AdminClient {
   /** What the email provider did with one message after accepting it. */
   async notificationDelivery(id: string): Promise<AdminNotificationDelivery> {
     return this.#get<AdminNotificationDelivery>(`/v1/admin/notifications/${encodeURIComponent(id)}/delivery`);
+  }
+
+  /** Send one test email to yourself and read the provider's answer. */
+  async notificationTest(): Promise<AdminNotificationTest> {
+    return this.#post<AdminNotificationTest>('/v1/admin/notifications/test', {});
   }
 
   /** What the platform has earned, and why it might be nothing. */

@@ -11,6 +11,7 @@ import { Logo } from './logo';
 import { Icon } from './icon';
 import type { IconName } from './icon';
 import { ThemeToggle } from './theme-toggle';
+import { useUnreadAnnouncements } from '@/lib/announcements-seen';
 
 /** The last answer about which services are paused, shared by every screen of this visit. */
 let rememberedServices: ServiceStates | undefined;
@@ -110,6 +111,9 @@ export function Shell({
   readonly greeting?: { readonly name: string | null | undefined };
 }) {
   const pathname = usePathname();
+  // The dot on the home header's bell: an announcement newer than the feed
+  // this browser last showed. Asked only where the bell is drawn.
+  const unread = useUnreadAnnouncements(greeting !== undefined);
   const router = useRouter();
 
   /*
@@ -286,20 +290,19 @@ export function Shell({
           <span className="spacer" />
           <ThemeToggle />
           {/*
-            THE DOT IS ONLY ON THE HOME SCREEN'S HEADER, which is where the
-            comp draws it — and it is decoration rather than a claim, so it
-            is `aria-hidden` and the link's own label is unchanged.
-
-            It says "there is something here". The bell opens the
-            announcements the platform has published (`/notifications`) — it
-            used to open the account screen, so the one control saying
-            "something to read" led to settings. What it must NEVER do is imply a
-            COUNT — a badge reading a number nothing has counted is the
-            "+₦150,000 this week" problem in a smaller place.
+            THE DOT IS A CLAIM NOW, NOT DECORATION. It was drawn always, so it
+            said "something to read" whether or not there was and was learnt
+            to be ignored. It is red, and it is there only when an
+            announcement is newer than the feed this browser last showed.
+            Still never a COUNT — nothing counts what a customer has read.
           */}
-          <Link href="/notifications" className="icon-btn has-dot" aria-label="Notifications">
+          <Link
+            href="/notifications"
+            className="icon-btn has-dot"
+            aria-label={unread ? 'Notifications, new announcement' : 'Notifications'}
+          >
             <Icon name="bell" size={20} />
-            <span className="dot" aria-hidden="true" />
+            {unread && <span className="dot" aria-hidden="true" />}
           </Link>
         </header>
         )}

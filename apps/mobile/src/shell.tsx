@@ -6,6 +6,7 @@ import { Link, router, usePathname } from 'expo-router';
 import { Icon } from '@/icon';
 import type { IconName } from '@/icon';
 import { useXetral } from '@/hooks';
+import { useUnreadAnnouncements } from '@/announcements-seen';
 import { screenGate, serviceForPath } from '@xetral/client';
 import type { ServiceStates } from '@xetral/client';
 import { font, gutter, space, useStyles, useTheme, useThemeChoice, useResolvedScheme } from '@/theme';
@@ -128,8 +129,8 @@ function PausedNotice() {
  *
  * The phone had none, and the web's opened the account screen, so the one
  * control saying "something to read" led nowhere to read anything. The dot is
- * decoration on the home header only, exactly as the web draws it: it never
- * carries a count, because nothing counts what a customer has read.
+ * RED and means an announcement newer than the feed this phone last showed —
+ * a claim, not decoration. Never a count.
  */
 function Bell({ dot }: { readonly dot: boolean }) {
   const colors = useTheme();
@@ -149,7 +150,7 @@ function Bell({ dot }: { readonly dot: boolean }) {
           style={{
             position: 'absolute', top: 10, right: 11,
             width: 8, height: 8, borderRadius: 4,
-            backgroundColor: colors.iris,
+            backgroundColor: colors.danger,
             borderWidth: 2, borderColor: colors.bg,
           }}
         />
@@ -233,6 +234,8 @@ export function Shell({
   const colors = useTheme();
   const insets = useSafeAreaInsets();
   const pathname = usePathname();
+  // The red dot on the home header's bell. Asked only where the bell is drawn.
+  const unread = useUnreadAnnouncements(greeting !== undefined);
   const client = useXetral();
 
   /*
@@ -364,7 +367,7 @@ export function Shell({
           </Text>
         </View>
         <ThemeToggle />
-        <Bell dot />
+        <Bell dot={unread} />
       </View>
     ) : null;
 

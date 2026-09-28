@@ -395,7 +395,7 @@ export class BrevoNotificationAdapter implements NotificationPort {
       throw new ProviderContractError(PROVIDER, 'send succeeded with no messageId', body);
     }
 
-    return { providerMessageId: success.messageId };
+    return { providerMessageId: success.messageId, from: sender.email };
   }
 }
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, useEffect, useState } from 'react';
-import type { AdminNotificationDelivery } from '@xetral/client';
+import type { AdminNotificationDelivery, AdminNotificationTest } from '@xetral/client';
 import { messageFor } from '@/lib/errors';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { AdminError } from '../access';
@@ -100,6 +100,8 @@ export default function Notifications() {
           </span>
         </div>
       )}
+
+      <SendTest />
 
       <div className="panel tbl-panel">
         <div className="tbl-head">
@@ -301,6 +303,67 @@ function Delivery({ id }: { id: string }) {
             );
           })}
         </ol>
+      )}
+    </div>
+  );
+}
+
+/**
+ * ONE TEST EMAIL, TO YOURSELF, AND THE PROVIDER'S OWN ANSWER.
+ *
+ * Every earlier "the code never arrives" ended at a row nobody opened. This
+ * asks the question in one press: a refusal comes back in the provider's own
+ * words — an unrecognised key, a server address it has not authorised, a
+ * sender it has not verified — and an acceptance comes back with the address
+ * it went out from and what its log says a few seconds later.
+ */
+function SendTest() {
+  const admin = useAdmin();
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<AdminNotificationTest | undefined>();
+  const [error, setError] = useState<string | undefined>();
+
+  const run = (): void => {
+    setBusy(true);
+    setError(undefined);
+    setResult(undefined);
+    admin.notificationTest().then(
+      (answer) => setResult(answer),
+      (cause: unknown) => setError(messageFor(cause)),
+    ).finally(() => setBusy(false));
+  };
+
+  return (
+    <div className="panel mail-test">
+      <div className="mail-test-head">
+        <span>
+          <strong>Send a test email</strong>
+          <small>To your own address, straight to the provider.</small>
+        </span>
+        <button type="button" className="ghost" disabled={busy} onClick={run}>
+          {busy ? 'Sending…' : 'Send test'}
+        </button>
+      </div>
+      {error !== undefined && <p className="error">{error}</p>}
+      {result !== undefined && (
+        result.sent ? (
+          <div className="notice" role="status">
+            <p>
+              <strong>Accepted by {result.provider ?? 'the provider'}.</strong>{' '}
+              Sent to {result.to}
+              {result.from !== null && <> from {result.from}</>}.{' '}
+              {result.events.length === 0
+                ? 'Its log has nothing yet — check your inbox and spam folder.'
+                : `Its log says: ${result.events.map((e) => e.event + (e.reason === undefined ? '' : ` (${e.reason})`)).join(', ')}.`}
+            </p>
+          </div>
+        ) : (
+          <div className="notice warn" role="status">
+            <p>
+              <strong>Refused.</strong> {result.error}
+            </p>
+          </div>
+        )
       )}
     </div>
   );

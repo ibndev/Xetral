@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
-import { convertPreset, formatAmount, groupTyped, TRANSFER_CURRENCIES } from '@xetral/client';
+import { convertPreset, exponentFor, formatAmount, groupTyped, isValidAmount, messageFor, TRANSFER_CURRENCIES } from '@xetral/client';
 import type { FxQuote, FxTrade } from '@xetral/client';
 import { Shell } from '@/shell';
 import {
@@ -107,7 +107,34 @@ export default function Fx() {
   const [from, setFrom] = useState(() => convertPreset(params.from, params.to).from);
   const [to, setTo] = useState(() => convertPreset(params.from, params.to).to);
   const [amount, setAmount] = useState('');
-  const [quote, setQuote] = useState<FxQuote | undefined>();
+  const [fetched, setFetched] = useState<{ readonly key: string; readonly quote: FxQuote } | undefined>();
+  const [quoteError, setQuoteError] = useState<string | undefined>();
+  /*
+   * THE FIGURE FOLLOWS THE TYPING, as on the web: the quote is a read priced
+   * from the published rates, fetched a moment after the typing stops, and
+   * drawn only while the pair and the amount are the ones it was asked about.
+   */
+  const wanted = `${from}>${to}:${amount}`;
+  const quote = fetched !== undefined && fetched.key === wanted ? fetched.quote : undefined;
+  const setQuote = (next: FxQuote | undefined): void => {
+    setFetched(next === undefined ? undefined : { key: wanted, quote: next });
+  };
+  useEffect(() => {
+    setQuoteError(undefined);
+    if (from === to || amount === '' || !isValidAmount(amount, exponentFor(from))) return undefined;
+    let live = true;
+    const key = `${from}>${to}:${amount}`;
+    const timer = setTimeout(() => {
+      client.fxQuote(from, to, amount).then(
+        (next) => live && setFetched({ key, quote: next }),
+        (cause: unknown) => live && setQuoteError(messageFor(cause)),
+      );
+    }, 450);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [client, from, to, amount]);
 
   return (
     <Shell
@@ -170,7 +197,9 @@ export default function Fx() {
             placeholder="0"
             placeholderTextColor={colors.text3}
             accessibilityLabel="Amount to convert"
-            style={[figure, { color: colors.text }]}
+            // No line or box around the figure: it is the amount, not a field.
+            underlineColorAndroid="transparent"
+            style={[figure, { color: colors.text, borderWidth: 0, padding: 0 }]}
           />
           {/* THE BALANCE UNDER THE FIGURE, which is what the comp draws and
               what answers the only other question somebody has here. It is
@@ -228,7 +257,7 @@ export default function Fx() {
           <Text
             style={[figure, { color: quote === undefined ? colors.text3 : colors.text2 }]}
           >
-            {quote === undefined ? '—' : formatAmount(quote.receives, quote.to)}
+            {quote === undefined ? '0' : formatAmount(quote.receives, quote.to)}
           </Text>
           <Text style={balanceLine}>
             {held.has(to) ? `Balance ${formatAmount(held.get(to) ?? '0', to)}` : ' '}
@@ -245,9 +274,13 @@ export default function Fx() {
       <View style={rateRow}>
         <Text style={rateLabel}>Rate</Text>
         <Text style={rateValue}>
-          {quote === undefined
-            ? 'Tap Convert to see today’s rate'
-            : `1 ${quote.from} = ${quote.rate} ${quote.to}`}
+          {quote !== undefined
+            ? `1 ${quote.from} = ${quote.rate} ${quote.to}`
+            : quoteError !== undefined
+              ? quoteError
+              : amount === ''
+                ? 'Enter an amount to see today’s rate'
+                : 'Getting today’s rate…'}
         </Text>
       </View>
       {quote !== undefined && (

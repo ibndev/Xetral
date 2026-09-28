@@ -787,7 +787,7 @@ export const DEPLOYMENT: readonly Item[] = [
     name: 'PASSWORD_RESET_TTL_MINUTES',
     kind: 'env',
     failure: 'default-is-deliberate',
-    ifMissed: 'thirty minutes. A reset link is a bearer token; longer is a longer window.',
+    ifMissed: 'five minutes. A reset code is a bearer credential; longer is a longer window.',
   },
   {
     name: 'LOGIN_RATE_LIMIT_PER_IDENTIFIER',

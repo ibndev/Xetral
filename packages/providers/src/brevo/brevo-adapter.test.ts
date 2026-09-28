@@ -78,7 +78,7 @@ describe('the three things Brevo does differently from Resend', () => {
     // Their successful send is 201, not 200. Code checking `=== 200` would
     // treat every success as a failure and retry it for ever.
     const { adapter } = adapterWith({ status: 201, body: { messageId: '<id@brevo>' } });
-    await expect(adapter.send(MESSAGE)).resolves.toEqual({ providerMessageId: '<id@brevo>' });
+    await expect(adapter.send(MESSAGE)).resolves.toEqual({ providerMessageId: '<id@brevo>', from: 'no-reply@xetral.com' });
   });
 });
 
@@ -259,7 +259,7 @@ describe('a sender Brevo has not verified', () => {
       { status: 201, body: { messageId: '<ok@brevo>' } },
       { status: 201, body: { messageId: '<ok2@brevo>' } },
     ]);
-    await expect(adapter.send(MESSAGE)).resolves.toEqual({ providerMessageId: '<ok@brevo>' });
+    await expect(adapter.send(MESSAGE)).resolves.toEqual({ providerMessageId: '<ok@brevo>', from: 'hello@xetral.com' });
     expect(bodyOf(calls[1]!.init)['sender']).toEqual({ name: 'Xetral', email: 'hello@xetral.com' });
 
     // Asked once per process, not per message.

@@ -1,8 +1,8 @@
 'use client';
 
-import { Suspense, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { convertPreset, formatAmount, groupTyped, TRANSFER_CURRENCIES } from '@xetral/client';
+import { convertPreset, exponentFor, formatAmount, groupTyped, isValidAmount, TRANSFER_CURRENCIES } from '@xetral/client';
 import type { FxQuote } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { Select } from '@/ui/select';
@@ -11,6 +11,7 @@ import { FormError } from '@/ui/form-error';
 import { Icon } from '@/ui/icon';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/lib/hooks';
 import { Toast } from '@/ui/toast';
+import { messageFor } from '@/lib/errors';
 
 /**
  * What can be converted between.
@@ -48,7 +49,39 @@ function Convert() {
   const [from, setFrom] = useState<string>(() => convertPreset(params?.get('from'), params?.get('to')).from);
   const [to, setTo] = useState<string>(() => convertPreset(params?.get('from'), params?.get('to')).to);
   const [amount, setAmount] = useState('');
-  const [quote, setQuote] = useState<FxQuote | undefined>();
+  const [fetched, setFetched] = useState<{ readonly key: string; readonly quote: FxQuote } | undefined>();
+  const [quoteError, setQuoteError] = useState<string | undefined>();
+  /*
+   * THE FIGURE FOLLOWS THE TYPING. The To panel was a dash until a button was
+   * pressed, so a customer typing 1 BTC read "—" dollars. The quote is a
+   * read, priced from the rates published on the dashboard, and fetched a
+   * moment after the typing stops.
+   *
+   * A QUOTE CARRIES THE AMOUNT IT IS A QUOTE FOR: it is drawn only while the
+   * pair and the amount are the ones it was asked about, so clearing 25 and
+   * typing 20 never shows what 25 converts to.
+   */
+  const wanted = `${from}>${to}:${amount}`;
+  const quote = fetched !== undefined && fetched.key === wanted ? fetched.quote : undefined;
+  const setQuote = (next: FxQuote | undefined): void => {
+    setFetched(next === undefined ? undefined : { key: wanted, quote: next });
+  };
+  useEffect(() => {
+    setQuoteError(undefined);
+    if (from === to || amount === '' || !isValidAmount(amount, exponentFor(from))) return undefined;
+    let live = true;
+    const key = `${from}>${to}:${amount}`;
+    const timer = setTimeout(() => {
+      client.fxQuote(from, to, amount).then(
+        (next) => live && setFetched({ key, quote: next }),
+        (cause: unknown) => live && setQuoteError(messageFor(cause)),
+      );
+    }, 450);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [client, from, to, amount]);
   const attempt = useIdempotencyKey();
   const { busy, error, code, done, run, clear } = useSubmit();
   const trades = useLoad(() => client.fxTrades(), [client]);
@@ -212,11 +245,11 @@ function Convert() {
                 compact
               />
             </div>
-            {/* A quote fills the figure; until one is fetched it is a dash,
-                because the rate is the operator's answer and not a default.
-                An unpublished pair is refused rather than quoted. */}
+            {/* The quote fills the figure as the amount is typed; with no
+                amount it is 0. An unpublished pair is refused rather than
+                quoted, and says so in the rate line. */}
             <span className={quote === undefined ? 'cv-figure waiting' : 'cv-figure'}>
-              {quote === undefined ? '—' : formatAmount(quote.receives, quote.to)}
+              {quote === undefined ? '0' : formatAmount(quote.receives, quote.to)}
             </span>
             <span className="cv-balance">
               {toBalance === undefined ? ' ' : `Balance ${formatAmount(toBalance.spendable, to)}`}
@@ -235,9 +268,13 @@ function Convert() {
         <div className="cv-rate">
           <span>Rate</span>
           <span>
-            {quote === undefined
-              ? 'Tap Convert to see today’s rate'
-              : `1 ${quote.from} = ${quote.rate} ${quote.to}`}
+            {quote !== undefined
+              ? `1 ${quote.from} = ${quote.rate} ${quote.to}`
+              : quoteError !== undefined
+                ? quoteError
+                : amount === ''
+                  ? 'Enter an amount to see today’s rate'
+                  : 'Getting today’s rate…'}
           </span>
         </div>
         {quote !== undefined && (

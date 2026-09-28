@@ -117,7 +117,7 @@ function sentenceFor(error: ApiError): string {
       // NOT "that number is taken" alone: the likeliest reader typed their own
       // number correctly, so the sentence has to offer the way forward rather
       // than just refuse.
-      return 'That phone number already has an account. Sign in instead.';
+      return 'This number belongs to an existing user. Use another phone number.';
     case 'country_exists':
       return 'That country is already on the list.';
     case 'country_not_found':

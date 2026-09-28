@@ -223,13 +223,15 @@ const QUEUE_ENTRY: Readonly<Record<string, string>> = {
   giftcard_review: '/admin/giftcards',
   data_requests: '/admin/data-requests',
   disputes: '/admin/disputes',
-  bank_payouts_stuck: '/admin/recovery',
   errors: '/admin/errors',
 };
 /** A count here is a regulatory clock or money in limbo, so it is red. */
 const URGENT_ENTRY = new Set(['/admin/risk', '/admin/recovery']);
 
 interface Badge { readonly count: number; readonly urgent: boolean }
+
+/** Dispatched on `window` by a screen whose work changed a queue's count. */
+export const QUEUES_CHANGED = 'xetral:admin-queues-changed';
 
 function useQueueBadges(): ReadonlyMap<string, Badge> {
   const admin = useAdmin();
@@ -250,14 +252,32 @@ function useQueueBadges(): ReadonlyMap<string, Badge> {
           }
           setBadges(next);
         })
+        // Recovery's badge is the LIST'S count, not a view's: the list shows
+        // held money past half an hour, and a badge counting anything else
+        // stayed lit over a page with nothing on it.
+        .then(() => admin.recoveryCount())
+        .then((r) => {
+          if (!live || r === undefined) return;
+          setBadges((current) => {
+            const next = new Map(current);
+            if (r.open > 0) next.set('/admin/recovery', { count: r.open, urgent: true });
+            else next.delete('/admin/recovery');
+            return next;
+          });
+        })
         // A badge is a courtesy. A staff member without the overview's role
         // still gets a working sidebar, just an unannotated one.
         .catch(() => undefined);
     void load();
     const id = setInterval(load, 60_000);
+    // A screen that just closed something says so, and the badge follows at
+    // once rather than a minute later.
+    const again = (): void => void load();
+    window.addEventListener(QUEUES_CHANGED, again);
     return () => {
       live = false;
       clearInterval(id);
+      window.removeEventListener(QUEUES_CHANGED, again);
     };
   }, [admin]);
   return badges;

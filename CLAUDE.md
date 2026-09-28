@@ -2320,6 +2320,49 @@ Schema: `packages/ledger/sql/084_signup_email_codes.sql`,
   instead of its form and then "Coming soon" over it. The answer is kept for
   the visit, so only the first gated screen waits at all.
 
+### Mail from app.xetral.com, and what the bell and the counts claim — non-obvious rules
+
+`packages/providers/src/brevo/brevo-adapter.ts`, `NotificationService.sendTest`,
+`apps/web/src/lib/announcements-seen.ts`, `apps/mobile/src/announcements-seen.ts`,
+`RecoveryService.openCount`.
+
+- **THE SENDER IS `hello@app.xetral.com`, THE ONLY AUTHENTICATED DOMAIN.** Brevo
+  held one sender, `hello@xetral.com`, on a domain it had never authenticated;
+  `app.xetral.com` carries the DKIM and DMARC records. The account now holds
+  exactly one sender on that domain, and `NOTIFICATION_FROM` defaults to it. The
+  adapter reads the verified list before its first send, so an older
+  `NOTIFICATION_FROM` still set in production is replaced by the listed sender.
+- **BREVO HAD LOGGED NO XETRAL MAIL IN THIRTY DAYS**, while a test sent through the
+  same account from the same domain was delivered in a second. So the app's
+  requests are refused BEFORE Brevo logs them — a key from another account, or a
+  server address Brevo has not authorised — and a refusal like that is visible
+  only as the outbox row's last error. `/admin/notifications` has a **Send test**
+  button: one message to the caller's own address, answered with Brevo's own
+  sentence. Not through the outbox, which would retry the refusal into a row.
+- **A RESET CODE LIVES FIVE MINUTES**, `PASSWORD_RESET_TTL_MINUTES` defaulting to
+  5, and a signup code the same. An environment still setting 30 overrides it;
+  the screens say five.
+- **THE BELL'S DOT IS A CLAIM, NOT DECORATION.** It was drawn always. It is red
+  now and means an announcement newer than the feed this device last showed —
+  stored per device, never sent to the server. Opening the feed clears it.
+- **PUSH STILL NEEDS AN EAS `projectId` AND FCM CREDENTIALS.** Nothing in code
+  can mint either; until an operator runs `eas init` and uploads the Firebase
+  key, announcements reach the bell feed and not a lock screen.
+- **THE RECOVERY BADGE IS THE LIST'S COUNT.** It read `bank_payouts_stuck`, which
+  also counts SENT payouts a day old that the list never shows — a badge lit over
+  an empty page. `GET /v1/admin/recovery/count` counts what the list shows, and
+  the list now also asks about those day-old sent payouts, so a missed webhook
+  cannot leave one there. With nothing open the KPI row is not drawn at all.
+- **A NUMBER ALREADY ON AN ACCOUNT IS SAID AT THE BOX.** `POST
+  /v1/auth/signup/phone-check` normalises exactly as registration does and
+  answers `phone_taken` — the fact registration itself states — limited per
+  number and per address on its own bucket.
+- **CONVERT QUOTES AS YOU TYPE.** The To figure was a dash until a button was
+  pressed; the quote is a read, fetched after a pause and drawn only while the
+  pair and amount are the ones it was asked about. The figure has no box: the
+  bare input rule's focus ring is a box-shadow, and restating border and
+  background left it standing.
+
 ### The admin actions that never reached the server, and the ten seconds before every request — non-obvious rules
 
 `apps/web/src/app/api/x/[...path]/route.ts`, `packages/client/src/admin.ts`,
@@ -2352,7 +2395,7 @@ Schema: `packages/ledger/sql/084_signup_email_codes.sql`,
 `packages/providers/src/brevo/brevo-adapter.ts`, `/forgot` on both apps.
 
 - **A SENDER BREVO HAS NOT VERIFIED IS REFUSED ON EVERY MESSAGE.**
-  `NOTIFICATION_FROM` defaults to `no-reply@xetral.com` so mail is sent at all;
+  `NOTIFICATION_FROM` defaults to `hello@app.xetral.com` so mail is sent at all;
   if that address or its domain is not verified in the Brevo account, every
   reset code is refused with a sentence about the sender. A refusal ABOUT THE
   SENDER now asks `GET /v3/senders` for the account's verified, active senders
