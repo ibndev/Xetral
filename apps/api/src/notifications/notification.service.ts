@@ -2,7 +2,17 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { Pool, PoolClient } from 'pg';
 import { seal } from '@xetral/identity';
 import { API_CONFIG, DATABASE, NOTIFICATION_PORT } from '../tokens.js';
-import type { DeliveryEvent, NotificationPort } from '@xetral/providers';
+import type { DeliveryEvent, NotificationPort, ProviderAccount } from '@xetral/providers';
+
+/** One recent reset or signup code, as the outbox recorded it. */
+export interface RecentCode {
+  readonly kind: string;
+  readonly status: string;
+  readonly attempts: number;
+  readonly last_error: string | null;
+  readonly created_at: string;
+  readonly sent_at: string | null;
+}
 import type { ApiConfig } from '../config.js';
 import { classOf, render } from './templates.js';
 import type { NotificationRequest } from './templates.js';
@@ -203,20 +213,26 @@ export class NotificationService {
     readonly message_id: string | null;
     readonly error: string | null;
     readonly events: readonly DeliveryEvent[];
+    readonly account: ProviderAccount | null;
+    readonly recent_codes: readonly RecentCode[];
   }> {
     const who = await this.pool.query<{ email: string }>(
       `SELECT email FROM users WHERE uuid = $1::uuid`,
       [userUuid],
     );
     const to = who.rows[0]?.email ?? '';
+    const recent = await this.#recentCodes();
     if (this.port === undefined) {
       return {
         sent: false, to, provider: null, from: null, message_id: null, events: [],
+        account: null, recent_codes: recent,
         error:
           'No email provider is configured on this server: NOTIFICATION_FROM is unset, ' +
           'so nothing can be sent at all.',
       };
     }
+    // WHOSE key this is, asked before the send so a refusal still carries it.
+    const account = (await this.port.account?.().catch(() => undefined)) ?? null;
     let receipt;
     try {
       receipt = await this.port.send({
@@ -231,6 +247,7 @@ export class NotificationService {
     } catch (error) {
       return {
         sent: false, to, provider: this.port.provider, from: null, message_id: null, events: [],
+        account, recent_codes: recent,
         error: error instanceof Error ? error.message : String(error),
       };
     }
@@ -246,8 +263,48 @@ export class NotificationService {
     }
     return {
       sent: true, to, provider: this.port.provider, from: receipt.from ?? null,
-      message_id: receipt.providerMessageId, error: null, events,
+      message_id: receipt.providerMessageId, error: null, events, account,
+      recent_codes: recent,
     };
+  }
+
+  /**
+   * THE LAST FEW CODES THE PLATFORM TRIED TO MAIL, and what became of each.
+   *
+   * A test that arrives proves the provider accepts THIS server's mail to
+   * THIS address. It does not prove a customer's reset code left the outbox:
+   * that path goes through the row, the sealed body and the worker, and its
+   * failure is written to `last_error` where nobody looks. Side by side with
+   * the test, "the test arrives and the code does not" becomes one sentence.
+   *
+   * No recipient and no code — the kind, the state and the reason only.
+   * `kind::text`, so a database behind 084 answers rather than failing on an
+   * enum value it has never heard of.
+   */
+  async #recentCodes(): Promise<readonly RecentCode[]> {
+    try {
+      const rows = await this.pool.query<{
+        kind: string; status: string; attempts: number; last_error: string | null;
+        created_at: Date; sent_at: Date | null;
+      }>(
+        `SELECT kind::text AS kind, status::text AS status, attempts, last_error,
+                created_at, sent_at
+           FROM notification_outbox
+          WHERE kind::text IN ('password_reset', 'signup_code')
+          ORDER BY id DESC
+          LIMIT 5`,
+      );
+      return rows.rows.map((row) => ({
+        kind: row.kind,
+        status: row.status,
+        attempts: row.attempts,
+        last_error: row.last_error,
+        created_at: row.created_at.toISOString(),
+        sent_at: row.sent_at === null ? null : row.sent_at.toISOString(),
+      }));
+    } catch {
+      return [];
+    }
   }
 
   /**

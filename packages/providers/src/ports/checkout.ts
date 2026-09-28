@@ -76,7 +76,33 @@ export interface CheckoutRequest {
 }
 
 /** The methods a customer can choose before leaving for the provider's page. */
-export type CheckoutMethod = 'card' | 'ussd';
+export type CheckoutMethod = 'card' | 'ussd' | 'mobile_money' | 'bank';
+
+/**
+ * WHICH METHODS EACH CURRENCY CAN BE PAID WITH, in the order a payer is shown
+ * them — the first is the default.
+ *
+ * A payer choosing cedis was sent straight to the provider's page, which
+ * opens on a CARD form: mobile money was two taps away behind a menu most
+ * payers in Accra never find, and read as "this link only takes cards". The
+ * choice is now made on our page and the provider's is narrowed to it.
+ *
+ * Mobile money first where it is how money moves; USSD is a Nigerian bank's
+ * short code and exists nowhere else; a dollar has no wallet rail, so card
+ * alone. A currency not listed takes card only — offering a method a
+ * currency cannot use is not an error at the provider, it is an empty page.
+ */
+export const CHECKOUT_METHODS: Readonly<Record<string, readonly CheckoutMethod[]>> = {
+  NGN: ['bank', 'card', 'ussd'],
+  GHS: ['mobile_money', 'bank', 'card'],
+  KES: ['mobile_money', 'card'],
+  USD: ['card'],
+};
+
+/** Whether a currency can be paid with a method; card goes everywhere. */
+export function checkoutMethodAllowed(method: CheckoutMethod, currency: string): boolean {
+  return (CHECKOUT_METHODS[currency] ?? ['card']).includes(method);
+}
 
 export interface CheckoutSession {
   /** Where to send the payer. The provider renders the method picker. */

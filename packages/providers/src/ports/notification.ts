@@ -73,6 +73,12 @@ export interface DeliveryEvent {
   readonly from?: string;
 }
 
+/** Who a provider says the configured key belongs to. No secret, no key. */
+export interface ProviderAccount {
+  readonly email?: string;
+  readonly company?: string;
+}
+
 export interface NotificationPort {
   readonly provider: string;
   /**
@@ -81,6 +87,13 @@ export interface NotificationPort {
    * `supportsVerification()` is on the fulfilment port.
    */
   deliveryEvents?(ref: { messageId?: string; email?: string }): Promise<readonly DeliveryEvent[]>;
+  /**
+   * OPTIONAL: which provider ACCOUNT the configured key belongs to. A test
+   * accepted by one account proves nothing about another, and "the dashboard
+   * shows no mail from us" is exactly what a key from a second account looks
+   * like. Never throws; `undefined` when it cannot be read.
+   */
+  account?(): Promise<ProviderAccount | undefined>;
   /**
    * Throws a `ProviderError` on failure, classified by whether a retry could
    * help — the worker reads `retryable` and nothing else.

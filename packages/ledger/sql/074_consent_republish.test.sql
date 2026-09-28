@@ -26,11 +26,14 @@ DECLARE
     stale_live INT;
     duplicates INT;
 BEGIN
+    -- AT OR AFTER, for privacy's reason below: from 086 the seed carries a
+    -- NEWER terms version, so on a fresh database 074 correctly publishes no
+    -- terms of its own.
     SELECT count(*) INTO terms_row
-      FROM consent_documents WHERE kind = 'terms' AND version = '2026-09-19';
+      FROM consent_documents WHERE kind = 'terms' AND version >= '2026-09-19';
 
-    IF terms_row <> 1 THEN
-        RAISE EXCEPTION 'TEST FAILED: 074 did not publish the terms';
+    IF terms_row < 1 THEN
+        RAISE EXCEPTION 'TEST FAILED: no terms at 2026-09-19 or later';
     END IF;
 
     -- PRIVACY IS ASSERTED AS ">= 074's", NOT AS "074's", and the difference is

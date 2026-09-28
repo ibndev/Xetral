@@ -934,6 +934,17 @@ export interface AdminNotificationTest {
   /** The provider's own sentence when it refused. */
   readonly error: string | null;
   readonly events: AdminNotificationDelivery['events'];
+  /** The provider account the server's key belongs to, where it could be read. */
+  readonly account: { readonly email?: string; readonly company?: string } | null;
+  /** The last few reset and signup codes, as the outbox recorded them. */
+  readonly recent_codes: readonly {
+    readonly kind: string;
+    readonly status: string;
+    readonly attempts: number;
+    readonly last_error: string | null;
+    readonly created_at: string;
+    readonly sent_at: string | null;
+  }[];
 }
 
 export interface AdminAudienceEstimate {

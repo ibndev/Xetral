@@ -1,3 +1,4 @@
+import type { PayMethod } from './pay-methods.js';
 import { ApiError, toApiError } from './errors.js';
 import { Session } from './session.js';
 import type { ServiceStates } from './services.js';
@@ -1021,7 +1022,7 @@ export class XetralClient {
    */
   async topUp(
     amount: string,
-    method?: 'card' | 'ussd',
+    method?: PayMethod,
   ): Promise<{ authorization_url: string; reference: string }> {
     return this.#post('/v1/funding/topup', { amount, ...(method === undefined ? {} : { method }) });
   }

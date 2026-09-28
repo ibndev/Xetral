@@ -2363,6 +2363,58 @@ Schema: `packages/ledger/sql/084_signup_email_codes.sql`,
   bare input rule's focus ring is a box-shadow, and restating border and
   background left it standing.
 
+### What the payment partner asked for, and a checkout that opened on a card — non-obvious rules
+
+`apps/web/src/lib/company.ts`, `apps/web/src/app/legal/refunds/page.tsx`,
+`apps/web/src/ui/legal-line.tsx`, `packages/providers/src/ports/checkout.ts`.
+Republished by `packages/ledger/sql/086_legal_republish.sql`.
+
+- **THE CONTRACTING PARTY IS "Xetral Ltd (RC 9748553)", FROM ONE CONSTANT.**
+  Flutterwave's review asked for the registration number beside the legal name
+  and for it to read the same everywhere. `LEGAL_ENTITY` in `company.ts` is the
+  only spelling; the terms, privacy notice, refund policy, legal footer, the
+  sign-in and sign-up pages and every payment link draw it from there.
+- **THE TERMS HASH NOW COVERS `company.ts`**, adopted at their first real
+  republish since 074, as 033's comment promised. A registration number changed
+  under an unchanged version is 077's drift about the recipient list, applied
+  to the other document.
+- **THE REFUND POLICY IS NOT A CONSENT DOCUMENT.** The terms incorporate it by
+  reference; it has no row in `consent_documents`, so publishing or editing it
+  asks nobody to agree again. Its payments half describes only mechanisms the
+  code has — automatic return of a failed payout, "held until the provider
+  answers", disputes answered in 72 hours. Its services half is contract terms
+  for milestone-billed development and retainers, and says a signed statement
+  of work overrides it.
+- **THE PCI STATEMENT IS TRUE BECAUSE OF HOW THE PAGE IS BUILT**, and the
+  privacy notice separates the two card cases: a card a payer PAYS with is
+  typed on the processor's hosted page and never reaches us; a virtual card we
+  ISSUE has its number fetched from the issuer on a PIN and dropped, never
+  stored. `payment-link.test.ts` still fails on a card field on the pay page —
+  which is why the statement says "security code" and "expiration date".
+- **086's SUITE CANNOT ASSERT "no older terms are live".** `033_consent.test.sql`
+  runs first on the shared database and publishes its own `2026-09-01` terms to
+  prove supersession, so that check is privacy-only; "exactly one live per
+  kind" holds for both. 074's suite now reads terms `>=` for the same reason:
+  from 086 the seed carries newer terms and 074 correctly publishes none.
+- **A CEDI PAYER LANDED ON A CARD FORM** because every option was offered and
+  Flutterwave's page leads with card. The payer now picks on OUR page —
+  `CHECKOUT_METHODS` in `ports/checkout.ts`, mirrored by `PAY_METHODS` in the
+  client and bound by `pay-methods.test.ts` — and the provider page opens on
+  that method only. A method a currency lacks is refused before a row is
+  written, as USSD for cedis already was. `banktransfer` is Nigeria's product
+  and `account` everybody else's (073).
+- **"THE TEST ARRIVED AND THE CODE DID NOT" IS NOW ONE SCREEN.** Send test on
+  `/admin/notifications` names the Brevo ACCOUNT the key belongs to
+  (`GET /v3/account` — email and company only) and lists the last five reset
+  and signup codes with their outbox state and `last_error`. A test sent from
+  Brevo's own dashboard proves that account works, not that the server's key
+  belongs to it: Brevo logs nothing for a request it could not attribute, so a
+  key from another account looks exactly like the app never sending.
+- **AN SMTP KEY IS REFUSED BY NAME.** `xsmtpsib-` is the relay's password,
+  issued on the same Brevo page as the `xkeysib-` API key and easy to paste in
+  its place; every API call then fails as an unknown key and Brevo records
+  nothing. A 401 now says which remedy applies — the key, or Authorised IPs.
+
 ### The admin actions that never reached the server, and the ten seconds before every request — non-obvious rules
 
 `apps/web/src/app/api/x/[...path]/route.ts`, `packages/client/src/admin.ts`,
@@ -4713,6 +4765,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/082_refusals_and_detail
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/083_payment_assignment.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/084_signup_email_codes.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/085_verified_rests_on_identity.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/086_legal_republish.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -4796,6 +4849,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/082_refusals_and_detail
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/083_payment_assignment.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/084_signup_email_codes.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/085_verified_rests_on_identity.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/086_legal_republish.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

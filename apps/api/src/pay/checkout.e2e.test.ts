@@ -242,6 +242,31 @@ describe('paying a link in a currency Flutterwave collects', () => {
     expect(bodies.map((b) => b.currency)).toEqual(['GHS', 'KES']);
   });
 
+  it('opens a cedi payer on the method THEY picked, and refuses one the currency lacks', async () => {
+    /*
+     * THE REPORT: a payer chose cedis and landed on a card form. Offered every
+     * option, Flutterwave's page leads with card; the payer now chooses on our
+     * page — Mobile money, Bank or Card for cedis — and theirs opens on it.
+     */
+    const slug = await ghanaian();
+    seen.length = 0;
+    await request(app.getHttpServer())
+      .post(`/v1/pay/${slug}/charge`)
+      .send({ amount: '25.00', currency: 'GHS', email: 'payer@example.com', method: 'mobile_money' })
+      .expect(200);
+    const body = seen.find((r) => r.url.startsWith('/v3/payments'))?.body as { payment_options?: string };
+    expect(body.payment_options).toBe('mobilemoneyghana');
+
+    // A dollar has no wallet rail: refused before a row or a call exists.
+    seen.length = 0;
+    const refused = await request(app.getHttpServer())
+      .post(`/v1/pay/${slug}/charge`)
+      .send({ amount: '25.00', currency: 'USD', email: 'payer@example.com', method: 'mobile_money' })
+      .expect(400);
+    expect(refused.body.error).toBe('payment_method_not_supported');
+    expect(seen.filter((r) => r.url.startsWith('/v3/payments'))).toHaveLength(0);
+  });
+
   it('writes the row BEFORE the payer leaves, naming the rail', async () => {
     /*
      * 058's security argument, unchanged by the rail: the reference is OURS

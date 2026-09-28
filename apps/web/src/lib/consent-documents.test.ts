@@ -44,13 +44,14 @@ const PAGES: Readonly<Record<string, string>> = {
  * test green. What is hashed is now every file whose text the notice renders,
  * in a fixed order, so a change to any of them needs a new version.
  *
- * The TERMS are still the page alone, deliberately and for now: widening
- * their hash would change it without changing a word, and republishing them
- * asks every customer to agree again to the same text. Their next real
- * republish adopts the wider hash.
+ * The TERMS adopted the wider hash at their first real republish since, 086:
+ * they now name the contracting party through `company.ts` — its legal name
+ * AND registration number — so a change to either is a change to the terms.
+ * Widening it earlier would have changed the hash without changing a word,
+ * and asked every customer to agree again to the same text.
  */
 const RENDERS_FROM: Readonly<Record<string, readonly string[]>> = {
-  terms: [],
+  terms: [join(HERE, 'company.ts')],
   privacy: [
     join(HERE, 'processors.ts'),
     join(HERE, 'company.ts'),

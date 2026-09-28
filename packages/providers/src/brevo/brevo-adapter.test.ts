@@ -150,6 +150,58 @@ describe('what it does with a refusal', () => {
     await expect(adapter.send(MESSAGE)).rejects.toBeInstanceOf(ProviderTimeoutError);
   });
 
+  it('says what to DO about a key Brevo does not recognise', async () => {
+    // Brevo logs nothing for a request it cannot attribute to an account, so
+    // from its dashboard this looks like the app never sending at all.
+    const { adapter } = adapterWith({ status: 401, body: { code: 'unauthorized', message: 'Key not found' } });
+    const error = await adapter.send(MESSAGE).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ProviderRejectedError);
+    expect((error as Error).message).toMatch(/Key not found — .*xkeysib-/);
+  });
+
+  it('names an unauthorised IP address as the thing to fix', async () => {
+    const { adapter } = adapterWith({
+      status: 401,
+      body: { code: 'unauthorized', message: 'We have detected you are using an unrecognised IP address 203.0.113.9' },
+    });
+    await expect(adapter.send(MESSAGE)).rejects.toThrow(/Authorised IPs/);
+  });
+
+  it('refuses an SMTP key before sending anything', async () => {
+    // `xsmtpsib-` is the SMTP relay's PASSWORD. On the API it is a key nobody
+    // has heard of, and Brevo records nothing — so it is named here instead.
+    const calls: string[] = [];
+    const adapter = new BrevoNotificationAdapter({
+      apiKey: 'xsmtpsib-0123456789',
+      from: 'Xetral <hello@app.xetral.com>',
+      fetch: async (url) => {
+        calls.push(url);
+        return new Response('{}', { status: 200 });
+      },
+    });
+    const error = await adapter.send(MESSAGE).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ProviderRejectedError);
+    expect((error as ProviderRejectedError).retryable).toBe(false);
+    expect((error as Error).message).toMatch(/SMTP key/);
+    expect(calls).toEqual([]);
+    expect(await adapter.account()).toBeUndefined();
+  });
+
+  it('reports which account the key belongs to, and nothing else', async () => {
+    const adapter = new BrevoNotificationAdapter({
+      apiKey: 'xkeysib-test',
+      from: 'Xetral <hello@app.xetral.com>',
+      fetch: async (url) =>
+        url.endsWith('/v3/account')
+          ? new Response(
+              JSON.stringify({ email: 'owner@example.com', companyName: 'Xetral Ltd', plan: [{ credits: 300 }] }),
+              { status: 200 },
+            )
+          : new Response('{}', { status: 404 }),
+    });
+    expect(await adapter.account()).toEqual({ email: 'owner@example.com', company: 'Xetral Ltd' });
+  });
+
   it('a success carrying no messageId is a contract error', async () => {
     // Without an id, "did this customer get their reset link?" has no answer
     // later — which is the whole reason 012 stores one.

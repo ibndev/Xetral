@@ -104,8 +104,20 @@ export async function initializeCheckout(
     reference: request.reference,
     ...(request.callbackUrl === undefined ? {} : { callback_url: request.callbackUrl }),
     /* Paystack's `channels`: one entry narrows their page to that method.
-       Their names match ours for these two — `card` and `ussd`. */
-    ...(request.method === undefined ? {} : { channels: [request.method] }),
+       `card`, `ussd` and `mobile_money` are their names too; a naira bank
+       payment is `bank_transfer` (pay into a one-off account), elsewhere
+       `bank`. */
+    ...(request.method === undefined
+      ? {}
+      : {
+          channels: [
+            request.method === 'bank'
+              ? request.currency === 'NGN'
+                ? 'bank_transfer'
+                : 'bank'
+              : request.method,
+          ],
+        }),
     metadata: {
       /*
        * Shown on Paystack's page and on their dashboard. The payer sees who

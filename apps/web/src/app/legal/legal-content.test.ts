@@ -52,7 +52,7 @@ describe('the legal pages carry no placeholder', () => {
     // Without this, a moved directory makes every assertion below pass over an
     // empty list — a guard that cannot fail, which is 013's lesson about the
     // reconciliation check that reported through a SELECT and exited zero.
-    expect(PAGES.map(([name]) => name).sort()).toEqual(['privacy', 'terms']);
+    expect(PAGES.map(([name]) => name).sort()).toEqual(['privacy', 'refunds', 'terms']);
   });
 
   it.each(PAGES.map(([name]) => name))('%s has no [bracketed] value', (name) => {

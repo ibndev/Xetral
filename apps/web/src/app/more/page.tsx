@@ -52,6 +52,7 @@ const GROUPS: readonly {
     items: [
       { href: '/legal/privacy', label: 'Privacy', sub: 'What we keep, and for how long', icon: 'shield' },
       { href: '/legal/terms',   label: 'Terms',   sub: 'How disputes and limits work', icon: 'receipt' },
+      { href: '/legal/refunds', label: 'Refunds', sub: 'Refunds and cancellations', icon: 'receipt' },
     ],
   },
 ];

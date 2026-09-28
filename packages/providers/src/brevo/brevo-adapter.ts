@@ -75,7 +75,23 @@ export const BREVO_ENDPOINTS = {
    * softBounces, blocked, spam, invalid, deferred, opened, clicks, error.
    */
   events: '/v3/smtp/statistics/events',
+  /** "Get your account information": `{ email, companyName, plan }`. */
+  account: '/v3/account',
 } as const;
+
+/**
+ * A Brevo SMTP KEY, which is not an API key.
+ *
+ * Brevo's "SMTP & API" page issues both, side by side, and they look alike:
+ * `xkeysib-…` authenticates the v3 API this adapter calls; `xsmtpsib-…` is a
+ * PASSWORD for their SMTP relay and is refused by every API call as a key
+ * Brevo has never heard of. Pasted into `/admin/credentials`, it reads as
+ * "set" on the dashboard while no message leaves — and Brevo logs nothing,
+ * because the request never authenticated. Named here, before a call is made.
+ */
+export function isSmtpKey(key: string): boolean {
+  return key.trim().startsWith('xsmtpsib-');
+}
 
 /**
  * The failure codes a retry can actually clear.
@@ -161,6 +177,9 @@ export class BrevoNotificationAdapter implements NotificationPort {
           'BREVO_API_KEY. Nothing can be sent until then.',
         'no_api_key',
       );
+    }
+    if (isSmtpKey(apiKey)) {
+      throw new ProviderRejectedError(PROVIDER, SMTP_KEY_REFUSAL, 'smtp_key');
     }
 
     const configured = senderOf(this.#from);
@@ -287,6 +306,36 @@ export class BrevoNotificationAdapter implements NotificationPort {
     });
   }
 
+  /**
+   * WHICH BREVO ACCOUNT THIS KEY BELONGS TO.
+   *
+   * Brevo logs nothing for a request it could not attribute to an account, so
+   * "the Brevo dashboard shows no mail from us" is what a key from a DIFFERENT
+   * account looks like from the account being watched. The account's email
+   * and company name, and nothing else — never the key, never the plan's
+   * credits — are enough for an operator to say "that is not ours".
+   */
+  async account(): Promise<{ email?: string; company?: string } | undefined> {
+    const apiKey = typeof this.#apiKey === 'string' ? this.#apiKey : await this.#apiKey();
+    if (apiKey === undefined || apiKey === '' || isSmtpKey(apiKey)) return undefined;
+    try {
+      const response = await this.#fetch(`${this.#baseUrl}${BREVO_ENDPOINTS.account}`, {
+        method: 'GET',
+        headers: { 'api-key': apiKey, accept: 'application/json' },
+      });
+      if (!response.ok) return undefined;
+      const payload = (await response.json()) as { email?: unknown; companyName?: unknown };
+      return {
+        ...(typeof payload.email === 'string' ? { email: payload.email } : {}),
+        ...(typeof payload.companyName === 'string' && payload.companyName !== ''
+          ? { company: payload.companyName }
+          : {}),
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
   async #attempt(
     apiKey: string,
     sender: { name?: string; email: string },
@@ -385,7 +434,12 @@ export class BrevoNotificationAdapter implements NotificationPort {
       if (code !== undefined && RETRYABLE_CODES.has(code)) {
         throw new ProviderUnavailableError(PROVIDER, `${detail} (${code})`, body);
       }
-      throw new ProviderRejectedError(PROVIDER, detail, code, body);
+      throw new ProviderRejectedError(
+        PROVIDER,
+        response.status === 401 ? `${detail}${unauthorisedHint(detail)}` : detail,
+        code,
+        body,
+      );
     }
 
     const success = payload as { messageId?: unknown };
@@ -415,6 +469,30 @@ export function senderOf(from: string): { name?: string; email: string } {
   const name = (match[1] ?? '').replace(/^"|"$/g, '').trim();
   const email = (match[2] ?? '').trim();
   return name === '' ? { email } : { name, email };
+}
+
+const SMTP_KEY_REFUSAL =
+  'the Brevo key set on this server is an SMTP key (it starts "xsmtpsib-"), which ' +
+  'is a password for their SMTP relay and not an API key. In Brevo open SMTP & API ' +
+  '→ API Keys, create an API key (it starts "xkeysib-") and paste that at ' +
+  '/admin/credentials.';
+
+/**
+ * What to DO about a 401, which Brevo words as "Key not found" or as an
+ * unrecognised IP address. Both look like "email is broken" from the outside
+ * and each has exactly one remedy.
+ */
+function unauthorisedHint(detail: string): string {
+  if (/\bip\b|ip address/i.test(detail)) {
+    return (
+      ' — Brevo is refusing this server\'s IP address. In Brevo open Security → ' +
+      'Authorised IPs and add it, or turn IP blocking off.'
+    );
+  }
+  return (
+    ' — Brevo does not recognise this API key. Paste an API key (starting ' +
+    '"xkeysib-") from the Brevo account that owns app.xetral.com at /admin/credentials.'
+  );
 }
 
 /** Is this Brevo's refusal of the SENDER, rather than of the recipient or the key? */

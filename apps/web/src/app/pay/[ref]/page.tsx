@@ -5,7 +5,10 @@ import { Logo } from '@/ui/logo';
 import { Icon } from '@/ui/icon';
 import { Select } from '@/ui/select';
 import { CurrencyMark } from '@/ui/currency-mark';
-import { readRequest, REQUEST_NOTE_MAX, symbolFor } from '@xetral/client';
+import { PAY_METHOD_LABEL, payMethodsFor, readRequest, REQUEST_NOTE_MAX, symbolFor } from '@xetral/client';
+import type { PayMethod } from '@xetral/client';
+import { LEGAL_ENTITY } from '@/lib/company';
+import { LegalLine } from '@/ui/legal-line';
 
 /**
  * THE PUBLIC CHECKOUT. No account, no sign-in, no app.
@@ -74,6 +77,7 @@ function Checkout({ slug }: { readonly slug: string }) {
    * commonest payment needs no decision at all.
    */
   const [currency, setCurrency] = useState('');
+  const [picked, setPicked] = useState<PayMethod | undefined>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
   const [paid, setPaid] = useState(false);
@@ -157,6 +161,16 @@ function Checkout({ slug }: { readonly slug: string }) {
     currency !== '' && (options.length === 0 || options.includes(currency))
       ? currency
       : (payee?.currency ?? '');
+  /*
+   * HOW THEY PAY, chosen HERE. A payer who chose cedis was sent straight to
+   * the provider's page, which opens on a card form — mobile money sat behind
+   * a menu most payers in Accra never find, and the link read as card-only.
+   * The first method for the currency is the default, and the provider's page
+   * opens on whichever was picked.
+   */
+  const methods = chosen === '' ? [] : payMethodsFor(chosen);
+  const method: PayMethod | undefined =
+    picked !== undefined && methods.includes(picked) ? picked : methods[0];
   const initials = (payee?.name ?? '')
     .split(/\s+/)
     .filter((w) => w !== '')
@@ -178,6 +192,7 @@ function Checkout({ slug }: { readonly slug: string }) {
           ...(name.trim() === '' ? {} : { name: name.trim() }),
           currency: chosen,
           ...(note.trim() === '' ? {} : { note: note.trim() }),
+          ...(method === undefined ? {} : { method }),
         }),
       });
       const body = (await response.json()) as {
@@ -190,6 +205,8 @@ function Checkout({ slug }: { readonly slug: string }) {
             ? 'Enter an amount to pay.'
             : body.error === 'currency_not_supported'
               ? `${chosen} cannot be paid to this link. Choose another currency.`
+              : body.error === 'payment_method_not_supported'
+                ? `${chosen} cannot be paid that way. Choose another way to pay.`
               : body.error === 'checkout_unavailable'
                 ? 'Payments are unavailable right now. Try again shortly.'
                 : 'That did not work. Check the amount and try again.',
@@ -298,6 +315,26 @@ function Checkout({ slug }: { readonly slug: string }) {
                   />
                 )}
 
+                {methods.length > 1 && (
+                  <div className="req-method">
+                    <span className="req-method-label" id="pay-method-label">Pay with</span>
+                    <div className="segmented wide" role="radiogroup" aria-labelledby="pay-method-label">
+                      {methods.map((m) => (
+                        <button
+                          key={m}
+                          type="button"
+                          role="radio"
+                          aria-checked={method === m}
+                          className={method === m ? 'active' : undefined}
+                          onClick={() => setPicked(m)}
+                        >
+                          {PAY_METHOD_LABEL[m]}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <div className="req-fields">
                   <div className="field">
                     <label htmlFor="email">Your email</label>
@@ -346,13 +383,25 @@ function Checkout({ slug }: { readonly slug: string }) {
                     goes to Flutterwave — and a payer does not need to know
                     which processor we route to, only that we never see their
                     card. */}
+                {/*
+                  AND THE CARDHOLDER-DATA STATEMENT, as the acquirer asked for
+                  it, in the same sentence rather than a second paragraph
+                  repeating the first. True because of how this page is built:
+                  the card is typed on the processor's hosted page, so no card
+                  number, security code or expiration date ever reaches this
+                  page, the API or a database here.
+                */}
                 <p className="req-foot">
                   They receive it in their Xetral wallet. You pay on a secure
-                  page — Xetral never sees your card details.
+                  page run by our PCI DSS Level 1 certified payment partners —{' '}
+                  {LEGAL_ENTITY} never stores, processes or transmits your card
+                  number, security code (CVV) or expiration date.
                 </p>
               </form>
             </>
           )}
+
+          <LegalLine className="animate-in d2" />
         </div>
       </div>
     </main>

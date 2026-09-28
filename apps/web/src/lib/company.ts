@@ -24,6 +24,13 @@
 export const COMPANY = {
   /** As registered. Used wherever the contracting entity must be named. */
   legalName: 'Xetral Ltd',
+  /**
+   * The Corporate Affairs Commission number, stated beside the name wherever
+   * the name is — the acquirer's review asked for the two to appear together
+   * and consistently, and a number typed into four pages is four chances to
+   * mistype it.
+   */
+  registrationNumber: 'RC 9748553',
   /** What a customer calls us, which is not the same string. */
   tradingName: 'Xetral',
   addressLine: '26 Admiralty Way, Lekki Phase 1',
@@ -39,7 +46,11 @@ export const COMPANY = {
   /** Where the published notice lives, for the Play listing and for emails. */
   privacyUrl: 'https://app.xetral.com/legal/privacy',
   termsUrl: 'https://app.xetral.com/legal/terms',
+  refundsUrl: 'https://app.xetral.com/legal/refunds',
 } as const;
+
+/** "Xetral Ltd (RC 9748553)" — the entity as every page names it. */
+export const LEGAL_ENTITY = `${COMPANY.legalName} (${COMPANY.registrationNumber})`;
 
 /** The postal address on one line, as a notice quotes it. */
 export const REGISTERED_ADDRESS =

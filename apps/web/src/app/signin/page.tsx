@@ -10,6 +10,7 @@ import { Logo } from '@/ui/logo';
 import { Icon } from '@/ui/icon';
 import { ThemeToggle } from '@/ui/theme-toggle';
 import { AuthAside } from '@/ui/auth-aside';
+import { LegalLine } from '@/ui/legal-line';
 
 export default function SignIn() {
   const router = useRouter();
@@ -117,6 +118,8 @@ export default function SignIn() {
       <p className="auth-trust animate-in d3">
         <Icon name="lock" size={14} /> Your session is encrypted end to end
       </p>
+
+      <LegalLine className="animate-in d3 start" />
         </div>
       </div>
     </main>

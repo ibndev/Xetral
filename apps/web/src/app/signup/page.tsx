@@ -15,6 +15,7 @@ import { Select } from '@/ui/select';
 import { CountryMark } from '@/ui/currency-mark';
 import { ThemeToggle } from '@/ui/theme-toggle';
 import { AuthAside } from '@/ui/auth-aside';
+import { LegalLine } from '@/ui/legal-line';
 
 /**
  * Opening an account.
@@ -449,6 +450,8 @@ export default function SignUp() {
       <p className="auth-foot animate-in d3">
         Already have an account? <Link href="/signin">Sign in</Link>
       </p>
+
+      <LegalLine className="animate-in d3 start" />
 
         </div>
       </div>

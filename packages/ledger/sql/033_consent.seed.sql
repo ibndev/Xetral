@@ -18,8 +18,11 @@ INSERT INTO consent_documents (kind, version, body_sha256, summary) VALUES
   -- an existing database cannot be moved by editing a row here, because both
   -- versions would be live and `consent_one_current_per_kind` refuses that.
   -- 074 retires and republishes, and is idempotent so this pair stays correct.
-  ('terms', '2026-09-19',
-   '866c9d5e52b5511048facae0eb2343709d4ae52d4c52984dbf10ad4a68ea72fb',
+  -- 086's names the registration number with the legal name, as the payment
+  -- partner asked, points at the refund policy, and is the first terms hash
+  -- taken over `company.ts` as well as the page.
+  ('terms', '2026-09-28',
+   '02f53bb837abb9146dd33a1ba90022fd9ce33169e83e2aea82e92693a65a94d0',
    'The terms on which Xetral Ltd holds and moves your money, including who '
    'may open an account, what cannot be undone, and how to complain.'),
 
@@ -46,8 +49,10 @@ INSERT INTO consent_documents (kind, version, body_sha256, summary) VALUES
   -- names Flutterwave as receiving a BVN, which it does from 076 on.
   -- 081's names Bitnob too: it can open naira account numbers, and their
   -- documentation puts the BVN and date of birth on the Bitnob customer.
-  ('privacy', '2026-09-25',
-   '4109639543a30bcf63136cd763b416ea6b234a5fe8043660199c576920f20689',
+  -- 086's adds the NDPR's principles and rights, the 72-hour breach notice,
+  -- the registration number and how a card number is and is not handled.
+  ('privacy', '2026-09-28',
+   '77d0bf612f99ee4ba3f84416ec58492716e726aa4dd640d031debdf7489aec59',
    'What personal data Xetral Ltd holds, why, exactly which companies receive '
    'it and what reaches them, how long it is kept, and how to get a copy or '
    'have it erased.'),

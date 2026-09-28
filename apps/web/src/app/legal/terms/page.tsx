@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { LegalPage } from '@/ui/legal-page';
-import { COMPANY, OPEN_COUNTRIES, REGISTERED_ADDRESS } from '@/lib/company';
+import { COMPANY, LEGAL_ENTITY, OPEN_COUNTRIES, REGISTERED_ADDRESS } from '@/lib/company';
 
 export const metadata: Metadata = {
   title: 'Terms — Xetral',
@@ -28,10 +28,12 @@ export const metadata: Metadata = {
  */
 export default function Terms() {
   return (
-    <LegalPage title="Terms of service" updated="19 September 2026">
+    <LegalPage title="Terms of service" updated="28 September 2026">
       <p className="legal-lede">
-        These are the terms on which <strong>{COMPANY.legalName}</strong> of{' '}
-        {REGISTERED_ADDRESS} (&ldquo;{COMPANY.tradingName}&rdquo;,
+        These are the terms on which <strong>{COMPANY.legalName}</strong>, a
+        company registered in Nigeria under registration number{' '}
+        <strong>{COMPANY.registrationNumber}</strong>, of {REGISTERED_ADDRESS}{' '}
+        (&ldquo;{COMPANY.tradingName}&rdquo;,
         &ldquo;we&rdquo;, &ldquo;us&rdquo;) holds and moves your money. Opening
         an account means accepting them. Please read the part about what cannot
         be undone.
@@ -125,6 +127,15 @@ export default function Terms() {
         Department.
       </p>
 
+      <h2>Refunds and cancellations</h2>
+      <p>
+        When and how money is returned — a payment that failed, one charged
+        twice, a cancelled service — is set out in our{' '}
+        <a href="/legal/refunds">Refund and Cancellation Policy</a>, which forms
+        part of these terms. It also covers the software development and IT
+        consulting services {COMPANY.legalName} provides to business clients.
+      </p>
+
       <h2>Things we cannot undo</h2>
       <p>Some things are final once they happen, and it is worth knowing which:</p>
       <ul>
@@ -208,7 +219,7 @@ export default function Terms() {
       </p>
 
       <p className="legal-contact">
-        <strong>{COMPANY.legalName}</strong>
+        <strong>{LEGAL_ENTITY}</strong>
         <br />
         {COMPANY.addressLine}
         <br />

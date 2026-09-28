@@ -28,7 +28,7 @@ const topUpSchema = z
     amount: z.string().trim().min(1).max(32),
     /* The Add Money button the customer pressed. Absent is every method the
        rail offers, which is what this endpoint always did. */
-    method: z.enum(['card', 'ussd']).optional(),
+    method: z.enum(['card', 'ussd', 'mobile_money', 'bank']).optional(),
   })
   .strict();
 

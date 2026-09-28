@@ -14,6 +14,7 @@ import {
   PaystackCheckoutAdapter,
   PaystackClient,
 } from '@xetral/providers';
+import { checkoutMethodAllowed } from '@xetral/providers';
 import type { CheckoutMethod, CheckoutPort } from '@xetral/providers';
 import { ProviderRejectedError, ProviderUnavailableError } from '@xetral/providers';
 import { assertBalanced, posting } from '@xetral/ledger';
@@ -235,12 +236,12 @@ export class PaymentLinkService {
       throw new BadRequestException({ error: 'currency_not_supported' });
     }
     /*
-     * USSD IS A NAIRA PRODUCT, on Paystack and on Flutterwave alike — it is a
-     * Nigerian bank's short code. Refused HERE, before a row is written,
-     * because sent on to the provider it is not an error: it is a checkout
-     * page with no method on it, which the customer reads as a broken screen.
+     * A METHOD THE CURRENCY CANNOT BE PAID WITH is refused HERE, before a row
+     * is written — USSD outside naira, mobile money for dollars — because sent
+     * on to the provider it is not an error: it is a checkout page with no
+     * method on it, which the payer reads as a broken screen.
      */
-    if (input.method === 'ussd' && currency !== 'NGN') {
+    if (input.method !== undefined && !checkoutMethodAllowed(input.method, currency)) {
       throw new BadRequestException({ error: 'payment_method_not_supported' });
     }
 

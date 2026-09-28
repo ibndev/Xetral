@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { FlutterwaveClient } from './client.js';
-import { FlutterwaveCheckoutAdapter } from './checkout-adapter.js';
+import { FlutterwaveCheckoutAdapter, flutterwaveOption } from './checkout-adapter.js';
 import { ProviderContractError, ProviderRejectedError } from '../ports/errors.js';
 
 /**
@@ -236,6 +236,32 @@ describe('starting a Flutterwave checkout', () => {
       method: 'ussd',
     });
     expect((sent[0]?.body as { payment_options: string }).payment_options).toBe('ussd');
+  });
+
+  it('opens a cedi payer who chose Mobile money on mobile money, not a card form', async () => {
+    // THE REPORT: a payer picked cedis on a payment link and Flutterwave's page
+    // opened on a card form. With every option offered their page leads with
+    // card; the payer chooses on OUR page now and theirs opens on that choice.
+    const { client, sent } = stub([{ status: 'success', data: { link: 'https://x' } }]);
+    await new FlutterwaveCheckoutAdapter(client).begin({
+      payerEmail: 'payer@example.com',
+      amountMinor: 5_000n,
+      currency: 'GHS',
+      reference: 'xetpay-momo',
+      callbackUrl: 'https://app.xetral.com/pay/abc',
+      method: 'mobile_money',
+    });
+    expect((sent[0]?.body as { payment_options: string }).payment_options).toBe('mobilemoneyghana');
+  });
+
+  it('names each corridor’s own product for a method', () => {
+    // `banktransfer` is the NIGERIAN pay-with-transfer product and `account`
+    // is the rest — 073's lesson that the two are not spellings of one thing.
+    expect(flutterwaveOption('bank', 'NGN')).toBe('banktransfer');
+    expect(flutterwaveOption('bank', 'GHS')).toBe('account');
+    expect(flutterwaveOption('mobile_money', 'GHS')).toBe('mobilemoneyghana');
+    expect(flutterwaveOption('mobile_money', 'KES')).toBe('mpesa');
+    expect(flutterwaveOption('card', 'USD')).toBe('card');
   });
 
   it('offers a dollar checkout a card and nothing else', async () => {

@@ -1,7 +1,13 @@
 import { z } from 'zod';
 import { fromMajor, isCurrency, toMajor, money } from '@xetral/shared';
 import { ProviderContractError, ProviderRejectedError } from '../ports/errors.js';
-import type { CheckoutOutcome, CheckoutPort, CheckoutRequest, CheckoutSession } from '../ports/checkout.js';
+import type {
+  CheckoutMethod,
+  CheckoutOutcome,
+  CheckoutPort,
+  CheckoutRequest,
+  CheckoutSession,
+} from '../ports/checkout.js';
 import { FLUTTERWAVE_ENDPOINTS, type FlutterwaveClient } from './client.js';
 
 const PROVIDER = 'flutterwave';
@@ -54,6 +60,25 @@ export const FLUTTERWAVE_PAYMENT_OPTIONS: Readonly<Record<string, string>> = {
    * only thing a stranger can pay one with. */
   USD: 'card',
 };
+
+/**
+ * OUR METHOD IN THEIR VOCABULARY, per currency — because theirs is per
+ * country. Mobile money is `mobilemoneyghana` in Accra and `mpesa` in
+ * Nairobi; a bank is `banktransfer` for naira and `account` elsewhere (see
+ * the Ghana note above: they are not two spellings of one thing).
+ */
+export function flutterwaveOption(method: CheckoutMethod, currency: string): string {
+  switch (method) {
+    case 'card':
+      return 'card';
+    case 'ussd':
+      return 'ussd';
+    case 'mobile_money':
+      return currency === 'KES' ? 'mpesa' : 'mobilemoneyghana';
+    case 'bank':
+      return currency === 'NGN' ? 'banktransfer' : 'account';
+  }
+}
 
 const paymentsResponse = z.object({
   status: z.string().optional(),
@@ -130,7 +155,10 @@ export class FlutterwaveCheckoutAdapter implements CheckoutPort {
     /* A method the customer chose narrows the page to it — Flutterwave's
        `payment_options` names both `card` and `ussd` as we do. Otherwise the
        per-currency list, for a stranger who has not chosen. */
-    const options = request.method ?? FLUTTERWAVE_PAYMENT_OPTIONS[request.currency];
+    const options =
+      request.method === undefined
+        ? FLUTTERWAVE_PAYMENT_OPTIONS[request.currency]
+        : flutterwaveOption(request.method, request.currency);
 
     const body = await this.#client.request('POST', FLUTTERWAVE_ENDPOINTS.payments, {
       /* THEIRS IS `tx_ref`, OURS IS `reference`, and it is the same string.

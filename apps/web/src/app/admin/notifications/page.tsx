@@ -365,6 +365,37 @@ function SendTest() {
           </div>
         )
       )}
+      {result !== undefined && (
+        <p className="mail-test-account">
+          {result.account === null
+            ? 'The provider would not say which account this key belongs to.'
+            : <>Key belongs to the Brevo account{' '}
+                <strong>{result.account.company ?? result.account.email ?? 'unnamed'}</strong>
+                {result.account.company !== undefined && result.account.email !== undefined && (
+                  <> ({result.account.email})</>
+                )}. If that is not the account you are watching, paste a key from the right one at{' '}
+                <a href="/admin/credentials">Credentials</a>.</>}
+        </p>
+      )}
+      {result !== undefined && result.recent_codes.length > 0 && (
+        <div className="mail-test-codes">
+          <strong>Recent reset and signup codes</strong>
+          <ul>
+            {result.recent_codes.map((code) => (
+              <li key={code.created_at + code.kind}>
+                <span className={`badge ${code.status === 'sent' ? 'ok' : code.status === 'pending' ? 'warn' : 'danger'}`}>
+                  {code.status}
+                </span>
+                <span>
+                  {code.kind === 'signup_code' ? 'Signup code' : 'Reset code'} ·{' '}
+                  {new Date(code.created_at).toLocaleString()}
+                  {code.last_error !== null && <small>{code.last_error}</small>}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

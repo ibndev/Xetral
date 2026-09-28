@@ -39,6 +39,7 @@ shipped, that is called out explicitly.
 | 28 — Recovery that asks first, and the requests that never arrived | ✅ | a verified Brevo sender, and a run of the refund audit |
 | 29 — One recovery list, a proved signup address, and verified meaning reviewed | ✅ | migrations 084 and 085, and an EAS projectId for push |
 | 30 — Mail from app.xetral.com, a bell that means something, counts that go away | ✅ | the Brevo key and authorised IPs, and an EAS projectId for push |
+| 31 — What the payment partner asked for, and a checkout that opened on a card | ✅ | migration 086, and the Send test's answer about the Brevo key |
 
 All eleven phases are built, a **pre-deployment audit** (Phase 12) closed what
 building them phase by phase had left between the phases, and **Phase 13** is
@@ -2668,3 +2669,33 @@ the Brevo account that owns `app.xetral.com` at `/admin/credentials`, or add the
 server's address under Brevo → Security → Authorised IPs; remove any
 `PASSWORD_RESET_TTL_MINUTES=30` from the environment; and, for push, run
 `eas init` in `apps/mobile`, add the Firebase key to Expo, and rebuild.
+
+---
+
+## Phase 31 — What the payment partner asked for, and a checkout that opened on a card ✅
+
+| File | What it is |
+|---|---|
+| `apps/web/src/lib/company.ts` | `LEGAL_ENTITY`: Xetral Ltd (RC 9748553), the one spelling |
+| `apps/web/src/app/legal/refunds/page.tsx` | refunds and cancellation: payments, development milestones, retainers |
+| `packages/ledger/sql/086_legal_republish.sql` | terms and privacy republished; the terms hash covers `company.ts` |
+| `packages/providers/src/ports/checkout.ts` | which methods each currency's checkout offers |
+| `apps/web/src/app/pay/[ref]/page.tsx` | "Pay with" before the provider's page; the PCI DSS statement |
+| `packages/providers/src/brevo/brevo-adapter.ts` | the key's account, and an SMTP key named |
+
+1. **Flutterwave's review** asked for the registered name and number on the
+   terms and across the site, a refund and cancellation policy covering
+   development milestones and consulting retainers, NDPR detail in the privacy
+   notice, and a cardholder-data statement on the payment page.
+2. **A cedi payment link opened on a card form**; the payer now picks Mobile
+   money, Bank or Card first.
+3. **An OTP that never arrives** now has its explanation on the Send test:
+   whose key it is, and what became of the last five codes.
+
+**Before this goes live, an operator must:** apply **086** (every customer is
+asked to accept the updated terms and privacy notice — `consent_outstanding`
+fills, which is the mechanism working); send Flutterwave the links to
+`/legal/terms`, `/legal/privacy` and `/legal/refunds`; and press **Send test**
+on `/admin/notifications` — if the account it names is not the one that owns
+`app.xetral.com`, paste an `xkeysib-` key from that account at
+`/admin/credentials`.

@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { LegalPage } from '@/ui/legal-page';
 import { RETENTION_ROWS } from '@/lib/retention-table';
-import { COMPANY, OPEN_COUNTRIES, REGISTERED_ADDRESS } from '@/lib/company';
+import { COMPANY, LEGAL_ENTITY, OPEN_COUNTRIES, REGISTERED_ADDRESS } from '@/lib/company';
 import { NON_PROCESSORS, PROCESSORS } from '@/lib/processors';
 
 export const metadata: Metadata = {
@@ -31,7 +31,7 @@ export const metadata: Metadata = {
  */
 export default function Privacy() {
   return (
-    <LegalPage title="Privacy notice" updated="25 September 2026">
+    <LegalPage title="Privacy notice" updated="28 September 2026">
       <p className="legal-lede">
         This notice explains what {COMPANY.tradingName} collects about you, why,
         who else sees it, how long it is kept and what you can ask us to do with
@@ -44,14 +44,24 @@ export default function Privacy() {
       <h2>Who we are</h2>
       <p>
         {COMPANY.tradingName} is operated by <strong>{COMPANY.legalName}</strong>{' '}
-        of <strong>{REGISTERED_ADDRESS}</strong>. We are the data controller for
+        (registration number {COMPANY.registrationNumber}) of{' '}
+        <strong>{REGISTERED_ADDRESS}</strong>. We are the data controller for
         everything described here, and we are responsible for it under the
-        Nigeria Data Protection Act 2023.
+        Nigeria Data Protection Act 2023 and the Nigeria Data Protection
+        Regulation 2019 (NDPR) with its Implementation Framework, which the Act
+        keeps in force.
+      </p>
+      <p>
+        We process personal data by the principles the NDPR sets out: lawfully,
+        fairly and openly; only for the purposes stated here; no more than those
+        purposes need; kept accurate; kept no longer than necessary; and kept
+        secure against loss, misuse and unauthorised access.
       </p>
       <p>
         For anything about your data — a copy, a correction, an erasure, or a
-        complaint — write to <a href={`mailto:${COMPANY.email}`}>{COMPANY.email}</a>.
-        A person reads it, and we answer within 30 days.
+        complaint — write to our Data Protection Officer at{' '}
+        <a href={`mailto:${COMPANY.email}`}>{COMPANY.email}</a>. A person reads
+        it, and we answer within 30 days.
       </p>
 
       <h2>What we collect, and why</h2>
@@ -289,6 +299,22 @@ export default function Privacy() {
           an account that still holds money or is under investigation; we will
           tell you that rather than refusing without a reason.
         </dd>
+        <dt>To restrict how it is used</dt>
+        <dd>
+          While a correction or an objection is being looked at, you can ask us
+          to hold your data without using it for anything else.
+        </dd>
+        <dt>To take it elsewhere</dt>
+        <dd>
+          The copy described above is a structured, machine-readable file, so
+          you can give it to another provider.
+        </dd>
+        <dt>Not to be decided about by a machine alone</dt>
+        <dd>
+          No decision about your account that affects you significantly — an
+          approval, a refusal, a closure — is made by software alone. Our
+          monitoring flags; a person decides.
+        </dd>
         <dt>To object, or to withdraw consent</dt>
         <dd>
           At any time, for anything we rely on consent for. Some services cannot
@@ -346,9 +372,23 @@ export default function Privacy() {
         device signed in with it.
       </p>
       <p>
-        No system is perfect. If personal data is ever exposed in a way that is
-        likely to harm you, we will tell you and the Nigeria Data Protection
-        Commission within the time the Act requires.
+        No system is perfect. If personal data is ever exposed, we will notify
+        the Nigeria Data Protection Commission within 72 hours of becoming aware
+        of it, and tell you without delay where it is likely to put your rights
+        at risk — what happened, what it affects and what we are doing about it.
+      </p>
+
+      <h2>Card payments</h2>
+      <p>
+        When you pay by card — funding your wallet, or paying somebody&rsquo;s
+        payment link — you type the card on our payment partner&rsquo;s secure
+        page, and our partners are certified to the Payment Card Industry Data
+        Security Standard (PCI DSS). For a card you pay with,{' '}
+        {COMPANY.legalName} does not store, process or transmit its number, CVV
+        or expiry date: what reaches us is the outcome of the payment and a
+        reference. For a virtual card we issue you, we keep only its last four
+        digits; its full details are fetched from the issuer and shown to you
+        when you ask and prove your PIN, and are never stored by us.
       </p>
 
       <h2>Changes</h2>
@@ -360,7 +400,7 @@ export default function Privacy() {
       </p>
 
       <p className="legal-contact">
-        <strong>{COMPANY.legalName}</strong>
+        <strong>{LEGAL_ENTITY}</strong>
         <br />
         {COMPANY.addressLine}
         <br />

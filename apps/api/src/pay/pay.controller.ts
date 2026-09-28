@@ -64,6 +64,12 @@ const beginSchema = z
      * credited. Bounded because it goes into somebody else's system for ever.
      */
     note: z.string().trim().min(1).max(140).optional(),
+    /**
+     * HOW THE PAYER CHOSE TO PAY — mobile money, a bank, a card — so the
+     * provider's page opens on that rather than on its own default, which is
+     * a card form. Whether the currency allows it is the service's question.
+     */
+    method: z.enum(['card', 'ussd', 'mobile_money', 'bank']).optional(),
   })
   .strict();
 
@@ -103,6 +109,7 @@ export class PayController {
         ? {}
         : { currency: parsed.data.currency.toUpperCase() }),
       ...(parsed.data.note === undefined ? {} : { note: parsed.data.note }),
+      ...(parsed.data.method === undefined ? {} : { method: parsed.data.method }),
     });
   }
 

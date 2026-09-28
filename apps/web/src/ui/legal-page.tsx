@@ -2,6 +2,7 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { Logo } from './logo';
 import { ThemeToggle } from './theme-toggle';
+import { LEGAL_ENTITY, REGISTERED_ADDRESS } from '@/lib/company';
 
 /**
  * The frame the legal pages use, and NOT `Shell`.
@@ -40,8 +41,14 @@ export function LegalPage({
         <nav className="legal-foot">
           <Link href="/legal/privacy">Privacy</Link>
           <Link href="/legal/terms">Terms</Link>
+          <Link href="/legal/refunds">Refunds</Link>
           <Link href="/signin">Sign in</Link>
         </nav>
+        {/* The contracting entity on every legal page, the same string each
+            time — the acquirer's review asked for exactly this consistency. */}
+        <p className="legal-entity">
+          {LEGAL_ENTITY} · {REGISTERED_ADDRESS}
+        </p>
       </main>
     </div>
   );
