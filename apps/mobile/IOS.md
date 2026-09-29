@@ -1,79 +1,99 @@
-# Getting this onto an iPhone
+# Getting this onto an iPhone, and into the App Store — with no Mac
 
-Android needs nothing from you — the **Android APK** workflow builds and
-publishes one, and you install it. iOS is different, and the difference is
-Apple's, not this project's: **every binary that runs on a physical iPhone must
-be signed by a paid Apple Developer account.** There is no sideloading
-equivalent to an APK.
+Every binary that runs on a physical iPhone is signed by a paid Apple Developer
+account, and building one needs macOS. **EAS Build is the Mac**: `eas build`
+runs from Windows or Linux, uploads the project, and Expo's macOS workers
+compile and sign it. Nothing below needs a Mac.
 
-That gives two routes, and only one of them needs anything from you.
+## Once
 
-## Route A — the simulator. Free, today, no account
+1. **An Apple Developer Program membership** — $99/year at
+   <https://developer.apple.com/programs/>. As an *organisation* it needs a
+   D-U-N-S number and takes days; for a fintech shipping to the App Store that
+   is the account you want, so start it first. Everything else waits on it.
+2. **An Expo account** (free, <https://expo.dev>), then from `apps/mobile`:
 
-A simulator build is not signed for a device, so Apple requires nothing:
+   ```bash
+   npx eas login
+   npx eas init            # writes extra.eas.projectId into app.json — commit it
+   ```
 
-```bash
-npx eas build --profile development --platform ios
-```
+   `eas init` is also what push notifications need (see `CLAUDE.md`,
+   "Telling customers something").
+3. **Credentials.** The first `eas build --platform ios` asks you to sign in to
+   Apple and creates the distribution certificate and provisioning profiles
+   itself, stored on EAS. There is no keychain to manage and nothing to put in
+   this repository.
 
-`eas.json`'s `development` profile sets `ios.simulator: true`. The result is a
-`.tar.gz` you unpack and drag onto a running simulator.
+## Testing on your iPhone
 
-**It needs a Mac.** The iOS Simulator is macOS-only — there is no Linux or
-Windows equivalent, and no CI runner substitutes for it. What it exercises is
-every screen, the whole API surface and the navigation. What it *cannot*
-exercise is Face ID against real hardware, the Keychain's
-`WHEN_UNLOCKED_THIS_DEVICE_ONLY` behaviour, or the app-switcher screenshot the
-cover in `screen-privacy.tsx` exists to prevent. Those are the three things
-this app most needs a device for, which is why Route B exists.
-
-## Route B — a real iPhone. Needs an Apple Developer account
-
-**What I need from you:**
-
-1. **An Apple Developer Program membership** — $99/year, at
-   <https://developer.apple.com/programs/>. Enrolment as an *organisation*
-   takes days and needs a D-U-N-S number; as an *individual* it is usually
-   same-day. For a fintech that will eventually ship on the App Store, the
-   organisation account is the one you want, so start it early — it is the
-   longest-lead item here and nothing else is blocked by it.
-2. **An Expo account**, free, at <https://expo.dev>. Then `npx eas login`.
-3. **The UDID of each iPhone** that will run a build. `eas device:create` walks
-   you through registering them; Apple allows 100 per year and removing one
-   only frees the slot at renewal, so register the phones you mean to test on.
-
-**Then:**
+### Quickest: Expo Go
 
 ```bash
-npx eas device:create                                  # once per phone
-npx eas build --profile device --platform ios          # a signed development build
+npm run start:go            # same Wi-Fi as the phone
+npm run start:go:tunnel     # phone on mobile data, or a different network
 ```
 
-EAS handles the certificate and provisioning profile — you will be asked to
-sign in to Apple once and it creates them. The build finishes as a link; open
-it on the phone and install.
+Scan the QR code with the Camera app. **Expo Go only runs the one SDK version
+it was built for**, and it moves forward with the App Store. When it says the
+project is incompatible, that is not something to fix here — use the
+development build below, which is this app's own binary and never goes stale.
+Expo Go also cannot show the Face ID prompt with our wording, or receive push.
 
-`distribution: internal` is what makes that link work without TestFlight.
-TestFlight is the next step up and needs App Store Connect metadata,
-an export-compliance answer, and a review for external testers — worth doing
-before a public beta, not before you have seen the app run.
+`start:go` used to be plain `expo start`, which — because `expo-dev-client` is
+installed — serves a *development build*, so Expo Go was shown a QR code for an
+app it does not have. It passes `--go` now.
 
-## What each profile in `eas.json` is for
+### The real thing: an internal build
 
-| Profile | Android | iOS | Use |
-|---|---|---|---|
-| `development` | APK, dev client | **simulator** | Day-to-day, Metro on your machine |
-| `device` | APK, dev client | **physical device** | Same, on a real iPhone. Needs the account |
-| `preview` | APK | device | Standalone, JS bundled in — hand to a tester |
-| `production` | **AAB** | device | Store submission. AAB because Play requires it |
+```bash
+npx eas device:create       # once per iPhone — registers its UDID with Apple
+npm run build:ios:device    # development build: your phone + `npm start` on your PC
+npm run build:ios:internal  # standalone build: the JavaScript is inside
+```
 
-`development` and `device` load JavaScript from Metro, exactly as the Android
-development build does. `preview` and `production` carry it inside.
+`distribution: internal` is **ad hoc** provisioning: the build finishes as a
+link, you open it on a registered iPhone, and it installs — no TestFlight, no
+review. Apple allows 100 devices a year; removing one frees the slot only at
+renewal, so register the phones you mean to test on. A phone registered after
+a build needs a new build.
 
-## The one thing to decide before any of this
+## Submitting to the App Store
 
-`EXPO_PUBLIC_API_URL`, or `extra.apiUrl` in `app.json`, has to point at an
-address the **phone** can reach over the internet — not the internal Docker
-name the web app uses, and not `localhost`. Until the API has a public
-hostname, an iOS build will install and open and every request will fail, in
-exactly the way the Android preview build currently does.
+```bash
+npm run build:ios           # production profile, then uploads to App Store Connect
+```
+
+`--auto-submit` runs `eas submit` after the build. The first time, it asks for
+your Apple ID and offers to create the app record in App Store Connect; after
+that it goes to **TestFlight**, and you release it to review from App Store
+Connect. `npm run submit:ios` re-uploads a finished build on its own.
+
+Build numbers are counted on EAS (`appVersionSource: remote`,
+`autoIncrement`), so two uploads can never share one — Apple refuses a repeat.
+
+**Two questions App Store Connect asks that only you can answer:**
+
+- **Export compliance.** Every build shows "Missing Compliance" until it is
+  answered. The app uses HTTPS and the iOS Keychain only; if you are
+  satisfied that is exempt, set `ios.config.usesNonExemptEncryption: false`
+  in `app.json` and it stops asking. It is a legal declaration, so it is
+  yours to make, not a default in this file.
+- **App Privacy.** The data types collected — name, email, phone, financial
+  info, identifiers — must match what `/legal/privacy` says.
+
+## Which profile is which
+
+| Profile | iOS | Use |
+|---|---|---|
+| `development` | simulator | Needs a Mac to run. Not for you |
+| `device` | iPhone, dev client | Replaces Expo Go; loads JS from `npm start` |
+| `ios-internal` | iPhone, standalone | Hand to a tester. Registered devices only |
+| `preview` | iPhone, standalone | The same on iOS; also builds the Android APK |
+| `production` | App Store | TestFlight, then review |
+
+## Before any of it
+
+`extra.apiUrl` in `app.json` is `https://app.xetral.com/api/x`, and it is
+compiled in — see `api-url.test.ts`. A standalone build pointed anywhere else
+installs, opens and fails every request.

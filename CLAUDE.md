@@ -2515,7 +2515,7 @@ Republished by `packages/ledger/sql/086_legal_republish.sql`.
   offered, by trigger and deliberately — the one role able to read the log
   would be the one role able to remove the record of what it did.
 
-, and the ten seconds before every request — non-obvious rules
+### DELETE through the proxy, and the ten seconds before every request — non-obvious rules
 
 `apps/web/src/app/api/x/[...path]/route.ts`, `packages/client/src/admin.ts`,
 `apps/api/src/auth/rate-limit.ts`.
@@ -2541,6 +2541,40 @@ Republished by `packages/ledger/sql/086_legal_republish.sql`.
 - **AN UNSCOPED ADMIN RULE REDREW THE CUSTOMER SIGN-IN.** `.auth-head` was
   given `display: flex` for the authenticator panel and the customer's sign-in,
   sign-up and reset headings became a squeezed row. It is `.admin-frame .auth-head`.
+
+### A payout that held nothing, and iOS with no Mac — non-obvious rules
+
+Schema: `packages/ledger/sql/088_hollow_payouts.sql`. iOS in `apps/mobile/eas.json`
+and `apps/mobile/IOS.md`, guarded by `ios-release.test.ts`.
+
+- **THE ₦10 PAYOUT NOBODY COULD CLEAR WAS A TEST FIXTURE.** `080`'s and
+  `046`'s `.test.sql` suites write a `reserved` payout against the FIRST user
+  — the owner, on a live database — pointing at a `wallet_withdrawal` entry
+  with NO POSTINGS. Asking Paystack failed on the colon in `p80:ref`, sending
+  again failed on the fake account, and refunding answered 500 because the
+  reversal drove an empty `customer_pending` negative. Real references are
+  `xetral-payout-<hex>`; the colon was only ever the fixture's.
+- **THE DANGEROUS HALF WAS THE BUTTONS THAT MIGHT HAVE WORKED.** A resend to
+  an account that resolved would pay float out for a reserve that held
+  nothing; a refund for a customer with a REAL payout in flight would hand
+  back somebody's held money twice.
+- **SO "HELD" IS STRUCTURAL: the reserve entry must have postings.**
+  `LedgerService.post()` never writes an entry without them and the reserve
+  commits before the payout row can reference it, so an empty reserve is only
+  ever a row somebody typed. `money_awaiting_recovery` requires one.
+- **CLOSED, NOT DELETED.** Both tables refuse a DELETE and are right to.
+  `fail_hollow_payouts()` moves them `reserved -> failed` with the reason and
+  posts NOTHING — a reversal of an empty entry would be a statement about
+  money that does not exist. `hollow_payouts` keeps the evidence.
+- **A REFUSED RESEND IS NOT "SENT AGAIN".** The history read "Sent to the
+  recipient again" twice over a payout still held; it reads `detail.sent` now.
+- **EAS BUILD IS THE MAC.** Every iOS profile a person uses targets a device —
+  a simulator build succeeds in the cloud and produces a file nobody here can
+  open. `ios-internal` is ad hoc (registered UDIDs, a link, no TestFlight);
+  `production` is `store` and `build:ios` auto-submits to TestFlight.
+- **EXPORT COMPLIANCE IS THE OWNER'S DECLARATION**, so
+  `usesNonExemptEncryption` is deliberately NOT set: App Store Connect asks per
+  build until they decide.
 
 ### The reset code, and a sender Brevo never verified — non-obvious rules
 
@@ -3373,8 +3407,10 @@ Review in `apps/mobile/SECURITY.md`, cover in `src/screen-privacy.tsx`.
   mismatch above is a recurring tax for a thing that was always a stand-in.
   `expo-dev-client` makes the development build this app's OWN binary, pointed
   at Metro the same way. `npm start` is `expo start --dev-client`; `start:go`
-  keeps the old behaviour for a quick look at a screen with no native
-  dependency.
+  is `expo start --go` for a quick look — and it has to SAY `--go`, because
+  with `expo-dev-client` a direct dependency a bare `expo start` serves a
+  development build, and for months `start:go` showed Expo Go a QR code for
+  an app it did not have.
 - **THE TWO ANDROID VARIANTS DIFFER IN WHERE THE JAVASCRIPT COMES FROM**, and
   that is why they take different inputs. A `preview` APK is bundled in CI, so
   `EXPO_PUBLIC_API_URL` is baked in and the phone cannot be told later. A
@@ -4867,6 +4903,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/084_signup_email_codes.
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/085_verified_rests_on_identity.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/086_legal_republish.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/087_scheduled_announcements.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/088_hollow_payouts.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -4952,6 +4989,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/084_signup_email_codes.
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/085_verified_rests_on_identity.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/086_legal_republish.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/087_scheduled_announcements.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/088_hollow_payouts.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

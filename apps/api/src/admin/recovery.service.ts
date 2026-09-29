@@ -491,8 +491,15 @@ export class RecoveryService {
 
   /** Everything a person did to this transaction, oldest first — the append-only record. */
   async #history(subjectUuid: string): Promise<RecoveryDetail['history']> {
-    const rows = await this.pool.query<{ at: Date; what: string; who: string | null; reason: string | null }>(
-      `SELECT l.created_at AS at, l.action AS what, u.email AS who, l.reason
+    const rows = await this.pool.query<{
+      at: Date;
+      what: string;
+      who: string | null;
+      reason: string | null;
+      sent: string | null;
+    }>(
+      `SELECT l.created_at AS at, l.action AS what, u.email AS who, l.reason,
+              l.detail->>'sent' AS sent
          FROM admin_audit_log l
          LEFT JOIN users u ON u.id = l.actor_id
         WHERE l.subject_id = $1 AND l.action LIKE 'recovery.%'
@@ -507,7 +514,12 @@ export class RecoveryService {
           : row.what === 'recovery.delivered'
             ? 'Marked delivered'
             : row.what === 'recovery.resend'
-              ? 'Sent to the recipient again'
+              ? // A RESEND THE PROVIDER REFUSED IS NOT A SEND. It read "Sent to
+                // the recipient again" twice over a payout still held, which
+                // is a history claiming something happened that did not.
+                row.sent === 'false'
+                ? 'Tried sending again — the provider did not accept it'
+                : 'Sent to the recipient again'
               : row.what === 'recovery.reviewed'
                 ? REVIEWED
                 : row.what,

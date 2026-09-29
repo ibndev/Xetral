@@ -471,6 +471,7 @@ export class FundingDiagnosticsService {
       ['signup_email_codes', '084_signup_email_codes.sql'],
       ['fn:assert_tier_rests_on_identity', '085_verified_rests_on_identity.sql'],
       ['push_broadcasts.send_at', '087_scheduled_announcements.sql'],
+      ['hollow_payouts', '088_hollow_payouts.sql'],
     ];
 
     const missing: string[] = [];

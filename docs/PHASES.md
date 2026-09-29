@@ -43,6 +43,7 @@ shipped, that is called out explicitly.
 | 32 — A migration skipped in production, and an announcement that said "queued" | ✅ | migrations 069 and 087, Brevo Authorised IPs, an EAS projectId and FCM for push |
 | 33 — Announcements on a database behind 087, and who did what | ✅ | migration 087 for scheduling |
 | 34 — A payout paid twice, and a list that clears | ✅ | |
+| 35 — A payout that held nothing, and iOS with no Mac | ✅ | migration 088; an Apple Developer account and `eas init` |
 
 All eleven phases are built, a **pre-deployment audit** (Phase 12) closed what
 building them phase by phase had left between the phases, and **Phase 13** is
@@ -2766,3 +2767,24 @@ cancel announcements; until then they go out immediately.
 
 **An operator need do nothing for this one** beyond opening the paid-twice
 row, dealing with the customer, and recording what happened.
+
+---
+
+## Phase 35 — A payout that held nothing, and iOS with no Mac ✅
+
+| File | What it is |
+|---|---|
+| `packages/ledger/sql/088_hollow_payouts.sql` | "held" requires a reserve that moved money; fixtures closed |
+| `apps/api/src/admin/recovery.service.ts` | a refused resend reads as refused |
+| `apps/mobile/eas.json` | `ios-internal` (ad hoc) and `production` (store) for a device |
+| `apps/mobile/IOS.md` | Apple account, `eas init`, device builds, TestFlight |
+
+1. **The ₦10 "Needs review" payout was a `.test.sql` fixture** run against
+   production; no button could clear it and one might have paid it out.
+2. **`start:go` served a development build**, so Expo Go could not open it.
+
+**Before this goes live, an operator must:** apply **088** (it closes every
+payout whose reserve moved no money — nothing is posted), and never run a
+`.test.sql` file against production. For iOS: enrol in the Apple Developer
+Program, run `npx eas init` in `apps/mobile` and commit the `projectId`, then
+`npm run build:ios:internal` or `npm run build:ios`.

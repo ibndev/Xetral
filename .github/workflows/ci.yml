@@ -173,6 +173,7 @@ jobs:
             -f packages/ledger/sql/085_verified_rests_on_identity.sql \
             -f packages/ledger/sql/086_legal_republish.sql \
             -f packages/ledger/sql/087_scheduled_announcements.sql \
+            -f packages/ledger/sql/088_hollow_payouts.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       - name: Ledger and identity invariants
@@ -267,6 +268,7 @@ jobs:
                    packages/ledger/sql/085_verified_rests_on_identity.test.sql \
                    packages/ledger/sql/086_legal_republish.test.sql \
                    packages/ledger/sql/087_scheduled_announcements.test.sql \
+                   packages/ledger/sql/088_hollow_payouts.test.sql \
                    packages/ledger/sql/099_least_privilege.test.sql; do
             echo "== $f"
             psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
@@ -393,6 +395,7 @@ jobs:
             -f packages/ledger/sql/085_verified_rests_on_identity.sql \
             -f packages/ledger/sql/086_legal_republish.sql \
             -f packages/ledger/sql/087_scheduled_announcements.sql \
+            -f packages/ledger/sql/088_hollow_payouts.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       # ------------------------------------------------------------------
