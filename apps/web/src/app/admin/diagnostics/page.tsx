@@ -90,7 +90,7 @@ export default function Diagnostics() {
             <p className="empty">No rail has refused to open an account.</p>
           )}
           {(report.data.accountRefusals ?? []).map((refusal, index) => (
-            <div className="row" key={`${refusal.rail}-${refusal.currency}-${index}`}>
+            <div className="row diag-row" key={`${refusal.rail}-${refusal.currency}-${index}`}>
               <span style={{ minWidth: 0 }}>
                 <span className="mono">
                   {refusal.rail} · {refusal.currency}
@@ -163,7 +163,7 @@ export default function Diagnostics() {
             <p className="empty">Nothing has failed. </p>
           )}
           {report.data.failures.map((failure, index) => (
-            <div className="row" key={`${failure.route}-${index}`}>
+            <div className="row diag-row" key={`${failure.route}-${index}`}>
               <span style={{ minWidth: 0 }}>
                 <span className="mono">
                   {failure.status} {failure.route ?? 'unmatched'}

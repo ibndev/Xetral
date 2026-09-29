@@ -82,7 +82,8 @@ export type AdminAction =
      after, because "which rail was serving at 14:02" is the first question
      anybody reading a failed payout asks. */
   | 'route.change'
-  | 'push.broadcast';
+  | 'push.broadcast'
+  | 'push.cancel';
 
 export interface AuditEntry {
   /** The actor's UUID, as it appears in an access token. Resolved to the

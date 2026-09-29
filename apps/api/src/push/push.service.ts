@@ -1,4 +1,11 @@
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import type { Pool } from 'pg';
 import { DATABASE } from '../tokens.js';
 
@@ -14,6 +21,9 @@ export interface BroadcastView {
   readonly country: string | null;
   readonly created_at: string;
   readonly sent_at: string | null;
+  /** When it is due — in the feed from then, and pushed from then. */
+  readonly send_at: string;
+  readonly cancelled_at: string | null;
   readonly devices: number;
   readonly accepted: number;
   readonly rejected: number;
@@ -160,15 +170,25 @@ export class PushService {
    */
   async queue(
     staffUuid: string,
-    input: { title: string; body: string; country?: string },
+    input: { title: string; body: string; country?: string; sendAt?: string },
   ): Promise<BroadcastView> {
-    const result = await this.pool.query<BroadcastRow>(
-      `INSERT INTO push_broadcasts (title, body, country, created_by)
-       SELECT $2, $3, $4::char(2), u.id FROM users u WHERE u.uuid = $1
-       RETURNING uuid, title, body, country, created_at, sent_at,
-                 devices, accepted, rejected, without_consent, failure_reason`,
-      [staffUuid, input.title.trim(), input.body.trim(), input.country ?? null],
-    );
+    let result;
+    try {
+      result = await this.pool.query<BroadcastRow>(
+        `INSERT INTO push_broadcasts (title, body, country, created_by, send_at)
+         SELECT $2, $3, $4::char(2), u.id, COALESCE($5::timestamptz, now())
+           FROM users u WHERE u.uuid = $1
+         RETURNING ${COLUMNS}`,
+        [staffUuid, input.title.trim(), input.body.trim(), input.country ?? null, input.sendAt ?? null],
+      );
+    } catch (error) {
+      // 087's CHECKs: not in the past, not more than a month out. Said as a
+      // field the screen can point at rather than a constraint name.
+      if ((error as { code?: unknown }).code === '23514') {
+        throw new BadRequestException({ error: 'invalid_request', fields: ['send_at'] });
+      }
+      throw error;
+    }
     const row = result.rows[0];
     if (row === undefined) throw new Error('broadcast queued by a user that does not exist');
 
@@ -184,14 +204,47 @@ export class PushService {
    */
   async history(limit = 50): Promise<readonly BroadcastView[]> {
     const result = await this.pool.query<BroadcastRow>(
-      `SELECT uuid, title, body, country, created_at, sent_at,
-              devices, accepted, rejected, without_consent, failure_reason
+      `SELECT ${COLUMNS}
          FROM push_broadcasts
-        ORDER BY created_at DESC
+        ORDER BY send_at DESC, created_at DESC
         LIMIT $1`,
       [Math.min(Math.max(limit, 1), 200)],
     );
     return result.rows.map(view);
+  }
+
+  /** Whether an announcement is due and not yet pushed — what the list drains. */
+  async hasDue(): Promise<boolean> {
+    const result = await this.pool.query(
+      `SELECT 1 FROM push_broadcasts
+        WHERE sent_at IS NULL AND cancelled_at IS NULL AND send_at <= now()
+        LIMIT 1`,
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  /**
+   * Calls back one that has not gone out. The trigger refuses a due one, a
+   * sent one or a cancelled one; this answers all three as one conflict,
+   * because each means the same thing to the operator: too late.
+   */
+  async cancel(uuid: string): Promise<BroadcastView> {
+    if (!/^[0-9a-f-]{36}$/i.test(uuid)) {
+      throw new NotFoundException({ error: 'broadcast_not_found' });
+    }
+    const result = await this.pool.query<BroadcastRow>(
+      `UPDATE push_broadcasts SET cancelled_at = now()
+        WHERE uuid = $1 AND sent_at IS NULL AND cancelled_at IS NULL AND send_at > now()
+        RETURNING ${COLUMNS}`,
+      [uuid],
+    );
+    const row = result.rows[0];
+    if (row === undefined) {
+      await this.one(uuid); // 404 for an unknown one
+      throw new ConflictException({ error: 'broadcast_not_cancellable' });
+    }
+    this.#logger.log(`broadcast cancelled before it was due: "${row.title}"`);
+    return view(row);
   }
 
   /**
@@ -225,11 +278,16 @@ export class PushService {
       body: string;
       created_at: Date;
     }>(
-      `SELECT b.uuid, b.title, b.body, b.created_at
+      // DUE AND NOT CALLED BACK (087). A scheduled announcement is not in the
+      // feed before its time, and `at` is when it went out, not when somebody
+      // typed it — "maintenance tonight" written at four reads as tonight's.
+      `SELECT b.uuid, b.title, b.body, b.send_at AS created_at
          FROM push_broadcasts b
          JOIN users u ON u.uuid = $1
-        WHERE b.country IS NULL OR b.country = u.country
-        ORDER BY b.created_at DESC
+        WHERE (b.country IS NULL OR b.country = u.country)
+          AND b.send_at <= now()
+          AND b.cancelled_at IS NULL
+        ORDER BY b.send_at DESC
         LIMIT $2`,
       [userUuid, Math.min(Math.max(limit, 1), 100)],
     );
@@ -243,9 +301,7 @@ export class PushService {
 
   async one(uuid: string): Promise<BroadcastView> {
     const result = await this.pool.query<BroadcastRow>(
-      `SELECT uuid, title, body, country, created_at, sent_at,
-              devices, accepted, rejected, without_consent, failure_reason
-         FROM push_broadcasts WHERE uuid = $1`,
+      `SELECT ${COLUMNS} FROM push_broadcasts WHERE uuid = $1`,
       [uuid],
     );
     const row = result.rows[0];
@@ -254,6 +310,9 @@ export class PushService {
   }
 }
 
+const COLUMNS = `uuid, title, body, country, created_at, sent_at, send_at, cancelled_at,
+                 devices, accepted, rejected, without_consent, failure_reason`;
+
 interface BroadcastRow {
   uuid: string;
   title: string;
@@ -261,6 +320,8 @@ interface BroadcastRow {
   country: string | null;
   created_at: Date;
   sent_at: Date | null;
+  send_at: Date;
+  cancelled_at: Date | null;
   devices: number;
   accepted: number;
   rejected: number;
@@ -276,6 +337,8 @@ function view(row: BroadcastRow): BroadcastView {
     country: row.country,
     created_at: row.created_at.toISOString(),
     sent_at: row.sent_at === null ? null : row.sent_at.toISOString(),
+    send_at: row.send_at.toISOString(),
+    cancelled_at: row.cancelled_at === null ? null : row.cancelled_at.toISOString(),
     devices: Number(row.devices),
     accepted: Number(row.accepted),
     rejected: Number(row.rejected),

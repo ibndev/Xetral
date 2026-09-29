@@ -377,6 +377,8 @@ function sentenceFor(error: ApiError): string {
       return 'Choose your country first — a phone number needs its dialling code.';
     case 'broadcast_not_found':
       return 'That announcement is no longer here.';
+    case 'broadcast_not_cancellable':
+      return 'That announcement has already gone out, so it can no longer be cancelled.';
     case 'cannot_send_to_self':
       return 'That is your own number. Choose somebody else to pay.';
     case 'unsupported_network':

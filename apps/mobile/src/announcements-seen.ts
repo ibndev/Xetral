@@ -4,6 +4,7 @@ import * as SecureStore from 'expo-secure-store';
 import { hasUnread, newestAt } from '@xetral/client';
 import type { Announcement } from '@xetral/client';
 import { xetral } from '@/session';
+import { notifyNewAnnouncements } from '@/push';
 
 /**
  * WHEN THIS PHONE LAST SHOWED THE FEED — the web's `announcements-seen`, on
@@ -49,6 +50,8 @@ export function useUnreadAnnouncements(enabled: boolean): boolean {
       try {
         const [feed, seen] = await Promise.all([xetral().client.announcements(), readSeen()]);
         if (live) setUnread(hasUnread(feed.announcements, seen));
+        // The same read raises anything new in the status bar — see push.ts.
+        void notifyNewAnnouncements(feed.announcements);
       } catch {
         // An unreadable feed is not a reason to light a dot.
       }

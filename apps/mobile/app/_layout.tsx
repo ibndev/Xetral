@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Stack } from 'expo-router';
+import { Stack, router } from 'expo-router';
+import * as Notifications from 'expo-notifications';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -24,6 +25,16 @@ export default function Layout() {
   // handset set to dark opened the app dark; the product's default is light,
   // and dark — or following the phone — is a choice made in Settings.
   const [choice, setChoice] = useState<ThemeChoice>('light');
+
+  // A TAPPED NOTIFICATION OPENS WHAT IT IS ABOUT. Every one this app raises is
+  // an announcement, so the feed is where the customer meant to go.
+  useEffect(() => {
+    const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
+      const route = (response.notification.request.content.data as { route?: unknown } | undefined)?.route;
+      if (route === '/notifications') router.push('/notifications');
+    });
+    return () => subscription.remove();
+  }, []);
 
   /*
    * THE BRAND FACES WERE NEVER LOADED.

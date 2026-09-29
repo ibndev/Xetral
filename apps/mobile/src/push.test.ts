@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 /**
@@ -19,6 +20,7 @@ const pkg = JSON.parse(readFileSync(`${HERE}/../package.json`, 'utf8')) as {
   dependencies: Record<string, string>;
 };
 const source = readFileSync(`${HERE}/push.ts`, 'utf8');
+const ROOT = join(HERE, '..');
 
 describe('push notifications are wired the way a build needs', () => {
   it('declares expo-notifications as a config plugin', () => {
@@ -26,7 +28,19 @@ describe('push notifications are wired the way a build needs', () => {
     // listed under `plugins` and ships none, so `expo config` — and therefore
     // `expo prebuild` — died. This one does ship one, and leaving it out means
     // the Android channel and the iOS entitlement are never configured.
-    expect(app.expo.plugins).toContain('expo-notifications');
+    const named = app.expo.plugins.map((entry) => (Array.isArray(entry) ? entry[0] : entry));
+    expect(named).toContain('expo-notifications');
+  });
+
+  it('gives the status bar a monochrome icon that exists', () => {
+    // Android draws a notification's small icon as a silhouette: a coloured
+    // square launcher icon becomes a white square. The plugin's `icon` is the
+    // white-on-transparent mark, and a missing file fails prebuild on a runner.
+    const entry = app.expo.plugins.find(
+      (plugin) => Array.isArray(plugin) && plugin[0] === 'expo-notifications',
+    ) as [string, { icon?: string }] | undefined;
+    expect(entry?.[1].icon).toBe('./assets/icon/notification.png');
+    expect(existsSync(join(ROOT, 'assets/icon/notification.png'))).toBe(true);
   });
 
   it('pins expo-notifications to the range SDK 54 bundles', () => {

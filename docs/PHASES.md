@@ -40,6 +40,7 @@ shipped, that is called out explicitly.
 | 29 — One recovery list, a proved signup address, and verified meaning reviewed | ✅ | migrations 084 and 085, and an EAS projectId for push |
 | 30 — Mail from app.xetral.com, a bell that means something, counts that go away | ✅ | the Brevo key and authorised IPs, and an EAS projectId for push |
 | 31 — What the payment partner asked for, and a checkout that opened on a card | ✅ | migration 086, and the Send test's answer about the Brevo key |
+| 32 — A migration skipped in production, and an announcement that said "queued" | ✅ | migrations 069 and 087, Brevo Authorised IPs, an EAS projectId and FCM for push |
 
 All eleven phases are built, a **pre-deployment audit** (Phase 12) closed what
 building them phase by phase had left between the phases, and **Phase 13** is
@@ -2699,3 +2700,30 @@ fills, which is the mechanism working); send Flutterwave the links to
 on `/admin/notifications` — if the account it names is not the one that owns
 `app.xetral.com`, paste an `xkeysib-` key from that account at
 `/admin/credentials`.
+
+---
+
+## Phase 32 — A migration skipped in production, and an announcement that said "queued" ✅
+
+| File | What it is |
+|---|---|
+| `apps/api/src/funding/funding-diagnostics.service.ts` | a sentinel for every migration from 049 on |
+| `packages/ledger/sql/087_scheduled_announcements.sql` | `send_at`, `cancelled_at`, and 082's test rows removed |
+| `apps/web/src/app/admin/broadcasts/page.tsx` | Now or Later, in the app vs push, Cancel |
+| `apps/mobile/src/push.ts` | local status-bar notifications for new announcements |
+| `apps/api/src/observability/error.filter.ts` | the refusal code recorded with a 5xx |
+
+1. **`/admin/providers` answered 500** because 069 was never applied in
+   production; the page now survives it and diagnostics names every missing file.
+2. **Announcements said "queued" while customers could read them**; they are
+   pushed on write and when the list is opened, and can be scheduled and
+   cancelled.
+3. **Reset and signup codes are refused by Brevo's Authorised IPs**, which the
+   Send test now says as steps.
+
+**Before this goes live, an operator must:** apply **069** and **087** (and any
+other file `/admin/diagnostics` names under "Database schema"); add the server's
+address shown on the Send test under Brevo → Security → Authorised IPs; never
+run a `.test.sql` file against production; and, for push to a closed app, run
+`eas init` in `apps/mobile`, add a Firebase project's `google-services.json`
+and its FCM key to Expo, and rebuild.

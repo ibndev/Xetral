@@ -44,6 +44,12 @@ export default function Broadcasts() {
   const [error, setError] = useState<string | undefined>(undefined);
   const [report, setReport] = useState<string | undefined>(undefined);
   const [audience, setAudience] = useState<AdminAudienceEstimate | undefined>(undefined);
+  // NOW OR LATER. Later is a local date and time in the operator's own zone,
+  // converted to an instant before it leaves the page — the API takes ISO with
+  // an offset, so the dashboard's timezone decides nothing on the server.
+  const [when, setWhen] = useState<'now' | 'later'>('now');
+  const [at, setAt] = useState('');
+  const [cancelling, setCancelling] = useState<string | undefined>(undefined);
 
   // Re-asked whenever the audience changes, because the number is the whole
   // point of showing it — a stale one is worse than none.
@@ -63,6 +69,24 @@ export default function Broadcasts() {
   }, [admin, country]);
 
   const tooShort = title.trim().length < 3 || body.trim().length < 3;
+  const laterAt = when === 'later' && at !== '' ? new Date(at) : undefined;
+  const laterInvalid =
+    when === 'later' &&
+    (laterAt === undefined || Number.isNaN(laterAt.getTime()) || laterAt.getTime() <= Date.now());
+
+  async function cancel(uuid: string): Promise<void> {
+    setCancelling(uuid);
+    setError(undefined);
+    try {
+      await admin.cancelBroadcast(uuid);
+      setReport('Cancelled. It will not go out.');
+      history.reload();
+    } catch (caught) {
+      setError(messageFor(caught));
+    } finally {
+      setCancelling(undefined);
+    }
+  }
 
   async function send(): Promise<void> {
     setBusy(true);
@@ -73,6 +97,7 @@ export default function Broadcasts() {
         title: title.trim(),
         body: body.trim(),
         ...(country === '' ? {} : { country }),
+        ...(laterAt === undefined ? {} : { sendAt: laterAt.toISOString() }),
         pin,
       });
       setTitle('');
@@ -80,9 +105,14 @@ export default function Broadcasts() {
       // The PIN is deliberately NOT cleared — the argument the prices screen
       // records: a credential re-entered per action is one people find a way
       // to stop re-entering. It is component state and goes when the page does.
+      setAt('');
+      setWhen('now');
       setReport(
-        `Queued for ${queued.country ?? 'every country'}. The worker sends it ` +
-          `within a minute; this list shows what actually happened.`,
+        Date.parse(queued.send_at) > Date.now()
+          ? `Scheduled for ${new Date(queued.send_at).toLocaleString()}. ` +
+              `It appears in customers' notifications then, and can be cancelled until it does.`
+          : `Sent to ${queued.country ?? 'every country'}. It is in customers' notifications now; ` +
+              `phones with push are reached next.`,
       );
       history.reload();
     } catch (caught) {
@@ -109,8 +139,9 @@ export default function Broadcasts() {
             Security and transaction messages are sent by the flows that owe them, never from here.
           </p>
           <p>
-            Skipped counts customers with the app installed who have not opted in to product news. If
-            one stays queued, no instance has PUSH_BROADCAST_INTERVAL_SECONDS set.
+            &ldquo;In the app&rdquo; means customers can read it now. Push reaches phones with the app
+            installed and product news switched on; &ldquo;no phones&rdquo; means no handset has
+            registered yet. A scheduled announcement can be cancelled until its time comes.
           </p>
         </details>
 
@@ -136,6 +167,35 @@ export default function Broadcasts() {
           />
           <span className="hint">{240 - body.length} left. No amounts — it shows on a lock screen.</span>
         </label>
+
+        {/* WHEN. Two answers, so a segmented pair rather than a picker; the
+            date only appears once "Later" is chosen. */}
+        <div className="announce-when">
+          <span className="tbl-inline">When</span>
+          <div className="segmented" role="radiogroup" aria-label="When">
+            {(['now', 'later'] as const).map((option) => (
+              <button
+                key={option}
+                type="button"
+                role="radio"
+                aria-checked={when === option}
+                className={when === option ? 'active' : ''}
+                onClick={() => setWhen(option)}
+              >
+                {option === 'now' ? 'Now' : 'Later'}
+              </button>
+            ))}
+          </div>
+          {when === 'later' && (
+            <input
+              type="datetime-local"
+              aria-label="Send at"
+              value={at}
+              min={localNow()}
+              onChange={(e) => setAt(e.target.value)}
+            />
+          )}
+        </div>
 
         {/* THE COMP'S SEND ROW: who, how many that is, and the button — the
             estimate sits BESIDE the audience it describes, before anything is
@@ -171,10 +231,10 @@ export default function Broadcasts() {
           />
           <button
             type="button"
-            disabled={busy || tooShort || pin === '' || (audience?.in_app ?? 0) === 0}
+            disabled={busy || tooShort || laterInvalid || pin === '' || (audience?.in_app ?? 0) === 0}
             onClick={() => void send()}
           >
-            {busy ? 'Queueing…' : 'Send announcement'}
+            {busy ? 'Saving…' : when === 'later' ? 'Schedule announcement' : 'Send announcement'}
           </button>
         </div>
 
@@ -184,7 +244,7 @@ export default function Broadcasts() {
 
       <div className="panel tbl-panel">
         <div className="tbl-head">
-          <span className="sec">Sent</span>
+          <span className="sec">Announcements</span>
         </div>
         <AdminError error={history.error} code={history.code} role="support" />
         {history.loading && <p className="spinner">Loading…</p>}
@@ -192,13 +252,13 @@ export default function Broadcasts() {
 
         {(history.data?.length ?? 0) > 0 && (
           <div className="scroll">
-            <table>
+            <table className="announce-table">
               <thead>
                 <tr>
                   <th>Title</th>
                   <th>Audience</th>
-                  <th className="r">Reach</th>
-                  <th className="r">Skipped</th>
+                  <th>Status</th>
+                  <th className="r">Push</th>
                   <th className="r">When</th>
                 </tr>
               </thead>
@@ -209,23 +269,34 @@ export default function Broadcasts() {
                       <strong>{row.title}</strong>
                       <div className="cell-sub">{row.body}</div>
                     </td>
-                    <td className="quiet">{row.country ?? 'All customers'}</td>
-                    {/* QUEUED IS A REAL STATE AND NOT A ZERO. `sent_at IS NULL`
-                        is the whole state machine, and "0" where it should
-                        read "not sent yet" is how a worker nobody started
-                        looks like a broadcast nobody could receive. */}
-                    <td className="r mono">
-                      {row.sent_at === null ? (
-                        <span className="badge warn">queued</span>
-                      ) : (
-                        <>
-                          {row.accepted}
-                          {row.rejected > 0 && <span className="cell-sub">{row.rejected} failed</span>}
-                        </>
+                    <td className="quiet nowrap">{row.country ?? 'All customers'}</td>
+                    {/* IN THE APP IS THE DELIVERY; PUSH IS A SECOND CHANNEL.
+                        It said "queued" beside an announcement every customer
+                        could already read, because the only state shown was
+                        the push worker's. The feed shows a row the moment it
+                        is due, whatever the push has done. */}
+                    <td>
+                      <BroadcastStatus
+                        row={row}
+                        cancelling={cancelling === row.uuid}
+                        onCancel={() => void cancel(row.uuid)}
+                      />
+                    </td>
+                    <td className="r quiet nowrap">
+                      <PushCell row={row} />
+                    </td>
+                    <td className="r quiet nowrap">
+                      {ago(row.send_at)}
+                      {Date.parse(row.send_at) > Date.now() && row.cancelled_at === null && (
+                        <span className="cell-sub">
+                          {new Date(row.send_at).toLocaleString(undefined, {
+                            weekday: 'short',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </span>
                       )}
                     </td>
-                    <td className="r mono quiet">{row.sent_at === null ? '—' : row.without_consent}</td>
-                    <td className="r quiet nowrap">{ago(row.created_at)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -235,4 +306,52 @@ export default function Broadcasts() {
       </div>
     </>
   );
+}
+
+/** Where an announcement is: waiting, called back, or in customers' feeds. */
+function BroadcastStatus({
+  row,
+  cancelling,
+  onCancel,
+}: {
+  row: AdminBroadcast;
+  cancelling: boolean;
+  onCancel: () => void;
+}) {
+  if (row.cancelled_at !== null) return <span className="badge">cancelled</span>;
+  if (Date.parse(row.send_at) > Date.now()) {
+    return (
+      <span className="announce-scheduled">
+        <span className="badge info">scheduled</span>
+        <button type="button" className="ghost small" disabled={cancelling} onClick={onCancel}>
+          {cancelling ? 'Cancelling…' : 'Cancel'}
+        </button>
+      </span>
+    );
+  }
+  return <span className="badge ok">in the app</span>;
+}
+
+/**
+ * What the push did. "No phones" is its own answer rather than a zero: until
+ * the app is built with an EAS project and FCM credentials no handset can
+ * register, and a "0" there reads as a broken send.
+ */
+function PushCell({ row }: { row: AdminBroadcast }) {
+  if (row.cancelled_at !== null || Date.parse(row.send_at) > Date.now()) return <>—</>;
+  if (row.sent_at === null) return <span className="badge warn">sending</span>;
+  if (row.devices === 0) return <>no phones</>;
+  return (
+    <>
+      {row.accepted} of {row.devices}
+      {row.without_consent > 0 && <span className="cell-sub">{row.without_consent} opted out</span>}
+    </>
+  );
+}
+
+/** Now, as a `datetime-local` value in the operator's own zone. */
+function localNow(): string {
+  const now = new Date();
+  now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+  return now.toISOString().slice(0, 16);
 }

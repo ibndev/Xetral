@@ -17,6 +17,7 @@ import type { AuthenticatedRequest } from '../auth/auth.guard.js';
 import { AdminService } from './admin.service.js';
 import { StaffService } from '../auth/staff.service.js';
 import { PushService } from '../push/push.service.js';
+import { PushBroadcastService } from '../push/push-broadcast.service.js';
 import { TreasuryService, type Treasury } from '../payouts/treasury.service.js';
 import { ProviderRoutesService } from '../routing/provider-routes.service.js';
 import type { RouteRow, RoutingView } from '../routing/provider-routes.service.js';
@@ -317,6 +318,11 @@ const broadcastSchema = z
       .toUpperCase()
       .regex(/^[A-Z]{2}$/)
       .optional(),
+    /* WHEN IT GOES OUT. Absent means now. An ISO instant rather than a local
+       time, so the dashboard's timezone decides nothing: the screen converts
+       what the operator typed, and the database refuses a backdated one or
+       one more than a month out. */
+    send_at: z.string().datetime({ offset: true }).optional(),
     transaction_pin: z.string().optional(),
   })
   .strict();
@@ -363,6 +369,7 @@ export class AdminController {
     @Inject(PushService) private readonly push: PushService,
     @Inject(ProviderRoutesService) private readonly providerRoutes: ProviderRoutesService,
     @Inject(TreasuryService) private readonly treasury: TreasuryService,
+    @Inject(PushBroadcastService) private readonly broadcaster: PushBroadcastService,
   ) {}
 
   /**
@@ -1721,9 +1728,53 @@ export class AdminController {
     return this.push.estimate(country === undefined || country === '' ? undefined : country);
   }
 
+  /**
+   * What was announced, and what became of each.
+   *
+   * OPENING THE LIST DRAINS WHAT IS DUE, within a few seconds. Production
+   * showed "queued" beside an announcement every customer could already read,
+   * because the worker that pushes it runs only where
+   * `PUSH_BROADCAST_INTERVAL_SECONDS` is set — the recovery list's argument:
+   * the screen an operator opens to ask "did it go out?" is the one place
+   * guaranteed to be running when somebody asks. The advisory lock makes this
+   * and the worker one sender, never two.
+   */
   @Get('broadcasts')
   async broadcasts(): Promise<{ broadcasts: readonly unknown[] }> {
+    if (await this.push.hasDue()) {
+      await Promise.race([
+        this.broadcaster.run().catch(() => undefined),
+        new Promise((resolve) => setTimeout(resolve, 4000)),
+      ]);
+    }
     return { broadcasts: await this.push.history() };
+  }
+
+  /**
+   * Calls back an announcement that has not gone out yet.
+   *
+   * NO PIN, for the reason freezing a card takes none: the protective action
+   * must be frictionless for somebody who has just noticed a mistake an hour
+   * before the send. Once due it cannot be cancelled — customers can read it.
+   */
+  @Post('broadcasts/:uuid/cancel')
+  @HttpCode(200)
+  async cancelBroadcast(
+    @Req() request: AuthenticatedRequest,
+    @Param('uuid') uuid: string,
+  ): Promise<unknown> {
+    const actor = claims(request).sub;
+    const cancelled = await this.push.cancel(uuid);
+    const ip = ipOf(request);
+    await this.audit.record({
+      actorId: actor,
+      action: 'push.cancel',
+      subjectType: 'broadcast',
+      subjectId: uuid,
+      detail: { title: cancelled.title, send_at: cancelled.send_at },
+      ...(ip === undefined ? {} : { ip }),
+    });
+    return cancelled;
   }
 
   /**
@@ -1752,6 +1803,7 @@ export class AdminController {
       title: parsed.data.title,
       body: parsed.data.body,
       ...(parsed.data.country === undefined ? {} : { country: parsed.data.country }),
+      ...(parsed.data.send_at === undefined ? {} : { sendAt: parsed.data.send_at }),
     });
 
     const ip = ipOf(request);
@@ -1764,9 +1816,20 @@ export class AdminController {
       // of the platform is exactly the sort of thing somebody later asks to
       // see, and `push_broadcasts` holding it is not a reason for the audit
       // trail to be vaguer than the thing it audits.
-      detail: { title: queued.title, country: queued.country },
+      detail: { title: queued.title, country: queued.country, send_at: queued.send_at },
       ...(ip === undefined ? {} : { ip }),
     });
+
+    /*
+     * SENT NOW WHEN IT IS DUE NOW, not on the next sweep — the reset code's
+     * fast lane (`deliverNow`) applied to an announcement. Not awaited: the
+     * operator's click must not wait on the push service. The worker's lock
+     * makes this and a sweep one sender; whatever this cannot push stays
+     * queued for the worker, and opening the list asks again.
+     */
+    if (Date.parse(queued.send_at) <= Date.now()) {
+      void this.broadcaster.run().catch(() => undefined);
+    }
     return queued;
   }
 

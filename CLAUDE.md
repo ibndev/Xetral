@@ -2415,6 +2415,56 @@ Republished by `packages/ledger/sql/086_legal_republish.sql`.
   its place; every API call then fails as an unknown key and Brevo records
   nothing. A 401 now says which remedy applies — the key, or Authorised IPs.
 
+### A migration skipped in production, and an announcement that said "queued" — non-obvious rules
+
+`apps/api/src/funding/funding-diagnostics.service.ts` ("Database schema"),
+`packages/ledger/sql/087_scheduled_announcements.sql`,
+`apps/api/src/push/push.service.ts`, `apps/mobile/src/push.ts`.
+
+- **PRODUCTION HAD 082 AND 083 AND NOT 069.** Migrations are applied by hand,
+  and one skipped file is silent until the one screen that reads it answers
+  500 — `/admin/providers`, on `relation "name_enquiry_failures" does not
+  exist`. The Database schema check on `/admin/diagnostics` now names a
+  sentinel for EVERY migration from 049 on (`fn:<name>` where a migration only
+  adds a function), so the operator is told which files to apply rather than
+  finding out screen by screen. And a panel that shares a request with others
+  answers EMPTY on `42P01` rather than taking the page down.
+- **`.test.sql` FILES REACHED PRODUCTION.** `/admin/diagnostics` listed
+  "test:082 customer validation required" beside Paystack's real refusal;
+  those rows exist only in 082's suite. 087 deletes them. Never run a
+  `.test.sql` against a live database — they insert fixtures (082's creates
+  users at `@example.ng`).
+- **"QUEUED" WAS THE PUSH WORKER'S STATE SHOWN AS THE ANNOUNCEMENT'S.** Every
+  customer could read it in the bell feed while the list said queued, because
+  the worker runs only where `PUSH_BROADCAST_INTERVAL_SECONDS` is set. Now a due
+  announcement is pushed the moment it is written (not awaited, the reset
+  code's fast lane) and OPENING THE LIST drains what is due within four
+  seconds; the advisory lock keeps them one sender. Status is "in the app";
+  push is its own column, and "no phones" is an answer, not a zero.
+- **SCHEDULED MEANS INVISIBLE UNTIL `send_at`.** The feed and the worker both
+  read `send_at <= now()`, and the feed dates an announcement by `send_at`, so
+  "maintenance tonight" written at four reads as tonight's. Not backdated, not
+  more than 31 days out, immutable — BY CHECK and trigger.
+- **A SCHEDULE WITHOUT A CANCEL IS A TRAP**, because the words are immutable.
+  `cancelled_at` is set once, only while nothing is sent and the time has not
+  come; a cancelled row can never be sent. No PIN, the freeze argument.
+- **THE STATUS BAR NEEDS NO PUSH SERVICE FOR AN OPEN APP.** Real push needs an
+  EAS `projectId` and FCM credentials, which only the owner's accounts can
+  mint. Until then the phone reads the feed on open and on foreground and
+  raises anything newer than its own NOTIFIED marker as a local notification —
+  a separate marker from "seen", and the first run records without notifying
+  so an install does not replay a month. Permission and the Android channel
+  are now asked for whether or not a push token can be minted, and the
+  notification icon is the white-on-transparent mark Android requires.
+- **BREVO REFUSES THE SERVER'S IP, AND ONLY THE BREVO ACCOUNT CAN FIX IT.**
+  "We have detected you are using an unrecognised IP address" is Brevo's
+  Authorised IPs setting; the Send test now says so as three steps with the
+  address to paste, and explains why the key's account could not be named.
+- **A DELIBERATE 503 IS RECORDED WITH ITS CODE.** `/admin/errors` read
+  "ServiceUnavailableException: Service Unavailable Exception"; the filter
+  now appends the `error` code the caller was given, e.g.
+  `(payout_provider_unavailable)`, which is what anybody searches for.
+
 ### The admin actions that never reached the server, and the ten seconds before every request — non-obvious rules
 
 `apps/web/src/app/api/x/[...path]/route.ts`, `packages/client/src/admin.ts`,
@@ -4766,6 +4816,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/083_payment_assignment.
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/084_signup_email_codes.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/085_verified_rests_on_identity.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/086_legal_republish.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/087_scheduled_announcements.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -4850,6 +4901,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/083_payment_assignment.
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/084_signup_email_codes.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/085_verified_rests_on_identity.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/086_legal_republish.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/087_scheduled_announcements.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

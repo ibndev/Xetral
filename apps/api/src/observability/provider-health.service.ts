@@ -89,14 +89,32 @@ export class ProviderHealthService {
    * prefix and the key itself never leaves the adapter.
    */
   async nameEnquiryFailures(): Promise<readonly Record<string, unknown>[]> {
-    const rows = await this.pool.query(
-      `SELECT provider, country, rail_code, refusals::text, key_mode,
-              last_message, last_tried, first_seen_at, last_seen_at
-         FROM name_enquiry_failures
-        LIMIT 50`,
-    );
-    return rows.rows as Record<string, unknown>[];
+    /*
+     * A DATABASE BEHIND 069 ANSWERS EMPTY, NOT 500. This panel shares a
+     * request with provider health, the float and the treasury, so a missing
+     * view took the whole providers screen down — in production, where 069
+     * had been skipped while 082 and 083 were applied. The missing migration
+     * is named on `/admin/diagnostics` ("Database schema"), which is where an
+     * operator is sent to find out what to apply.
+     */
+    try {
+      const rows = await this.pool.query(
+        `SELECT provider, country, rail_code, refusals::text, key_mode,
+                last_message, last_tried, first_seen_at, last_seen_at
+           FROM name_enquiry_failures
+          LIMIT 50`,
+      );
+      return rows.rows as Record<string, unknown>[];
+    } catch (error) {
+      if (isUndefinedRelation(error)) return [];
+      throw error;
+    }
   }
+}
+
+/** Postgres `undefined_table` — a relation a migration not yet applied creates. */
+export function isUndefinedRelation(error: unknown): boolean {
+  return (error as { code?: unknown } | null)?.code === '42P01';
 }
 
 /** What a thrown error means for the provider's health. */

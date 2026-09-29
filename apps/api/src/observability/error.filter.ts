@@ -74,11 +74,21 @@ export class ErrorRecordingFilter implements ExceptionFilter {
        * layer decided this was unavailable" is worth a word.
        */
       const cause = exception instanceof Error ? exception.cause : undefined;
+      /*
+       * AND THE CODE THE CALLER WAS GIVEN, where there was one. A deliberate
+       * refusal — `payout_provider_unavailable`, `insufficient_platform_
+       * liquidity` — reached `/admin/errors` as "ServiceUnavailableException:
+       * Service Unavailable Exception", which names the class and not the
+       * reason. The code is what the customer's app read, and it is what an
+       * operator searches the rest of this codebase for.
+       */
+      const code = codeOf(exception);
+      const named = code === undefined ? '' : ` (${code})`;
       const message =
         cause instanceof Error
-          ? `${exception instanceof Error ? exception.name : 'Error'} <- ${cause.name}: ${cause.message}`
+          ? `${exception instanceof Error ? exception.name : 'Error'}${named} <- ${cause.name}: ${cause.message}`
           : exception instanceof Error
-            ? `${exception.name}: ${exception.message}`
+            ? `${exception.name}${named}: ${exception.message}`
             : String(exception);
 
       // The reference FIRST, because this is the line somebody greps for with
@@ -158,4 +168,13 @@ function routeOf(request: Request): string {
   // happened. The path itself would be attacker-controlled here, so it is
   // deliberately not recorded.
   return 'unmatched';
+}
+
+/** The `error` code an HttpException's body carries, if it carries one. */
+function codeOf(exception: unknown): string | undefined {
+  if (!(exception instanceof HttpException)) return undefined;
+  const body = exception.getResponse();
+  if (typeof body !== 'object' || body === null) return undefined;
+  const code = (body as { error?: unknown }).error;
+  return typeof code === 'string' && /^[a-z0-9_]{2,64}$/.test(code) ? code : undefined;
 }

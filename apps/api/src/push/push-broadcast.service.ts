@@ -120,7 +120,9 @@ export class PushBroadcastService implements OnApplicationShutdown {
       `SELECT id, title, body, country
          FROM push_broadcasts
         WHERE sent_at IS NULL
-        ORDER BY created_at
+          AND cancelled_at IS NULL
+          AND send_at <= now()
+        ORDER BY send_at
         LIMIT 1`,
     );
     const row = result.rows[0];

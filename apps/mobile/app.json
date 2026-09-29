@@ -38,7 +38,14 @@
           "faceIDPermission": "Xetral uses Face ID to unlock your transaction PIN."
         }
       ],
-      "expo-notifications",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon/notification.png",
+          "color": "#0D1B3E",
+          "defaultChannel": "default"
+        }
+      ],
       "./plugins/with-lan-cleartext",
       "./plugins/with-release-signing"
     ],

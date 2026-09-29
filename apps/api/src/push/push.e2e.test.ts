@@ -12,6 +12,7 @@ import { AppModule } from '../app.module.js';
 import { systemClock } from '../tokens.js';
 import { testApiConfig } from '../test-support/api-config.js';
 import { PushBroadcastService } from './push-broadcast.service.js';
+import { PushService } from './push.service.js';
 
 /**
  * Announcements, over HTTP and against a real database.
@@ -345,5 +346,71 @@ describe('the bell’s feed', () => {
 
   it('refuses without a session', async () => {
     await request(app.getHttpServer()).get('/v1/push/announcements').expect(401);
+  });
+});
+
+describe('an announcement scheduled for later (087)', () => {
+  it('IS NOT IN THE FEED OR PUSHED BEFORE ITS TIME, and can be called back until then', async () => {
+    const reader = await register('NG');
+    const staff = await register();
+    await pool.query(
+      `INSERT INTO push_devices (user_id, token, platform)
+       SELECT id, $2, 'android' FROM users WHERE uuid = $1`,
+      [reader.uuid, handset()],
+    );
+    await optIn(reader.uuid);
+
+    const later = await app.get(PushService).queue(staff.uuid, {
+      title: `Tonight ${randomUUID().slice(0, 8)}`,
+      body: 'Maintenance at eleven.',
+      sendAt: new Date(Date.now() + 6 * 3600_000).toISOString(),
+    });
+    expect(Date.parse(later.send_at)).toBeGreaterThan(Date.now());
+
+    // Not pushed: the worker takes only what is due.
+    await app.get(PushBroadcastService).run();
+    const row = await pool.query<{ sent_at: Date | null }>(
+      `SELECT sent_at FROM push_broadcasts WHERE uuid = $1`,
+      [later.uuid],
+    );
+    expect(row.rows[0]!.sent_at).toBeNull();
+
+    // Not in the feed.
+    const feed = await request(app.getHttpServer())
+      .get('/v1/push/announcements')
+      .set('Authorization', `Bearer ${reader.token}`)
+      .expect(200);
+    expect((feed.body.announcements as { title: string }[]).map((a) => a.title)).not.toContain(later.title);
+
+    // Called back, it never goes out — and cannot be called back twice.
+    const cancelled = await app.get(PushService).cancel(later.uuid);
+    expect(cancelled.cancelled_at).not.toBeNull();
+    await expect(app.get(PushService).cancel(later.uuid)).rejects.toMatchObject({
+      response: { error: 'broadcast_not_cancellable' },
+    });
+  });
+
+  it('a due announcement cannot be called back — customers can already read it', async () => {
+    const staff = await register();
+    const now = await app.get(PushService).queue(staff.uuid, {
+      title: `Now ${randomUUID().slice(0, 8)}`,
+      body: 'Out already.',
+    });
+    await expect(app.get(PushService).cancel(now.uuid)).rejects.toMatchObject({
+      response: { error: 'broadcast_not_cancellable' },
+    });
+  });
+
+  it('refuses a time in the past or more than a month out, as a field', async () => {
+    const staff = await register();
+    for (const at of [Date.now() - 86_400_000, Date.now() + 60 * 86_400_000]) {
+      await expect(
+        app.get(PushService).queue(staff.uuid, {
+          title: 'Out of range',
+          body: 'Should be refused.',
+          sendAt: new Date(at).toISOString(),
+        }),
+      ).rejects.toMatchObject({ response: { error: 'invalid_request', fields: ['send_at'] } });
+    }
   });
 });

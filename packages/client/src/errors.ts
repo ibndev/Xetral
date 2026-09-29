@@ -327,6 +327,11 @@ const API_ERROR_CODES = [
    */
   'broadcast_not_found',
   /*
+   * `broadcast_not_cancellable` — calling back an announcement that is already
+   * due, sent or cancelled. Customers can read it; there is nothing to call back.
+   */
+  'broadcast_not_cancellable',
+  /*
    * `profile_locked` — a verified customer changing their own details.
    *
    * The direction looks backwards and is the point: what a reviewer read off a

@@ -435,10 +435,53 @@ export class FundingDiagnosticsService {
       ['countries.payout_methods', '070_payout_methods.sql'],
       ['bank_payouts.payout_method', '070_payout_methods.sql'],
       ['error_events.last_reference', '047_error_reference.sql'],
+      /*
+       * ONE SENTINEL PER MIGRATION FROM HERE ON, because production is
+       * migrated by hand and a skipped file is silent until the one screen
+       * that reads it answers 500 — `/admin/providers` did exactly that on a
+       * database that had 082 and 083 and not 069. A migration that only
+       * adds a function is named as `fn:<name>`; one that only moves data
+       * (a consent republish, a route seed) has no schema to find.
+       */
+      ['recovery_actions', '049_recovery.sql'],
+      ['users_without_a_country', '050_country_from_phone.sql'],
+      ['countries.funding_methods', '051_funding_methods.sql'],
+      ['fx_published_rates', '053_published_fx_rates.sql'],
+      ['auth_sessions.totp_first_verified_at', '054_elevation_window.sql'],
+      ['fn:consume_password_reset_code', '056_reset_codes.sql'],
+      ['stale_reference_rates', '057_reference_rates.sql'],
+      ['link_payments', '058_payment_links.sql'],
+      ['provider_routes', '059_provider_routing.sql'],
+      ['customers_without_a_country', '061_country_and_route_repair.sql'],
+      ['fx_rate_observations', '062_spread_pressure.sql'],
+      ['momo_accounts', '063_momo_accounts.sql'],
+      ['fn:refuse_fx_rate_delete', '064_retired_rate_delete.sql'],
+      ['push_broadcasts', '065_push.sql'],
+      ['fn:refuse_fx_policy_delete', '066_retired_policy_delete.sql'],
+      ['checkout_refusals', '067_wallet_payouts_and_missing_details.sql'],
+      ['recipients', '068_recipients.sql'],
+      ['name_enquiry_failures', '069_name_enquiry.sql'],
+      ['country_money_paths', '071_flutterwave_v4_and_ghana_bank.sql'],
+      ['countries_offering_an_unrouted_account', '072_activate_account_gh_ke.sql'],
+      ['platform_float_positions', '073_platform_float.sql'],
+      ['card_topup_funding', '078_card_funding_cascade.sql'],
+      ['provider_routing_policy', '079_routing_policy.sql'],
+      ['bank_payouts.provider_known', '080_payout_provider_known.sql'],
+      ['account_refusals', '082_refusals_and_details.sql'],
+      ['signup_email_codes', '084_signup_email_codes.sql'],
+      ['fn:assert_tier_rests_on_identity', '085_verified_rests_on_identity.sql'],
+      ['push_broadcasts.send_at', '087_scheduled_announcements.sql'],
     ];
 
     const missing: string[] = [];
     for (const [name, file] of REQUIRED) {
+      if (name.startsWith('fn:')) {
+        const fn = await this.pool.query(`SELECT true AS present FROM pg_proc WHERE proname = $1`, [
+          name.slice(3),
+        ]);
+        if ((fn.rowCount ?? 0) === 0) missing.push(`function ${name.slice(3)} (${file})`);
+        continue;
+      }
       const [table, column] = name.split('.');
       if (table === undefined) continue;
 

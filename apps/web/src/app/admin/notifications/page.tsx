@@ -365,10 +365,34 @@ function SendTest() {
           </div>
         )
       )}
+      {result !== undefined && blockedIp(result.error) !== undefined && (
+        /* THE ONE FIX, SAID AS AN INSTRUCTION. Brevo's own sentence buries the
+           address in a paragraph; this is the step, with the address to paste
+           and the page to paste it on. It is a setting in the Brevo account,
+           and nothing on this server can change it. */
+        <div className="mail-test-fix">
+          <strong>Authorise this server in Brevo</strong>
+          <ol>
+            <li>
+              Open{' '}
+              <a href="https://app.brevo.com/security/authorised_ips" target="_blank" rel="noreferrer">
+                Brevo → Security → Authorised IPs
+              </a>
+              .
+            </li>
+            <li>
+              Add <code>{blockedIp(result.error)}</code> — or turn &ldquo;Block unknown IP addresses&rdquo; off.
+            </li>
+            <li>Press Send test again. Reset and signup codes go out from then on.</li>
+          </ol>
+        </div>
+      )}
       {result !== undefined && (
         <p className="mail-test-account">
           {result.account === null
-            ? 'The provider would not say which account this key belongs to.'
+            ? blockedIp(result.error) !== undefined
+              ? 'Brevo refuses every request from this server until its address is authorised, so it could not say which account the key belongs to either.'
+              : 'The provider would not say which account this key belongs to.'
             : <>Key belongs to the Brevo account{' '}
                 <strong>{result.account.company ?? result.account.email ?? 'unnamed'}</strong>
                 {result.account.company !== undefined && result.account.email !== undefined && (
@@ -398,4 +422,10 @@ function SendTest() {
       )}
     </div>
   );
+}
+
+/** The address Brevo named when it refused an unrecognised IP, if that was the refusal. */
+function blockedIp(error: string | null): string | undefined {
+  if (error === null) return undefined;
+  return /unrecognised IP address\s+([0-9a-f.:]+[0-9a-f])/i.exec(error)?.[1];
 }

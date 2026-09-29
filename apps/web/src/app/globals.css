@@ -7068,6 +7068,10 @@ html[data-theme='dark'] .admin-frame {
 .admin-frame .mail-test-head strong { display: block; font-size: 14px; font-weight: 700; }
 .admin-frame .mail-test-head small { display: block; margin-top: 2px; font-size: 12px; font-weight: 500; color: var(--text-3); }
 .admin-frame .mail-test .notice { margin: 0; }
+.admin-frame .mail-test-fix { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--edge); font-size: 13px; }
+.admin-frame .mail-test-fix ol { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; color: var(--text-2); }
+.admin-frame .mail-test-fix code { font-family: var(--font-mono); font-weight: 700; color: var(--text); user-select: all; }
+.admin-frame .mail-test-fix a { color: var(--info); }
 .admin-frame .mail-test-account { margin: 0; font-size: 12.5px; color: var(--text-2); line-height: 1.5; }
 .admin-frame .mail-test-codes { display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; }
 .admin-frame .mail-test-codes ul { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
@@ -7084,6 +7088,13 @@ html[data-theme='dark'] .admin-frame {
 .admin-frame .announce-send { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; }
 .admin-frame .announce-who { flex: 1 1 320px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .admin-frame .announce-who .xselect { flex: 0 0 180px; }
+.admin-frame .announce-when { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; }
+.admin-frame .announce-when .segmented { flex: 0 0 auto; width: auto; }
+.admin-frame .announce-when .segmented button { min-width: 84px; }
+.admin-frame .announce-when input[type='datetime-local'] { flex: 0 1 240px; min-width: 0; }
+.admin-frame .announce-scheduled { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.admin-frame .announce-scheduled { flex-wrap: nowrap; }
+.admin-frame td.nowrap .cell-sub { display: block; }
 .admin-frame .panel.announce { position: relative; }
 /* The help is a round "?" in the panel's corner; opened, its text sits under
    the heading. Explanations on demand, counters always. */
@@ -7510,3 +7521,33 @@ html:not([data-theme='dark']) .tabbar {
 .legal-line a:hover { text-decoration: underline; }
 /* Under a left-aligned sign-in form it lines up with the form, not the page. */
 .legal-line.start { justify-content: flex-start; text-align: left; margin-top: 16px; }
+
+/* A diagnostics line: what happened, then how often and when. A rail's
+   sentence can be long and unbroken — an HTML error page, a run of one
+   character — so it wraps anywhere rather than pushing the count and the date
+   off a phone's edge; below 560px the count sits under the sentence. */
+.diag-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; }
+.diag-row .cell-sub { overflow-wrap: anywhere; }
+@media (max-width: 560px) {
+  .diag-row { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .diag-row > .nowrap { white-space: normal; font-size: 12.5px; justify-self: start; }
+}
+
+/* ON A PHONE AN ANNOUNCEMENT IS A CARD, not a row to scroll sideways through:
+   the status and the push result are what the screen is opened to read, and
+   in a five-column table they sat off the right edge. Title first, then the
+   facts on one wrapping line. */
+@media (max-width: 640px) {
+  .admin-frame .announce-table thead { display: none; }
+  .admin-frame .announce-table,
+  .admin-frame .announce-table tbody { display: block; width: 100%; }
+  .admin-frame .announce-table tr {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px;
+    padding: 12px 16px; border-bottom: 1px solid var(--line);
+  }
+  .admin-frame .announce-table tr td, .admin-frame .announce-table tr td:first-child { display: block; padding: 0; border: 0; text-align: left; }
+  .admin-frame .announce-table td:first-child { flex: 1 0 100%; }
+  .admin-frame .announce-table td.r { text-align: left; }
+  .admin-frame .announce-table td .cell-sub { display: inline; margin-left: 6px; }
+  .admin-frame .announce-table td:first-child .cell-sub { display: block; margin-left: 0; white-space: normal; }
+}

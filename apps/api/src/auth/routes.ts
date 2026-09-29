@@ -455,6 +455,10 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       .staff('GET', '/v1/admin/broadcasts', { pin: false, role: 'support' })
       .staff('GET', '/v1/admin/broadcasts/audience', { pin: false, role: 'support' })
       .staff('POST', '/v1/admin/broadcasts', { pin: true, role: 'admin' })
+      // No PIN: calling back an announcement before it is due is the
+      // protective action, and it must be frictionless — freezing a card's
+      // argument. Once due the database refuses it.
+      .staff('POST', '/v1/admin/broadcasts/:uuid/cancel', { pin: false, role: 'admin' })
       .staff('GET', '/v1/admin/stuck', { pin: false, role: 'support' })
       // `admin`, not `support`: it names every flow that is switched off and
       // every credential that is absent, which is a map of where this

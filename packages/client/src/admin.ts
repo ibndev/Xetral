@@ -897,7 +897,12 @@ export interface AdminBroadcast {
   /** Null means every country. */
   readonly country: string | null;
   readonly created_at: string;
+  /** When the PUSH finished. Null while it is waiting or has not been drained. */
   readonly sent_at: string | null;
+  /** When it is due: in customers' feeds from then, and pushed from then. */
+  readonly send_at: string;
+  /** Called back before it was due. A cancelled one never goes out. */
+  readonly cancelled_at: string | null;
   readonly devices: number;
   readonly accepted: number;
   readonly rejected: number;
@@ -1770,14 +1775,22 @@ export class AdminClient {
     title: string;
     body: string;
     country?: string;
+    /** An ISO instant. Absent sends now. */
+    sendAt?: string;
     pin: string;
   }): Promise<AdminBroadcast> {
     return this.#request('POST', '/v1/admin/broadcasts', {
       title: input.title,
       body: input.body,
       ...(input.country === undefined || input.country === '' ? {} : { country: input.country }),
+      ...(input.sendAt === undefined ? {} : { send_at: input.sendAt }),
       transaction_pin: input.pin,
     });
+  }
+
+  /** Calls back an announcement before it is due. No PIN — the protective action. */
+  async cancelBroadcast(uuid: string): Promise<AdminBroadcast> {
+    return this.#post<AdminBroadcast>(`/v1/admin/broadcasts/${encodeURIComponent(uuid)}/cancel`, {});
   }
 
   async retirePrice(

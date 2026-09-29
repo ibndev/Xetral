@@ -285,6 +285,8 @@ describe('the privileged surface is declared as privileged', () => {
       // it. `stepUp` is left at the strict default, because an operator
       // publishes prices weekly and announces something rarely.
       'POST /v1/admin/broadcasts (admin)',
+      // Calling one back before it is due. No PIN — the protective action.
+      'POST /v1/admin/broadcasts/:uuid/cancel (admin)',
       'POST /v1/admin/cards/:id/freeze (compliance)',
       'POST /v1/admin/countries (admin)',
       'POST /v1/admin/countries/:code (admin)',
