@@ -477,8 +477,13 @@ export class AdminService {
         [row.id],
       ),
       this.pool.query(
-        `SELECT platform, display_name, created_at, revoked_at
-           FROM devices WHERE user_id = $1::bigint ORDER BY created_at DESC LIMIT 20`,
+        // `devices` has no created_at or revoked_at — 002 names them
+        // first_seen_at and last_seen_at and records revocation as a STATUS.
+        // Selecting the missing pair failed this section on every customer,
+        // and `#sections` turned that into an empty panel and a log line, so
+        // the Devices panel read "None." for everybody.
+        `SELECT platform, display_name, status::text AS status, first_seen_at, last_seen_at
+           FROM devices WHERE user_id = $1::bigint ORDER BY last_seen_at DESC LIMIT 20`,
         [row.id],
       ),
       this.pool.query(

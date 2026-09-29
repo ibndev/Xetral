@@ -44,6 +44,7 @@ shipped, that is called out explicitly.
 | 33 — Announcements on a database behind 087, and who did what | ✅ | migration 087 for scheduling |
 | 34 — A payout paid twice, and a list that clears | ✅ | |
 | 35 — A payout that held nothing, and iOS with no Mac | ✅ | migration 088; an Apple Developer account and `eas init` |
+| 36 — A whole-code inspection, and the gates that were red | ✅ | |
 
 All eleven phases are built, a **pre-deployment audit** (Phase 12) closed what
 building them phase by phase had left between the phases, and **Phase 13** is
@@ -2788,3 +2789,23 @@ payout whose reserve moved no money — nothing is posted), and never run a
 `.test.sql` file against production. For iOS: enrol in the Apple Developer
 Program, run `npx eas init` in `apps/mobile` and commit the `projectId`, then
 `npm run build:ios:internal` or `npm run build:ios`.
+
+---
+
+## Phase 36 — A whole-code inspection, and the gates that were red ✅
+
+| File | What it is |
+|---|---|
+| `apps/api/src/sql-statements.e2e.test.ts` | every static SQL statement prepared against the schema |
+| `apps/api/src/push/push.service.ts` | statements written out, so the Scan gate passes |
+| `apps/mobile/scripts/assert-permissions.sh` | a development APK's dev-overlay permission, and only that |
+| `apps/api/src/admin/admin.service.ts`, `apps/api/src/auth/account-security.service.ts` | columns that exist |
+| `apps/web/src/app/admin/users/[id]/page.tsx` | balances and devices that render |
+
+1. **Scan had failed on every push since round 33**; the Android APK
+   development build failed on a permission only its debug manifest carries.
+2. **Two queries named columns that do not exist** — found by preparing every
+   statement, which is now a test.
+3. **Failed reads drew empty lists** on the home screens and the phone's bills.
+
+**An operator need do nothing for this one.**

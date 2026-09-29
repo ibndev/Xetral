@@ -118,7 +118,8 @@ export default function Home() {
 
 
   const history = useLoad(
-    () => client.transactions(currency).catch(() => ({ entries: [], nextCursor: null })),
+    // A FAILED READ IS NOT AN EMPTY HISTORY — see the web's home screen.
+    () => client.transactions(currency),
     [client, currency],
   );
 
@@ -379,7 +380,8 @@ export default function Home() {
         <SectionHead title="Recent activity" moreLabel="See all" moreHref="/activity" />
 
         {history.loading && <Loading />}
-        {!history.loading && (history.data?.entries.length ?? 0) === 0 && (
+        {!history.loading && <FormError error={history.error} code={history.code} />}
+        {!history.loading && history.error === undefined && (history.data?.entries.length ?? 0) === 0 && (
           <Empty
             icon="file"
             title="No transactions yet"

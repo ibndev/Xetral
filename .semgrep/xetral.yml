@@ -33,7 +33,7 @@ rules:
       idempotency key all at once.
     paths:
       exclude:
-        - "packages/ledger/src/ledger-service.ts"
+        - "/packages/ledger/src/ledger-service.ts"
         - "*.test.ts"
         - "*.test.sql"
         - "sql/"
@@ -163,6 +163,6 @@ rules:
         # be distinct within one millisecond bucket and is never presented to
         # anyone. Named rather than covered by a broad exclude, so a second use
         # in that file still fails.
-        - "apps/api/src/auth/rate-limit.ts"
+        - "/apps/api/src/auth/rate-limit.ts"
     patterns:
       - pattern: Math.random()

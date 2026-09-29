@@ -300,6 +300,20 @@ describe('money leaving a wallet', () => {
 });
 
 describe('revoking other devices', () => {
+  it('lists the devices with their live sessions', async () => {
+    // It read auth_sessions.expires_at, which does not exist — a session
+    // lives while it holds an unconsumed, unexpired refresh token — so this
+    // answered 500 to every customer. Nothing called it, so nothing noticed.
+    const customer = await newCustomer();
+    const listed = await request(app.getHttpServer())
+      .get('/v1/auth/devices')
+      .set('Authorization', `Bearer ${customer.token}`)
+      .expect(200);
+    const devices = listed.body as { current: boolean; live_sessions: number; status: string }[];
+    expect(devices).toHaveLength(1);
+    expect(devices[0]).toMatchObject({ current: true, live_sessions: 1, status: 'active' });
+  });
+
   it('confirms it by email', async () => {
     const customer = await newCustomer();
     await request(app.getHttpServer())

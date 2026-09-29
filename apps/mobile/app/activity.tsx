@@ -135,7 +135,7 @@ export default function Activity() {
       </ScrollView>
 
       {first.loading && <Loading />}
-      {!first.loading && pages.length === 0 && (
+      {!first.loading && first.error === undefined && pages.length === 0 && (
         <Empty
           icon="file"
           title={`No ${filter.label} transactions yet`}

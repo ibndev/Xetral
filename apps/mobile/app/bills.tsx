@@ -167,7 +167,9 @@ function Buy({
   const attempt = useIdempotencyKey();
 
   const catalogue = useLoad(
-    () => client.catalogue(service.code).catch(() => [] as readonly CatalogueItem[]),
+    // Not swallowed into an empty list: `service_not_configured` and an
+    // outage both read as "there are no plans", which the web never said.
+    () => client.catalogue(service.code),
     [client, service.code],
   );
 
@@ -187,6 +189,7 @@ function Buy({
   return (
     <Panel title={`Buy ${service.label.toLowerCase()}`}>
       {catalogue.loading && <Loading />}
+      {!catalogue.loading && <FormError error={catalogue.error} code={catalogue.code} />}
 
       {items.length > 0 && (
         <Select

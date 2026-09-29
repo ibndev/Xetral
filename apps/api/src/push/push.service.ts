@@ -233,14 +233,17 @@ export class PushService {
             `INSERT INTO push_broadcasts (title, body, country, created_by, send_at)
              SELECT $2, $3, $4::char(2), u.id, COALESCE($5::timestamptz, now())
                FROM users u WHERE u.uuid = $1
-             RETURNING ${COLUMNS}`,
+             RETURNING uuid, title, body, country, created_at, sent_at, send_at, cancelled_at,
+                    devices, accepted, rejected, without_consent, failure_reason`,
             [staffUuid, input.title.trim(), input.body.trim(), input.country ?? null, input.sendAt ?? null],
           )
         : await this.pool.query<BroadcastRow>(
             `INSERT INTO push_broadcasts (title, body, country, created_by)
              SELECT $2, $3, $4::char(2), u.id
                FROM users u WHERE u.uuid = $1
-             RETURNING ${LEGACY_COLUMNS}`,
+             RETURNING uuid, title, body, country, created_at, sent_at,
+                    created_at AS send_at, NULL::timestamptz AS cancelled_at,
+                    devices, accepted, rejected, without_consent, failure_reason`,
             [staffUuid, input.title.trim(), input.body.trim(), input.country ?? null],
           );
     } catch (error) {
@@ -268,14 +271,17 @@ export class PushService {
     const bounded = Math.min(Math.max(limit, 1), 200);
     const result = (await this.scheduling())
       ? await this.pool.query<BroadcastRow>(
-          `SELECT ${COLUMNS}
+          `SELECT uuid, title, body, country, created_at, sent_at, send_at, cancelled_at,
+                    devices, accepted, rejected, without_consent, failure_reason
              FROM push_broadcasts
             ORDER BY send_at DESC, created_at DESC
             LIMIT $1`,
           [bounded],
         )
       : await this.pool.query<BroadcastRow>(
-          `SELECT ${LEGACY_COLUMNS}
+          `SELECT uuid, title, body, country, created_at, sent_at,
+                    created_at AS send_at, NULL::timestamptz AS cancelled_at,
+                    devices, accepted, rejected, without_consent, failure_reason
              FROM push_broadcasts
             ORDER BY created_at DESC
             LIMIT $1`,
@@ -313,7 +319,8 @@ export class PushService {
     const result = await this.pool.query<BroadcastRow>(
       `UPDATE push_broadcasts SET cancelled_at = now()
         WHERE uuid = $1 AND sent_at IS NULL AND cancelled_at IS NULL AND send_at > now()
-        RETURNING ${COLUMNS}`,
+        RETURNING uuid, title, body, country, created_at, sent_at, send_at, cancelled_at,
+                    devices, accepted, rejected, without_consent, failure_reason`,
       [uuid],
     );
     const row = result.rows[0];
@@ -387,8 +394,14 @@ export class PushService {
 
   async one(uuid: string): Promise<BroadcastView> {
     const result = await this.pool.query<BroadcastRow>(
-      `SELECT ${(await this.scheduling()) ? COLUMNS : LEGACY_COLUMNS}
-         FROM push_broadcasts WHERE uuid = $1`,
+      (await this.scheduling())
+        ? `SELECT uuid, title, body, country, created_at, sent_at, send_at, cancelled_at,
+                    devices, accepted, rejected, without_consent, failure_reason
+             FROM push_broadcasts WHERE uuid = $1`
+        : `SELECT uuid, title, body, country, created_at, sent_at,
+                    created_at AS send_at, NULL::timestamptz AS cancelled_at,
+                    devices, accepted, rejected, without_consent, failure_reason
+             FROM push_broadcasts WHERE uuid = $1`,
       [uuid],
     );
     const row = result.rows[0];
@@ -397,13 +410,14 @@ export class PushService {
   }
 }
 
-const COLUMNS = `uuid, title, body, country, created_at, sent_at, send_at, cancelled_at,
-                 devices, accepted, rejected, without_consent, failure_reason`;
-
-/** The same row behind 087: due when written, never cancelled. */
-const LEGACY_COLUMNS = `uuid, title, body, country, created_at, sent_at,
-                 created_at AS send_at, NULL::timestamptz AS cancelled_at,
-                 devices, accepted, rejected, without_consent, failure_reason`;
+/*
+ * The column lists are WRITTEN OUT in every statement rather than shared as a
+ * constant, and that repetition is the Semgrep rule's own advice: a statement
+ * built by interpolation is one a reviewer cannot read as SQL, and the rule
+ * cannot tell a local constant from a request value. Behind 087 the same row
+ * reads `created_at AS send_at, NULL AS cancelled_at` — due when written,
+ * never cancelled — which is what 087's own backfill says.
+ */
 
 interface BroadcastRow {
   uuid: string;

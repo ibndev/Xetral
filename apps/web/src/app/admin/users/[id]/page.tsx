@@ -188,11 +188,22 @@ export default function UserDetail({ params }: { params: Promise<{ id: string }>
           <h2>Balances</h2>
           {balances.length === 0 && <p className="empty">Nothing yet.</p>}
           {balances.map((balance, index) => {
+            // The API sends `kind`, `currency` and `balance_minor`. This read
+            // `balance` and `amount_minor`, neither of which exists, so every
+            // balance on this page was drawn blank. MINOR units, so
+            // `formatMinor` — `formatAmount` would be a hundred times out.
             const row = balance as Record<string, string>;
+            const minor = row['balance_minor'];
+            const currency = row['currency'] ?? '';
             return (
               <div className="row" key={index}>
-                <span>{row['currency']}</span>
-                <span className="amount">{row['balance'] ?? row['amount_minor']}</span>
+                <span>
+                  {currency}
+                  <div className="hint">{(row['kind'] ?? '').replace(/^customer_/, '').replace(/_/g, ' ')}</div>
+                </span>
+                <span className="amount">
+                  {minor === undefined ? '—' : formatMinor(minor, currency)}
+                </span>
               </div>
             );
           })}
@@ -203,14 +214,22 @@ export default function UserDetail({ params }: { params: Promise<{ id: string }>
           {devices.length === 0 && <p className="empty">None.</p>}
           {devices.map((device, index) => {
             const row = device as Record<string, string | null>;
+            const named = typeof row['display_name'] === 'string' && row['display_name'] !== '';
             return (
               <div className="row" key={index}>
                 <span>
-                  {row['platform']}
-                  <div className="hint mono">{String(row['fingerprint']).slice(0, 16)}…</div>
+                  {named ? row['display_name'] : row['platform']}
+                  <div className="hint">
+                    {[
+                      named ? row['platform'] : undefined,
+                      typeof row['last_seen_at'] === 'string'
+                        ? `last seen ${new Date(row['last_seen_at']).toLocaleString()}`
+                        : undefined,
+                    ].filter((part) => part !== undefined).join(' · ')}
+                  </div>
                 </span>
-                <span className={`badge ${row['revoked_at'] === null ? 'ok' : 'danger'}`}>
-                  {row['revoked_at'] === null ? 'active' : 'revoked'}
+                <span className={`badge ${row['status'] === 'active' ? 'ok' : 'danger'}`}>
+                  {row['status'] === 'active' ? 'active' : 'revoked'}
                 </span>
               </div>
             );

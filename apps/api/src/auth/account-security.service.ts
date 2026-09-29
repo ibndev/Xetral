@@ -72,9 +72,16 @@ export class AccountSecurityService {
     }>(
       `SELECT d.uuid, d.platform, d.display_name, d.status::text AS status,
               d.first_seen_at, d.last_seen_at,
+              -- A session has no expiry of its own; it lives while it holds
+              -- an unconsumed refresh token that has not expired. Reading a
+              -- non-existent auth_sessions.expires_at answered 500 to every
+              -- customer who opened this screen.
               (SELECT count(*) FROM auth_sessions s
                 WHERE s.device_id = d.id AND s.revoked_at IS NULL
-                  AND s.expires_at > now())::text AS live_sessions
+                  AND EXISTS (SELECT 1 FROM refresh_tokens r
+                               WHERE r.session_id = s.id
+                                 AND r.consumed_at IS NULL
+                                 AND r.expires_at > now()))::text AS live_sessions
          FROM devices d
          JOIN users u ON u.id = d.user_id
         WHERE u.uuid = $1

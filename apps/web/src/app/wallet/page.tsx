@@ -173,10 +173,10 @@ export default function Wallet() {
    */
   const headline = dollars.data;
 
-  const history = useLoad(
-    () => client.transactions(currency).catch(() => ({ entries: [], nextCursor: null })),
-    [client, currency],
-  );
+  // A FAILED READ IS NOT AN EMPTY HISTORY. Swallowing the error into an empty
+  // list told a customer "No transactions yet" on a bad connection — on the
+  // screen they open to check whether they were paid.
+  const history = useLoad(() => client.transactions(currency), [client, currency]);
 
   return (
     <Shell greeting={{ name: session.data?.first_name }}>
@@ -399,7 +399,14 @@ export default function Wallet() {
           </div>
         )}
 
-        {!history.loading && (history.data?.entries.length ?? 0) === 0 && (
+        {!history.loading && history.error !== undefined && (
+          <p className="error">
+            <Icon name="alert" size={16} /> {history.error}{' '}
+            <button type="button" className="link" onClick={history.reload}>Try again</button>
+          </p>
+        )}
+
+        {!history.loading && history.error === undefined && (history.data?.entries.length ?? 0) === 0 && (
           <div className="empty">
             <span className="empty-icon"><Icon name="file" size={24} /></span>
             <span>No transactions yet</span>

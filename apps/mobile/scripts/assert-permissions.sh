@@ -61,6 +61,22 @@ if [ ! -f "$manifest" ]; then
 fi
 echo "reading $manifest"
 
+# WHICH BUILD THIS MANIFEST IS FOR, because one permission differs by design.
+# Expo's template ships `android/app/src/debug/AndroidManifest.xml` asking for
+# SYSTEM_ALERT_WINDOW — React Native's dev overlay (the red box, the perf
+# monitor) draws over other apps. That DEBUG source set outranks `main` in the
+# manifest merger, so the `tools:node="remove"` that `blockedPermissions`
+# writes into `main` cannot reach it: every `development` APK carried it, and
+# this script failed the first development build after the merged check
+# landed. A development build is the developer's own binary, signed with the
+# debug key and never uploaded; the RELEASE manifest — preview APKs and the
+# Play bundle — is still refused on it below, which is the one a customer sees.
+variant=release
+case "$manifest" in
+  */debug/*|*/src/debug/*) variant=debug ;;
+esac
+echo "variant: $variant"
+
 fail=0
 
 # Expo's android TEMPLATE ships these three, and no package in this repo asks
@@ -79,6 +95,8 @@ for perm in SYSTEM_ALERT_WINDOW READ_EXTERNAL_STORAGE WRITE_EXTERNAL_STORAGE \
     echo "ok: $perm is absent"
   elif echo "$line" | grep -q 'tools:node="remove"'; then
     echo "ok: $perm is marked for removal"
+  elif [ "$perm" = SYSTEM_ALERT_WINDOW ] && [ "$variant" = debug ]; then
+    echo "ok: $perm is in the DEVELOPMENT build only (React Native's dev overlay); release is checked for it"
   else
     echo "::error::$perm would ship and nothing uses it"
     fail=1

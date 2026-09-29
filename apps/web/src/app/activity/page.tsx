@@ -135,7 +135,7 @@ export default function Activity() {
         <p className="error"><Icon name="alert" size={16} /> {first.error}</p>
       )}
 
-      {!first.loading && rows.length === 0 && (
+      {!first.loading && first.error === undefined && rows.length === 0 && (
         <div className="empty">
           <span className="empty-icon"><Icon name="file" size={24} /></span>
           <span>Nothing in {filter.label} yet</span>

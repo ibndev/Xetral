@@ -2576,6 +2576,43 @@ and `apps/mobile/IOS.md`, guarded by `ios-release.test.ts`.
   `usesNonExemptEncryption` is deliberately NOT set: App Store Connect asks per
   build until they decide.
 
+### A whole-code inspection, and the gates that were red — non-obvious rules
+
+`apps/api/src/sql-statements.e2e.test.ts`, `apps/mobile/scripts/assert-permissions.sh`,
+`.semgrep/xetral.yml`.
+
+- **THE SCAN GATE WAS RED FOR THREE ROUNDS AND CI WAS GREEN THE WHOLE TIME.**
+  `push.service.ts` built six statements from `${COLUMNS}` constants and the
+  blocking Semgrep rule refused them — on every push since round 33, in a
+  workflow nobody was reading because the one called CI passed. Every
+  workflow's latest run is part of "green", not just CI's. The statements are
+  written out in full, as the rule's own message advises.
+- **EVERY STATIC SQL STATEMENT IS NOW PREPARED AGAINST THE MIGRATED SCHEMA**, by
+  `sql-statements.e2e.test.ts`, as the application role. It found two faults no
+  test had reached: the admin customer page selected `devices.created_at` and
+  `devices.revoked_at` (002 names them `first_seen_at`/`last_seen_at` and
+  records revocation as a STATUS), so its Devices panel read "None." for every
+  customer; and `GET /v1/auth/devices` read `auth_sessions.expires_at`, which
+  does not exist — a session lives while it holds an unconsumed, unexpired
+  refresh token — so it answered 500 to everybody. `#sections` turning a
+  failed query into an empty panel is why the first looked like a quiet account.
+- **AN UNTYPED `Record<string, unknown>` IS A FIELD NAME NOTHING CHECKS.** The
+  same page read `balance` and `amount_minor` off rows carrying `balance_minor`,
+  so every balance rendered blank, and a `fingerprint` nothing selected.
+- **A FAILED READ IS NOT AN EMPTY LIST.** Home activity on both apps caught its
+  own failure into `entries: []` and said "No transactions yet" on a bad
+  connection; the phone's bills catalogue said there were no plans when the
+  service was not configured. They show the error and a way to try again now.
+- **A DEVELOPMENT APK CARRIES `SYSTEM_ALERT_WINDOW` BY DESIGN.** Expo's
+  `src/debug/AndroidManifest.xml` asks for it for React Native's dev overlay,
+  and that source set OUTRANKS `main`, so `blockedPermissions`' remove marker
+  cannot reach it. The merged-manifest check exempts it for a debug manifest
+  only — keyed on the manifest's own path — and still fails a release one.
+- **THE TOOLCHAIN ADVISORIES ARE STILL THERE, AND ARE NOT IN THE REQUEST PATH.**
+  vitest, vite, and Expo's CLI/PostCSS/image-size report 25 findings on the
+  whole tree; each fix is a major version (vitest 5, Expo SDK 57). The
+  customer-facing audit — seven workspaces, `--omit=dev`, moderate — is clean.
+
 ### The reset code, and a sender Brevo never verified — non-obvious rules
 
 `packages/providers/src/brevo/brevo-adapter.ts`, `/forgot` on both apps.

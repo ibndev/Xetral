@@ -109,6 +109,21 @@ describe('both workflows check the manifest the same way', () => {
     expect(script).toContain('no merged manifest under');
   });
 
+  it('lets the dev overlay through ONLY in a debug build', () => {
+    // Expo's debug source set asks for SYSTEM_ALERT_WINDOW and outranks the
+    // `main` manifest `blockedPermissions` writes to, so every development
+    // APK carried it and the merged check failed the build. The exemption is
+    // keyed on the manifest's own path and names that one permission — a
+    // release manifest carrying it must still fail.
+    const script = readFileSync(
+      new URL('../scripts/assert-permissions.sh', import.meta.url),
+      'utf8',
+    );
+    expect(script).toContain('variant=release');
+    expect(script).toMatch(/\*\/debug\/\*.*variant=debug/);
+    expect(script).toContain('[ "$perm" = SYSTEM_ALERT_WINDOW ] && [ "$variant" = debug ]');
+  });
+
   it('the script refuses a permission that would ship AND one that is blocked', () => {
     // BOTH DIRECTIONS, because the failing one is not the obvious one: a typo
     // in `blockedPermissions` marks something the app NEEDS for removal, the
