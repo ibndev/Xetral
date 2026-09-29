@@ -18,21 +18,48 @@ import { shortDate } from '../age';
  *
  * Destructive actions carry a required reason, by CHECK. There is no path that
  * freezes an account or moves suspense money without a sentence attached.
+ *
+ * THERE IS NO DELETE, and that is the log working rather than a missing
+ * button. Only `admin` can open this page; if `admin` could also clear it,
+ * the one role able to do the most damage would be the one role able to
+ * remove the record of having done it.
+ *
+ * WHO IS A NAME AND AN ADDRESS, both in full. The column used to show "tunde@"
+ * with the rest on hover, which reads well until two operators share a first
+ * name — and "which Tunde?" is the question an audit exists to answer.
  */
 export default function Audit() {
   const admin = useAdmin();
-  const entries = useLoad(() => admin.audit({ limit: 100 }), [admin]);
+  const entries = useLoad(() => admin.audit({ limit: PAGE }), [admin]);
+  const [older, setOlder] = useState<readonly AdminAuditEntry[]>([]);
+  const [more, setMore] = useState<'idle' | 'loading' | 'end' | 'failed'>('idle');
   const [query, setQuery] = useState('');
 
+  const loaded = [...(entries.data ?? []), ...older];
   const needle = query.trim().toLowerCase();
-  const shown = (entries.data ?? []).filter(
+  const shown = loaded.filter(
     (entry) =>
       needle === '' ||
-      [entry.actor ?? 'system', entry.action, targetOf(entry), entry.reason ?? '']
+      [entry.actor_name ?? '', entry.actor ?? 'system', entry.action, targetOf(entry), entry.reason ?? '']
         .join(' ')
         .toLowerCase()
         .includes(needle),
   );
+
+  const loadOlder = async (): Promise<void> => {
+    const last = loaded[loaded.length - 1];
+    if (last === undefined) return;
+    setMore('loading');
+    try {
+      const page = await admin.audit({ limit: PAGE, before: last.id });
+      setOlder((current) => [...current, ...page]);
+      setMore(page.length < PAGE ? 'end' : 'idle');
+    } catch {
+      setMore('failed');
+    }
+  };
+  const hasMore =
+    entries.data !== undefined && entries.data.length === PAGE && more !== 'end';
 
   return (
     <div className="panel tbl-panel audit">
@@ -48,10 +75,10 @@ export default function Audit() {
           <Icon name="search" size={17} />
           <input
             type="search"
-            placeholder="Search the latest 100 by actor, action or target"
+            placeholder={`Search the ${loaded.length} loaded by name, email, action or target`}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            aria-label="Search the latest 100 audit entries"
+            aria-label="Search the loaded audit entries"
           />
         </label>
       </div>
@@ -62,7 +89,9 @@ export default function Audit() {
         <p className="empty">Nothing recorded yet.</p>
       )}
       {entries.data !== undefined && entries.data.length > 0 && shown.length === 0 && (
-        <p className="empty">Nothing in the latest 100 matches that.</p>
+        <p className="empty">
+          Nothing loaded matches that.{hasMore ? ' Load older entries to search further back.' : ''}
+        </p>
       )}
 
       {shown.length > 0 && (
@@ -70,8 +99,8 @@ export default function Audit() {
           <table>
             <thead>
               <tr>
-                <th>Time</th>
-                <th>Actor</th>
+                <th>Date</th>
+                <th>Staff member</th>
                 <th>Action</th>
                 <th>Target</th>
                 <th>IP</th>
@@ -80,11 +109,15 @@ export default function Audit() {
             <tbody>
               {shown.map((entry) => (
                 <tr key={entry.id}>
-                  <td className="mono quiet nowrap" title={new Date(entry.created_at).toLocaleString()}>
-                    {timeOf(entry.created_at)}
+                  <td className="mono quiet nowrap">
+                    {dateOf(entry.created_at)}
+                    <div className="cell-sub">{timeOf(entry.created_at)}</div>
                   </td>
-                  <td className="actor" title={entry.actor ?? 'system'}>
-                    {actorOf(entry.actor)}
+                  <td className="actor">
+                    <span className="actor-name">{entry.actor_name ?? entry.actor ?? 'System'}</span>
+                    {entry.actor !== null && entry.actor_name !== null && (
+                      <div className="cell-sub">{entry.actor}</div>
+                    )}
                   </td>
                   <td>
                     <span className="mono">{entry.action}</span>
@@ -100,27 +133,41 @@ export default function Audit() {
           </table>
         </div>
       )}
+
+      {(hasMore || more === 'failed') && (
+        <div className="audit-more">
+          <button type="button" className="quiet" onClick={() => void loadOlder()} disabled={more === 'loading'}>
+            {more === 'loading' ? 'Loading…' : 'Load older entries'}
+          </button>
+          {more === 'failed' && <span className="quiet">Could not load more. Try again.</span>}
+        </div>
+      )}
     </div>
   );
 }
 
-/** "03:31:04" today, "Yesterday", then a date — the comp's column. */
-function timeOf(iso: string): string {
+const PAGE = 100;
+
+/**
+ * "Today", "Yesterday", then the date — with the year once it is not this
+ * one, because a log read in January is otherwise ambiguous about December.
+ */
+function dateOf(iso: string): string {
   const then = new Date(iso);
   const now = new Date();
   const day = (d: Date): string => d.toDateString();
-  if (day(then) === day(now)) return then.toLocaleTimeString('en-GB', { hour12: false });
+  if (day(then) === day(now)) return 'Today';
   const yesterday = new Date(now);
   yesterday.setDate(now.getDate() - 1);
   if (day(then) === day(yesterday)) return 'Yesterday';
-  return shortDate(iso);
+  return then.getFullYear() === now.getFullYear()
+    ? shortDate(iso)
+    : then.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-/** "tunde@" — who, at a glance; the whole address is one hover away. */
-function actorOf(actor: string | null): string {
-  if (actor === null) return 'system';
-  const at = actor.indexOf('@');
-  return at > 0 ? actor.slice(0, at + 1) : actor;
+/** "03:31:04", always — the date is the line above it. */
+function timeOf(iso: string): string {
+  return new Date(iso).toLocaleTimeString('en-GB', { hour12: false });
 }
 
 function targetOf(entry: AdminAuditEntry): string {

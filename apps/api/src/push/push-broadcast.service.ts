@@ -117,13 +117,21 @@ export class PushBroadcastService implements OnApplicationShutdown {
       body: string;
       country: string | null;
     }>(
-      `SELECT id, title, body, country
-         FROM push_broadcasts
-        WHERE sent_at IS NULL
-          AND cancelled_at IS NULL
-          AND send_at <= now()
-        ORDER BY send_at
-        LIMIT 1`,
+      // Behind 087 there is no schedule and nothing cancelled: the oldest
+      // unsent row is the one due. `PushService.scheduling()` says which.
+      (await this.devices.scheduling())
+        ? `SELECT id, title, body, country
+             FROM push_broadcasts
+            WHERE sent_at IS NULL
+              AND cancelled_at IS NULL
+              AND send_at <= now()
+            ORDER BY send_at
+            LIMIT 1`
+        : `SELECT id, title, body, country
+             FROM push_broadcasts
+            WHERE sent_at IS NULL
+            ORDER BY created_at
+            LIMIT 1`,
     );
     const row = result.rows[0];
     if (row === undefined) return undefined;

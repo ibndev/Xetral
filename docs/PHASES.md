@@ -41,6 +41,7 @@ shipped, that is called out explicitly.
 | 30 — Mail from app.xetral.com, a bell that means something, counts that go away | ✅ | the Brevo key and authorised IPs, and an EAS projectId for push |
 | 31 — What the payment partner asked for, and a checkout that opened on a card | ✅ | migration 086, and the Send test's answer about the Brevo key |
 | 32 — A migration skipped in production, and an announcement that said "queued" | ✅ | migrations 069 and 087, Brevo Authorised IPs, an EAS projectId and FCM for push |
+| 33 — Announcements on a database behind 087, and who did what | ✅ | migration 087 for scheduling |
 
 All eleven phases are built, a **pre-deployment audit** (Phase 12) closed what
 building them phase by phase had left between the phases, and **Phase 13** is
@@ -2727,3 +2728,23 @@ address shown on the Send test under Brevo → Security → Authorised IPs; neve
 run a `.test.sql` file against production; and, for push to a closed app, run
 `eas init` in `apps/mobile`, add a Firebase project's `google-services.json`
 and its FCM key to Expo, and rebuild.
+
+---
+
+## Phase 33 — Announcements on a database behind 087, and who did what ✅
+
+| File | What it is |
+|---|---|
+| `apps/api/src/push/push.service.ts` | `scheduling()`: every query has a pre-087 shape |
+| `apps/api/src/push/push-legacy-schema.e2e.test.ts` | the old schema, reproduced in a rolled-back transaction |
+| `apps/api/src/admin/audit.service.ts` | the actor's name and IP address |
+| `apps/web/src/app/admin/audit/page.tsx` | name, email, date and time; older entries |
+
+1. **The Announcements list answered 500** because production had not applied
+   087; the list, the bell feed and the worker now run on either schema.
+2. **The audit page showed half an email address.** It names the staff member
+   in full, and the IP column — never selected — now fills.
+3. **Deleting audit history is refused by design**, not missing.
+
+**Before this goes live, an operator must:** apply **087** to schedule and
+cancel announcements; until then they go out immediately.

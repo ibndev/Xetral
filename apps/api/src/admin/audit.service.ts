@@ -171,7 +171,8 @@ export class AuditService {
     const rows = await this.pool.query(
       // nosemgrep: semgrep.no-interpolated-sql
       `SELECT l.id::text, l.uuid, l.action, l.subject_type, l.subject_id,
-              l.detail, l.reason, l.created_at, u.email AS actor
+              l.detail, l.reason, l.created_at, u.email AS actor,
+              u.full_name AS actor_name, host(l.ip_address) AS ip_address
          FROM admin_audit_log l
          JOIN users u ON u.id = l.actor_id
         ${clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : ''}

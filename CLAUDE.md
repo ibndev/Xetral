@@ -2465,7 +2465,37 @@ Republished by `packages/ledger/sql/086_legal_republish.sql`.
   now appends the `error` code the caller was given, e.g.
   `(payout_provider_unavailable)`, which is what anybody searches for.
 
-### The admin actions that never reached the server, and the ten seconds before every request — non-obvious rules
+### Code that ships ahead of its migration, and the staff audit — non-obvious rules
+
+`PushService.scheduling()`, `apps/web/src/app/admin/audit/page.tsx`, covered by
+`push-legacy-schema.e2e.test.ts`.
+
+- **THE ANNOUNCEMENTS LIST ANSWERED 500 BECAUSE 087 WAS NOT APPLIED.** The
+  code reading `send_at` shipped; the file adding it had not been run. The
+  admin list, the customer's bell feed and the push worker read the same
+  columns, so one skipped file took all three down — 069's fault on
+  `/admin/providers`, one migration later.
+- **SO A NEW COLUMN IS READ BEHIND A PROBE, NOT ASSUMED.** `scheduling()` asks
+  `pg_attribute` (not `information_schema`, which answers about GRANTS) and
+  every query has a pre-087 shape: due when written, never cancelled — 087's
+  own backfill says exactly that. Present is cached for good, absent for a
+  minute, so applying the file takes effect without a restart.
+- **WHAT THE OLD SCHEMA CANNOT DO IS REFUSED BY NAME.** A time later than now is
+  `scheduling_unavailable`, never sent early: tonight's maintenance announced at
+  four is the misreading scheduling exists to prevent.
+- **THE TEST DROPS THE COLUMNS INSIDE A TRANSACTION, AS THE OWNER, AND ROLLS
+  BACK** — and restores 065's trigger function too, because 087's reads
+  `NEW.send_at` and would fail the worker for a reason production never meets.
+  Removing the fallback fails it with production's exact error.
+- **THE AUDIT PAGE NAMES EACH STAFF MEMBER IN FULL** — name, email, date and
+  time. It showed "tunde@" with the rest on hover, which fails on the day two
+  operators share a first name. Older entries load in pages of a hundred.
+- **ONLY `admin` CAN READ IT AND NOBODY CAN DELETE FROM IT.** There is no
+  "super admin" role: `admin` is the top of the list. Deleting history is not
+  offered, by trigger and deliberately — the one role able to read the log
+  would be the one role able to remove the record of what it did.
+
+, and the ten seconds before every request — non-obvious rules
 
 `apps/web/src/app/api/x/[...path]/route.ts`, `packages/client/src/admin.ts`,
 `apps/api/src/auth/rate-limit.ts`.

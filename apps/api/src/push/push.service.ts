@@ -69,8 +69,54 @@ export interface AudienceEstimate {
 @Injectable()
 export class PushService {
   readonly #logger = new Logger(PushService.name);
+  #scheduled: { readonly has: boolean; readonly at: number } | undefined;
 
   constructor(@Inject(DATABASE) private readonly pool: Pool) {}
+
+  /**
+   * WHETHER 087 IS APPLIED — `send_at` and `cancelled_at` exist.
+   *
+   * Production applies migrations by hand, and the list of announcements
+   * answered 500 on "column send_at does not exist" the day the code that
+   * reads it shipped ahead of the file that adds it. The admin list, the
+   * customer's bell feed and the worker all read these columns, so a skipped
+   * migration took out every one of them at once — the fault 069 made on
+   * `/admin/providers`, one migration later.
+   *
+   * So each query is written twice, and behind 087 the old shape is used:
+   * every row was due when it was written (087's own backfill says exactly
+   * that) and none was ever cancelled. What cannot be served is a schedule,
+   * and that is refused by name rather than by a 500.
+   *
+   * `pg_attribute`, not `information_schema`: the second shows only columns
+   * the role holds a privilege on, which is a question about grants rather
+   * than about the schema. Present is cached for good — a column is never
+   * dropped — and absent for a minute, so applying 087 takes effect without a
+   * restart.
+   */
+  async scheduling(): Promise<boolean> {
+    const cached = this.#scheduled;
+    if (cached !== undefined && (cached.has || Date.now() - cached.at < 60_000)) {
+      return cached.has;
+    }
+    const result = await this.pool.query<{ n: number }>(
+      `SELECT count(*)::int AS n
+         FROM pg_attribute
+        WHERE attrelid = to_regclass('push_broadcasts')
+          AND attname IN ('send_at', 'cancelled_at')
+          AND NOT attisdropped`,
+    );
+    const has = Number(result.rows[0]?.n ?? 0) === 2;
+    if (!has && cached?.has !== false) {
+      this.#logger.warn(
+        'push_broadcasts has no send_at: migration 087_scheduled_announcements.sql ' +
+          'is not applied. Announcements go out immediately and cannot be scheduled ' +
+          'or cancelled until it is.',
+      );
+    }
+    this.#scheduled = { has, at: Date.now() };
+    return has;
+  }
 
   /**
    * Records the handset a customer is signed in on.
@@ -172,15 +218,31 @@ export class PushService {
     staffUuid: string,
     input: { title: string; body: string; country?: string; sendAt?: string },
   ): Promise<BroadcastView> {
+    const scheduling = await this.scheduling();
+    // A time within the minute's grace 087 allows is "now", and needs no
+    // column to say so. A later one does, and behind 087 it is refused rather
+    // than sent early — an announcement of tonight's maintenance going out at
+    // four is the exact misreading scheduling exists to prevent.
+    if (!scheduling && input.sendAt !== undefined && Date.parse(input.sendAt) > Date.now() + 60_000) {
+      throw new ConflictException({ error: 'scheduling_unavailable' });
+    }
     let result;
     try {
-      result = await this.pool.query<BroadcastRow>(
-        `INSERT INTO push_broadcasts (title, body, country, created_by, send_at)
-         SELECT $2, $3, $4::char(2), u.id, COALESCE($5::timestamptz, now())
-           FROM users u WHERE u.uuid = $1
-         RETURNING ${COLUMNS}`,
-        [staffUuid, input.title.trim(), input.body.trim(), input.country ?? null, input.sendAt ?? null],
-      );
+      result = scheduling
+        ? await this.pool.query<BroadcastRow>(
+            `INSERT INTO push_broadcasts (title, body, country, created_by, send_at)
+             SELECT $2, $3, $4::char(2), u.id, COALESCE($5::timestamptz, now())
+               FROM users u WHERE u.uuid = $1
+             RETURNING ${COLUMNS}`,
+            [staffUuid, input.title.trim(), input.body.trim(), input.country ?? null, input.sendAt ?? null],
+          )
+        : await this.pool.query<BroadcastRow>(
+            `INSERT INTO push_broadcasts (title, body, country, created_by)
+             SELECT $2, $3, $4::char(2), u.id
+               FROM users u WHERE u.uuid = $1
+             RETURNING ${LEGACY_COLUMNS}`,
+            [staffUuid, input.title.trim(), input.body.trim(), input.country ?? null],
+          );
     } catch (error) {
       // 087's CHECKs: not in the past, not more than a month out. Said as a
       // field the screen can point at rather than a constraint name.
@@ -203,23 +265,34 @@ export class PushService {
    * "did my announcement go out?" is the question this screen exists for.
    */
   async history(limit = 50): Promise<readonly BroadcastView[]> {
-    const result = await this.pool.query<BroadcastRow>(
-      `SELECT ${COLUMNS}
-         FROM push_broadcasts
-        ORDER BY send_at DESC, created_at DESC
-        LIMIT $1`,
-      [Math.min(Math.max(limit, 1), 200)],
-    );
+    const bounded = Math.min(Math.max(limit, 1), 200);
+    const result = (await this.scheduling())
+      ? await this.pool.query<BroadcastRow>(
+          `SELECT ${COLUMNS}
+             FROM push_broadcasts
+            ORDER BY send_at DESC, created_at DESC
+            LIMIT $1`,
+          [bounded],
+        )
+      : await this.pool.query<BroadcastRow>(
+          `SELECT ${LEGACY_COLUMNS}
+             FROM push_broadcasts
+            ORDER BY created_at DESC
+            LIMIT $1`,
+          [bounded],
+        );
     return result.rows.map(view);
   }
 
   /** Whether an announcement is due and not yet pushed — what the list drains. */
   async hasDue(): Promise<boolean> {
-    const result = await this.pool.query(
-      `SELECT 1 FROM push_broadcasts
-        WHERE sent_at IS NULL AND cancelled_at IS NULL AND send_at <= now()
-        LIMIT 1`,
-    );
+    const result = (await this.scheduling())
+      ? await this.pool.query(
+          `SELECT 1 FROM push_broadcasts
+            WHERE sent_at IS NULL AND cancelled_at IS NULL AND send_at <= now()
+            LIMIT 1`,
+        )
+      : await this.pool.query(`SELECT 1 FROM push_broadcasts WHERE sent_at IS NULL LIMIT 1`);
     return (result.rowCount ?? 0) > 0;
   }
 
@@ -231,6 +304,11 @@ export class PushService {
   async cancel(uuid: string): Promise<BroadcastView> {
     if (!/^[0-9a-f-]{36}$/i.test(uuid)) {
       throw new NotFoundException({ error: 'broadcast_not_found' });
+    }
+    if (!(await this.scheduling())) {
+      // Behind 087 nothing was ever scheduled, so everything is already due.
+      await this.one(uuid);
+      throw new ConflictException({ error: 'broadcast_not_cancellable' });
     }
     const result = await this.pool.query<BroadcastRow>(
       `UPDATE push_broadcasts SET cancelled_at = now()
@@ -281,14 +359,22 @@ export class PushService {
       // DUE AND NOT CALLED BACK (087). A scheduled announcement is not in the
       // feed before its time, and `at` is when it went out, not when somebody
       // typed it — "maintenance tonight" written at four reads as tonight's.
-      `SELECT b.uuid, b.title, b.body, b.send_at AS created_at
-         FROM push_broadcasts b
-         JOIN users u ON u.uuid = $1
-        WHERE (b.country IS NULL OR b.country = u.country)
-          AND b.send_at <= now()
-          AND b.cancelled_at IS NULL
-        ORDER BY b.send_at DESC
-        LIMIT $2`,
+      // Behind 087 every row was due when it was written.
+      (await this.scheduling())
+        ? `SELECT b.uuid, b.title, b.body, b.send_at AS created_at
+             FROM push_broadcasts b
+             JOIN users u ON u.uuid = $1
+            WHERE (b.country IS NULL OR b.country = u.country)
+              AND b.send_at <= now()
+              AND b.cancelled_at IS NULL
+            ORDER BY b.send_at DESC
+            LIMIT $2`
+        : `SELECT b.uuid, b.title, b.body, b.created_at
+             FROM push_broadcasts b
+             JOIN users u ON u.uuid = $1
+            WHERE (b.country IS NULL OR b.country = u.country)
+            ORDER BY b.created_at DESC
+            LIMIT $2`,
       [userUuid, Math.min(Math.max(limit, 1), 100)],
     );
     return result.rows.map((row) => ({
@@ -301,7 +387,8 @@ export class PushService {
 
   async one(uuid: string): Promise<BroadcastView> {
     const result = await this.pool.query<BroadcastRow>(
-      `SELECT ${COLUMNS} FROM push_broadcasts WHERE uuid = $1`,
+      `SELECT ${(await this.scheduling()) ? COLUMNS : LEGACY_COLUMNS}
+         FROM push_broadcasts WHERE uuid = $1`,
       [uuid],
     );
     const row = result.rows[0];
@@ -311,6 +398,11 @@ export class PushService {
 }
 
 const COLUMNS = `uuid, title, body, country, created_at, sent_at, send_at, cancelled_at,
+                 devices, accepted, rejected, without_consent, failure_reason`;
+
+/** The same row behind 087: due when written, never cancelled. */
+const LEGACY_COLUMNS = `uuid, title, body, country, created_at, sent_at,
+                 created_at AS send_at, NULL::timestamptz AS cancelled_at,
                  devices, accepted, rejected, without_consent, failure_reason`;
 
 interface BroadcastRow {

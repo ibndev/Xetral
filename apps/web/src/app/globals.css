@@ -6519,7 +6519,10 @@ html, body { overflow-x: hidden; overflow-x: clip; }
 .auth-line { margin: 14px 0 10px; font-size: 13px; font-weight: 600; color: var(--text-2); }
 /* An actor is a name to scan, so one line: a long address ends in an
    ellipsis and the whole of it is the cell's title. */
-.admin-frame td.actor { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.admin-frame td.actor { max-width: 260px; }
+.admin-frame td.actor .actor-name { font-weight: 600; color: var(--text); }
+.admin-frame td.actor .cell-sub { overflow-wrap: anywhere; }
+.audit-more { display: flex; align-items: center; gap: 12px; padding: 12px 18px; }
 
 /*
  * A FIELD INSIDE THE OPENED ROW TAKES THE PAGE'S GROUND. `--field` is the

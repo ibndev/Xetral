@@ -379,6 +379,8 @@ function sentenceFor(error: ApiError): string {
       return 'That announcement is no longer here.';
     case 'broadcast_not_cancellable':
       return 'That announcement has already gone out, so it can no longer be cancelled.';
+    case 'scheduling_unavailable':
+      return 'Scheduling needs database migration 087, which is not applied yet. Send it now, or apply 087 first.';
     case 'cannot_send_to_self':
       return 'That is your own number. Choose somebody else to pay.';
     case 'unsupported_network':

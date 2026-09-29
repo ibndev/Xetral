@@ -332,6 +332,12 @@ const API_ERROR_CODES = [
    */
   'broadcast_not_cancellable',
   /*
+   * `scheduling_unavailable` — an announcement set for later on a database
+   * that has not applied 087. Refused rather than sent early: tonight's
+   * maintenance announced at four is read as happening at four.
+   */
+  'scheduling_unavailable',
+  /*
    * `profile_locked` — a verified customer changing their own details.
    *
    * The direction looks backwards and is the point: what a reviewer read off a

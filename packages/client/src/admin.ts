@@ -338,7 +338,10 @@ export interface AdminStaffGrant {
 
 export interface AdminAuditEntry {
   readonly id: string;
+  /** The staff member's email address. */
   readonly actor: string | null;
+  /** Their name, where the account holds one. */
+  readonly actor_name: string | null;
   readonly action: string;
   readonly subject_type: string | null;
   readonly subject_id: string | null;
