@@ -31,6 +31,11 @@ import { Kpis, MoneyFigure, shortRef } from '../queue';
  * button, which is how the owner's own ₦10 was once refunded after it had
  * arrived.
  *
+ * CLOSED ROWS ARE OUT OF THE WAY UNTIL ASKED FOR. The list opens on what is
+ * still open; what closed this week is one tap away under "Resolved". A queue
+ * that keeps drawing what somebody already finished reads as work that was
+ * never done.
+ *
  * THE AMOUNT IS NOT ON THIS FORM. It comes from the held row on the server,
  * so this screen cannot credit an arbitrary customer an arbitrary sum.
  */
@@ -39,11 +44,14 @@ export default function Recovery() {
   const queue = useLoad(() => admin.recoveryQueue(), [admin]);
   const [open, setOpen] = useState<string | undefined>();
   const [said, setSaid] = useState<AdminRecoveryOutcome | undefined>();
+  const [view, setView] = useState<'open' | 'resolved'>('open');
 
-  const items = [...(queue.data?.items ?? [])].sort((a, b) => ORDER[a.state] - ORDER[b.state]);
+  const all = [...(queue.data?.items ?? [])].sort((a, b) => ORDER[a.state] - ORDER[b.state]);
   const summary = queue.data?.summary;
-  const review = items.filter((i) => i.state === 'needs_review').length;
-  const stuck = items.filter((i) => i.state === 'stuck').length;
+  const review = all.filter((i) => i.state === 'needs_review').length;
+  const stuck = all.filter((i) => i.state === 'stuck').length;
+  const resolved = all.length - review - stuck;
+  const items = all.filter((i) => (view === 'open') === (i.state !== 'resolved'));
   /*
    * THE COUNTS ARE FOR WHEN SOMETHING IS WRONG. With nothing stuck and
    * nothing to review there is nothing to count, and a row of zeros over an
@@ -91,7 +99,9 @@ export default function Recovery() {
                 ? 'Refunded.'
                 : said.outcome === 'delivered'
                   ? 'Resolved — delivered.'
-                  : 'Still held — nothing moved.'}
+                  : said.outcome === 'reviewed'
+                    ? 'Reviewed and closed.'
+                    : 'Still held — nothing moved.'}
             </strong>{' '}
             {said.detail}
           </p>
@@ -99,14 +109,33 @@ export default function Recovery() {
       )}
 
       <div className="panel tbl-panel">
+        {queue.data !== undefined && (
+          <div className="rec-filter">
+            <div className="segmented" role="radiogroup" aria-label="Show">
+              {(['open', 'resolved'] as const).map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  role="radio"
+                  aria-checked={view === option}
+                  className={view === option ? 'active' : ''}
+                  onClick={() => {
+                    setView(option);
+                    setOpen(undefined);
+                  }}
+                >
+                  {option === 'open' ? `Open · ${stuck + review}` : `Resolved · ${resolved}`}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <AdminError error={queue.error} code={queue.code} role="support" />
         {queue.loading && queue.data === undefined && <p className="spinner">Asking providers…</p>}
         {queue.data !== undefined && items.length === 0 && (
-          <p className="empty">Nothing needs attention.</p>
-        )}
-
-        {queue.data !== undefined && !attention && items.length > 0 && (
-          <p className="empty">Nothing needs attention. Closed this week:</p>
+          <p className="empty">
+            {view === 'open' ? 'Nothing needs attention.' : 'Nothing closed in the last seven days.'}
+          </p>
         )}
         {items.length > 0 && (
           <div className="scroll">
@@ -194,6 +223,7 @@ const ACTION_LABEL: Record<AdminRecoveryAction, string> = {
   refund: 'Refund to customer’s wallet',
   send: 'Send to recipient',
   mark_delivered: 'Mark delivered',
+  mark_reviewed: 'Mark reviewed',
 };
 
 /**
@@ -234,6 +264,8 @@ function Opened({ item, onDone }: { item: AdminRecoveryItem; onDone: (said: Admi
           return admin.resendPayout(item.subject_uuid, reason, pin);
         case 'mark_delivered':
           return admin.markPayoutDelivered(item.subject_uuid, transferId.trim(), reason, pin);
+        case 'mark_reviewed':
+          return admin.markPayoutReviewed(item.subject_uuid, reason, pin);
       }
     };
     setBusy(action);
@@ -301,12 +333,19 @@ function Opened({ item, onDone }: { item: AdminRecoveryItem; onDone: (said: Admi
           <p className="hint">
             {item.state === 'needs_review'
               ? 'Already refunded, and the provider says it was also paid. Recovering it is a conversation with the customer, not a button.'
-              : 'Closed. Nothing left to do.'}
+              : item.note}
           </p>
         ) : (
           <>
+            {first === 'mark_reviewed' && (
+              <p className="hint">
+                Refunded to the customer, and the provider says it was also delivered — paid twice.
+                Nothing here can take it back. Once you have dealt with the customer, write what
+                happened and mark it reviewed. No money moves.
+              </p>
+            )}
             <label>
-              Reason
+              {first === 'mark_reviewed' ? 'What happened' : 'Reason'}
               <textarea
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}

@@ -319,6 +319,8 @@ describe('the privileged surface is declared as privileged', () => {
       // Recording a held payout as DELIVERED, with the provider's transfer id.
       // Gives nothing back, so it is the one resolution a person may make.
       'POST /v1/admin/recovery/bank_payout/:id/delivered (finance)',
+      // A payout paid twice, recorded as dealt with. Moves nothing.
+      'POST /v1/admin/recovery/bank_payout/:id/reviewed (finance)',
       // Sending a held payout again under its own reference.
       'POST /v1/admin/recovery/bank_payout/:id/send (finance)',
       // Opening and noting take no PIN; closing does, because it resolves

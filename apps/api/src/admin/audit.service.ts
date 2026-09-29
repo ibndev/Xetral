@@ -47,6 +47,9 @@ export type AdminAction =
   | 'recovery.delivered'
   /* A held payout sent to its recipient again, under its own reference. */
   | 'recovery.resend'
+  /* A payout given back AND delivered — paid twice — that a person has dealt
+     with outside the system. Moves nothing; the reason is the outcome. */
+  | 'recovery.reviewed'
   /* A dispute resolved. Recorded whichever way it went: an upheld one moved
      money, and a rejected one is a decision a customer may come back about. */
   | 'dispute.accept'

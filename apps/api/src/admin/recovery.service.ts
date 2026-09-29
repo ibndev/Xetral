@@ -72,7 +72,7 @@ export interface RecoverySummary {
  * because the provider said the payout or purchase failed.
  */
 export interface RecoveryOutcome {
-  readonly outcome: 'reversed' | 'delivered' | 'held';
+  readonly outcome: 'reversed' | 'delivered' | 'held' | 'reviewed';
   readonly detail: string;
   readonly record?: RecoveryRecord;
 }
@@ -126,7 +126,7 @@ export interface RecoveryItem {
   readonly resolved_at: string | null;
 }
 
-export type RecoveryAction = 'mark_resolved' | 'refund' | 'send' | 'mark_delivered';
+export type RecoveryAction = 'mark_resolved' | 'refund' | 'send' | 'mark_delivered' | 'mark_reviewed';
 
 export interface RecoveryDetail {
   readonly kind: RecoveryKind;
@@ -148,6 +148,9 @@ export interface RecoveryDetail {
   readonly actions: readonly RecoveryAction[];
   readonly history: readonly { readonly at: string; readonly what: string; readonly who: string | null; readonly reason: string | null }[];
 }
+
+/** How the history names a double payment a person has closed. */
+const REVIEWED = 'Reviewed — paid twice';
 
 /** Held this long before a person is shown it: the webhook and the sweep own it until then. */
 const REVIEW_AFTER_HOURS = 0.5;
@@ -287,7 +290,16 @@ export class RecoveryService {
         : 'Waiting for the provider to confirm.',
       resolved_at: null,
     }));
+    /*
+     * A DOUBLE PAYMENT A PERSON HAS REVIEWED LEAVES THE QUEUE. The finding
+     * stays true — the provider still says it was paid — but what it asks of
+     * an operator is a conversation with the customer, and once somebody has
+     * had it and written down the outcome, listing it for ever makes the
+     * queue a record of the past rather than a list of work.
+     */
+    const reviewed = await this.#reviewedSubjects((audit?.paid_twice ?? []).map((p) => p.subject_uuid));
     for (const paid of audit?.paid_twice ?? []) {
+      if (reviewed.has(paid.subject_uuid)) continue;
       items.push({
         kind: 'bank_payout',
         subject_uuid: paid.subject_uuid,
@@ -302,8 +314,26 @@ export class RecoveryService {
         resolved_at: null,
       });
     }
-    items.push(...(await this.#resolvedRecently()));
+    /*
+     * ONE ROW PER TRANSACTION. A payout given back and then found paid was
+     * drawn twice — "Resolved" for the refund and "Needs review" for the
+     * finding — so the same reference read as closed and open at once. The
+     * open state wins: a resolved row for something still open is hidden.
+     */
+    const open = new Set(items.map((item) => item.subject_uuid));
+    items.push(...(await this.#resolvedRecently()).filter((item) => !open.has(item.subject_uuid)));
     return { items, summary: await this.summary() };
+  }
+
+  /** Of these payouts, the ones a person has recorded as reviewed. */
+  async #reviewedSubjects(subjects: readonly string[]): Promise<Set<string>> {
+    if (subjects.length === 0) return new Set();
+    const rows = await this.pool.query<{ subject_id: string }>(
+      `SELECT DISTINCT subject_id FROM admin_audit_log
+        WHERE action = 'recovery.reviewed' AND subject_id = ANY($1::text[])`,
+      [subjects],
+    );
+    return new Set(rows.rows.map((row) => row.subject_id));
   }
 
   /** Closed in the last seven days, by a person or by the provider's answer on this screen. */
@@ -330,10 +360,26 @@ export class RecoveryService {
          JOIN bank_payouts p ON p.uuid::text = l.subject_id
          JOIN users u ON u.id = p.user_id
         WHERE l.action = 'recovery.delivered' AND l.created_at > now() - interval '7 days'
+       UNION ALL
+       SELECT 'bank_payout', p.uuid, u.full_name, u.email, p.currency,
+              (p.amount_minor + p.fee_minor)::text,
+              p.bank_name || ' ' || p.account_number, p.created_at, l.created_at, 'reviewed'
+         FROM admin_audit_log l
+         JOIN bank_payouts p ON p.uuid::text = l.subject_id
+         JOIN users u ON u.id = p.user_id
+        WHERE l.action = 'recovery.reviewed' AND l.created_at > now() - interval '7 days'
         ORDER BY resolved_at DESC
         LIMIT 50`,
     );
-    return rows.rows.map((row) => ({
+    // The latest closing per transaction: a refund later reviewed as a
+    // double payment is one row saying so, not two.
+    const seen = new Set<string>();
+    const latest = rows.rows.filter((row) => {
+      if (seen.has(row.subject_uuid)) return false;
+      seen.add(row.subject_uuid);
+      return true;
+    });
+    return latest.map((row) => ({
       kind: row.kind,
       subject_uuid: row.subject_uuid,
       name: row.name,
@@ -343,7 +389,12 @@ export class RecoveryService {
       destination: row.destination,
       created_at: new Date(row.created_at).toISOString(),
       state: 'resolved' as const,
-      note: row.how === 'refunded' ? 'Refunded to the customer’s wallet.' : 'Confirmed delivered.',
+      note:
+        row.how === 'refunded'
+          ? 'Refunded to the customer’s wallet.'
+          : row.how === 'reviewed'
+            ? 'Paid twice — reviewed and closed by a person.'
+            : 'Confirmed delivered.',
       resolved_at: new Date(row.resolved_at).toISOString(),
     }));
   }
@@ -363,7 +414,11 @@ export class RecoveryService {
         const said = await this.payouts.confirmWithRail(payout);
         if (said.kind === 'arrived') {
           verdict = { verdict: 'delivered', detail: 'The provider says this was delivered.' };
-          actions = held ? ['mark_resolved'] : [];
+          // Given back AND delivered: the double payment. Nothing here can
+          // move that money back, but a person can record that they have
+          // dealt with it, which is what takes it off the queue.
+          const paidTwice = payout.status === 'failed' && !history.some((h) => h.what === REVIEWED);
+          actions = held ? ['mark_resolved'] : paidTwice ? ['mark_reviewed'] : [];
         } else if (said.kind === 'failed') {
           verdict = { verdict: 'failed', detail: `The provider says this failed: ${said.reason}` };
           actions = held ? ['refund'] : [];
@@ -453,7 +508,9 @@ export class RecoveryService {
             ? 'Marked delivered'
             : row.what === 'recovery.resend'
               ? 'Sent to the recipient again'
-              : row.what,
+              : row.what === 'recovery.reviewed'
+                ? REVIEWED
+                : row.what,
       who: row.who,
       reason: row.reason,
     }));
@@ -838,6 +895,40 @@ export class RecoveryService {
     return {
       outcome: 'delivered',
       detail: 'Recorded as delivered and settled. Nothing was given back.',
+    };
+  }
+
+  /**
+   * A PERSON RECORDS THAT A DOUBLE PAYMENT HAS BEEN DEALT WITH.
+   *
+   * The payout was given back to the customer and the provider says it was
+   * ALSO delivered. Nothing on this screen can recover that money — it is a
+   * conversation with the customer — so this moves NOTHING. It writes the
+   * outcome of that conversation into the append-only audit log, with the
+   * person and the reason, and that record is what takes the row off
+   * "Needs review". It is refused for anything that is not a payout already
+   * given back, so it cannot be used to hide a payout still being held.
+   */
+  async markReviewed(subjectUuid: string, actorUuid: string, reason: string, ip?: string): Promise<RecoveryOutcome> {
+    const payout = await this.#payout(subjectUuid);
+    if (payout.status !== 'failed') throw new ConflictException({ error: 'not_recoverable' });
+    await this.audit.record({
+      actorId: actorUuid,
+      action: 'recovery.reviewed',
+      subjectType: 'user',
+      subjectId: subjectUuid,
+      detail: {
+        kind: 'bank_payout',
+        amount_minor: String(BigInt(payout.amount_minor) + BigInt(payout.fee_minor)),
+        currency: payout.currency,
+        reference: payout.reference,
+      },
+      reason,
+      ...(ip === undefined ? {} : { ip }),
+    });
+    return {
+      outcome: 'reviewed',
+      detail: 'Recorded as reviewed. Nothing moved; the note is in the history.',
     };
   }
 

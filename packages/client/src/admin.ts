@@ -712,7 +712,7 @@ export interface AdminRecoveryRecord {
  * provider could not say.
  */
 export interface AdminRecoveryOutcome {
-  readonly outcome: 'reversed' | 'delivered' | 'held';
+  readonly outcome: 'reversed' | 'delivered' | 'held' | 'reviewed';
   readonly detail: string;
   readonly record?: AdminRecoveryRecord;
 }
@@ -740,7 +740,7 @@ export interface AdminRecoveryItem {
 }
 
 /** What the screen may offer for one row, the first being the default. */
-export type AdminRecoveryAction = 'mark_resolved' | 'refund' | 'send' | 'mark_delivered';
+export type AdminRecoveryAction = 'mark_resolved' | 'refund' | 'send' | 'mark_delivered' | 'mark_reviewed';
 
 export interface AdminRecoveryDetail {
   readonly kind: 'bank_payout' | 'purchase';
@@ -1552,6 +1552,14 @@ export class AdminClient {
    * Record a held payout as DELIVERED, with the provider's own transfer id —
    * for one the provider will not describe on request. Gives nothing back.
    */
+  /** A payout paid twice, recorded as dealt with. Moves nothing. */
+  async markPayoutReviewed(subjectUuid: string, reason: string, pin: string): Promise<AdminRecoveryOutcome> {
+    return this.#post(`/v1/admin/recovery/bank_payout/${encodeURIComponent(subjectUuid)}/reviewed`, {
+      reason,
+      transaction_pin: pin,
+    });
+  }
+
   async markPayoutDelivered(
     subjectUuid: string,
     providerPayoutId: string,

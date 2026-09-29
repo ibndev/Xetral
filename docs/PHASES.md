@@ -42,6 +42,7 @@ shipped, that is called out explicitly.
 | 31 — What the payment partner asked for, and a checkout that opened on a card | ✅ | migration 086, and the Send test's answer about the Brevo key |
 | 32 — A migration skipped in production, and an announcement that said "queued" | ✅ | migrations 069 and 087, Brevo Authorised IPs, an EAS projectId and FCM for push |
 | 33 — Announcements on a database behind 087, and who did what | ✅ | migration 087 for scheduling |
+| 34 — A payout paid twice, and a list that clears | ✅ | |
 
 All eleven phases are built, a **pre-deployment audit** (Phase 12) closed what
 building them phase by phase had left between the phases, and **Phase 13** is
@@ -2748,3 +2749,20 @@ and its FCM key to Expo, and rebuild.
 
 **Before this goes live, an operator must:** apply **087** to schedule and
 cancel announcements; until then they go out immediately.
+
+---
+
+## Phase 34 — A payout paid twice, and a list that clears ✅
+
+| File | What it is |
+|---|---|
+| `apps/api/src/admin/recovery.service.ts` | `markReviewed`; one row per transaction |
+| `apps/web/src/app/admin/recovery/page.tsx` | Open / Resolved; the Mark reviewed form |
+
+1. **A refunded payout the provider calls delivered sat on "Needs review" for
+   ever** — and on "Resolved" too — because nothing could close it.
+2. **Mark reviewed records the outcome and moves no money.**
+3. **The list opens on open rows**; resolved ones are behind a tab.
+
+**An operator need do nothing for this one** beyond opening the paid-twice
+row, dealing with the customer, and recording what happened.

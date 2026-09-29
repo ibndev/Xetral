@@ -887,6 +887,41 @@ describe('the sweep that gives held money back', () => {
     expect(audit.paid_twice.map((r) => r.subject_uuid)).toContain(uuid);
   });
 
+  it('A PAYOUT PAID TWICE IS ONE ROW, AND A PERSON CAN CLOSE IT WITHOUT MOVING MONEY', async () => {
+    /*
+     * The owner's screenshot: a refunded payout listed as "Resolved" AND as
+     * "Needs review" under one reference, and the opened row offered nothing
+     * to press — so it could never leave the queue.
+     */
+    const { customer, uuid, actor, reference } = await heldPayout();
+    port.byReferenceAnswer = { providerPayoutId: 'TRF_twice', state: 'failed', failureReason: 'account closed', reference };
+    await app.get(RecoveryService).recover('bank_payout', uuid, actor, 'provider said it failed');
+    // ...and later the provider says it was delivered after all.
+    port.byReferenceAnswer = { providerPayoutId: 'TRF_twice', state: 'completed', reference };
+    const recovery = app.get(RecoveryService);
+    const before = await nairaBalance(customer);
+
+    const listed = (await recovery.list()).items.filter((i) => i.subject_uuid === uuid);
+    expect(listed.map((i) => i.state)).toEqual(['needs_review']);
+    expect((await recovery.detail('bank_payout', uuid)).actions).toEqual(['mark_reviewed']);
+
+    const said = await recovery.markReviewed(uuid, actor, 'customer repaid the duplicate by transfer');
+    expect(said.outcome).toBe('reviewed');
+
+    const after = (await recovery.list()).items.filter((i) => i.subject_uuid === uuid);
+    expect(after.map((i) => i.state)).toEqual(['resolved']);
+    const opened = await recovery.detail('bank_payout', uuid);
+    expect(opened.actions).toEqual([]);
+    expect(opened.history.map((h) => h.what)).toContain('Reviewed — paid twice');
+    expect(await nairaBalance(customer)).toEqual(before);
+
+    // It closes a finding, never a payout still held.
+    const held = await heldPayout();
+    await expect(recovery.markReviewed(held.uuid, held.actor, 'hiding a held payout')).rejects.toMatchObject({
+      response: { error: 'not_recoverable' },
+    });
+  });
+
   /*
    * THE ONE-LIST SCREEN'S BUTTONS. The owner's decisions: refunding a payout
    * the provider says ARRIVED is BLOCKED rather than warned about, and

@@ -521,6 +521,9 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // It settles and gives nothing back, and still takes the PIN: it closes
       // a question about a customer's money on a person's word.
       .staff('POST', '/v1/admin/recovery/bank_payout/:id/delivered', { pin: true, role: 'finance' })
+      // A payout PAID TWICE recorded as dealt with. Moves nothing, and still
+      // takes the PIN: it closes a finding about money on a person's word.
+      .staff('POST', '/v1/admin/recovery/bank_payout/:id/reviewed', { pin: true, role: 'finance' })
 
       .staff('GET', '/v1/admin/users', { pin: false, role: 'support' })
       .staff('GET', '/v1/admin/users/:id', { pin: false, role: 'support' })

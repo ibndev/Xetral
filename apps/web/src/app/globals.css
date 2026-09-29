@@ -2432,6 +2432,9 @@ th.right { font-family: var(--font-sans); }
    radius above and a shape is not a thing to resolve by source position. */
 .admin-frame .badge, .admin-frame .pill, .admin-frame .segmented,
 .admin-frame .segmented button { border-radius: var(--r-pill); }
+/* Open or resolved, over the recovery list: closed rows stay out of the way. */
+.admin-frame .rec-filter { padding: 14px 18px 4px; }
+.admin-frame .rec-filter .segmented { display: inline-flex; }
 
 /*
  * THE QUEUE SCREENS, as the comp draws every one of them: a row of THREE

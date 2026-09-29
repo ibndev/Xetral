@@ -2465,6 +2465,26 @@ Republished by `packages/ledger/sql/086_legal_republish.sql`.
   now appends the `error` code the caller was given, e.g.
   `(payout_provider_unavailable)`, which is what anybody searches for.
 
+### A payout paid twice, and a list that clears — non-obvious rules
+
+`RecoveryService.markReviewed`, `/admin/recovery`.
+
+- **A REFUNDED PAYOUT THE PROVIDER CALLS DELIVERED COULD NEVER LEAVE THE
+  QUEUE.** The refund audit lists it as "Needs review", and opening it offered
+  no action — its status is `failed`, so every button was for held money. The
+  same reference was also drawn as "Resolved" for the refund, so one transfer
+  read as closed and open at once.
+- **"MARK REVIEWED" MOVES NOTHING.** Recovering money paid twice is a
+  conversation with the customer, not a posting. A person records what
+  happened — reason and PIN, `finance`, `recovery.reviewed` in the append-only
+  audit log — and that record takes it off the queue. It is refused for
+  anything but a payout already given back, so it cannot hide held money.
+- **ONE ROW PER TRANSACTION, AND THE OPEN STATE WINS.** A resolved row for a
+  subject that is still open is not drawn; of several closings, the latest.
+- **THE LIST OPENS ON WHAT IS OPEN.** Closed rows sit under "Resolved", one
+  tap away, because a queue that keeps drawing finished work reads as work
+  never done.
+
 ### Code that ships ahead of its migration, and the staff audit — non-obvious rules
 
 `PushService.scheduling()`, `apps/web/src/app/admin/audit/page.tsx`, covered by

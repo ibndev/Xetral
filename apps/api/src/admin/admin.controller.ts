@@ -589,6 +589,20 @@ export class AdminController {
     );
   }
 
+  /**
+   * A payout PAID TWICE — given back, and delivered — recorded as dealt with.
+   * Moves nothing; takes it off "Needs review".
+   */
+  @Post('recovery/bank_payout/:id/reviewed')
+  async recoverReviewed(
+    @Param('id', uuidOr404('not_recoverable')) id: string,
+    @Body() body: unknown,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<RecoveryOutcome> {
+    const reason = parseReason(body);
+    return this.recovery.markReviewed(id, claims(request).sub, reason, request.ip);
+  }
+
   /* -------------------------------- users ------------------------------ */
 
   @Get('users')
