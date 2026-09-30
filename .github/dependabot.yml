@@ -23,6 +23,12 @@ updates:
       time: '07:00'
       timezone: Africa/Lagos
     open-pull-requests-limit: 10
+    # A release must be a week old before it is proposed. A hijacked
+    # maintainer account publishes, and is usually caught and yanked within
+    # days; a bot that proposes the new version the same morning is how that
+    # version reaches a lockfile. Security updates are NOT delayed by this.
+    cooldown:
+      default-days: 7
     groups:
       # Grouped so a week's routine updates are ONE pull request to read rather
       # than fifteen to skim. Security updates are deliberately not grouped —
@@ -51,4 +57,10 @@ updates:
       day: monday
       time: '07:00'
       timezone: Africa/Lagos
+    # Every action is pinned to a COMMIT SHA with its version in a comment. A
+    # tag is a pointer its owner can move, so `@v4` runs whatever `v4` points
+    # at today with this repository's token; a SHA runs exactly what was
+    # reviewed. Dependabot updates the SHA and the comment together.
+    cooldown:
+      default-days: 7
     labels: ['dependencies']

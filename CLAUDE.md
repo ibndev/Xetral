@@ -2664,6 +2664,12 @@ the `generic-rules` and `dynamic` jobs in `scan.yml`.
   `no-store`, which is deliberate; Sec-Fetch-Dest describes ZAP's own REQUEST.
   Those two are waived in `.zap/baseline.tsv` with their reasons, and every
   other rule still reports.
+- **ONCE THE LIST WAS READABLE, ALL 25 LEFT WERE ABOUT THE WORKFLOWS.** Every
+  action is pinned to a COMMIT SHA with its version in a comment: a tag is a
+  pointer its owner can move, and the APK job holds `contents: write`. Both
+  Dependabot entries have a seven-day cooldown, which delays a freshly
+  published (possibly hijacked) release and never a security update. After
+  that the generic packs report nothing.
 - **`pg_isready` WITH NO `-U` CONNECTS AS THE RUNNER'S USER**, so every
   Postgres service logged `role "root" does not exist` every ten seconds and
   buried whatever else it said.
