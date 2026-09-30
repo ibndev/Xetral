@@ -41,13 +41,57 @@ function atLeast(version: string, floor: readonly number[]): boolean {
   return true;
 }
 
+/**
+ * One requirement: `name` must resolve to `range` — everywhere, or only as
+ * seen from `parent` when the override is SCOPED (`{ "xcode": { "uuid": … } }`).
+ * A scoped override moves one consumer's copy and leaves every other
+ * consumer's alone, which is the point of scoping it.
+ */
+interface Requirement {
+  readonly name: string;
+  readonly range: string;
+  readonly parent?: string;
+}
+
+type Overrides = Record<string, string | Record<string, string>>;
+
+function requirements(overrides: Overrides): Requirement[] {
+  return Object.entries(overrides).flatMap(([key, value]) =>
+    typeof value === 'string'
+      ? [{ name: key, range: value }]
+      : Object.entries(value).map(([name, range]) => ({ name, range, parent: key })),
+  );
+}
+
+/**
+ * The lockfile path Node would load `name` from when `from` requires it: its
+ * own `node_modules` first, then each enclosing one, then the root — the
+ * lookup `require` performs, so the answer is the copy that actually runs.
+ */
+function resolveFrom(
+  packages: Record<string, unknown>,
+  from: string,
+  name: string,
+): string | undefined {
+  let base = from;
+  for (;;) {
+    const candidate = `${base}/node_modules/${name}`;
+    if (candidate in packages) return candidate;
+    const cut = base.lastIndexOf('/node_modules/');
+    if (cut === -1) break;
+    base = base.slice(0, cut);
+  }
+  const root = `node_modules/${name}`;
+  return root in packages ? root : undefined;
+}
+
 describe('every dependency override is actually applied', () => {
-  const overrides: Record<string, string> =
-    (JSON.parse(readFileSync(ROOT, 'utf8')) as { overrides?: Record<string, string> }).overrides ??
-    {};
+  const overrides: Overrides =
+    (JSON.parse(readFileSync(ROOT, 'utf8')) as { overrides?: Overrides }).overrides ?? {};
   const lock = JSON.parse(readFileSync(LOCK, 'utf8')) as {
     packages: Record<string, { version?: string }>;
   };
+  const required = requirements(overrides);
 
   it('declares at least one, so a silent zero cannot pass this', () => {
     /*
@@ -55,13 +99,13 @@ describe('every dependency override is actually applied', () => {
      * override is legitimately removed, delete this file with it — the same
      * call `e2e-env.test.ts` makes about finding no suites.
      */
-    expect(Object.keys(overrides).length, 'no overrides declared').toBeGreaterThan(0);
+    expect(required.length, 'no overrides declared').toBeGreaterThan(0);
   });
 
   it('understands every range it is asked to check', () => {
-    const unreadable = Object.entries(overrides)
-      .filter(([, range]) => !CARET.test(range))
-      .map(([name, range]) => `${name}: ${range}`);
+    const unreadable = required
+      .filter(({ range }) => !CARET.test(range))
+      .map(({ name, range, parent }) => `${parent === undefined ? '' : `${parent} > `}${name}: ${range}`);
     expect(
       unreadable,
       'this test only reads `^x.y.z`. Widen it deliberately rather than ' +
@@ -71,23 +115,32 @@ describe('every dependency override is actually applied', () => {
 
   it('resolved a version that satisfies each one', () => {
     const wrong: string[] = [];
-    for (const [name, range] of Object.entries(overrides)) {
+    const satisfies = (version: string, floor: readonly number[]): boolean =>
+      /* A major above the caret's is outside it, not merely "at least". */
+      version.startsWith(`${floor[0]}.`) && atLeast(version, floor);
+
+    for (const { name, range, parent } of required) {
       const m = CARET.exec(range);
       if (m === null) continue;
       const floor = [Number(m[1]), Number(m[2]), Number(m[3])];
-      const entries = Object.entries(lock.packages).filter(([path]) =>
-        path.endsWith(`node_modules/${name}`),
-      );
-      if (entries.length === 0) {
-        wrong.push(`${name}: declared ${range} and resolved to NOTHING in the lockfile`);
+      const label = parent === undefined ? name : `${parent} > ${name}`;
+
+      // Flat: every copy anywhere. Scoped: the copy each parent would load.
+      const paths =
+        parent === undefined
+          ? Object.keys(lock.packages).filter((path) => path.endsWith(`node_modules/${name}`))
+          : Object.keys(lock.packages)
+              .filter((path) => path.endsWith(`node_modules/${parent}`))
+              .map((from) => resolveFrom(lock.packages, from, name) ?? `${from} (resolves no ${name})`);
+
+      if (paths.length === 0) {
+        wrong.push(`${label}: declared ${range} and resolved to NOTHING in the lockfile`);
         continue;
       }
-      for (const [path, entry] of entries) {
-        const version = entry.version ?? '';
-        /* A major above the caret's is outside it, not merely "at least". */
-        const inRange = version.startsWith(`${floor[0]}.`) && atLeast(version, floor);
-        if (!inRange) {
-          wrong.push(`${path}: declared ${range} and resolved ${version || '(no version)'}`);
+      for (const path of paths) {
+        const version = lock.packages[path]?.version ?? '';
+        if (!satisfies(version, floor)) {
+          wrong.push(`${label} at ${path}: declared ${range} and resolved ${version || '(no version)'}`);
         }
       }
     }

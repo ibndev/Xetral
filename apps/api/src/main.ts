@@ -81,6 +81,11 @@ async function bootstrap(): Promise<void> {
     // Every response here is about one customer's money. A shared cache
     // holding one is a shared cache serving it to somebody else.
     response.setHeader('Cache-Control', 'no-store');
+    // No other site may load a response from here as an image, script or
+    // frame. A browser that is TOLD a body is cross-origin-readable-only-here
+    // cannot be tricked into pulling it into another page's process, which is
+    // what Spectre-class side channels read. Native clients ignore it.
+    response.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
     /*
      * HSTS, and it is set HERE rather than left to Cloudflare.
      *

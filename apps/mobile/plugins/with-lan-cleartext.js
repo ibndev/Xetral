@@ -89,7 +89,10 @@ function assertCommentIsLegalXml(lines) {
 function configFor(hosts) {
   assertCommentIsLegalXml(NOTE);
 
+  // Each host is `URL.hostname` or a literal above, and a WHATWG hostname
+  // cannot contain `<`, `>` or `&`, so it cannot break out of the element.
   const domains = hosts
+    // nosemgrep: html-in-template-string
     .map((host) => `        <domain includeSubdomains="false">${host}</domain>`)
     .join('\n');
   const note = NOTE.map((line) => (line === '' ? '' : `  ${line}`)).join('\n');

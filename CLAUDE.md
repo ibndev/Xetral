@@ -2608,10 +2608,65 @@ and `apps/mobile/IOS.md`, guarded by `ios-release.test.ts`.
   and that source set OUTRANKS `main`, so `blockedPermissions`' remove marker
   cannot reach it. The merged-manifest check exempts it for a debug manifest
   only — keyed on the manifest's own path — and still fails a release one.
-- **THE TOOLCHAIN ADVISORIES ARE STILL THERE, AND ARE NOT IN THE REQUEST PATH.**
-  vitest, vite, and Expo's CLI/PostCSS/image-size report 25 findings on the
-  whole tree; each fix is a major version (vitest 5, Expo SDK 57). The
-  customer-facing audit — seven workspaces, `--omit=dev`, moderate — is clean.
+- **THE TOOLCHAIN ADVISORIES WERE 25 AND ARE 4** — see "The advisories
+  left, and why each one is left" below. The customer-facing audit — seven
+  workspaces, `--omit=dev`, moderate — is clean.
+
+### The advisories left, the scans nobody could read — non-obvious rules
+
+`package.json`'s `overrides`, `overrides-applied.test.ts`, `.zap/baseline.tsv`,
+the `generic-rules` and `dynamic` jobs in `scan.yml`.
+
+- **VITEST 2 → 4 CLEARED THE CRITICAL**, and vite 5 and esbuild 0.21 with it.
+  npm 10.9.7 CANNOT RESOLVE IT: `Cannot read properties of null (reading
+  'edgesOut')`, in arborist's peer-set walk over vitest 4's optional peers,
+  whether by `npm install vitest@4` or by editing `package.json`. npm 11
+  resolved it and moved ONLY vitest's own subtree; npm 10 then installs that
+  lockfile under `npm ci` and leaves it byte-for-byte alone on `npm install`
+  (it only drops the `libc` fields npm 11 writes). Measure the lockfile diff by
+  PACKAGE, not by line: 1,400 lines was 59 removed, 23 added, 15 changed.
+- **VITE 8 COMPILES WITH OXC, AND OXC OBEYS `"jsx": "preserve"`.** Next wants
+  that setting; esbuild ignored it in tests and oxc does not, so every web test
+  importing a `.tsx` module failed to LOAD — `Failed to parse source for import
+  analysis`. `apps/web/vitest.config.ts` sets the JSX runtime for tests only.
+- **AN OVERRIDE CAN BE SCOPED, AND THESE TWO ARE.** `@expo/metro-config >
+  postcss ^8.5.28` (a minor; the four PostCSS advisories) and `xcode > uuid
+  ^11.1.1` (xcode `require`s it and calls `v4()`, which uuid 11 still ships as
+  CommonJS). Scoping moves one consumer's copy and not every other one's.
+  They were applied by setting the two lockfile entries to the fixed versions
+  WITH THE REGISTRY'S INTEGRITY HASHES and letting `npm ci` verify them — npm
+  ignored the override over an existing lockfile, and deleting the entries
+  made it PRUNE them, both exactly as the section below says.
+  `overrides-applied.test.ts` checks a scoped entry at the path `require`
+  would load from the parent, and fails on either being put back.
+- **FOUR ARE LEFT AND NONE CAN BE FORCED.** `image-size` (high): metro calls
+  `imageSize(path)` synchronously, and 2.x removed reading a path — it would
+  break every bundle; it parses only OUR asset images, at build time.
+  `decode-uri-component` ≥0.3 is ESM-only, and `query-string` 7 `require`s it,
+  so a forced version is `{ default }` where a function was; its advisory is a
+  slow decode of a malformed deep link on the customer's own phone. The other
+  two are the chain above it. All four close with Expo SDK 57, which is a
+  native upgrade to be done and tested on hardware, not an override.
+- **THE SEMGREP REPORT PRINTED FORTY LINES OF TWENTY-SEVEN FINDINGS.** The tail
+  of one finding and the summary; the job read "27 findings" and showed two. It
+  lists every finding, one line each, now. `semgrep.dev` is unreachable from
+  the development container, so the registry packs are only ever run on a
+  runner; `semgrep/semgrep-rules` on GitHub IS reachable and is how they were
+  approximated locally.
+- **WHAT IT FOUND THAT WAS REAL:** two AES-GCM decrypts without
+  `authTagLength` — `envelope.ts` already refused a short tag by length, the
+  BVN backfill script did not — and a TOTP check that built a `RegExp` from its
+  `digits` argument. The typed kill-switch lookup and the Android network
+  config's hostnames are false positives, suppressed at the line with the
+  reason.
+- **ZAP'S THREE WARNINGS:** Cross-Origin-Resource-Policy was genuinely missing
+  and is sent now (and asserted by the boot probe). Non-Storable Content is
+  `no-store`, which is deliberate; Sec-Fetch-Dest describes ZAP's own REQUEST.
+  Those two are waived in `.zap/baseline.tsv` with their reasons, and every
+  other rule still reports.
+- **`pg_isready` WITH NO `-U` CONNECTS AS THE RUNNER'S USER**, so every
+  Postgres service logged `role "root" does not exist` every ten seconds and
+  buried whatever else it said.
 
 ### The reset code, and a sender Brevo never verified — non-obvious rules
 
@@ -3603,7 +3658,8 @@ issue concurrent requests.
 
 ### An override npm did not apply — non-obvious rules
 
-`package.json`'s one `overrides` entry, guarded by `overrides-applied.test.ts`.
+`package.json`'s `overrides` (`multer`; the two scoped entries are in "The
+advisories left" above), guarded by `overrides-applied.test.ts`.
 
 - **`@nestjs/platform-express` PINS `multer` AT EXACTLY `2.2.0`**, which is
   the top of the affected range for four denial-of-service advisories. No

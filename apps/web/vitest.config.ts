@@ -15,6 +15,15 @@ import { defineConfig } from 'vitest/config';
  * about anything more than this one entry.
  */
 export default defineConfig({
+  /*
+   * JSX is COMPILED here, whatever `tsconfig.json` says. Next wants
+   * `"jsx": "preserve"` because Next transforms JSX itself; Vite 8's
+   * transformer (oxc) honours that setting, leaves the JSX in place, and the
+   * import analysis that follows cannot parse it — so every test importing a
+   * `.tsx` module failed to load at all. Vite 5's esbuild ignored the setting,
+   * which is why this only surfaced with the vitest 4 upgrade.
+   */
+  oxc: { jsx: { runtime: 'automatic' } },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

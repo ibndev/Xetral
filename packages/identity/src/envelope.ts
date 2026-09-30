@@ -120,7 +120,11 @@ export function open(envelope: string, keyring: Keyring): string {
     throw new EnvelopeError('malformed envelope');
   }
 
-  const decipher = createDecipheriv('aes-256-gcm', key.key, iv);
+  // `authTagLength` pins the tag Node will accept to the full sixteen bytes.
+  // The length check above already refuses a short one; this makes the
+  // cipher refuse it too, so a later edit to that check cannot quietly admit
+  // a truncated tag — which is how a GCM forgery gets cheap.
+  const decipher = createDecipheriv('aes-256-gcm', key.key, iv, { authTagLength: TAG_BYTES });
   decipher.setAAD(Buffer.from(version, 'utf8'));
   decipher.setAuthTag(tag);
 

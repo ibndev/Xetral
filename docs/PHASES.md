@@ -45,6 +45,7 @@ shipped, that is called out explicitly.
 | 34 — A payout paid twice, and a list that clears | ✅ | |
 | 35 — A payout that held nothing, and iOS with no Mac | ✅ | migration 088; an Apple Developer account and `eas init` |
 | 36 — A whole-code inspection, and the gates that were red | ✅ | |
+| 37 — The advisories left, and the scans nobody could read | ✅ | Expo SDK 57, for the last four advisories |
 
 All eleven phases are built, a **pre-deployment audit** (Phase 12) closed what
 building them phase by phase had left between the phases, and **Phase 13** is
@@ -2807,5 +2808,26 @@ Program, run `npx eas init` in `apps/mobile` and commit the `projectId`, then
 2. **Two queries named columns that do not exist** — found by preparing every
    statement, which is now a test.
 3. **Failed reads drew empty lists** on the home screens and the phone's bills.
+
+**An operator need do nothing for this one.**
+
+---
+
+## Phase 37 — The advisories left, and the scans nobody could read ✅
+
+| File | What it is |
+|---|---|
+| `package.json` | vitest 4; scoped overrides for PostCSS and uuid |
+| `packages/ledger/src/overrides-applied.test.ts` | a scoped override checked where `require` loads it |
+| `apps/web/vitest.config.ts` | JSX compiled for tests under Vite 8 |
+| `packages/identity/src/envelope.ts`, `scripts/backfill-bvn-fingerprint.mjs` | the GCM tag length, pinned |
+| `apps/api/src/main.ts` | `Cross-Origin-Resource-Policy` |
+| `.github/workflows/scan.yml`, `.zap/baseline.tsv` | every Semgrep finding listed; two ZAP warnings waived with reasons |
+
+1. **Whole-tree advisories went from 25 to 4**, the critical and two of the
+   three highs among them. The four left need Expo SDK 57.
+2. **The Semgrep report showed two of its 27 findings**; the real ones are
+   fixed and it lists every finding now.
+3. **The API sends Cross-Origin-Resource-Policy**, which ZAP found missing.
 
 **An operator need do nothing for this one.**

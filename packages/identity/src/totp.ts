@@ -160,7 +160,9 @@ export function verifyTotp(
   digits = TOTP_DIGITS,
 ): TotpVerification {
   const presented = code.trim();
-  if (!new RegExp(`^[0-9]{${digits}}$`).test(presented)) return { valid: false };
+  // A fixed pattern and a length compare, never a RegExp built from `digits`:
+  // a pattern assembled at runtime is one an argument can reshape.
+  if (presented.length !== digits || !/^[0-9]+$/.test(presented)) return { valid: false };
 
   const current = timeStepAt(atSeconds);
 

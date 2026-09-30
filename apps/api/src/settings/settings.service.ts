@@ -486,6 +486,9 @@ export class SettingsService implements OnApplicationBootstrap {
    * product is paused rather than showing one generic message everywhere.
    */
   async assertServiceEnabled(service: KillSwitch): Promise<void> {
+    // `service` is the `KillSwitch` union, so the lookup can only name one of
+    // the functions declared in KILL_SWITCHES — never a caller's string.
+    // nosemgrep: unsafe-dynamic-method
     const on = await KILL_SWITCHES[service](this);
     if (!on) throw new ServiceUnavailableException(DISABLED_ERROR[service]);
   }

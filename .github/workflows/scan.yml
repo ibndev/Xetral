@@ -111,20 +111,35 @@ jobs:
       # also why this job cannot fail the build: an unreachable registry would
       # otherwise be a red build about nothing.
       - name: Scan and report
+        # EVERY finding, one line each. This step used to print the last forty
+        # lines of semgrep's text output, which is the tail of one finding and
+        # the summary — so "27 findings" was reported and two were readable.
+        # A report nobody can read is not being read.
         run: |
           semgrep --config p/typescript --config p/nodejs --config p/owasp-top-ten \
-            --metrics=off \
+            --metrics=off --json --output /tmp/semgrep.json \
             --exclude=node_modules --exclude=dist --exclude=.next \
             --exclude='*.probe' --exclude='*.test.ts' \
             . > /tmp/semgrep.txt 2>&1 || true
-          tail -40 /tmp/semgrep.txt
+          python3 - > /tmp/semgrep-list.txt <<'PY'
+          import json
+          try:
+              results = json.load(open('/tmp/semgrep.json'))['results']
+          except Exception as error:
+              print(f'no results could be read: {error}')
+          else:
+              for r in results:
+                  print(f"{r['check_id'].rsplit('.', 1)[-1]}  {r['path']}:{r['start']['line']}")
+              print(f'{len(results)} findings')
+          PY
+          cat /tmp/semgrep-list.txt
           {
             echo '### Semgrep, generic rulesets'
             echo
             echo 'Advisory. Blocking rules live in `.semgrep/xetral.yml`.'
             echo
             echo '```'
-            tail -40 /tmp/semgrep.txt
+            cat /tmp/semgrep-list.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -158,7 +173,7 @@ jobs:
           POSTGRES_DB: xetral
         ports: ['5432:5432']
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U xetral"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10
@@ -216,6 +231,9 @@ jobs:
       - name: Baseline scan
         run: |
           mkdir -p /tmp/zap
+          # Two warnings are true of this API by design and are waived with
+          # their reasons in `.zap/baseline.tsv` — everything else still reports.
+          cp .zap/baseline.tsv /tmp/zap/baseline.tsv
           # The image runs as uid 1000 and writes its report into the mount.
           chmod 777 /tmp/zap
           # Passive only. An ACTIVE scan against a money API sends requests
@@ -230,7 +248,7 @@ jobs:
             ghcr.io/zaproxy/zaproxy:stable \
             zap-baseline.py \
               -t http://127.0.0.1:3100/health \
-              -a -I -j \
+              -a -I -j -c baseline.tsv \
               -r report.html -w report.md \
             | tee /tmp/zap/console.txt || true
 

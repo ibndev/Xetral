@@ -26,7 +26,7 @@ jobs:
           POSTGRES_DB: xetral
         ports: ['5432:5432']
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U xetral"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10
@@ -705,6 +705,7 @@ jobs:
           header "x-content-type-options"    "nosniff"
           header "x-frame-options"           "DENY"
           header "referrer-policy"           "no-referrer"
+          header "cross-origin-resource-policy" "same-origin"
           # Every response here is about one customer's money, so a shared
           # cache holding one is a shared cache serving it to somebody else.
           header "cache-control"             "no-store"

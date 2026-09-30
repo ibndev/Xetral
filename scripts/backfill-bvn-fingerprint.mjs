@@ -74,7 +74,12 @@ function open(envelope) {
   const key = keyring.get(version);
   if (key === undefined) throw new Error(`no key for ${version}`);
 
-  const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(iv, 'base64url'));
+  // The full sixteen-byte tag, as envelope.ts writes it. Without
+  // `authTagLength` Node accepts a truncated tag, which makes a forged
+  // envelope cheap to produce.
+  const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(iv, 'base64url'), {
+    authTagLength: 16,
+  });
   decipher.setAAD(Buffer.from(version, 'utf8'));
   decipher.setAuthTag(Buffer.from(tag, 'base64url'));
   return (
