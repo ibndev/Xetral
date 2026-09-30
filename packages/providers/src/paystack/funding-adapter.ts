@@ -11,6 +11,7 @@ import {
   type PaystackClient,
 } from './client.js';
 import type {
+  AccountDeactivationCapable,
   AccountIdentityCapable,
   DepositLookup,
   CreateVirtualAccountRequest,
@@ -181,7 +182,9 @@ export interface PaystackFundingOptions {
   readonly preferredBank: string | undefined | (() => Promise<string | undefined>);
 }
 
-export class PaystackFundingAdapter implements FundingPort, AccountIdentityCapable {
+export class PaystackFundingAdapter
+  implements FundingPort, AccountIdentityCapable, AccountDeactivationCapable
+{
   readonly provider = PROVIDER;
 
   readonly #client: PaystackClient;
@@ -473,6 +476,27 @@ export class PaystackFundingAdapter implements FundingPort, AccountIdentityCapab
       );
     }
     return account;
+  }
+
+  /**
+   * Switches an issued number off — for resetting a whitelisted TEST account
+   * only (see `AccountDeactivationCapable`).
+   *
+   * A 404 is the goal already met: an account Paystack no longer knows is not
+   * one that will be handed back to the next registration. Everything else is
+   * rethrown, so the reset refuses rather than leaving a live number our
+   * closed row still holds.
+   */
+  async deactivateVirtualAccount(providerAccountId: string): Promise<void> {
+    try {
+      await this.#client.request(
+        'DELETE',
+        PAYSTACK_ENDPOINTS.deactivateDedicatedAccount(providerAccountId),
+      );
+    } catch (error) {
+      if (error instanceof ProviderRejectedError && error.providerCode === 'http_404') return;
+      throw error;
+    }
   }
 
   /**

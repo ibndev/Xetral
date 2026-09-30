@@ -1,6 +1,10 @@
 import { Logger } from '@nestjs/common';
 import type { ProviderRouterService } from '../routing/provider-router.service.js';
-import { supportsAccountIdentity, supportsDepositVerification } from '@xetral/providers';
+import {
+  supportsAccountDeactivation,
+  supportsAccountIdentity,
+  supportsDepositVerification,
+} from '@xetral/providers';
 import type {
   CreateVirtualAccountRequest,
   IdentityBank,
@@ -153,6 +157,19 @@ export class SwitchingFundingPort implements FundingPort {
     const adapter = this.#adapters.get(provider);
     if (adapter === undefined || !supportsAccountIdentity(adapter)) return undefined;
     return adapter.identityBanks();
+  }
+
+  /**
+   * Switch an issued number off at the rail that issued it — the TEST ACCOUNT
+   * reset's step, dispatched by the row's provider like every other read.
+   * False when that rail has no such call: nothing was switched off, and the
+   * caller says so rather than claiming a clean reset.
+   */
+  async deactivateAt(provider: string, providerAccountId: string): Promise<boolean> {
+    const adapter = this.#adapterFor(provider);
+    if (!supportsAccountDeactivation(adapter)) return false;
+    await adapter.deactivateVirtualAccount(providerAccountId);
+    return true;
   }
 
   /** Open an account on one NAMED rail — the fallback's step. */

@@ -259,3 +259,25 @@ export function supportsAccountIdentity(
 ): port is FundingPort & AccountIdentityCapable {
   return typeof (port as Partial<AccountIdentityCapable>).identityBanks === 'function';
 }
+
+/**
+ * AN OPTIONAL CAPABILITY: switching an issued account number off at the rail.
+ *
+ * Used by ONE path — resetting a whitelisted TEST account — and never for a
+ * customer. A rail keys its customer on the email address, so a test address
+ * registered again is the same customer there and is handed the same live
+ * account number back; our row for it is immutable and still names the reset
+ * account, and the new registration collides with it. Switched off, the rail
+ * opens a fresh number for the next registration instead.
+ */
+export interface AccountDeactivationCapable {
+  deactivateVirtualAccount(providerAccountId: string): Promise<void>;
+}
+
+export function supportsAccountDeactivation(
+  port: FundingPort,
+): port is FundingPort & AccountDeactivationCapable {
+  return (
+    typeof (port as Partial<AccountDeactivationCapable>).deactivateVirtualAccount === 'function'
+  );
+}

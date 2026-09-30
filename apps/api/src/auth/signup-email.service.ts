@@ -13,6 +13,7 @@ import type { ApiConfig } from '../config.js';
 import { NotificationService } from '../notifications/notification.service.js';
 import { NotificationWorker } from '../notifications/notification.worker.js';
 import { SettingsService } from '../settings/settings.service.js';
+import { acceptsTestOtp, isTestEmail } from './test-accounts.js';
 
 /** Minutes a signup code lives. Long enough to find the email, short enough to be worthless later. */
 const CODE_TTL_MINUTES = 5;
@@ -67,6 +68,20 @@ export class SignupEmailService {
   async sendCode(email: string): Promise<{ readonly required: boolean }> {
     const address = email.trim().toLowerCase();
     if (!(await this.required())) return { required: false };
+
+    /*
+     * A WHITELISTED TEST ADDRESS IS SENT NOTHING when `TEST_OTP` is set: the
+     * fixed code is what it signs up with (`check` below), and mailing a real
+     * one on every test run is the inbox noise the owner asked to be rid of.
+     * The address is still refused when an account holds it — a reset is
+     * what frees it, not this.
+     */
+    if (this.config.testAccounts.otp !== undefined && isTestEmail(this.config, address)) {
+      const held = await this.pool.query(`SELECT 1 FROM users WHERE lower(email) = $1`, [address]);
+      if ((held.rowCount ?? 0) > 0) throw new ConflictException({ error: 'email_taken' });
+      return { required: true };
+    }
+
     if (!this.notifications.deliverable) {
       // Nothing would send it, so asking for it would strand the customer at
       // a box waiting for mail. Named, so the signup screen can say so.
@@ -123,11 +138,18 @@ export class SignupEmailService {
    * Returns the hash to spend inside the transaction, or undefined when no
    * code is required (switched off, or a database behind 084).
    */
-  async check(email: string, code: string | undefined): Promise<string | undefined> {
+  async check(
+    email: string,
+    code: string | undefined,
+    phone?: string,
+  ): Promise<string | undefined> {
     if (!(await this.required())) return undefined;
     if (code === undefined || !/^[0-9]{6}$/.test(code)) {
       throw new BadRequestException({ error: 'email_code_required' });
     }
+    // `TEST_OTP`, for a whitelisted email or phone only. Nothing to spend: no
+    // code row was ever written for it.
+    if (acceptsTestOtp(this.config, code, { email, phone })) return undefined;
     const address = email.trim().toLowerCase();
     const hash = hashSignupEmailCode(address, code, this.config.accessTokenKeyring.current.secret);
     let outcome: string;

@@ -72,6 +72,8 @@ import { ProviderCredentialService } from './settings/provider-credentials.servi
 import { AuditService } from './admin/audit.service.js';
 import { AdminService } from './admin/admin.service.js';
 import { AdminController } from './admin/admin.controller.js';
+import { TestAccountsController } from './admin/test-accounts.controller.js';
+import { TestAccountService } from './admin/test-account.service.js';
 import { KycController } from './kyc/kyc.controller.js';
 import { KycService } from './kyc/kyc.service.js';
 import {
@@ -1284,6 +1286,7 @@ export class AppModule {
         ConsentController,
         DataRightsController,
         AdminController,
+        TestAccountsController,
         DisputeController,
         AdminDisputeController,
         CountriesController,
@@ -1522,6 +1525,7 @@ export class AppModule {
         ReadinessService,
         FundingDiagnosticsService,
         RecoveryService,
+        TestAccountService,
         EarningsService,
         PublishedRateService,
         MetricsService,

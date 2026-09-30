@@ -48,6 +48,7 @@ shipped, that is called out explicitly.
 | 37 — The advisories left, and the scans nobody could read | ✅ | Expo SDK 57, for the last four advisories |
 | 38 — Naira accounts on Paystack alone, and the identity Paystack asks for | ✅ | migration 089; Paystack's assign webhooks on the deposit URL |
 | 39 — A sign-in from Germany that was our own server | ✅ | migration 090; `WEB_PROXY_SECRET` on the api and web services |
+| 40 — Resetting a test account | ✅ | migration 091 and 099 re-applied; `TEST_ACCOUNT_EMAILS`, `TEST_ACCOUNT_PHONES`, `TEST_OTP` |
 
 All eleven phases are built, a **pre-deployment audit** (Phase 12) closed what
 building them phase by phase had left between the phases, and **Phase 13** is
@@ -2886,3 +2887,32 @@ empty to use the first one Paystack names.
 same random value on the api and web services (`openssl rand -hex 32`).
 Until then sign-ins are recorded without a country and the new-country email
 does not fire — quiet, never wrong.
+
+---
+
+## Phase 40 — Resetting a test account ✅
+
+| File | What it is |
+|---|---|
+| `packages/ledger/sql/091_test_account_reset.sql` | `reset_test_account()`, its log, and 089's one exception |
+| `apps/api/src/admin/test-account.service.ts` | whitelist, the rail's switch-off, the reset |
+| `apps/api/src/admin/test-accounts.controller.ts` | `POST /v1/admin/test-accounts/reset` |
+| `apps/api/src/auth/test-accounts.ts` | the whitelist, and `TEST_OTP` in place of the signup code |
+| `packages/providers/src/paystack/funding-adapter.ts` | `deactivateVirtualAccount` |
+
+1. **The owner could test signup, the account number and KYC once per email
+   and phone.** A reset retires a whitelisted account — what can go goes, the
+   email, phone and BVN are released, the account number is switched off at
+   Paystack — and the same email and phone register again as a new customer.
+2. **Nothing append-only is removed.** Postings, the audit log, consent and
+   sign-in history stay on the retired row; money still held is named, not
+   moved. Staff accounts are refused by the database.
+3. **`TEST_OTP` replaces the emailed signup code** for whitelisted accounts;
+   there is no SMS in the product.
+4. **The Add Money identity form** lost its explanatory paragraph and the
+   `*565*0#` hint.
+
+**Before this goes live, an operator must:** apply **091** and re-apply
+**099**; set `TEST_ACCOUNT_EMAILS` and/or `TEST_ACCOUNT_PHONES` (phones with
+the country code) and, if wanted, a six-digit `TEST_OTP`. Never list a real
+customer.

@@ -381,6 +381,14 @@ const API_ERROR_CODES = [
      BVN already stands for another customer, which is deliberately the same
      answer. */
   'account_identity_failed',
+  /* Resetting a test account (admin only). Not on the operator's whitelist;
+     no account holds that email or phone; a staff account, which a reset
+     never reaches; and a rail that would not switch the account number off,
+     in which case nothing was changed. */
+  'test_account_not_whitelisted',
+  'test_account_not_found',
+  'test_account_is_staff',
+  'test_account_provider_refused',
   'account_not_supported_here',
   'momo_already_linked',
   'momo_not_supported_here',

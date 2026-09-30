@@ -296,7 +296,7 @@ export class AuthService {
 
     // Checked BEFORE the transaction — see `SignupEmailService.check` for
     // why a wrong code must be charged somewhere a rollback cannot undo.
-    const proved = await this.signupEmail.check(input.email, input.email_code);
+    const proved = await this.signupEmail.check(input.email, input.email_code, phone);
 
     const passwordHash = await hashPassword(input.password);
     const client = await this.pool.connect();

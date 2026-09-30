@@ -169,6 +169,24 @@ export interface ApiConfig {
   readonly webProxySecret: string | undefined;
 
   /**
+   * TEST ACCOUNTS, which an administrator may RESET so their email and phone
+   * register again as a brand-new customer. From `TEST_ACCOUNT_EMAILS` and
+   * `TEST_ACCOUNT_PHONES`, comma-separated, nothing hardcoded: a list in code is
+   * a list every deployment shares, and a real customer's address in it would
+   * be a way to erase them. Empty is the default and means nobody.
+   *
+   * `otp` (`TEST_OTP`) is accepted IN PLACE OF the emailed signup code for a
+   * whitelisted email or phone, and no code is mailed to a whitelisted email.
+   * Six digits or refused at boot — a malformed one would fail every test
+   * signup with a sentence about the customer's code.
+   */
+  readonly testAccounts: {
+    readonly emails: readonly string[];
+    readonly phones: readonly string[];
+    readonly otp: string | undefined;
+  };
+
+  /**
    * Keys for sealing what must be stored but not stored in the clear: an
    * electricity token, an eSIM activation code.
    *
@@ -918,6 +936,7 @@ export function loadConfig(env: Env): ApiConfig {
     paystackPreferredBank: optional(env, 'PAYSTACK_PREFERRED_BANK'),
     metricsToken: optional(env, 'METRICS_TOKEN'),
     webProxySecret: optional(env, 'WEB_PROXY_SECRET'),
+    testAccounts: parseTestAccounts(env),
     encryptionKeyring: parseEncryptionKeyring(env),
     kycBlindIndexKey: parseBlindIndexKey(env),
     // Live only in production. VTpass keeps two hosts, so the default follows
@@ -1157,6 +1176,45 @@ function parseAllowlist(env: Env): readonly string[] {
     .split(',')
     .map((entry) => entry.trim().toLowerCase())
     .filter((entry) => entry !== '');
+}
+
+/**
+ * The whitelisted test accounts, normalised the way the rows they match are
+ * stored: emails lower-cased (`users_email_unique` is on `lower(email)`), phones
+ * as E.164 (`users.phone` is written that way at registration). An entry that
+ * is not one is refused rather than dropped — a list that silently omits an
+ * entry resets fewer accounts than the operator believes it names.
+ */
+function parseTestAccounts(env: Env): ApiConfig['testAccounts'] {
+  // Each name is passed to `optional` literally: `go-live.test.ts` reads the
+  // variables this file uses off those calls.
+  const list = (raw: string | undefined): string[] =>
+    (raw ?? '')
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry !== '');
+
+  const emails = list(optional(env, 'TEST_ACCOUNT_EMAILS')).map((entry) => {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(entry)) {
+      throw new ConfigError(`TEST_ACCOUNT_EMAILS has '${entry}', which is not an email address`);
+    }
+    return entry.toLowerCase();
+  });
+  const phones = list(optional(env, 'TEST_ACCOUNT_PHONES')).map((entry) => {
+    const digits = entry.replace(/[\s-]/g, '');
+    if (!/^\+?[1-9][0-9]{7,14}$/.test(digits)) {
+      throw new ConfigError(
+        `TEST_ACCOUNT_PHONES has '${entry}'; write it with its country code, e.g. +2348012345678`,
+      );
+    }
+    return digits.startsWith('+') ? digits : `+${digits}`;
+  });
+
+  const otp = optional(env, 'TEST_OTP')?.trim();
+  if (otp !== undefined && !/^[0-9]{6}$/.test(otp)) {
+    throw new ConfigError('TEST_OTP must be exactly six digits, the shape of a signup code');
+  }
+  return { emails, phones, otp };
 }
 
 /**

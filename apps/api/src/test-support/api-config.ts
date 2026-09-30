@@ -78,6 +78,7 @@ export function testApiConfig(databaseUrl: string, overrides: Partial<ApiConfig>
     // production-shaped answer: the endpoint is not there at all.
     metricsToken: undefined,
     webProxySecret: undefined,
+    testAccounts: { emails: [], phones: [], otp: undefined },
     // A real keyring, not undefined: a suite that never seals anything cannot
     // catch a sealing path that was silently skipped.
     encryptionKeyring: { current: sealing, accepted: [sealing] },

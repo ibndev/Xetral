@@ -103,7 +103,10 @@ DECLARE
         'provider_credential_rotations',
         -- Who changed how every corridor is routed. 079's trigger refuses the
         -- edit for the owner too.
-        'provider_routing_policy_history'
+        'provider_routing_policy_history',
+        -- Who reset which test account. 091's trigger refuses the edit for
+        -- the owner too; the record of a destructive action cannot be pruned.
+        'test_account_resets'
     ];
     v_table TEXT;
 BEGIN
@@ -170,7 +173,10 @@ GRANT EXECUTE ON FUNCTION erase_customer_personal_data(BIGINT) TO xetral_app;
  */
 DO $$
 DECLARE
-    v_named TEXT[] := ARRAY['rotate_refresh_token', 'consume_password_reset_token'];
+    -- `reset_test_account` (091) deletes where the app role holds no DELETE,
+    -- by design: which rows it may remove is its body, not a grant.
+    v_named TEXT[] := ARRAY['rotate_refresh_token', 'consume_password_reset_token',
+                            'reset_test_account'];
     v_signature TEXT;
 BEGIN
     FOR v_signature IN

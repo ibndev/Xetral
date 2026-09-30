@@ -468,6 +468,38 @@ export const PROVIDERS: readonly Item[] = [
       'the lesson this repo\'s provider tables have taught twice.',
   },
   {
+    name: 'TEST_ACCOUNT_EMAILS',
+    kind: 'env',
+    failure: 'default-is-deliberate',
+    flow: 'resetting a test account',
+    ifMissed:
+      'empty means NO account can be reset, which is the right default for a ' +
+      'platform holding real customers. Comma-separated addresses the owner ' +
+      'tests with; POST /v1/admin/test-accounts/reset refuses anything else ' +
+      'with 403. Never put a real customer here: a reset retires the account.',
+  },
+  {
+    name: 'TEST_ACCOUNT_PHONES',
+    kind: 'env',
+    failure: 'default-is-deliberate',
+    flow: 'resetting a test account',
+    ifMissed:
+      'the same list by phone number, written with the country code ' +
+      '(+2348012345678). A malformed entry refuses to boot rather than being ' +
+      'dropped, so the list never names fewer accounts than it appears to.',
+  },
+  {
+    name: 'TEST_OTP',
+    kind: 'env',
+    failure: 'default-is-deliberate',
+    flow: 'signing up a test account',
+    ifMissed:
+      'unset, test accounts sign up with the emailed code like everybody else. ' +
+      'Set (six digits), a whitelisted email or phone signs up with it instead ' +
+      'and no code is mailed to a whitelisted email. It opens nothing but a ' +
+      'whitelisted account, so keep the lists short.',
+  },
+  {
     name: 'FLUTTERWAVE_BASE_URL',
     kind: 'env',
     failure: 'default-is-deliberate',

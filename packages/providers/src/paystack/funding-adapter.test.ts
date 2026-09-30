@@ -566,3 +566,35 @@ describe('a business Paystack requires to identify its customers', () => {
     expect((refused as Error).message).not.toContain('22233344455');
   });
 });
+
+/**
+ * Switching a number off, for resetting a whitelisted test account.
+ *
+ * Paystack keys a customer on the email address, so without this the same
+ * test address registered again is handed the same live number back — which
+ * our immutable row still names as the reset account's.
+ */
+describe('deactivating a dedicated account', () => {
+  it("sends Paystack's DELETE for that account and nothing else", async () => {
+    const { adapter, calls } = adapterWith([{ status: true, message: 'Deactivated' }]);
+    await adapter.deactivateVirtualAccount('4521');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.method).toBe('DELETE');
+    expect(calls[0]?.path).toBe('/dedicated_account/4521');
+    expect(calls[0]?.body).toBeUndefined();
+  });
+
+  it('treats an account Paystack no longer knows as already switched off', async () => {
+    const { adapter } = adapterWith([
+      { __http: 404, status: false, message: 'Dedicated account not found' },
+    ]);
+    await expect(adapter.deactivateVirtualAccount('4521')).resolves.toBeUndefined();
+  });
+
+  it('rethrows any other refusal, so the reset stops rather than leaving a live number', async () => {
+    const { adapter } = adapterWith([{ __http: 401, status: false, message: 'Invalid key' }]);
+    await expect(adapter.deactivateVirtualAccount('4521')).rejects.toBeInstanceOf(
+      ProviderRejectedError,
+    );
+  });
+});

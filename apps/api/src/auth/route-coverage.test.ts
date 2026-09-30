@@ -335,6 +335,8 @@ describe('the privileged surface is declared as privileged', () => {
       'POST /v1/admin/staff/grant (admin)',
       'POST /v1/admin/staff/revoke (admin)',
       'POST /v1/admin/suspense/:id/attribute (finance)',
+      // Retiring a whitelisted test account so it can register again.
+      'POST /v1/admin/test-accounts/reset (admin)',
       'POST /v1/admin/users/:id/status (compliance)',
       // Deciding how much money may leave an account in a day.
       'POST /v1/admin/users/:id/tier (compliance)',

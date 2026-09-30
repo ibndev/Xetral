@@ -474,6 +474,7 @@ export class FundingDiagnosticsService {
       ['hollow_payouts', '088_hollow_payouts.sql'],
       ['account_identity_checks', '089_paystack_identity.sql'],
       ['sign_in_events.country_relayed', '090_sign_in_country_relayed.sql'],
+      ['test_account_resets', '091_test_account_reset.sql'],
     ];
 
     const missing: string[] = [];

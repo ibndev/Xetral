@@ -360,6 +360,15 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       .staff('POST', '/v1/admin/data-requests/:id/resolve', { pin: true, role: 'compliance' })
 
       /*
+       * RESETTING A WHITELISTED TEST ACCOUNT so its email and phone register
+       * again. `admin`, a PIN and the strict step-up: it retires an account
+       * and cannot be undone by appending. The whitelist is the second gate,
+       * in the service — an account not on it is refused 403 whatever role
+       * asks.
+       */
+      .staff('POST', '/v1/admin/test-accounts/reset', { pin: true, role: 'admin' })
+
+      /*
        * Publishing a price.
        *
        * `finance`, and the writes take a PIN. Nothing in the application ever

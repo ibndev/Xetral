@@ -2198,6 +2198,49 @@ Schema: `packages/ledger/sql/089_paystack_identity.sql`. Adapter in
   Paystack as a BVN and bank-account recipient, and `processors.ts` says the
   same, so `legal-content.test.ts` holds the two together.
 
+### Resetting a test account — non-obvious rules
+
+Schema: `packages/ledger/sql/091_test_account_reset.sql`. Service in
+`apps/api/src/admin/test-account.service.ts`, route
+`POST /v1/admin/test-accounts/reset`, whitelist and `TEST_OTP` in
+`apps/api/src/auth/test-accounts.ts`.
+
+- **THE ACCOUNT IS RETIRED, NOT DELETED, AND THAT IS NOT A SHORTCUT.** The
+  user row is referenced by postings, the audit log, consent records and
+  sign-in history — every one append-only by trigger, because they are the
+  evidence. A reset able to remove them could be pointed at an account
+  somebody wants the evidence of gone. So `reset_test_account()` removes what
+  can go (sessions, tokens, password and PIN, devices nothing references,
+  push tokens, notifications, recipients, linked wallets, KYC and identity
+  checks), revokes the devices sign-in history points at, closes the account
+  number, and replaces the email with `reset+<uuid>@invalid` and the phone
+  with NULL. The ledger is never touched; money still held is NAMED in the
+  log (`left_behind`), never moved.
+- **THE WHITELIST IS THE ENVIRONMENT'S AND THE DATABASE ADDS ONE GUARD IT CAN
+  HOLD**: a staff account is refused whatever list it is on, because a reset
+  that could reach an administrator would be a way to erase one.
+- **THE ACCOUNT NUMBER IS SWITCHED OFF AT THE RAIL FIRST.** Paystack keys a
+  customer on the email address, so the same test address registered again
+  is the same customer there and is handed the same live number — which our
+  immutable row still names as the retired account's (`virtual_accounts` is
+  unique on the number and the provider id, closed rows included). Switched
+  off (`DELETE /dedicated_account/:id`), the next registration gets a fresh
+  one. A rail that refuses stops the reset before anything here changes.
+- **089'S NO-DELETE TRIGGER GAINED ONE EXCEPTION, AND IT GRANTS NOTHING ON ITS
+  OWN.** A row whose user matches the transaction-local
+  `xetral.test_reset_user` may go. Anybody can `set_config`, but the app role
+  holds no DELETE on that table (099) — so only the owner-run function can use
+  it, and 091's suite proves the app role setting the flag is still refused.
+- **LOGGED THREE TIMES**: 091's append-only `test_account_resets` (written by
+  the function, so a reset without a record cannot happen), `admin_audit_log`
+  as `test_account.reset` (on the must-say-why list), and a log line naming
+  the account by uuid rather than address.
+- **`TEST_OTP` IS THE SIGNUP CODE, BECAUSE THERE IS NO SMS.** The only code
+  at signup is the one emailed to the address. For a whitelisted email no
+  code is mailed and `TEST_OTP` is accepted; for a whitelisted phone it is
+  accepted too. It opens nothing but a whitelisted account, it is six digits
+  or refused at boot, and it is compared in constant time.
+
 ### The assignment, the refusal nobody could read, and a paused service — non-obvious rules
 
 Schema: `packages/ledger/sql/082_refusals_and_details.sql`,
@@ -5073,6 +5116,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/087_scheduled_announcem
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/088_hollow_payouts.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/089_paystack_identity.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/090_sign_in_country_relayed.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/091_test_account_reset.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -5161,6 +5205,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/087_scheduled_announcem
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/088_hollow_payouts.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/089_paystack_identity.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/090_sign_in_country_relayed.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/091_test_account_reset.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

@@ -86,7 +86,10 @@ export type AdminAction =
      anybody reading a failed payout asks. */
   | 'route.change'
   | 'push.broadcast'
-  | 'push.cancel';
+  | 'push.cancel'
+  /* A whitelisted test account retired so its email and phone register
+     again. On 091's must-say-why list: it cannot be undone by appending. */
+  | 'test_account.reset';
 
 export interface AuditEntry {
   /** The actor's UUID, as it appears in an access token. Resolved to the

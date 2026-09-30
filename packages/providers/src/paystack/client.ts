@@ -86,6 +86,14 @@ export const PAYSTACK_ENDPOINTS = {
   dedicatedAccountProviders: '/dedicated_account/available_providers',
   getDedicatedAccount: (id: string) => `/dedicated_account/${id}`,
   /*
+   * DEACTIVATE — `DELETE /dedicated_account/:dedicated_account_id`, Paystack's
+   * "Deactivate Dedicated Account" (Dedicated Virtual Account API, read
+   * September 2026). Used only to reset a whitelisted TEST account: Paystack
+   * keys a customer on the email address, so without it the same address
+   * registered again is handed back the same live number our reset row holds.
+   */
+  deactivateDedicatedAccount: (id: string) => `/dedicated_account/${encodeURIComponent(id)}`,
+  /*
    * `active` AND `currency` ARE REQUIRED, and omitting them is not a lenient
    * default — it is a refusal.
    *
@@ -146,7 +154,11 @@ export class PaystackClient {
     this.#timeoutMs = options.timeoutMs ?? 15_000;
   }
 
-  async request(method: 'GET' | 'POST', path: string, body?: unknown): Promise<unknown> {
+  async request(
+    method: 'GET' | 'POST' | 'DELETE',
+    path: string,
+    body?: unknown,
+  ): Promise<unknown> {
     // Asked BEFORE the timer starts, so a slow credential read cannot eat the
     // provider's own budget — and refused here rather than sent as
     // `Bearer undefined`, which reads as a wrong key when the truth is that

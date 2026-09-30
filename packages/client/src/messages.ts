@@ -207,6 +207,14 @@ function sentenceFor(error: ApiError): string {
       return 'Our bank partner needs your BVN and a bank account in your name to open your account number.';
     case 'account_identity_failed':
       return 'Those details did not match. Check your BVN, bank and account number, and try again.';
+    case 'test_account_not_whitelisted':
+      return 'That email or phone is not on the test-account list (TEST_ACCOUNT_EMAILS / TEST_ACCOUNT_PHONES).';
+    case 'test_account_not_found':
+      return 'No account holds that email or phone.';
+    case 'test_account_is_staff':
+      return 'That is a staff account. Staff accounts cannot be reset.';
+    case 'test_account_provider_refused':
+      return 'The bank partner would not switch that account number off, so nothing was reset. Try again shortly.';
     /*
      * NOT "TRY AGAIN SHORTLY", because it will never work.
      *

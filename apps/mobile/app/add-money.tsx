@@ -374,10 +374,6 @@ function IdentifyForAccount({
     <View style={{ gap: space.sm, marginTop: space.md }}>
       <View style={{ gap: 4 }}>
         <Text style={lead}>Confirm it’s you to get your account number</Text>
-        <Text style={[styles.hint, { marginTop: 0 }]}>
-          Our bank partner must match your BVN to a bank account in your name before it opens a
-          Nigerian account number for you. It takes about a minute.
-        </Text>
       </View>
 
       {failed && error === undefined && (
@@ -399,9 +395,6 @@ function IdentifyForAccount({
         placeholderTextColor={colors.text3}
         accessibilityLabel="BVN"
       />
-      <Text style={[styles.hint, { marginTop: -4 }]}>
-        Dial *565*0# from the phone linked to your bank to see it.
-      </Text>
 
       <Text style={styles.label}>Bank</Text>
       <Select

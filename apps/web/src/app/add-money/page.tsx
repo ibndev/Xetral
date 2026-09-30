@@ -502,10 +502,6 @@ function IdentifyForAccount({
     >
       <div className="identity-head">
         <p className="activate-lead">Confirm it&rsquo;s you to get your account number</p>
-        <p className="hint">
-          Our bank partner must match your BVN to a bank account in your name before it opens a
-          Nigerian account number for you. It takes about a minute.
-        </p>
       </div>
 
       {failed && error === undefined && (
@@ -528,7 +524,6 @@ function IdentifyForAccount({
           value={bvn}
           onChange={(e) => setBvn(e.target.value.replace(/[^0-9]/g, '').slice(0, 11))}
         />
-        <span className="hint">Dial *565*0# from the phone linked to your bank to see it.</span>
       </div>
 
       <div className="field">
