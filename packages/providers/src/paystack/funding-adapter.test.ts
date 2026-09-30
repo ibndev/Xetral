@@ -44,9 +44,12 @@ function adapterWith(
       body: init.body === undefined ? undefined : JSON.parse(String(init.body)),
       auth: (init.headers as Record<string, string>)['authorization'],
     });
-    const next = responses[i++] ?? { status: true, data: {} };
-    return new Response(JSON.stringify(next), {
-      status: 200,
+    const next = (responses[i++] ?? { status: true, data: {} }) as { __http?: number };
+    // `__http` scripts a non-200 answer — Paystack's 400 for an unidentified
+    // customer arrives that way, not as `status: false` on a 200.
+    const { __http, ...body } = next;
+    return new Response(JSON.stringify(body), {
+      status: __http ?? 200,
       headers: { 'content-type': 'application/json' },
     });
   };
@@ -460,3 +463,106 @@ describe('reading deposits back for reconciliation', () => {
 });
 
 const lookup = { providerAccountId: '12345', providerCustomerRef: 'CUS_abc' } as const;
+
+/*
+ * THE REFUSAL PRODUCTION RECORDED FOR EVERY NEW CUSTOMER, and what now
+ * happens instead. Paystack answers `POST /dedicated_account` with HTTP 400
+ * "Customer has not been identified" on a business it requires to identify
+ * its customers. That is a question for the customer — a BVN and a bank
+ * account on it — so it gets its own code, and the answer goes to the one
+ * endpoint that takes it.
+ */
+const NOT_IDENTIFIED = { __http: 400, status: false, message: 'Customer has not been identified' };
+const WITH_IDENTITY: CreateVirtualAccountRequest = {
+  ...NEW_CUSTOMER,
+  identity: { bvn: '22233344455', bankCode: '058', accountNumber: '0123456789' },
+};
+
+describe('a business Paystack requires to identify its customers', () => {
+  it('RELAYS "Customer has not been identified" AS identity_required, not a generic refusal', async () => {
+    const { adapter } = adapterWith([CUSTOMER_CREATED, NO_ACCOUNTS, NOT_IDENTIFIED], {
+      preferredBank: 'wema-bank',
+    });
+    const refused = await adapter.createVirtualAccount(NEW_CUSTOMER).catch((e: unknown) => e);
+    expect(refused).toBeInstanceOf(ProviderRejectedError);
+    expect((refused as ProviderRejectedError).providerCode).toBe('identity_required');
+  });
+
+  it('keeps any other 400 a plain refusal about us', async () => {
+    const { adapter } = adapterWith(
+      [CUSTOMER_CREATED, NO_ACCOUNTS, { __http: 400, status: false, message: 'Invalid preferred bank' }],
+      { preferredBank: 'wema-bank' },
+    );
+    const refused = await adapter.createVirtualAccount(NEW_CUSTOMER).catch((e: unknown) => e);
+    expect((refused as ProviderRejectedError).providerCode).toBe('http_400');
+  });
+
+  it('SENDS THE BVN AND BANK ACCOUNT TO /dedicated_account/assign, exactly as Paystack documents', async () => {
+    const { adapter, calls } = adapterWith(
+      [{ status: true, message: 'Assign dedicated account in progress' }],
+      { preferredBank: 'wema-bank' },
+    );
+    await expect(adapter.createVirtualAccount(WITH_IDENTITY)).rejects.toBeInstanceOf(
+      ProviderPendingError,
+    );
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.method).toBe('POST');
+    expect(calls[0]?.path).toBe('/dedicated_account/assign');
+    expect(calls[0]?.body).toEqual({
+      email: 'ada@example.ng',
+      first_name: 'Ada',
+      last_name: 'Obi',
+      phone: '+2348031234567',
+      preferred_bank: 'wema-bank',
+      country: 'NG',
+      bvn: '22233344455',
+      bank_code: '058',
+      account_number: '0123456789',
+    });
+  });
+
+  it('asks Paystack which bank to name when the setting is empty — the call requires one', async () => {
+    const { adapter, calls } = adapterWith([
+      { status: true, data: [{ provider_slug: 'titan-paystack' }, { provider_slug: 'wema-bank' }] },
+      { status: true, message: 'Assign dedicated account in progress' },
+    ]);
+    await expect(adapter.createVirtualAccount(WITH_IDENTITY)).rejects.toBeInstanceOf(
+      ProviderPendingError,
+    );
+    expect(calls[0]?.path).toBe('/dedicated_account/available_providers');
+    expect((calls[1]?.body as { preferred_bank: string }).preferred_bank).toBe('titan-paystack');
+  });
+
+  it('sends nothing without a phone number, which the assign call requires', async () => {
+    const { adapter, calls } = adapterWith([], { preferredBank: 'wema-bank' });
+    const refused = await adapter
+      .createVirtualAccount({ ...WITH_IDENTITY, customer: { ...WITH_IDENTITY.customer, phone: undefined } })
+      .catch((e: unknown) => e);
+    expect((refused as ProviderRejectedError).providerCode).toBe('phone_required');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('returns an account already assigned rather than asking for a second', async () => {
+    const { adapter, calls } = adapterWith(
+      [{ status: true, data: [{ ...ACCOUNT_CREATED.data }] }],
+      { preferredBank: 'wema-bank' },
+    );
+    const account = await adapter.createVirtualAccount({
+      ...WITH_IDENTITY,
+      customer: { ...WITH_IDENTITY.customer, providerCustomerId: 'CUS_abc' },
+    });
+    expect(account.accountNumber).toBe('9911223344');
+    expect(calls.map((c) => c.path)).not.toContain('/dedicated_account/assign');
+  });
+
+  it('relays a synchronous refusal of the details as a refusal, with Paystack\'s sentence and no BVN', async () => {
+    const { adapter } = adapterWith(
+      [{ __http: 400, status: false, message: 'Invalid BVN' }],
+      { preferredBank: 'wema-bank' },
+    );
+    const refused = await adapter.createVirtualAccount(WITH_IDENTITY).catch((e: unknown) => e);
+    expect(refused).toBeInstanceOf(ProviderRejectedError);
+    expect((refused as Error).message).toContain('Invalid BVN');
+    expect((refused as Error).message).not.toContain('22233344455');
+  });
+});

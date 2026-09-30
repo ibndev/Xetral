@@ -51,11 +51,14 @@ INSERT INTO consent_documents (kind, version, body_sha256, summary) VALUES
   -- documentation puts the BVN and date of birth on the Bitnob customer.
   -- 086's adds the NDPR's principles and rights, the 72-hour breach notice,
   -- the registration number and how a card number is and is not handled.
-  ('privacy', '2026-09-28',
-   '77d0bf612f99ee4ba3f84416ec58492716e726aa4dd640d031debdf7489aec59',
+  -- 089's names Paystack as a BVN recipient: it may ask to match a BVN to a
+  -- bank account on it before it opens a naira account number.
+  ('privacy', '2026-09-30',
+   'dad4861991204196f7fb61e050c87233197fbc7e83d70e7dc193e964d6d451d1',
    'What personal data Xetral Ltd holds, why, exactly which companies receive '
-   'it and what reaches them, how long it is kept, and how to get a copy or '
-   'have it erased.'),
+   'it and what reaches them — including Paystack, which is given your BVN and '
+   'a bank account on it when it needs them to open your naira account number '
+   '— how long it is kept, and how to get a copy or have it erased.'),
 
   ('marketing_email', '2026-08-25',
    -- Not a page: this is the exact wording of the opt-in, hashed so the

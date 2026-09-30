@@ -31,7 +31,7 @@ export const metadata: Metadata = {
  */
 export default function Privacy() {
   return (
-    <LegalPage title="Privacy notice" updated="28 September 2026">
+    <LegalPage title="Privacy notice" updated="30 September 2026">
       <p className="legal-lede">
         This notice explains what {COMPANY.tradingName} collects about you, why,
         who else sees it, how long it is kept and what you can ask us to do with
@@ -80,7 +80,12 @@ export default function Privacy() {
           <strong>Flutterwave</strong> or <strong>Bitnob</strong> — whichever
           opens your naira account number — because a bank will not open a
           permanent account in your name without one. Bitnob is also given
-          your date of birth, which it checks against the same record.
+          your date of birth, which it checks against the same record. If{' '}
+          <strong>Paystack</strong>, which opens most naira account numbers,
+          asks to confirm who you are first, you give it your Bank
+          Verification Number and the number of a bank account held on it, and
+          Paystack checks one against the other. We keep only the last four
+          digits of each.
         </dd>
 
         <dt>What you do with your money</dt>
@@ -226,8 +231,10 @@ export default function Privacy() {
         <strong>
           Your date of birth goes to Dojah, to check it, and to Bitnob if it
           opens your naira account number. Your Bank Verification Number goes
-          to Dojah, to check it, and to Flutterwave or Bitnob, whichever opens
-          your naira account number.
+          to Dojah, to check it; to Paystack, with a bank account number held
+          on it, when Paystack asks to confirm who you are before opening your
+          naira account number; and to Flutterwave or Bitnob, whichever opens
+          it.
         </strong>{' '}
         Your address is checked by our own reviewers and goes to nobody at all.
         Otherwise the companies that move your money are told the amount, the

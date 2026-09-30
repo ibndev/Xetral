@@ -472,6 +472,7 @@ export class FundingDiagnosticsService {
       ['fn:assert_tier_rests_on_identity', '085_verified_rests_on_identity.sql'],
       ['push_broadcasts.send_at', '087_scheduled_announcements.sql'],
       ['hollow_payouts', '088_hollow_payouts.sql'],
+      ['account_identity_checks', '089_paystack_identity.sql'],
     ];
 
     const missing: string[] = [];

@@ -718,6 +718,16 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // issuing one — see the controller.
       .authenticated('GET', '/v1/funding/account', { pin: false })
       /*
+       * IDENTIFYING A CUSTOMER TO THE RAIL THAT WILL NOT OPEN AN ACCOUNT
+       * WITHOUT IT (089): a BVN and a bank account on it, sent to Paystack,
+       * which matches them itself. No PIN, for the reason the account itself
+       * takes none — a new customer has not set one, and this brings money
+       * in. It is bounded in the service instead: five a day, one in flight.
+       * The bank list is the rail's own, so its codes go back to its issuer.
+       */
+      .authenticated('GET', '/v1/funding/account/banks', { pin: false })
+      .authenticated('POST', '/v1/funding/account/identify', { pin: false })
+      /*
        * THE MOBILE MONEY WALLET A CUSTOMER LINKS, in Ghana and Kenya.
        *
        * Reading costs nothing. LINKING TAKES A PIN, and unlinking does too:

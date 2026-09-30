@@ -46,6 +46,7 @@ shipped, that is called out explicitly.
 | 35 — A payout that held nothing, and iOS with no Mac | ✅ | migration 088; an Apple Developer account and `eas init` |
 | 36 — A whole-code inspection, and the gates that were red | ✅ | |
 | 37 — The advisories left, and the scans nobody could read | ✅ | Expo SDK 57, for the last four advisories |
+| 38 — Naira accounts on Paystack alone, and the identity Paystack asks for | ✅ | migration 089; Paystack's assign webhooks on the deposit URL |
 
 All eleven phases are built, a **pre-deployment audit** (Phase 12) closed what
 building them phase by phase had left between the phases, and **Phase 13** is
@@ -2831,3 +2832,30 @@ Program, run `npx eas init` in `apps/mobile` and commit the `projectId`, then
 3. **The API sends Cross-Origin-Resource-Policy**, which ZAP found missing.
 
 **An operator need do nothing for this one.**
+
+---
+
+## Phase 38 — Naira accounts on Paystack alone, and the identity Paystack asks for ✅
+
+| File | What it is |
+|---|---|
+| `packages/ledger/sql/089_paystack_identity.sql` | fallback off; `account_identity_checks`; privacy republished |
+| `packages/providers/src/paystack/funding-adapter.ts` | `identity_required`, and `/dedicated_account/assign` |
+| `apps/api/src/funding/funding.service.ts` | `identify()`, `identityBanks()`, `identityOutcome()` |
+| `apps/api/src/funding/paystack-webhook.service.ts` | `dedicatedaccount.assign.*` and `customeridentification.*` |
+| `apps/web/src/app/add-money/page.tsx`, `apps/mobile/app/add-money.tsx` | the BVN, bank and account-number form, and the wait |
+
+1. **A naira account request went to Flutterwave and Bitnob** after Paystack
+   refused, because 079 shipped the fallback on. It is off.
+2. **Paystack refused every new customer with "Customer has not been
+   identified"**, and the customer read "could not be opened". Add Money now
+   asks for a BVN and a bank account on it, Paystack matches them, and the
+   number appears in about a minute. Only a fingerprint is kept.
+
+**Before this goes live, an operator must:** apply **089** and re-apply
+**099**; make sure Paystack sends `dedicatedaccount.assign.success`,
+`dedicatedaccount.assign.failed` and `customeridentification.*` to the same
+`/v1/webhooks/paystack/deposits` URL (Paystack posts every event to the one
+webhook URL, so nothing needs adding if it is already set); and set
+`paystack_preferred_bank` on Settings to the bank to assign at, or leave it
+empty to use the first one Paystack names.

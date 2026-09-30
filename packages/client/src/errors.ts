@@ -374,6 +374,13 @@ const API_ERROR_CODES = [
   // integration, a preferred bank it is not approved for. An operator fixes
   // this, and the provider's own sentence is in the API log.
   'account_issue_refused',
+  /* The rail will not open an account until it has identified the customer:
+     a BVN and a bank account on it, asked for on Add Money (089). */
+  'account_identity_required',
+  /* The rail could not match the BVN to the bank account given — or that
+     BVN already stands for another customer, which is deliberately the same
+     answer. */
+  'account_identity_failed',
   'account_not_supported_here',
   'momo_already_linked',
   'momo_not_supported_here',

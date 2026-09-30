@@ -1213,6 +1213,34 @@ export class XetralClient {
     return body.account;
   }
 
+  /**
+   * The banks the identity form offers — the rail's own list, so the code
+   * sent back is one that rail issued. Empty where no identity is asked for.
+   */
+  async identityBanks(): Promise<readonly { code: string; name: string }[]> {
+    const body = await this.#get<{ banks: readonly { code: string; name: string }[] }>(
+      '/v1/funding/account/banks',
+    );
+    return body.banks;
+  }
+
+  /**
+   * THE BVN AND A BANK ACCOUNT ON IT, for a rail that answered
+   * `account_identity_required`. Usually answers `account_issue_pending` —
+   * the rail matches them first — and the account on a later read.
+   */
+  async identifyForAccount(details: {
+    readonly bvn: string;
+    readonly bankCode: string;
+    readonly accountNumber: string;
+  }): Promise<VirtualAccount> {
+    return this.#post('/v1/funding/account/identify', {
+      bvn: details.bvn,
+      bank_code: details.bankCode,
+      account_number: details.accountNumber,
+    });
+  }
+
   /* ------------------------ mobile money ------------------------ */
 
   /**

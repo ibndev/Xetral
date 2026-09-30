@@ -3,8 +3,10 @@
 -- ============================================================================
 \set ON_ERROR_STOP on
 
--- 1. There is exactly one policy row, and it ships reading the route table
---    with the account fallback on.
+-- 1. There is exactly one policy row, and it ships reading the route table.
+--    The fallback is NOT asserted on: 079 shipped it on and 089 turned it off,
+--    and a suite must not hardcode a value a later migration owns (075's
+--    lesson). 089's own suite asserts where it stands now.
 DO $$
 DECLARE n INT; m TEXT; f BOOLEAN;
 BEGIN
@@ -13,10 +15,10 @@ BEGIN
         RAISE EXCEPTION 'TEST FAILED 1: % routing policy rows', n;
     END IF;
     SELECT mode, account_fallback INTO m, f FROM provider_routing_policy;
-    IF m IS DISTINCT FROM 'per_route' OR f IS DISTINCT FROM TRUE THEN
+    IF m IS DISTINCT FROM 'per_route' OR f IS NULL THEN
         RAISE EXCEPTION 'TEST FAILED 1: shipped as mode % fallback %', m, f;
     END IF;
-    RAISE NOTICE 'PASS 1: one policy row, per_route, fallback on';
+    RAISE NOTICE 'PASS 1: one policy row, per_route, fallback decided';
 END $$;
 
 -- 2. It cannot be deleted into nothing.

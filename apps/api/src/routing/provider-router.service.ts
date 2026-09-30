@@ -54,14 +54,17 @@ export interface CoverageRow {
 
 /**
  * WHAT A DEPLOYMENT BEHIND 079 READS AS. The route table, unchanged, and the
- * fallback on — the policy that migration ships, so applying it changes
- * nothing about who serves what.
+ * fallback OFF — 089's default. It shipped on, and a naira account request
+ * the owner had assigned to Paystack then went on to Flutterwave and Bitnob
+ * after Paystack refused: two more companies handed a customer's details, two
+ * more refusals on `/admin/diagnostics`, and nothing the owner had chosen.
+ * Trying another rail is a decision an operator turns on, never a default.
  */
 const DEFAULT_POLICY: RoutingPolicy = {
   mode: 'per_route',
   preferredProvider: null,
   singleProvider: null,
-  accountFallback: true,
+  accountFallback: false,
 };
 
 /**

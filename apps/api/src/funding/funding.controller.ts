@@ -49,6 +49,21 @@ const linkMomoSchema = z
   })
   .strict();
 
+/*
+ * THE THREE VALUES PAYSTACK WANTS TO IDENTIFY A CUSTOMER, and nothing else.
+ * `.strict()` so a caller-supplied name, email or phone is refused rather
+ * than ignored — those come from the account, and anything a client can send
+ * a stolen session can send. Shapes checked here so a mistyped BVN is a
+ * field error on the form, not a refusal from a bank a minute later.
+ */
+const identifySchema = z
+  .object({
+    bvn: z.string().trim().regex(/^[0-9]{11}$/),
+    bank_code: z.string().trim().regex(/^[0-9A-Za-z-]{2,20}$/),
+    account_number: z.string().trim().regex(/^[0-9]{10}$/),
+  })
+  .strict();
+
 @Controller('v1/funding')
 export class FundingController {
   constructor(
@@ -118,6 +133,40 @@ export class FundingController {
   @HttpCode(200)
   async account(@Req() request: AuthenticatedRequest): Promise<VirtualAccountView> {
     return this.funding.accountFor(claimsOf(request).sub);
+  }
+
+  /** The banks the identity form offers — the rail's own list. */
+  @Get('account/banks')
+  async identityBanks(
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ banks: readonly { code: string; name: string }[] }> {
+    return { banks: await this.funding.identityBanks(claimsOf(request).sub) };
+  }
+
+  /**
+   * THE CUSTOMER'S BVN AND A BANK ACCOUNT ON IT, for the rail that answered
+   * `account_identity_required`. Answers the account where the rail assigns
+   * one at once, and `account_issue_pending` where it matches the details
+   * first — which is Paystack's usual answer.
+   */
+  @Post('account/identify')
+  @HttpCode(200)
+  async identify(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: unknown,
+  ): Promise<VirtualAccountView> {
+    const parsed = identifySchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException({
+        error: 'invalid_request',
+        fields: parsed.error.issues.map((i) => i.path.join('.')),
+      });
+    }
+    return this.funding.identify(claimsOf(request).sub, {
+      bvn: parsed.data.bvn,
+      bankCode: parsed.data.bank_code,
+      accountNumber: parsed.data.account_number,
+    });
   }
 
   /**

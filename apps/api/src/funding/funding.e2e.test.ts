@@ -7,7 +7,11 @@ import request from 'supertest';
 import pg from 'pg';
 import type { Pool } from 'pg';
 import { hashPassword } from '@xetral/identity';
-import { ProviderTimeoutError } from '@xetral/providers';
+import {
+  ProviderPendingError,
+  ProviderRejectedError,
+  ProviderTimeoutError,
+} from '@xetral/providers';
 import type {
   CreateVirtualAccountRequest,
   FundingPort,
@@ -64,7 +68,16 @@ const WEBHOOK_SECRET = 'a-test-webhook-secret';
 /** A stand-in for Bitnob. Deterministic account numbers so a test can assert
  *  on the exact one a customer would be shown. */
 class FakeFundingPort implements FundingPort {
-  readonly provider = 'bitnob';
+  provider = 'bitnob';
+  /**
+   * PAYSTACK'S GATE, reproduced: with this on, an account is refused with
+   * `identity_required` — the code the real adapter gives "Customer has not
+   * been identified" — until the customer's email is in `identified`, which
+   * is what Paystack's assignment finishing looks like from outside. A
+   * request carrying `identity` is Paystack's "in progress".
+   */
+  identityRequired = false;
+  readonly identified = new Set<string>();
   readonly created: CreateVirtualAccountRequest[] = [];
   /**
    * Keyed by account, as the real endpoint is.
@@ -94,6 +107,16 @@ class FakeFundingPort implements FundingPort {
       const error = this.failNextWith;
       this.failNextWith = undefined;
       throw error;
+    }
+    if (this.identityRequired && !this.identified.has(req.customer.email)) {
+      if (req.identity !== undefined) {
+        throw new ProviderPendingError('paystack', 'Assign dedicated account in progress');
+      }
+      throw new ProviderRejectedError(
+        'paystack',
+        'Customer has not been identified',
+        'identity_required',
+      );
     }
     this.#seq += 1;
     return {
@@ -257,6 +280,8 @@ beforeEach(() => {
   port.created.length = 0;
   port.deposits.clear();
   port.failNextWith = undefined;
+  port.identityRequired = false;
+  port.provider = 'bitnob';
 });
 
 describe('getting an account number', () => {
@@ -715,5 +740,185 @@ describe('an account number without asking for one', () => {
       port.failNextWith = undefined;
       await registering.close();
     }
+  });
+});
+
+describe('a rail that will not open an account until it has identified the customer', () => {
+  /*
+   * PRODUCTION'S REFUSAL, END TO END. Paystack answered every new customer's
+   * account request with "Customer has not been identified" (HTTP 400), and
+   * the customer read "could not be opened — this one is on us". These drive
+   * the whole replacement: the question, the three answers, the wait, and
+   * Paystack's own event finishing it.
+   */
+  const PAYSTACK_KEY = 'sk_test_identity_e2e';
+  let paystackApp: INestApplication;
+
+  beforeAll(async () => {
+    paystackApp = await boot(makeConfig({ paystackSecretKey: PAYSTACK_KEY }));
+  });
+  afterAll(async () => {
+    await paystackApp?.close();
+  });
+
+  async function withPhone(customer: Customer): Promise<string> {
+    const phone = `+234${8000000000 + Math.floor(Math.random() * 999999999)}`;
+    const found = await pool.query<{ email: string }>(
+      `UPDATE users SET phone = $2 WHERE id = $1::bigint RETURNING email`,
+      [customer.userId, phone],
+    );
+    return found.rows[0]?.email as string;
+  }
+
+  const identify = (customer: Customer, body: Record<string, unknown>) =>
+    request(app.getHttpServer())
+      .post('/v1/funding/account/identify')
+      .set('Authorization', `Bearer ${customer.token}`)
+      .send(body);
+
+  const bvn = () => String(22000000000 + Math.floor(Math.random() * 999999999));
+  const details = (b: string) => ({ bvn: b, bank_code: '058', account_number: '0123456789' });
+
+  function paystackEvent(event: string, email: string, extra: Record<string, unknown> = {}) {
+    const body = JSON.stringify({ event, data: { customer: { email, customer_code: 'CUS_x' }, ...extra } });
+    return request(paystackApp.getHttpServer())
+      .post('/v1/webhooks/paystack/deposits')
+      .set('content-type', 'application/json')
+      .set('x-paystack-signature', createHmac('sha512', PAYSTACK_KEY).update(body).digest('hex'))
+      .send(body);
+  }
+
+  it('ASKS FOR IDENTITY rather than reporting a refusal, and records no fault', async () => {
+    port.provider = 'paystack';
+    port.identityRequired = true;
+    const customer = await onboard(false);
+    await withPhone(customer);
+
+    const res = await getAccount(customer).expect(422);
+    expect(res.body.error).toBe('account_identity_required');
+
+    // Not a fault an operator can fix, so not on the diagnostics screen.
+    await new Promise((r) => setTimeout(r, 100));
+    const recorded = await pool.query(
+      `SELECT 1 FROM account_refusals WHERE provider_code = 'identity_required'`,
+    );
+    expect(recorded.rowCount).toBe(0);
+  });
+
+  it('refuses a malformed BVN, and any field the account already holds', async () => {
+    const customer = await onboard(false);
+    await withPhone(customer);
+    await identify(customer, { ...details('2200000000'), bank_code: '058' }).expect(400);
+    await identify(customer, { ...details(bvn()), full_name: 'Somebody Else' }).expect(400);
+  });
+
+  it('SENDS THE DETAILS, KEEPS ONLY A FINGERPRINT, and says the account is on its way', async () => {
+    port.provider = 'paystack';
+    port.identityRequired = true;
+    const customer = await onboard(false);
+    await withPhone(customer);
+    const theBvn = bvn();
+
+    const res = await identify(customer, details(theBvn)).expect(503);
+    expect(res.body.error).toBe('account_issue_pending');
+    expect(port.created.at(-1)?.identity).toEqual({
+      bvn: theBvn,
+      bankCode: '058',
+      accountNumber: '0123456789',
+    });
+
+    const rows = await pool.query(
+      `SELECT row_to_json(c)::text AS row, bvn_fingerprint, bvn_last4, status
+         FROM account_identity_checks c WHERE user_id = $1::bigint`,
+      [customer.userId],
+    );
+    expect(rows.rowCount).toBe(1);
+    expect(rows.rows[0].row).not.toContain(theBvn);
+    expect(rows.rows[0].row).not.toContain('0123456789');
+    expect(rows.rows[0].bvn_fingerprint).toMatch(/^v[0-9]+:[0-9a-f]{64}$/);
+    expect(rows.rows[0].bvn_last4).toBe(theBvn.slice(-4));
+    expect(rows.rows[0].status).toBe('submitted');
+
+    // While Paystack matches, the screen hears "on its way", not the form…
+    const again = await getAccount(customer).expect(503);
+    expect(again.body.error).toBe('account_issue_pending');
+
+    // …and a second submission is not sent at all.
+    const sent = port.created.length;
+    await identify(customer, details(theBvn)).expect(503);
+    expect(port.created.length).toBe(sent);
+  });
+
+  it('refuses a BVN that stands for another customer — as a mismatch, sending nothing', async () => {
+    port.provider = 'paystack';
+    port.identityRequired = true;
+    const first = await onboard(false);
+    await withPhone(first);
+    const second = await onboard(false);
+    await withPhone(second);
+    const shared = bvn();
+
+    await identify(first, details(shared)).expect(503);
+    const sent = port.created.length;
+    const res = await identify(second, details(shared)).expect(422);
+    expect(res.body.error).toBe('account_identity_failed');
+    expect(port.created.length).toBe(sent);
+  });
+
+  it('asks for a phone number first, which Paystack requires here', async () => {
+    port.provider = 'paystack';
+    port.identityRequired = true;
+    const customer = await onboard(false);
+    const res = await identify(customer, details(bvn())).expect(409);
+    expect(res.body.error).toBe('profile_incomplete');
+    expect(res.body.field).toBe('phone');
+  });
+
+  it("OPENS THE ACCOUNT ON PAYSTACK'S assign.success, by reading it rather than believing the event", async () => {
+    port.provider = 'paystack';
+    port.identityRequired = true;
+    const customer = await onboard(false);
+    const email = await withPhone(customer);
+    await identify(customer, details(bvn())).expect(503);
+
+    // Paystack has assigned the number; its event rings the bell.
+    port.identified.add(email);
+    await paystackEvent('dedicatedaccount.assign.success', email, {
+      dedicated_account: { account_number: '9999999999' },
+    }).expect(200);
+
+    const status = await pool.query<{ status: string }>(
+      `SELECT status FROM account_identity_checks WHERE user_id = $1::bigint`,
+      [customer.userId],
+    );
+    expect(status.rows[0]?.status).toBe('validated');
+
+    const read = await request(app.getHttpServer())
+      .get('/v1/funding/account')
+      .set('Authorization', `Bearer ${customer.token}`)
+      .expect(200);
+    // The number is the one READ from the rail, not the one the event named.
+    expect(read.body.account?.account_number).toMatch(/^[0-9]{10}$/);
+    expect(read.body.account?.account_number).not.toBe('9999999999');
+  });
+
+  it('brings the form back with a reason after assign.failed', async () => {
+    port.provider = 'paystack';
+    port.identityRequired = true;
+    const customer = await onboard(false);
+    const email = await withPhone(customer);
+    await identify(customer, details(bvn())).expect(503);
+
+    await paystackEvent('dedicatedaccount.assign.failed', email, {
+      dedicated_account: null,
+      identification: { status: 'failed' },
+    }).expect(200);
+
+    const res = await getAccount(customer).expect(422);
+    expect(res.body.error).toBe('account_identity_failed');
+  });
+
+  it('acknowledges an identification event it cannot place, rather than having it retried for ever', async () => {
+    await paystackEvent('customeridentification.success', `nobody-${randomUUID()}@example.ng`).expect(200);
   });
 });

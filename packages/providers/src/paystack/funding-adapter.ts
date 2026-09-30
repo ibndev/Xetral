@@ -4,11 +4,18 @@ import {
   ProviderPendingError,
   ProviderRejectedError,
 } from '../ports/errors.js';
-import { PAYSTACK_ENDPOINTS, isStaleCustomerRefusal, type PaystackClient } from './client.js';
+import {
+  PAYSTACK_ENDPOINTS,
+  isIdentityRequiredRefusal,
+  isStaleCustomerRefusal,
+  type PaystackClient,
+} from './client.js';
 import type {
+  AccountIdentityCapable,
   DepositLookup,
   CreateVirtualAccountRequest,
   FundingPort,
+  IdentityBank,
   ProviderDeposit,
   VirtualAccount,
 } from '../ports/funding.js';
@@ -32,9 +39,19 @@ const PROVIDER = 'paystack';
  *   POST /customer            name, email, phone -> customer_code
  *   POST /dedicated_account   customer_code      -> a NUBAN
  *
- * Neither is a KYC step. `POST /customer/:code/identification` is where a BVN
- * goes when one is needed, which is at the point a customer wants past a tier
- * 1 ceiling rather than at the point they want somewhere to be paid.
+ * Neither is a KYC step — ON A BUSINESS PAYSTACK DOES NOT MAKE IDENTIFY ITS
+ * CUSTOMERS. On one it does (Betting, Financial Services, General Services),
+ * the second call answers HTTP 400 "Customer has not been identified", and
+ * production recorded exactly that for every new customer. That refusal is
+ * relayed as `identity_required`, the customer is asked for a BVN and a bank
+ * account on it, and the request comes back with `identity` set:
+ *
+ *   POST /dedicated_account/assign   email, names, phone, bvn, bank, account
+ *                                    -> "in progress"; the number arrives on
+ *                                       `dedicatedaccount.assign.success`
+ *
+ * Paystack matches the BVN to the account itself. Nothing here decides
+ * whether they match, and nothing here keeps the BVN.
  */
 
 /**
@@ -98,6 +115,17 @@ const dedicatedAccountListResponse = z.object({
  */
 const TEST_PREFERRED_BANK = 'test-bank';
 
+const bankListResponse = z.object({
+  data: z.array(
+    z.object({
+      name: z.string().min(1),
+      code: z.string().min(1),
+      type: z.string().nullish(),
+      active: z.boolean().nullish(),
+    }),
+  ),
+});
+
 const transactionListResponse = z.object({
   data: z.array(
     z.object({
@@ -153,7 +181,7 @@ export interface PaystackFundingOptions {
   readonly preferredBank: string | undefined | (() => Promise<string | undefined>);
 }
 
-export class PaystackFundingAdapter implements FundingPort {
+export class PaystackFundingAdapter implements FundingPort, AccountIdentityCapable {
   readonly provider = PROVIDER;
 
   readonly #client: PaystackClient;
@@ -174,7 +202,133 @@ export class PaystackFundingAdapter implements FundingPort {
       );
     }
 
+    if (request.identity !== undefined) return this.#assign(request, request.identity);
     return this.#issue(request, await this.#customerCode(request), true);
+  }
+
+  /**
+   * CREATE, IDENTIFY AND ASSIGN, for a business Paystack requires to identify
+   * its customers.
+   *
+   * ONE CALL, AND IT ANSWERS "IN PROGRESS". Paystack validates the BVN
+   * against the bank account asynchronously and then assigns the number;
+   * both outcomes arrive by webhook, and the next read of this customer's
+   * accounts finds the number through the look-before-create in `#issue`. So
+   * a successful call here is `ProviderPendingError` — the code the apps
+   * already render as "your account is being opened" — never a success
+   * without a number.
+   *
+   * NOT RETRIED, AND NOT PRECEDED BY A GUESS. Paystack keys this on the email
+   * address, so a customer a checkout already created is updated rather than
+   * duplicated; and an account already assigned is looked for first, where we
+   * know the customer code, so a second submission does not ask for a second
+   * number.
+   */
+  async #assign(
+    request: CreateVirtualAccountRequest,
+    identity: NonNullable<CreateVirtualAccountRequest['identity']>,
+  ): Promise<VirtualAccount> {
+    const known = request.customer.providerCustomerId;
+    if (known !== undefined && known !== '') {
+      const existing = await this.#existingAccount(known);
+      if (existing !== undefined) return existing;
+    }
+
+    /*
+     * PAYSTACK REQUIRES A PHONE NUMBER HERE, where `POST /dedicated_account`
+     * did not. Refused before anything is sent — with nothing sent, so the
+     * caller may ask the customer for one — rather than by Paystack in a
+     * sentence that would read as a problem with the BVN.
+     */
+    const phone = request.customer.phone;
+    if (phone === undefined || phone === '') {
+      throw new ProviderRejectedError(
+        PROVIDER,
+        'Paystack assigns an identified account only with a phone number, and this customer has none.',
+        'phone_required',
+      );
+    }
+
+    const preferredBank = (await this.#bankToAskFor()) ?? (await this.#firstApprovedBank());
+    if (preferredBank === undefined) {
+      /*
+       * `preferred_bank` is REQUIRED on this call and optional on the other.
+       * With the setting empty and Paystack naming no provider we can use,
+       * there is no bank to ask for — an operator's problem, said in the
+       * operator's words and sent nowhere.
+       */
+      throw new ProviderRejectedError(
+        PROVIDER,
+        'paystack_preferred_bank is empty and Paystack named no NUBAN provider for this ' +
+          'integration, so there is no bank to assign an identified account at.',
+        'preferred_bank_unset',
+      );
+    }
+
+    await this.#client.request('POST', PAYSTACK_ENDPOINTS.assignDedicatedAccount, {
+      email: request.customer.email,
+      first_name: request.customer.firstName,
+      last_name: request.customer.lastName,
+      phone,
+      preferred_bank: preferredBank,
+      country: 'NG',
+      bvn: identity.bvn,
+      bank_code: identity.bankCode,
+      account_number: identity.accountNumber,
+    });
+
+    throw new ProviderPendingError(
+      PROVIDER,
+      'Paystack is matching the BVN to the bank account and will assign the number when it ' +
+        'has; the outcome arrives on dedicatedaccount.assign.success or .failed.',
+    );
+  }
+
+  /**
+   * THE BANKS A CUSTOMER MAY NAME on the identity form — Paystack's own
+   * Nigerian list, so the code that goes to `/dedicated_account/assign` is one
+   * Paystack issued. Filtered as the payout adapter filters it: a mobile
+   * money wallet or an inactive entry cannot hold an account on a BVN.
+   */
+  async identityBanks(): Promise<readonly IdentityBank[]> {
+    const payload = await this.#client.request('GET', PAYSTACK_ENDPOINTS.banks('nigeria', 'NGN'));
+    const parsed = bankListResponse.safeParse(payload);
+    if (!parsed.success) {
+      throw new ProviderContractError(
+        PROVIDER,
+        `bank list does not match the expected shape: ${issues(parsed.error)}`,
+        parsed.error,
+      );
+    }
+    return parsed.data.data
+      .filter((bank) => bank.active !== false && (bank.type ?? 'nuban') === 'nuban')
+      .map((bank) => ({ code: bank.code, name: bank.name }));
+  }
+
+  /**
+   * The first NUBAN provider Paystack says this integration may name, when
+   * the operator named none.
+   *
+   * NOT A GUESS: it is Paystack's own list of banks this business is approved
+   * for, and any of them is a valid answer. The setting still wins wherever
+   * it is filled in — this only stops an empty box from refusing every
+   * customer on the one call where the bank is required.
+   */
+  async #firstApprovedBank(): Promise<string | undefined> {
+    try {
+      const payload = (await this.#client.request(
+        'GET',
+        PAYSTACK_ENDPOINTS.dedicatedAccountProviders,
+      )) as { data?: unknown };
+      if (!Array.isArray(payload.data)) return undefined;
+      for (const row of payload.data) {
+        const slug = (row as { provider_slug?: unknown } | null)?.provider_slug;
+        if (typeof slug === 'string' && slug !== '') return slug;
+      }
+      return undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   /**
@@ -245,6 +399,15 @@ export class PaystackFundingAdapter implements FundingPort {
         isStaleCustomerRefusal(error.message)
       ) {
         return this.#issue(request, await this.#createCustomer(request), false);
+      }
+      /*
+       * "CUSTOMER HAS NOT BEEN IDENTIFIED" IS A QUESTION FOR THE CUSTOMER, not
+       * a failure. Given its own code so the service can ask them for the BVN
+       * and bank account Paystack wants, instead of telling them the account
+       * "could not be opened" — which is what every new customer read.
+       */
+      if (error instanceof ProviderRejectedError && isIdentityRequiredRefusal(error.message)) {
+        throw new ProviderRejectedError(PROVIDER, error.message, 'identity_required', error);
       }
       throw error;
     }

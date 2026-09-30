@@ -2150,6 +2150,54 @@ Router in `apps/api/src/routing/provider-router.service.ts`, liquidity in
   081 republishes the privacy notice naming that before the first one
   leaves. 077's suite now asserts `>=` its version, the lesson 075's learned.
 
+### Naira accounts on Paystack alone, and the identity Paystack asks for — non-obvious rules
+
+Schema: `packages/ledger/sql/089_paystack_identity.sql`. Adapter in
+`packages/providers/src/paystack/funding-adapter.ts`, service
+`FundingService.identify()`, form on Add Money in both apps.
+
+- **THE OWNER ASSIGNED NAIRA ACCOUNTS TO PAYSTACK AND THE REQUEST WENT TO
+  FLUTTERWAVE AND BITNOB ANYWAY.** 079 shipped `account_fallback` ON, so after
+  Paystack refused, the customer's details went to two more companies and
+  `/admin/diagnostics` showed three refusals for one request. 089 turns it off
+  and makes OFF the default, in the column and in `DEFAULT_POLICY`. A route
+  names who serves; trying another rail is an operator's deliberate choice.
+- **"CUSTOMER HAS NOT BEEN IDENTIFIED" IS PAYSTACK'S REGULATORY GATE, NOT OUR
+  BUG.** HTTP 400 on `POST /dedicated_account`, for businesses in the Betting,
+  Financial Services and General Services categories. No change to our request
+  removes it (round 29 added the name and phone, and it stayed). What Paystack
+  wants is a BVN and a bank account on that BVN, which it matches ITSELF — so
+  the adapter relays it as `identity_required`, the customer is asked for those
+  three values, and they go to `POST /dedicated_account/assign`. There is no
+  reviewer.
+- **THE BVN IS NOT STORED.** `account_identity_checks` holds 025's keyed
+  fingerprint, two last fours and the outcome. The fingerprint is what enforces
+  one BVN, one customer, by trigger, against both this table and
+  `kyc_submissions` — and a clash answers `account_identity_failed`, the same as
+  a mismatch, so the form cannot tell anybody whether a BVN banks here.
+- **IT IS NOT A REFUSAL AND IS NOT RECORDED AS ONE.** `identity_required` never
+  reaches `account_refusals`. A question for the customer is not a fault an
+  operator can fix, and recording it put every new customer on the diagnostics
+  screen. 089 deletes the rows it answered.
+- **ASSIGN ANSWERS "IN PROGRESS".** That is `ProviderPendingError`, which the
+  apps already render as "your account is being opened"; the form then asks
+  again every eight seconds for two minutes. `dedicatedaccount.assign.success`
+  is a DOORBELL: the account is then opened through the ordinary path, which
+  READS Paystack's accounts before creating. `customeridentification.success`
+  alone opens nothing, because asking for an account while the assignment is
+  still running is how a customer gets two numbers.
+- **BOUNDED, AND NO PIN.** Five submissions a day and one in flight per
+  customer. A PIN would stop the new customer this exists for; a BVN form with
+  no ceiling is a way to test BVNs against bank accounts at Paystack's expense.
+- **`preferred_bank` IS REQUIRED ON ASSIGN AND OPTIONAL ELSEWHERE.** With the
+  setting empty the adapter takes the first provider Paystack's own
+  `available_providers` names, which is a list of banks this business is
+  approved for, not a guess. The phone number is required too, and is asked
+  for by name (`profile_incomplete`, field `phone`) before anything is sent.
+- **THE NOTICE SAID IT FIRST.** 089 republishes the privacy notice naming
+  Paystack as a BVN and bank-account recipient, and `processors.ts` says the
+  same, so `legal-content.test.ts` holds the two together.
+
 ### The assignment, the refusal nobody could read, and a paused service — non-obvious rules
 
 Schema: `packages/ledger/sql/082_refusals_and_details.sql`,
@@ -5003,6 +5051,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/085_verified_rests_on_i
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/086_legal_republish.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/087_scheduled_announcements.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/088_hollow_payouts.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/089_paystack_identity.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -5089,6 +5138,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/085_verified_rests_on_i
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/086_legal_republish.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/087_scheduled_announcements.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/088_hollow_payouts.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/089_paystack_identity.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

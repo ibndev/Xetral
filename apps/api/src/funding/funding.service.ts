@@ -2,6 +2,7 @@ import {
   ConflictException,
   ForbiddenException,
   HttpException,
+  HttpStatus,
   Inject,
   Injectable,
   Logger,
@@ -19,10 +20,16 @@ import {
   ProviderUnavailableError,
   providerDidNothing,
 } from '@xetral/providers';
-import type { FundingCustomer, FundingPort } from '@xetral/providers';
+import type {
+  AccountIdentity,
+  FundingCustomer,
+  FundingPort,
+  IdentityBank,
+  VirtualAccount,
+} from '@xetral/providers';
 import { CURRENCIES, toMajor } from '@xetral/shared';
 import type { Currency } from '@xetral/shared';
-import { open } from '@xetral/identity';
+import { blindIndex, open } from '@xetral/identity';
 import { API_CONFIG, DATABASE, FUNDING_PORT, LEDGER } from '../tokens.js';
 import { isMissingSchema, reportMissingSchema } from '../database-schema.js';
 import type { ApiConfig } from '../config.js';
@@ -77,6 +84,27 @@ interface AccountRow {
  * by a power of ten.
  */
 const FALLBACK_ACCOUNT_CURRENCY: Currency = 'NGN';
+
+/**
+ * How long a submission counts as "still being matched". Paystack's own
+ * documentation says assignment usually lands within a minute; half an hour
+ * is the point past which silence means the event was lost, and the
+ * customer may try again rather than wait on something that will not come.
+ */
+const IDENTITY_IN_FLIGHT = '30 minutes';
+
+/** Submissions a customer may make in a day. A BVN form with no ceiling is a
+ *  way to test BVNs against bank accounts at a provider's expense. */
+const IDENTITY_ATTEMPTS_PER_DAY = 5;
+
+function isIdentityRequired(error: unknown): boolean {
+  return error instanceof ProviderRejectedError && error.providerCode === 'identity_required';
+}
+
+function isOneBvnOneCustomer(error: unknown): boolean {
+  const e = error as { code?: unknown; constraint?: unknown } | null;
+  return e?.code === '23505' && e.constraint === 'account_identity_one_bvn_one_customer';
+}
 
 @Injectable()
 export class FundingService {
@@ -171,6 +199,290 @@ export class FundingService {
     }
   }
 
+  /**
+   * THE BANKS THE IDENTITY FORM OFFERS — from the rail that would receive the
+   * details, because the code goes back to the provider that issued it. Empty
+   * where the rail serving this customer never asks for identity.
+   */
+  async identityBanks(userUuid: string): Promise<readonly IdentityBank[]> {
+    const userId = await this.#activeUserId(userUuid);
+    const currency = await this.#accountCurrencyOf(userId);
+    const rail = (await this.#accountRailsFor(currency))[0] as string;
+    const switching = this.port as FundingPort & {
+      identityBanksAt?: (provider: string) => Promise<readonly IdentityBank[] | undefined>;
+    };
+    if (typeof switching.identityBanksAt !== 'function') return [];
+    try {
+      return (await switching.identityBanksAt(rail)) ?? [];
+    } catch (error) {
+      this.#logger.error(
+        `could not read ${rail}'s bank list for the identity form: ` +
+          (error instanceof Error ? error.message : String(error)),
+      );
+      throw new ServiceUnavailableException({ error: 'account_issue_unavailable' });
+    }
+  }
+
+  /**
+   * OPENS THE ACCOUNT A RAIL WOULD NOT OPEN UNTIL THE CUSTOMER WAS IDENTIFIED.
+   *
+   * Paystack answers "Customer has not been identified" for a business in a
+   * category it requires to identify its customers, and what it wants is a
+   * BVN and a bank account on it — which it matches ITSELF, with no reviewer
+   * here. So this sends exactly those three values to the rail the owner
+   * assigned, and nothing else of them survives the request: 089 keeps a
+   * keyed fingerprint (025's blind index), the last four of each, and the
+   * outcome.
+   *
+   * THE FINGERPRINT IS CHECKED BEFORE ANYTHING IS SENT. Every per-customer
+   * control assumes one person is one customer, so a BVN already standing for
+   * somebody else is refused by the database — with the same answer as a BVN
+   * that does not match its account, so the form cannot be used to learn
+   * whether a BVN banks here.
+   *
+   * NO PIN, deliberately. This brings money IN and moves none; a customer
+   * without a PIN is exactly the new customer this is for. It is bounded
+   * instead: five submissions a day, and one in flight at a time.
+   */
+  async identify(userUuid: string, identity: AccountIdentity): Promise<VirtualAccountView> {
+    try {
+      return await this.#identify(userUuid, identity);
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      this.#logger.error(
+        `SUBMITTING IDENTITY FOR A DEPOSIT ACCOUNT THREW SOMETHING THIS SERVICE DOES NOT ` +
+          `CLASSIFY: ${error instanceof Error ? error.name : 'unknown'}`,
+      );
+      if (error instanceof Error && error.stack !== undefined) this.#logger.error(error.stack);
+      throw new ServiceUnavailableException({ error: 'account_issue_unavailable' }, { cause: error });
+    }
+  }
+
+  async #identify(userUuid: string, identity: AccountIdentity): Promise<VirtualAccountView> {
+    const userId = await this.#activeUserId(userUuid);
+    const currency = await this.#accountCurrencyOf(userId);
+
+    const existing = await this.#accountOf(userId, currency);
+    if (existing !== undefined) return toAccountView(existing);
+
+    // THE RAIL THE OWNER ASSIGNED, and only it. 089's point is that the
+    // details go to one company, not to whichever will take them.
+    const rail = (await this.#accountRailsFor(currency))[0] as string;
+    const customer = await this.#fundingCustomer(userId, rail);
+    if (customer.phone === undefined || customer.phone === '') {
+      // The assign call requires one; asked for by name before anything is
+      // stored or sent, so the customer can add it on Settings and come back.
+      throw new ConflictException({ error: 'profile_incomplete', field: 'phone' });
+    }
+
+    const key = this.config.kycBlindIndexKey;
+    if (key === undefined) {
+      // Without the key the one-BVN-one-customer check cannot run, and
+      // sending a BVN nothing can match against is not a safe default.
+      throw new ServiceUnavailableException({ error: 'encryption_not_configured' });
+    }
+
+    let checkId: string;
+    try {
+      const recent = await this.pool.query<{ total: string; in_flight: string }>(
+        `SELECT count(*)::text AS total,
+                count(*) FILTER (WHERE status = 'submitted'
+                                   AND created_at > now() - $2::interval)::text AS in_flight
+           FROM account_identity_checks
+          WHERE user_id = $1::bigint AND created_at > now() - interval '1 day'`,
+        [userId, IDENTITY_IN_FLIGHT],
+      );
+      if (Number(recent.rows[0]?.in_flight ?? '0') > 0) {
+        // Paystack is still matching the last one. Sending again would be a
+        // second assignment request for one customer.
+        throw new ServiceUnavailableException({ error: 'account_issue_pending' });
+      }
+      if (Number(recent.rows[0]?.total ?? '0') >= IDENTITY_ATTEMPTS_PER_DAY) {
+        throw new HttpException({ error: 'too_many_attempts' }, HttpStatus.TOO_MANY_REQUESTS);
+      }
+
+      const inserted = await this.pool.query<{ id: string }>(
+        `INSERT INTO account_identity_checks
+           (user_id, provider, bvn_fingerprint, bvn_last4, bank_code, account_last4)
+         VALUES ($1::bigint, $2, $3, $4, $5, $6)
+         RETURNING id`,
+        [
+          userId,
+          rail,
+          blindIndex(identity.bvn, key),
+          identity.bvn.slice(-4),
+          identity.bankCode,
+          identity.accountNumber.slice(-4),
+        ],
+      );
+      const row = inserted.rows[0];
+      if (row === undefined) throw new Error('identity check insert returned no row');
+      checkId = row.id;
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      if (isOneBvnOneCustomer(error)) {
+        // The same answer as a mismatch, on purpose — see the method header.
+        this.#logger.warn(`an identity submission for user ${userId} named a BVN held by another customer`);
+        throw new UnprocessableEntityException({ error: 'account_identity_failed' });
+      }
+      if (isMissingSchema(error)) {
+        reportMissingSchema(this.#logger, error, 'recording an identity check (089)');
+        throw new ServiceUnavailableException({ error: 'account_issue_unavailable' });
+      }
+      throw error;
+    }
+
+    let issued: VirtualAccount;
+    try {
+      issued = await this.#createAt(rail, {
+        customer,
+        currency,
+        idempotencyKey: `xetral-va-${userId}-${currency}`,
+        identity,
+      });
+    } catch (error) {
+      if (error instanceof ProviderPendingError || error instanceof ProviderTimeoutError) {
+        // Sent, and the outcome is Paystack's to announce. The row stays
+        // `submitted`; the webhook or the next visit finishes it.
+        this.#relayAccountFailure(error, rail, currency);
+      }
+      if (error instanceof ProviderRejectedError) {
+        if (error.providerCode === 'phone_required') {
+          await this.#resolveCheck(checkId, 'failed', 'no phone number on the account');
+          throw new ConflictException({ error: 'profile_incomplete', field: 'phone' });
+        }
+        const aboutUs =
+          error.providerCode === 'preferred_bank_unset' ||
+          error.providerCode === 'http_401' ||
+          error.providerCode === 'http_403';
+        await this.#resolveCheck(checkId, 'failed', error.message);
+        if (aboutUs) {
+          // A key or a setting — an operator's to fix, and written down where
+          // they read it. The customer is not told their details were wrong.
+          this.#recordRefusal(rail, currency, error);
+          this.#relayAccountFailure(error, rail, currency);
+        }
+        // THE RAIL'S SENTENCE, to the log and the row, never the customer:
+        // it names our integration. The BVN is in neither.
+        this.#logger.warn(`${rail} refused identity details for user ${userId}: ${error.message}`);
+        throw new UnprocessableEntityException({ error: 'account_identity_failed' });
+      }
+      if (providerDidNothing(error)) {
+        await this.#resolveCheck(checkId, 'failed', error instanceof Error ? error.message : 'not sent');
+      }
+      this.#recordRefusal(rail, currency, error);
+      this.#relayAccountFailure(error, rail, currency);
+    }
+
+    await this.#resolveCheck(checkId, 'validated', null);
+    return this.#record(userId, issued, currency);
+  }
+
+  /**
+   * WHAT THE RAIL SAID, LATER — Paystack's `dedicatedaccount.assign.*` and
+   * `customeridentification.*` events, which carry the customer's email and
+   * nothing we act on beyond "success" or "failed".
+   *
+   * On success the account is then OPENED THROUGH THE ORDINARY PATH, which
+   * looks before it creates and so finds the number Paystack just assigned:
+   * the event is a doorbell, and what is recorded is Paystack's own answer to
+   * our read. A failure marks the check so the customer's next visit says
+   * their details did not match, rather than "still opening" for ever.
+   */
+  async identityOutcome(
+    provider: string,
+    email: string,
+    outcome: 'validated' | 'failed',
+    reason: string | undefined,
+  ): Promise<void> {
+    const found = await this.pool.query<{ id: string; uuid: string }>(
+      `SELECT id, uuid FROM users WHERE lower(email) = lower($1) LIMIT 1`,
+      [email],
+    );
+    const user = found.rows[0];
+    if (user === undefined) return;
+
+    try {
+      await this.pool.query(
+        `UPDATE account_identity_checks
+            SET status = $3, reason = $4, resolved_at = now()
+          WHERE id = (SELECT id FROM account_identity_checks
+                       WHERE user_id = $1::bigint AND provider = $2 AND status = 'submitted'
+                       ORDER BY id DESC LIMIT 1)`,
+        [user.id, provider, outcome, reason === undefined ? null : reason.slice(0, 500)],
+      );
+    } catch (error) {
+      if (!isMissingSchema(error)) throw error;
+    }
+
+    if (outcome === 'validated') {
+      try {
+        await this.accountFor(user.uuid);
+      } catch (error) {
+        // Not a reason to make Paystack retry an event that was delivered:
+        // the customer's next visit asks again.
+        this.#logger.warn(
+          `${provider} identified user ${user.id} and the account could not be read yet: ` +
+            (error instanceof Error ? error.message : String(error)),
+        );
+      }
+    }
+  }
+
+  /** Best effort: an outcome that cannot be written must not become a second failure. */
+  async #resolveCheck(
+    checkId: string,
+    status: 'validated' | 'failed',
+    reason: string | null,
+  ): Promise<void> {
+    await this.pool
+      .query(
+        `UPDATE account_identity_checks
+            SET status = $2, reason = $3, resolved_at = now()
+          WHERE id = $1::bigint AND status = 'submitted'`,
+        [checkId, status, reason === null ? null : reason.slice(0, 500)],
+      )
+      .catch((error: unknown) =>
+        this.#logger.error(
+          `could not record the outcome of identity check ${checkId}: ` +
+            (error instanceof Error ? error.message : String(error)),
+        ),
+      );
+  }
+
+  /**
+   * WHAT TO TELL A CUSTOMER THE RAIL WANTS IDENTIFIED — from the last time
+   * they gave their details, if they have.
+   *
+   * Still being matched: "your account is being opened". Refused: "those
+   * details did not match", so the form comes back with a reason rather than
+   * blank. Never given, or given so long ago nothing answered: the form.
+   */
+  async #identityAnswer(userId: string, rail: string): Promise<HttpException> {
+    let last: { status: string; fresh: boolean } | undefined;
+    try {
+      const found = await this.pool.query<{ status: string; fresh: boolean }>(
+        `SELECT status, created_at > now() - $3::interval AS fresh
+           FROM account_identity_checks
+          WHERE user_id = $1::bigint AND provider = $2
+          ORDER BY id DESC LIMIT 1`,
+        [userId, rail, IDENTITY_IN_FLIGHT],
+      );
+      last = found.rows[0];
+    } catch (error) {
+      // A deployment behind 089 has no record to read; the form is still the
+      // right answer, and submitting it names the missing migration.
+      if (!isMissingSchema(error)) throw error;
+    }
+    if (last?.status === 'failed') {
+      return new UnprocessableEntityException({ error: 'account_identity_failed' });
+    }
+    if (last !== undefined && last.fresh) {
+      return new ServiceUnavailableException({ error: 'account_issue_pending' });
+    }
+    return new UnprocessableEntityException({ error: 'account_identity_required' });
+  }
+
   async #openAccount(userUuid: string): Promise<VirtualAccountView> {
     const userId = await this.#activeUserId(userUuid);
 
@@ -262,6 +574,16 @@ export class FundingService {
         }
         break;
       } catch (error) {
+        /*
+         * "IDENTIFY THIS CUSTOMER FIRST" IS A QUESTION, NOT A REFUSAL — and it
+         * is the rail the owner assigned asking it, so no other rail is tried
+         * (089). The customer is asked for the BVN and bank account the rail
+         * wants, or told the answer to the last time they gave them. Not
+         * written to `account_refusals`: it is not a fault an operator can
+         * fix, and recording it put every new customer on the diagnostics
+         * screen as though something had broken.
+         */
+        if (isIdentityRequired(error)) throw await this.#identityAnswer(userId, rail);
         this.#recordRefusal(rail, currency, error);
         // Anything but a certain "no" stops here: that rail may have opened
         // an account, and asking another is a second live number.
@@ -291,6 +613,19 @@ export class FundingService {
     }
     if (issued === undefined) throw new Error('no funding rail was asked for an account');
 
+    return this.#record(userId, issued, currency);
+  }
+
+  /**
+   * WRITES THE ACCOUNT A RAIL OPENED, and answers the row — shared by the
+   * ordinary open and the identified one, so there is one INSERT and one
+   * race resolution rather than two copies that drift.
+   */
+  async #record(
+    userId: string,
+    issued: VirtualAccount,
+    currency: Currency,
+  ): Promise<VirtualAccountView> {
     /*
      * WRAPPED, because this INSERT writes columns a MIGRATION adds.
      *

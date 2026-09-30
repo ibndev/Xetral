@@ -190,10 +190,10 @@ export function RoutingPolicyPanel(props: {
         <span className="policy-row-text">
           <span className="name">Try the next provider when an account number is refused</span>
           <span className="sub">
-            Flutterwave and Bitnob open a naira account only for a verified
-            customer. With this on, Paystack opens one for everybody else.
-            Only a definite refusal moves on — never a timeout, which may
-            already have opened an account.
+            Off by default. With it on, a request the assigned provider refuses
+            is sent to every other provider that opens accounts in that
+            currency — each of which then receives the customer's details.
+            Only a definite refusal moves on, never a timeout.
           </span>
         </span>
         <span className="switch">

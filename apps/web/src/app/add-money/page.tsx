@@ -1,7 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { exponentFor, formatAmount, isValidAmount, nationalPhone, paymentLinkFor } from '@xetral/client';
+import { useEffect, useRef, useState } from 'react';
+import {
+  codeOf,
+  exponentFor,
+  formatAmount,
+  isValidAmount,
+  nationalPhone,
+  paymentLinkFor,
+} from '@xetral/client';
 import type { MomoAccount, XetralClient, XetralCountry } from '@xetral/client';
 import { MOMO_NETWORKS } from '@xetral/client';
 import { Shell } from '@/ui/shell';
@@ -277,6 +284,24 @@ export default function AddMoney() {
           <div className="activate" aria-live="polite">
             {opening !== 'done' ? (
               <p className="activate-lead">Setting up your account number…</p>
+            ) : opener.code === 'account_identity_required' ||
+              opener.code === 'account_identity_failed' ||
+              opener.code === 'account_issue_pending' ? (
+              /*
+               * THE BANK PARTNER'S QUESTION, ASKED — not a red sentence.
+               *
+               * Paystack will not open an account number for this business's
+               * customers until it has matched a BVN to a bank account, and
+               * it said so to every new customer as "Customer has not been
+               * identified", which reached them as "could not be opened ...
+               * this one is on us". Nothing on our side could change that
+               * answer; these three values do.
+               */
+              <IdentifyForAccount
+                client={client}
+                start={opener.code}
+                onOpened={() => account.reload()}
+              />
             ) : (
               <>
                 <p className="activate-lead">Your account number is not ready yet.</p>
@@ -351,6 +376,204 @@ export default function AddMoney() {
         either grows a rule the other does not have.
       */}
     </Shell>
+  );
+}
+
+/**
+ * THE BVN AND A BANK ACCOUNT ON IT, for the partner bank that asks (089).
+ *
+ * THREE FIELDS AND NOTHING ELSE. The name, email and phone go from the
+ * account, so a customer is never asked twice for what signup took; the BVN
+ * is the one thing Paystack needs to confirm who they are, and a bank account
+ * on it is how Paystack confirms it without a person reviewing anything.
+ *
+ * THEN IT WAITS, VISIBLY. Paystack matches and assigns asynchronously —
+ * usually inside a minute — so a submission answers "pending" and this panel
+ * asks again every few seconds for two minutes, rather than leaving the
+ * customer to guess whether to press something. The account appears in place
+ * the moment it exists.
+ */
+function IdentifyForAccount({
+  client,
+  start,
+  onOpened,
+}: {
+  readonly client: XetralClient;
+  readonly start: string | undefined;
+  readonly onOpened: () => void;
+}) {
+  const [mode, setMode] = useState<'form' | 'pending' | 'slow'>(
+    start === 'account_issue_pending' ? 'pending' : 'form',
+  );
+  const [failed, setFailed] = useState(start === 'account_identity_failed');
+  const [bvn, setBvn] = useState('');
+  const [bank, setBank] = useState('');
+  const [number, setNumber] = useState('');
+  const { busy, error, code, run } = useSubmit();
+  const banks = useLoad(
+    () => (mode === 'form' ? client.identityBanks() : Promise.resolve([])),
+    [client, mode],
+  );
+
+  /*
+   * ASKING AGAIN WHILE PAYSTACK MATCHES. Every eight seconds for two minutes:
+   * long enough for the minute Paystack documents, short enough that a tab
+   * left open does not ask for ever. The same POST the screen opened with,
+   * which reads Paystack's accounts before it asks for one.
+   */
+  const polls = useRef(0);
+  // A ref, so the parent's inline callback does not restart the timer on
+  // every render — which would reset the count and never reach "slow".
+  const opened = useRef(onOpened);
+  opened.current = onOpened;
+  useEffect(() => {
+    if (mode !== 'pending') return;
+    polls.current = 0;
+    const timer = setInterval(() => {
+      polls.current += 1;
+      if (polls.current > 15) {
+        clearInterval(timer);
+        setMode('slow');
+        return;
+      }
+      client.fundingAccount().then(
+        () => {
+          clearInterval(timer);
+          opened.current();
+        },
+        (cause: unknown) => {
+          const refused = codeOf(cause);
+          if (refused === 'account_identity_failed' || refused === 'account_identity_required') {
+            clearInterval(timer);
+            setFailed(refused === 'account_identity_failed');
+            setMode('form');
+          }
+        },
+      );
+    }, 8000);
+    return () => clearInterval(timer);
+  }, [mode, client]);
+
+  if (mode !== 'form') {
+    return (
+      <div className="identity-wait" aria-live="polite">
+        <span className="identity-wait-mark" aria-hidden>
+          <Icon name={mode === 'slow' ? 'clock' : 'shield'} size={20} />
+        </span>
+        <div>
+          <p className="activate-lead">
+            {mode === 'slow' ? 'Still confirming your details' : 'Confirming your details with the bank'}
+          </p>
+          <p className="hint">
+            {mode === 'slow'
+              ? 'This is taking longer than usual. Your account number will be here the next time you open this screen.'
+              : 'Your account number usually arrives within a minute. It will appear here — you can stay or come back.'}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const bvnOk = /^[0-9]{11}$/.test(bvn);
+  const numberOk = /^[0-9]{10}$/.test(number);
+  const ready = bvnOk && numberOk && bank !== '';
+
+  return (
+    <form
+      className="activate momo-form identity-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!ready) return;
+        void run(async () => {
+          try {
+            await client.identifyForAccount({ bvn, bankCode: bank, accountNumber: number });
+            onOpened();
+          } catch (cause) {
+            if (codeOf(cause) === 'account_issue_pending') {
+              setBvn('');
+              setMode('pending');
+              return undefined;
+            }
+            throw cause;
+          }
+          return undefined;
+        });
+      }}
+    >
+      <div className="identity-head">
+        <p className="activate-lead">Confirm it&rsquo;s you to get your account number</p>
+        <p className="hint">
+          Our bank partner, Paystack, must match your BVN to a bank account in your name before it
+          opens a Nigerian account number for you. It takes about a minute.
+        </p>
+      </div>
+
+      {failed && error === undefined && (
+        <div className="form-error">
+          <p className="error">
+            <Icon name="alert" size={16} /> Those details did not match. Check your BVN, bank and
+            account number, and try again.
+          </p>
+        </div>
+      )}
+
+      <div className="field">
+        <label htmlFor="id-bvn">BVN</label>
+        <input
+          id="id-bvn"
+          inputMode="numeric"
+          autoComplete="off"
+          maxLength={11}
+          placeholder="11 digits"
+          value={bvn}
+          onChange={(e) => setBvn(e.target.value.replace(/[^0-9]/g, '').slice(0, 11))}
+        />
+        <span className="hint">Dial *565*0# from the phone linked to your bank to see it.</span>
+      </div>
+
+      <div className="field">
+        <label htmlFor="id-bank">Bank</label>
+        <Select
+          id="id-bank"
+          value={bank}
+          onChange={setBank}
+          searchable
+          searchPlaceholder="Search banks"
+          placeholder={banks.loading ? 'Loading banks…' : 'Choose your bank'}
+          options={(banks.data ?? []).map((b) => ({ value: b.code, label: b.name }))}
+        />
+      </div>
+
+      <div className="field">
+        <label htmlFor="id-account">Account number</label>
+        <input
+          id="id-account"
+          inputMode="numeric"
+          autoComplete="off"
+          maxLength={10}
+          placeholder="10 digits, held on the same BVN"
+          value={number}
+          onChange={(e) => setNumber(e.target.value.replace(/[^0-9]/g, '').slice(0, 10))}
+        />
+      </div>
+
+      <button type="submit" className="block" disabled={busy || !ready}>
+        {busy
+          ? 'Sending…'
+          : !bvnOk
+            ? 'Enter your 11-digit BVN'
+            : bank === ''
+              ? 'Choose your bank'
+              : !numberOk
+                ? 'Enter your 10-digit account number'
+                : 'Get my account number'}
+      </button>
+      <p className="identity-note">
+        <Icon name="lock" size={14} /> Sent to Paystack to confirm who you are. Xetral keeps only the
+        last four digits.
+      </p>
+      <FormError error={error ?? banks.error} code={code ?? banks.code} />
+    </form>
   );
 }
 

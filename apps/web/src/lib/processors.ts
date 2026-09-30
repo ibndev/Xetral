@@ -64,8 +64,11 @@
  * birth, address or BVN reaches any provider.
  * `kyc.service.ts` mints `provider_customers.provider_customer_id` as
  * `xetral-<uuid>` — a string we invent — and makes no provider call at all;
- * Paystack's `/customer/:code/identification`, which is where a BVN would go,
- * is declared in the endpoint table and CALLED FROM NOWHERE.
+ * Paystack's `/customer/:code/identification` is still called from nowhere —
+ * BUT FROM 089 A BVN DOES GO TO PAYSTACK, on `/dedicated_account/assign`,
+ * when Paystack will not open a naira account number until it has matched
+ * the customer's BVN to a bank account on it. The customer types both on Add
+ * Money for that one request; neither is stored.
  */
 
 /** What a company does for a customer, and what of theirs reaches it. */
@@ -137,8 +140,11 @@ export const PROCESSORS: readonly Processor[] = [
       'Naira account numbers, card and bank checkouts, and transfers out to a Nigerian bank',
     receives:
       'Your name, email address and phone number, so an account number can be ' +
-      'opened in your name. For a transfer out, the destination account number ' +
-      'and the name the receiving bank returns for it.',
+      'opened in your name. If Paystack asks to confirm who you are before ' +
+      'opening it, your Bank Verification Number and the number of a bank ' +
+      'account held on it, which Paystack matches against each other. For a ' +
+      'transfer out, the destination account number and the name the ' +
+      'receiving bank returns for it.',
   },
   {
     via: 'adapter',

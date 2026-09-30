@@ -65,6 +65,14 @@ export const PAYSTACK_ENDPOINTS = {
 
   createDedicatedAccount: '/dedicated_account',
   /*
+   * CREATE, VALIDATE AND ASSIGN IN ONE CALL — the path a business Paystack
+   * requires to identify its customers must take. It takes the customer's
+   * BVN and a bank account on it, matches them itself, and answers "in
+   * progress"; the number arrives on `dedicatedaccount.assign.success`, or
+   * the refusal on `dedicatedaccount.assign.failed`.
+   */
+  assignDedicatedAccount: '/dedicated_account/assign',
+  /*
    * WHICH NUBAN PROVIDERS THIS INTEGRATION MAY NAME.
    *
    * The single most useful call for an operator, and the one nothing made.
@@ -291,5 +299,29 @@ export function isStaleCustomerRefusal(message: string): boolean {
     text.includes('invalid for your live domain') ||
     text.includes('invalid for your test domain') ||
     (text.includes('customer') && text.includes('domain'))
+  );
+}
+
+/**
+ * Does this refusal mean "Paystack will not open an account for this customer
+ * until they are identified"?
+ *
+ * THE SENTENCE PRODUCTION RECORDED, verbatim, on every new customer:
+ * "Customer has not been identified" — an HTTP 400 on `POST
+ * /dedicated_account`. It is Paystack's regulatory gate for businesses in the
+ * Betting, Financial Services and General Services categories, and no change
+ * to OUR request removes it: what it asks for is a BVN and a bank account on
+ * that BVN. Recognising it is what lets the customer be asked for exactly
+ * that, rather than told their account "could not be opened".
+ *
+ * Matched on the words rather than the status, because 400 is also every
+ * malformed request and those must stay refusals about us.
+ */
+export function isIdentityRequiredRefusal(message: string): boolean {
+  const text = message.toLowerCase();
+  return (
+    (text.includes('customer') && text.includes('not been identified')) ||
+    (text.includes('customer') && text.includes('not been validated')) ||
+    text.includes('identification is required')
   );
 }

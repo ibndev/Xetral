@@ -1,8 +1,9 @@
 import { Logger } from '@nestjs/common';
 import type { ProviderRouterService } from '../routing/provider-router.service.js';
-import { supportsDepositVerification } from '@xetral/providers';
+import { supportsAccountIdentity, supportsDepositVerification } from '@xetral/providers';
 import type {
   CreateVirtualAccountRequest,
+  IdentityBank,
   DepositLookup,
   FundingPort,
   ProviderDeposit,
@@ -141,6 +142,17 @@ export class SwitchingFundingPort implements FundingPort {
     const rows = (await this.#router.coverage()).filter((c) => c.operation === 'account');
     const currencies = [...new Set(rows.map((c) => c.currency))];
     return currencies.length === 0 ? ['NGN'] : currencies;
+  }
+
+  /**
+   * THE BANKS THE IDENTITY FORM OFFERS, from the rail that would receive the
+   * details — undefined when that rail never asks for them, which is how the
+   * API tells "this rail takes a BVN" from "this rail answered no banks".
+   */
+  async identityBanksAt(provider: string): Promise<readonly IdentityBank[] | undefined> {
+    const adapter = this.#adapters.get(provider);
+    if (adapter === undefined || !supportsAccountIdentity(adapter)) return undefined;
+    return adapter.identityBanks();
   }
 
   /** Open an account on one NAMED rail — the fallback's step. */

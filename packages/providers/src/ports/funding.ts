@@ -128,9 +128,39 @@ export interface DepositLookup {
   readonly providerCustomerRef: string | undefined;
 }
 
+/**
+ * WHAT A RAIL MAY ASK FOR BEFORE IT OPENS AN ACCOUNT: a BVN and a bank
+ * account held on it, which the rail matches itself.
+ *
+ * Paystack refuses a dedicated account with "Customer has not been
+ * identified" for businesses in the Betting, Financial Services and General
+ * Services categories, and nothing about OUR request changes that answer —
+ * what it wants is exactly these three values. They are typed by the customer
+ * on the request that sends them, handed to the one adapter that asked, and
+ * never stored: 089 keeps a keyed fingerprint and two last fours.
+ *
+ * NEVER LOGGED. Nothing here may be interpolated into a message, and an
+ * adapter that fails puts the RAIL's sentence in its error, not these.
+ */
+export interface AccountIdentity {
+  /** Eleven digits. */
+  readonly bvn: string;
+  /** The rail's own code for the customer's bank, from its bank list. */
+  readonly bankCode: string;
+  /** Ten digits, held at `bankCode` on the same BVN. */
+  readonly accountNumber: string;
+}
+
 export interface CreateVirtualAccountRequest {
   readonly customer: FundingCustomer;
   readonly currency: Currency;
+  /**
+   * Present only on the request a customer made by filling in the identity
+   * form, after this rail refused with `identity_required`. An adapter that
+   * has no use for it ignores it; one that does sends it and nothing else of
+   * it survives the call.
+   */
+  readonly identity?: AccountIdentity;
   /**
    * Caller-generated and stable across retries.
    *
@@ -203,4 +233,29 @@ export function supportsDepositVerification(
   port: FundingPort,
 ): port is FundingPort & DepositVerifier {
   return typeof (port as Partial<DepositVerifier>).verifyDeposit === 'function';
+}
+
+/** A bank a customer may name as holding an account on their BVN. */
+export interface IdentityBank {
+  /** The rail's own code, sent back verbatim as `AccountIdentity.bankCode`. */
+  readonly code: string;
+  readonly name: string;
+}
+
+/**
+ * AN OPTIONAL CAPABILITY: a rail that may ask for an `AccountIdentity` before
+ * it opens an account, and the bank list its codes come from.
+ *
+ * The list is the RAIL'S, not the payout rail's: the code goes back to the
+ * same provider that published it, which is 059's rule about a bank code
+ * meaning nothing to anybody but its issuer.
+ */
+export interface AccountIdentityCapable {
+  identityBanks(): Promise<readonly IdentityBank[]>;
+}
+
+export function supportsAccountIdentity(
+  port: FundingPort,
+): port is FundingPort & AccountIdentityCapable {
+  return typeof (port as Partial<AccountIdentityCapable>).identityBanks === 'function';
 }

@@ -1939,6 +1939,43 @@ select {
 .activate.momo-form .field { margin-bottom: 0; }
 
 /*
+ * CONFIRMING WHO A CUSTOMER IS, for the bank partner that asks (089).
+ *
+ * The same panel rhythm as the wallet form, with the question stated in two
+ * lines above it and the privacy line under the button — close to the act it
+ * describes, in the quieter ink, so it reads as a promise rather than a
+ * warning. The waiting state is a row with a mark, not a spinner: Paystack
+ * takes about a minute, and a spinner for a minute reads as something stuck.
+ */
+.identity-form { gap: var(--s-3); }
+.identity-head { display: grid; gap: 4px; }
+.identity-form .field .hint { margin-top: 4px; }
+.identity-note {
+  display: flex; align-items: center; gap: 6px;
+  margin: -4px 0 0;
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+.identity-wait {
+  display: flex; align-items: flex-start; gap: 12px;
+  margin-top: var(--s-4);
+  padding: 16px;
+  border-radius: 16px;
+  background: var(--surface);
+  border: 1px solid var(--edge);
+  box-shadow: var(--card-shadow);
+}
+.identity-wait > div { display: grid; gap: 4px; min-width: 0; }
+.identity-wait-mark {
+  flex: none;
+  display: grid; place-items: center;
+  width: 36px; height: 36px;
+  border-radius: 999px;
+  background: var(--iris-tint);
+  color: var(--iris-text);
+}
+
+/*
  * THE DIALLING CODE IS THE COUNTRY PICKER, and there is no longer a second
  * one above it.
  *

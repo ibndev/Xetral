@@ -200,6 +200,14 @@ function sentenceFor(error: ApiError): string {
     case 'account_issue_unavailable':
       return 'We could not reach the bank just now. Try again in a few minutes.';
     /*
+     * NOT AN ERROR ON THE SCREEN — the Add Money form draws itself from these
+     * two codes. The sentences are for anywhere else that meets them.
+     */
+    case 'account_identity_required':
+      return 'Our bank partner needs your BVN and a bank account in your name to open your account number.';
+    case 'account_identity_failed':
+      return 'Those details did not match. Check your BVN, bank and account number, and try again.';
+    /*
      * NOT "TRY AGAIN SHORTLY", because it will never work.
      *
      * The rail serving this country does not issue dedicated account numbers

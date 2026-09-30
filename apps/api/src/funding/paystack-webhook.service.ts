@@ -111,6 +111,28 @@ export class PaystackWebhookService {
       return;
     }
 
+    /*
+     * THE OUTCOME OF IDENTIFYING A CUSTOMER (089). Paystack posts these to the
+     * same URL, and like transfers they fell into the charge parser, which
+     * throws on a shape it does not know — so Paystack would retry them for
+     * ever and the customer's screen would say "still opening" for ever.
+     *
+     * Only `assign.success` leads to anything being opened, and then through
+     * the ordinary path, which READS Paystack's accounts before creating: the
+     * event says which customer to look at, never what the account is.
+     * `customeridentification.success` alone opens nothing — the assignment
+     * it belongs to is still running, and asking for an account in parallel
+     * is how a customer ends up with two numbers.
+     */
+    const identity = identityEventOf(rawBody);
+    if (identity !== undefined) {
+      if (identity.outcome !== undefined) {
+        await this.funding.identityOutcome(PROVIDER, identity.email, identity.outcome, identity.reason);
+      }
+      this.#logger.log(`paystack ${identity.event}`);
+      return;
+    }
+
     const event = parsePaystackWebhook(rawBody);
 
     /*
@@ -355,3 +377,47 @@ function transferEventOf(
   };
 }
 
+/**
+ * A `dedicatedaccount.assign.*` or `customeridentification.*` event, reduced
+ * to the customer's email and what happened. The BVN Paystack echoes back
+ * masked is not read at all.
+ */
+function identityEventOf(rawBody: string):
+  | {
+      readonly event: string;
+      readonly email: string;
+      /** Undefined where the event decides nothing on its own. */
+      readonly outcome: 'validated' | 'failed' | undefined;
+      readonly reason: string | undefined;
+    }
+  | undefined {
+  let json: unknown;
+  try {
+    json = JSON.parse(rawBody);
+  } catch {
+    return undefined;
+  }
+  const body = json as {
+    event?: unknown;
+    data?: { email?: unknown; reason?: unknown; customer?: { email?: unknown } | null };
+  };
+  const event = body.event;
+  if (
+    typeof event !== 'string' ||
+    !(event.startsWith('dedicatedaccount.assign.') || event.startsWith('customeridentification.'))
+  ) {
+    return undefined;
+  }
+  const named = body.data?.customer?.email ?? body.data?.email;
+  // No email names nobody: acknowledged rather than handed to the charge
+  // parser, which would throw and have Paystack retry it for ever.
+  const email = typeof named === 'string' ? named : '';
+  const reason = typeof body.data?.reason === 'string' ? body.data.reason : undefined;
+  const outcome =
+    event === 'dedicatedaccount.assign.success'
+      ? 'validated'
+      : event.endsWith('.failed')
+        ? 'failed'
+        : undefined;
+  return { event, email, outcome: email === '' ? undefined : outcome, reason };
+}
