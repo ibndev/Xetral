@@ -4191,7 +4191,7 @@ Schema: `packages/ledger/sql/023_entry_status.sql`.
 
 ### Sign-in events — non-obvious rules
 
-Schema: `packages/ledger/sql/024_sign_in_events.sql`. Service in
+Schema: `packages/ledger/sql/024_sign_in_events.sql`, `090_sign_in_country_relayed.sql`. Service in
 `apps/api/src/auth/sign-in-events.service.ts`.
 
 - **The FAILURES are the half that was missing.** A password sprayed across
@@ -4206,6 +4206,26 @@ Schema: `packages/ledger/sql/024_sign_in_events.sql`. Service in
   The edge already computes it, so there is no provider to keep current and
   nothing extra to be down. It is trusted on exactly the terms
   `x-forwarded-for` is: it describes a sign-in and never authorises one.
+- **BUT NEVER THE ONE ON THE API'S OWN REQUEST — that is the web server's.**
+  Every customer request reaches the API through the web app (the phone via
+  `/api/x`), and that second trip through Cloudflare is stamped with the
+  SERVER'S country. A customer signing in from Lagos was emailed "Sign-in
+  from a new country: DE" beside a Cloudflare address. The web proxy relays
+  `CF-IPCountry` and `CF-Connecting-IP` from the CUSTOMER'S request as
+  `x-xetral-client-*`, and `signInOriginFrom` trusts them only beside
+  `WEB_PROXY_SECRET` — the same value on both services — because a forged
+  "NG" is how a takeover from elsewhere would keep the alert quiet. With no
+  secret the country is absent, and an unplaceable sign-in raises nothing:
+  quiet, never wrong.
+- **THE COUNTRIES ALREADY RECORDED ARE THE SERVER'S, AND THEY CANNOT BE
+  EDITED** — the table refuses an UPDATE at any age. Compared against them,
+  every existing customer's first correctly placed sign-in would read "new
+  country: NG", once each, the day the fix went live. 090 adds
+  `country_relayed` (FALSE on every older row) and `sign_in_is_familiar`
+  reads relayed countries only; an account with none has been nowhere, so
+  its first placed sign-in is a BASELINE rather than a move — which also
+  stops a new account being alerted from the country it registered in.
+  Behind 090 the service probes the column and keeps the alert off.
 - **The identifier is stored as a SHA-256 hash.** A failed attempt against an
   address that matched no account is somebody else's email, put there by
   whoever guessed it; in the clear this table is a list of addresses under
@@ -5052,6 +5072,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/086_legal_republish.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/087_scheduled_announcements.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/088_hollow_payouts.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/089_paystack_identity.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/090_sign_in_country_relayed.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -5139,6 +5160,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/086_legal_republish.tes
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/087_scheduled_announcements.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/088_hollow_payouts.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/089_paystack_identity.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/090_sign_in_country_relayed.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

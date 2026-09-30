@@ -503,8 +503,8 @@ function IdentifyForAccount({
       <div className="identity-head">
         <p className="activate-lead">Confirm it&rsquo;s you to get your account number</p>
         <p className="hint">
-          Our bank partner, Paystack, must match your BVN to a bank account in your name before it
-          opens a Nigerian account number for you. It takes about a minute.
+          Our bank partner must match your BVN to a bank account in your name before it opens a
+          Nigerian account number for you. It takes about a minute.
         </p>
       </div>
 
@@ -569,8 +569,7 @@ function IdentifyForAccount({
                 : 'Get my account number'}
       </button>
       <p className="identity-note">
-        <Icon name="lock" size={14} /> Sent to Paystack to confirm who you are. Xetral keeps only the
-        last four digits.
+        <Icon name="lock" size={14} /> Xetral keeps only the last four digits.
       </p>
       <FormError error={error ?? banks.error} code={code ?? banks.code} />
     </form>

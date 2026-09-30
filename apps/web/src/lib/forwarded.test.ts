@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { forwardedFor } from './forwarded';
 
 /**
@@ -38,5 +38,38 @@ describe('forwarding the caller address', () => {
     // which is what it did before this existed.
     const request = new Request('https://xetral.com/api/x/v1/wallets');
     expect(forwardedFor(request)).toEqual({});
+  });
+});
+
+/**
+ * The customer's country, relayed — because the one on the API's own request
+ * is this server's. A customer in Lagos was emailed "new country: DE".
+ */
+describe('relaying where the customer was', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  const fromLagos = () =>
+    new Request('https://xetral.com/api/x/v1/auth/login', {
+      headers: { 'cf-connecting-ip': '102.89.40.7', 'cf-ipcountry': 'NG' },
+    });
+
+  it("sends Cloudflare's answer about the customer's request, vouched by the secret", () => {
+    vi.stubEnv('WEB_PROXY_SECRET', 'shared-between-web-and-api');
+    expect(forwardedFor(fromLagos())).toEqual({
+      'x-xetral-proxy-secret': 'shared-between-web-and-api',
+      'x-xetral-client-ip': '102.89.40.7',
+      'x-xetral-client-country': 'NG',
+    });
+  });
+
+  it('sends nothing without the secret, so the API records no country rather than a wrong one', () => {
+    vi.stubEnv('WEB_PROXY_SECRET', '');
+    expect(forwardedFor(fromLagos())).toEqual({});
+  });
+
+  it('invents no country the edge did not give', () => {
+    vi.stubEnv('WEB_PROXY_SECRET', 'shared-between-web-and-api');
+    const request = new Request('https://xetral.com/api/x/v1/auth/login');
+    expect(forwardedFor(request)).toEqual({ 'x-xetral-proxy-secret': 'shared-between-web-and-api' });
   });
 });

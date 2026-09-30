@@ -154,6 +154,21 @@ export interface ApiConfig {
   readonly metricsToken: string | undefined;
 
   /**
+   * What the web app's proxy presents to say "this sign-in came through me,
+   * and here is where the customer really was".
+   *
+   * EVERY CUSTOMER REQUEST ARRIVES THROUGH THE WEB APP — the browser directly,
+   * the phone through `/api/x` — so the `CF-IPCountry` and address on the
+   * request the API receives describe the WEB SERVER, which Cloudflare places
+   * in Germany. A customer signing in from Lagos was told their account had
+   * been used from DE. Only the proxy saw the customer's own request, so only
+   * the proxy can say where it came from, and a header anybody could send is
+   * trusted only beside this secret. Unset, the country is not read at all and
+   * the new-country alert stays quiet rather than wrong.
+   */
+  readonly webProxySecret: string | undefined;
+
+  /**
    * Keys for sealing what must be stored but not stored in the clear: an
    * electricity token, an eSIM activation code.
    *
@@ -902,6 +917,7 @@ export function loadConfig(env: Env): ApiConfig {
     paystackBaseUrl: optional(env, 'PAYSTACK_BASE_URL') ?? 'https://api.paystack.co',
     paystackPreferredBank: optional(env, 'PAYSTACK_PREFERRED_BANK'),
     metricsToken: optional(env, 'METRICS_TOKEN'),
+    webProxySecret: optional(env, 'WEB_PROXY_SECRET'),
     encryptionKeyring: parseEncryptionKeyring(env),
     kycBlindIndexKey: parseBlindIndexKey(env),
     // Live only in production. VTpass keeps two hosts, so the default follows

@@ -473,6 +473,7 @@ export class FundingDiagnosticsService {
       ['push_broadcasts.send_at', '087_scheduled_announcements.sql'],
       ['hollow_payouts', '088_hollow_payouts.sql'],
       ['account_identity_checks', '089_paystack_identity.sql'],
+      ['sign_in_events.country_relayed', '090_sign_in_country_relayed.sql'],
     ];
 
     const missing: string[] = [];

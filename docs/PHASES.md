@@ -47,6 +47,7 @@ shipped, that is called out explicitly.
 | 36 — A whole-code inspection, and the gates that were red | ✅ | |
 | 37 — The advisories left, and the scans nobody could read | ✅ | Expo SDK 57, for the last four advisories |
 | 38 — Naira accounts on Paystack alone, and the identity Paystack asks for | ✅ | migration 089; Paystack's assign webhooks on the deposit URL |
+| 39 — A sign-in from Germany that was our own server | ✅ | migration 090; `WEB_PROXY_SECRET` on the api and web services |
 
 All eleven phases are built, a **pre-deployment audit** (Phase 12) closed what
 building them phase by phase had left between the phases, and **Phase 13** is
@@ -2859,3 +2860,29 @@ Program, run `npx eas init` in `apps/mobile` and commit the `projectId`, then
 webhook URL, so nothing needs adding if it is already set); and set
 `paystack_preferred_bank` on Settings to the bank to assign at, or leave it
 empty to use the first one Paystack names.
+
+---
+
+## Phase 39 — A sign-in from Germany that was our own server ✅
+
+| File | What it is |
+|---|---|
+| `apps/web/src/lib/forwarded.ts` | the customer's country and address, relayed and vouched |
+| `apps/api/src/auth/sign-in-events.service.ts` | `signInOriginFrom`: the relayed origin, or none |
+| `packages/ledger/sql/090_sign_in_country_relayed.sql` | only a relayed country is where a customer has been |
+| `apps/web/src/app/add-money/page.tsx`, `apps/mobile/app/add-money.tsx` | no provider named on the identity form |
+
+1. **A customer signing in from Lagos was emailed "new country: DE".** The
+   country on the API's request described the web server, which reaches the
+   API through Cloudflare from Germany. The web app now relays the customer's
+   own, and the API reads no other.
+2. **Every existing history says DE**, and rows cannot be edited, so the
+   first correct sign-in would have alerted "new country: NG" once per
+   customer. 090 marks relayed countries and compares only against those;
+   the first placed sign-in is a baseline, not a move.
+3. **The Add Money identity form named Paystack**; it says "our bank partner".
+
+**Before this goes live, an operator must:** apply **090**, and set `WEB_PROXY_SECRET` to the
+same random value on the api and web services (`openssl rand -hex 32`).
+Until then sign-ins are recorded without a country and the new-country email
+does not fire — quiet, never wrong.

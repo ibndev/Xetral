@@ -1,4 +1,5 @@
-import { createHash } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
+import { isIP } from 'node:net';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { Pool, PoolClient } from 'pg';
 import { DATABASE } from '../tokens.js';
@@ -31,7 +32,9 @@ export interface SignInOrigin {
    *  `TRUST_PROXY_HOPS`. Absent when the request did not arrive through the
    *  edge — itself a thing worth being able to see. */
   readonly ip?: string | undefined;
-  /** Cloudflare's `CF-IPCountry`, if the edge set one. */
+  /** Cloudflare's `CF-IPCountry` for the CUSTOMER'S request, as the web
+   *  proxy relays it — never the header on the request we received, which
+   *  describes the web server. See `signInOriginFrom`. */
   readonly country?: string | undefined;
   readonly platform?: SignInPlatform | undefined;
 }
@@ -49,14 +52,78 @@ export interface Familiarity {
  */
 const COUNTRY = /^[A-Z0-9]{2}$/;
 
-export function countryFrom(
-  headers: Readonly<Record<string, string | string[] | undefined>>,
-): string | undefined {
-  const raw = headers['cf-ipcountry'];
-  const value = Array.isArray(raw) ? raw[0] : raw;
+type Headers = Readonly<Record<string, string | string[] | undefined>>;
+
+/**
+ * The three headers the web app's proxy adds. Lower-case, because that is how
+ * Node hands them over, and the web side imports nothing from here — the
+ * names are asserted equal by `sign-in-origin.test.ts` on both sides.
+ */
+export const PROXY_HEADERS = {
+  secret: 'x-xetral-proxy-secret',
+  ip: 'x-xetral-client-ip',
+  country: 'x-xetral-client-country',
+} as const;
+
+const first = (headers: Headers, name: string): string | undefined => {
+  const raw = headers[name];
+  return Array.isArray(raw) ? raw[0] : raw;
+};
+
+const countryCode = (value: string | undefined): string | undefined => {
   if (value === undefined) return undefined;
   const upper = value.toUpperCase();
   return COUNTRY.test(upper) ? upper : undefined;
+};
+
+/** Compared as digests so the lengths always match and the time says nothing. */
+const sameSecret = (presented: string | undefined, expected: string): boolean => {
+  if (presented === undefined) return false;
+  const a = createHash('sha256').update(presented, 'utf8').digest();
+  const b = createHash('sha256').update(expected, 'utf8').digest();
+  return timingSafeEqual(a, b);
+};
+
+/**
+ * Where a sign-in came from — the CUSTOMER, not the hop in front of us.
+ *
+ * `CF-IPCOUNTRY` ON THIS REQUEST DESCRIBES OUR OWN WEB SERVER. Every customer
+ * request reaches the API through the web app — a browser directly, the phone
+ * through `/api/x` — and the web app's request to the API is a second trip
+ * through Cloudflare, which stamps the country of whoever opened THAT
+ * connection: the server, in Germany. So a customer signing in from Lagos was
+ * emailed "Sign-in from a new country: DE" with a Cloudflare address beside
+ * it, which is the message most likely to make somebody think their money is
+ * being taken. The header was never read on the documented topology either:
+ * there the web reaches the API privately and no country arrives at all.
+ *
+ * SO THE COUNTRY IS READ ONLY WHERE THE PROXY VOUCHES FOR IT. The proxy saw
+ * the customer's own request and copies Cloudflare's answer about THAT one;
+ * the secret is what stops a caller reaching the API some other way from
+ * typing a country of its choosing — a forged "NG" is how a takeover from
+ * elsewhere would keep this alert quiet. Without a matching secret the
+ * country is absent, and an unplaceable sign-in raises nothing: quiet is the
+ * safe direction for a message whose only job is to be believed.
+ *
+ * The address follows the same rule, falling back to `req.ip` — which still
+ * serves the failure counting that only needs addresses to be consistent.
+ */
+export function signInOriginFrom(
+  headers: Headers,
+  requestIp: string | undefined,
+  proxySecret: string | undefined,
+): { readonly ip: string | undefined; readonly country: string | undefined } {
+  const vouched =
+    proxySecret !== undefined &&
+    proxySecret !== '' &&
+    sameSecret(first(headers, PROXY_HEADERS.secret), proxySecret);
+  if (!vouched) return { ip: requestIp, country: undefined };
+
+  const clientIp = first(headers, PROXY_HEADERS.ip)?.trim();
+  return {
+    ip: clientIp !== undefined && isIP(clientIp) !== 0 ? clientIp : requestIp,
+    country: countryCode(first(headers, PROXY_HEADERS.country)),
+  };
 }
 
 /**
@@ -76,7 +143,45 @@ export function identifierHash(identifier: string): string {
 export class SignInEventService {
   readonly #logger = new Logger(SignInEventService.name);
 
+  #relayColumn: { readonly has: boolean; readonly at: number } | undefined;
+
   constructor(@Inject(DATABASE) private readonly pool: Pool) {}
+
+  /**
+   * Whether 090 is applied — `sign_in_events.country_relayed`.
+   *
+   * WITHOUT IT THE NEW-COUNTRY ALERT IS SILENT, deliberately. Every country
+   * written before the relay existed is the web server's (DE), so comparing a
+   * customer's first correctly placed sign-in against that history emails
+   * every customer "new country: NG" once — the panic this round removes.
+   * Only 090 can tell the two kinds of row apart, so behind it the answer is
+   * "seen before". Code ships ahead of migrations here (069, 087), so this is
+   * probed rather than assumed: present is cached for good, absent for a
+   * minute, and `pg_attribute` because `information_schema` answers about
+   * grants.
+   */
+  async #relayed(client: PoolClient): Promise<boolean> {
+    const cached = this.#relayColumn;
+    if (cached !== undefined && (cached.has || Date.now() - cached.at < 60_000)) {
+      return cached.has;
+    }
+    const result = await client.query<{ n: number }>(
+      `SELECT count(*)::int AS n
+         FROM pg_attribute
+        WHERE attrelid = to_regclass('sign_in_events')
+          AND attname = 'country_relayed'
+          AND NOT attisdropped`,
+    );
+    const has = Number(result.rows[0]?.n ?? 0) === 1;
+    if (!has && cached?.has !== false) {
+      this.#logger.warn(
+        'sign_in_events has no country_relayed: migration 090_sign_in_country_relayed.sql ' +
+          'is not applied. The new-country sign-in email stays off until it is.',
+      );
+    }
+    this.#relayColumn = { has, at: Date.now() };
+    return has;
+  }
 
   /**
    * Whether this account has been seen at this place before — asked BEFORE the
@@ -102,7 +207,10 @@ export class SignInEventService {
       // manufacture a security alert on every sign-in from a client we simply
       // cannot place.
       ipSeenBefore: row?.ip_seen_before ?? true,
-      countrySeenBefore: row?.country_seen_before ?? true,
+      // Behind 090 the history is the web server's country; see `#relayed`.
+      countrySeenBefore: (await this.#relayed(client))
+        ? (row?.country_seen_before ?? true)
+        : true,
     };
   }
 
@@ -123,6 +231,25 @@ export class SignInEventService {
       readonly origin: SignInOrigin;
     },
   ): Promise<void> {
+    // Every country that reaches here came through the vouched relay
+    // (`signInOriginFrom` reads no other), so a present one is marked as the
+    // customer's — which is what 090's familiarity compares against.
+    if (await this.#relayed(client)) {
+      await client.query(
+        `INSERT INTO sign_in_events
+           (user_id, identifier_hash, ip, country, country_relayed, platform, device_id, outcome)
+         VALUES ($1::bigint, $2, $3::inet, $4::text, $4::text IS NOT NULL, $5, $6::bigint, 'succeeded')`,
+        [
+          input.userId,
+          identifierHash(input.identifier),
+          input.origin.ip ?? null,
+          input.origin.country ?? null,
+          input.origin.platform ?? null,
+          input.deviceId,
+        ],
+      );
+      return;
+    }
     await client.query(
       `INSERT INTO sign_in_events
          (user_id, identifier_hash, ip, country, platform, device_id, outcome)

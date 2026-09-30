@@ -26,7 +26,7 @@ import {
 } from './login-rate-limit.guard.js';
 import { SignupEmailService } from './signup-email.service.js';
 import { SettingsService } from '../settings/settings.service.js';
-import { countryFrom } from './sign-in-events.service.js';
+import { signInOriginFrom } from './sign-in-events.service.js';
 import {
   changePasswordSchema,
   forgotPasswordSchema,
@@ -152,12 +152,13 @@ export class AuthController {
         fields: parsed.error.issues.map((issue) => issue.path.join('.')),
       });
     }
-    // Both fields describe the sign-in and neither decides it. `request.ip`
-    // resolves the forwarded chain against TRUST_PROXY_HOPS; the country comes
-    // from the edge's own header and is discarded unless it looks like one.
+    // Both fields describe the sign-in and neither decides it. They are the
+    // CUSTOMER'S as the web proxy relays them, never the headers on this
+    // request, which describe the web server — see `signInOriginFrom`.
+    const origin = signInOriginFrom(request.headers, request.ip, this.config.webProxySecret);
     return this.auth.login(parsed.data, {
-      ip: request.ip,
-      country: countryFrom(request.headers),
+      ip: origin.ip,
+      country: origin.country,
       platform: parsed.data.device.platform,
     });
   }

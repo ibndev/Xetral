@@ -83,6 +83,12 @@ DECLARE v_b BIGINT; v_ip BOOLEAN; v_country BOOLEAN;
 BEGIN
     SELECT id INTO v_b FROM users WHERE email = 'p24-b@example.ng';
 
+    -- A home country first. From 090 an account with no RELAYED history has
+    -- been nowhere, so every country reads as seen; the question here needs
+    -- somewhere to compare against.
+    INSERT INTO sign_in_events (user_id, identifier_hash, country, country_relayed, outcome)
+    VALUES (v_b, repeat('d', 64), 'NG', TRUE, 'succeeded');
+
     INSERT INTO sign_in_events (user_id, identifier_hash, ip, country, outcome)
     VALUES (v_b, repeat('d', 64), '203.0.113.9', 'RU', 'bad_credentials');
 
@@ -97,8 +103,8 @@ BEGIN
     END IF;
 
     -- And a success does.
-    INSERT INTO sign_in_events (user_id, identifier_hash, ip, country, outcome)
-    VALUES (v_b, repeat('d', 64), '203.0.113.9', 'RU', 'succeeded');
+    INSERT INTO sign_in_events (user_id, identifier_hash, ip, country, country_relayed, outcome)
+    VALUES (v_b, repeat('d', 64), '203.0.113.9', 'RU', TRUE, 'succeeded');
 
     SELECT ip_seen_before, country_seen_before INTO v_ip, v_country
       FROM sign_in_is_familiar(v_b, '203.0.113.9'::inet, 'RU');

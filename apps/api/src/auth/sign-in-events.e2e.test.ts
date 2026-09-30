@@ -27,6 +27,14 @@ if (DATABASE_URL === undefined || DATABASE_URL === '') {
 }
 
 const PASSWORD = 'a-long-enough-password';
+const PROXY_SECRET = 'e2e-web-proxy-secret';
+
+/** What the web proxy adds: the CUSTOMER'S country, vouched by the secret.
+ *  `cf-ipcountry` on the API's own request is the web server's. */
+const relayed = (country: string): Record<string, string> => ({
+  'x-xetral-proxy-secret': PROXY_SECRET,
+  'x-xetral-client-country': country,
+});
 
 let pool: Pool;
 let app: INestApplication;
@@ -77,7 +85,7 @@ beforeAll(async () => {
   const mod = await Test.createTestingModule({
     imports: [
       AppModule.forRoot({
-        config: testApiConfig(DATABASE_URL as string),
+        config: testApiConfig(DATABASE_URL as string, { webProxySecret: PROXY_SECRET }),
         pool,
         clock: systemClock,
       }),
@@ -102,7 +110,7 @@ describe('recording a sign-in', () => {
     await request(app.getHttpServer())
       .post('/v1/auth/login')
       .set('x-forwarded-for', '102.89.40.7')
-      .set('cf-ipcountry', 'ng')
+      .set(relayed('ng'))
       .send({ identifier, password: PASSWORD, device: device() })
       .expect(200);
 
@@ -172,6 +180,48 @@ describe('recording a sign-in', () => {
     expect(await eventsFor(identifier)).toHaveLength(1);
   });
 
+  it("ignores the country on the API's own request, which is the web server's", async () => {
+    // The production email: a customer in Lagos, told their account was used
+    // from DE, because the web app's trip to the API goes through Cloudflare
+    // from a server in Germany.
+    const { identifier } = await seedUser();
+
+    await request(app.getHttpServer())
+      .post('/v1/auth/login')
+      .set('cf-ipcountry', 'DE')
+      .send({ identifier, password: PASSWORD, device: device() })
+      .expect(200);
+
+    expect((await eventsFor(identifier))[0]?.country).toBeNull();
+  });
+
+  it('ignores a relayed country without the secret', async () => {
+    const { identifier } = await seedUser();
+
+    await request(app.getHttpServer())
+      .post('/v1/auth/login')
+      .set({ 'x-xetral-proxy-secret': 'guessed', 'x-xetral-client-country': 'NG' })
+      .send({ identifier, password: PASSWORD, device: device() })
+      .expect(200);
+
+    expect((await eventsFor(identifier))[0]?.country).toBeNull();
+  });
+
+  it('records the address the proxy relays over the one it connected from', async () => {
+    const { identifier } = await seedUser();
+
+    await request(app.getHttpServer())
+      .post('/v1/auth/login')
+      .set('x-forwarded-for', '172.71.131.61')
+      .set({ ...relayed('NG'), 'x-xetral-client-ip': '102.89.40.8' })
+      .send({ identifier, password: PASSWORD, device: device() })
+      .expect(200);
+
+    const [event] = await eventsFor(identifier);
+    expect(event?.ip).toBe('102.89.40.8');
+    expect(event?.country).toBe('NG');
+  });
+
   it('drops a country header that is not a country code', async () => {
     // The header means something only because the one route to this API is
     // through the edge. A request that came another way carries whatever its
@@ -180,7 +230,7 @@ describe('recording a sign-in', () => {
 
     await request(app.getHttpServer())
       .post('/v1/auth/login')
-      .set('cf-ipcountry', 'Nigeria')
+      .set(relayed('Nigeria'))
       .send({ identifier, password: PASSWORD, device: device() })
       .expect(200);
 
@@ -205,7 +255,7 @@ describe('alerting on a new country', () => {
 
     await request(app.getHttpServer())
       .post('/v1/auth/login')
-      .set('cf-ipcountry', 'GB')
+      .set(relayed('GB'))
       .send({ identifier, password: PASSWORD, device: device() })
       .expect(200);
 
@@ -222,7 +272,7 @@ describe('alerting on a new country', () => {
 
     await request(app.getHttpServer())
       .post('/v1/auth/login')
-      .set('cf-ipcountry', 'NG')
+      .set(relayed('NG'))
       .send({ identifier, password: PASSWORD, device: handset })
       .expect(200);
 
@@ -230,11 +280,55 @@ describe('alerting on a new country', () => {
 
     await request(app.getHttpServer())
       .post('/v1/auth/login')
-      .set('cf-ipcountry', 'RU')
+      .set(relayed('RU'))
       .send({ identifier, password: PASSWORD, device: handset })
       .expect(200);
 
     expect(await queued(userId)).toContain('new_location');
+  });
+
+  it('does not call the first placed sign-in a move', async () => {
+    // A new account signs up on a phone and signs in on it again at home. It
+    // has been nowhere yet, so "new country: NG" to a Nigerian is the panic
+    // this suite exists to prevent, not an alert.
+    const { identifier, userId } = await seedUser();
+    const handset = device();
+
+    await request(app.getHttpServer())
+      .post('/v1/auth/login')
+      .send({ identifier, password: PASSWORD, device: handset })
+      .expect(200);
+    await request(app.getHttpServer())
+      .post('/v1/auth/login')
+      .set(relayed('NG'))
+      .send({ identifier, password: PASSWORD, device: handset })
+      .expect(200);
+
+    expect(await queued(userId)).not.toContain('new_location');
+  });
+
+  it("does not measure against countries written before the relay — the web server's DE", async () => {
+    // Every existing customer's history says DE. Their first correctly placed
+    // sign-in must not be announced as a move to Nigeria.
+    const { identifier, userId } = await seedUser();
+    const handset = device();
+
+    await request(app.getHttpServer())
+      .post('/v1/auth/login')
+      .send({ identifier, password: PASSWORD, device: handset })
+      .expect(200);
+    await pool.query(
+      `INSERT INTO sign_in_events (user_id, identifier_hash, country, outcome)
+       VALUES ($1::bigint, $2, 'DE', 'succeeded')`,
+      [userId, hashOf(identifier)],
+    );
+    await request(app.getHttpServer())
+      .post('/v1/auth/login')
+      .set(relayed('NG'))
+      .send({ identifier, password: PASSWORD, device: handset })
+      .expect(200);
+
+    expect(await queued(userId)).not.toContain('new_location');
   });
 
   it('says it once, not on every sign-in until the customer comes home', async () => {
@@ -246,7 +340,7 @@ describe('alerting on a new country', () => {
     for (const country of ['NG', 'GH', 'GH', 'GH']) {
       await request(app.getHttpServer())
         .post('/v1/auth/login')
-        .set('cf-ipcountry', country)
+        .set(relayed(country))
         .send({ identifier, password: PASSWORD, device: handset })
         .expect(200);
     }

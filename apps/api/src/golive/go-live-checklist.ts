@@ -759,6 +759,18 @@ export const DEPLOYMENT: readonly Item[] = [
       'It must match the actual topology, which the default cannot know.',
   },
   {
+    name: 'WEB_PROXY_SECRET',
+    kind: 'env',
+    failure: 'silent',
+    ifMissed:
+      'Every customer request reaches the API through the web app, so the ' +
+      'country Cloudflare stamps on it is the web SERVER\'s. Without this ' +
+      'secret — the same value on the api and web services — the API cannot ' +
+      'trust the customer\'s own country and address, so sign-ins are recorded ' +
+      'without a country and the new-country security email never fires. Set ' +
+      'it on both; nothing errors while it is missing.',
+  },
+  {
     name: 'METRICS_TOKEN',
     kind: 'env',
     failure: 'silent',

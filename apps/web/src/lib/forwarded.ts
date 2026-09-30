@@ -32,5 +32,43 @@
  */
 export function forwardedFor(request: Request): Record<string, string> {
   const forwarded = request.headers.get('x-forwarded-for');
-  return forwarded === null ? {} : { 'x-forwarded-for': forwarded };
+  return {
+    ...(forwarded === null ? {} : { 'x-forwarded-for': forwarded }),
+    ...clientOrigin(request),
+  };
+}
+
+/** Must equal `PROXY_HEADERS` in the API's `sign-in-events.service.ts`;
+ *  `sign-in-origin.test.ts` there reads this file and fails on a drift. */
+export const PROXY_HEADERS = {
+  secret: 'x-xetral-proxy-secret',
+  ip: 'x-xetral-client-ip',
+  country: 'x-xetral-client-country',
+} as const;
+
+/**
+ * Where the CUSTOMER was, as Cloudflare told THIS app.
+ *
+ * THE API CANNOT WORK IT OUT FOR ITSELF. This app's request to the API is a
+ * second trip through Cloudflare, and the country Cloudflare stamps on that
+ * one is this server's — Germany. A customer signing in from Lagos was
+ * emailed "Sign-in from a new country: DE". Only this app saw the customer's
+ * own request, so it relays `CF-IPCountry` and `CF-Connecting-IP` from THAT —
+ * values Cloudflare sets itself and overwrites whatever a browser sent.
+ *
+ * VOUCHED WITH `WEB_PROXY_SECRET`, the same value on both services. Without it
+ * the API cannot tell this app from anybody else typing a country, and a
+ * forged one is how a takeover would keep the alert quiet; so with no secret
+ * nothing is sent and the API records no country rather than a wrong one.
+ */
+function clientOrigin(request: Request): Record<string, string> {
+  const secret = process.env['WEB_PROXY_SECRET'];
+  if (secret === undefined || secret === '') return {};
+  const ip = request.headers.get('cf-connecting-ip');
+  const country = request.headers.get('cf-ipcountry');
+  return {
+    [PROXY_HEADERS.secret]: secret,
+    ...(ip === null ? {} : { [PROXY_HEADERS.ip]: ip }),
+    ...(country === null ? {} : { [PROXY_HEADERS.country]: country }),
+  };
 }
