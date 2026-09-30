@@ -1420,7 +1420,18 @@ describe('what support can see and do', () => {
     // Four digits and no more. This response is read over shoulders and
     // screenshotted into tickets.
     expect(String(res.body.last4)).toMatch(/^[0-9]{4}$/);
-    expect(JSON.stringify(res.body)).not.toMatch(/[0-9]{12,}/);
+    /*
+     * UUIDS ARE REMOVED BEFORE THE SCAN. A UUID's last group is twelve hex
+     * characters, and about one in three hundred is all digits — so a random
+     * `user_uuid` ending `565199721739` read as a card number and failed CI
+     * on a response that was entirely correct. A PAN is not inside a UUID, so
+     * removing them loses nothing the check is for.
+     */
+    const withoutIds = JSON.stringify(res.body).replace(
+      /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi,
+      '',
+    );
+    expect(withoutIds).not.toMatch(/[0-9]{12,}/);
   });
 
   it('lets compliance freeze a card, and records why', async () => {
