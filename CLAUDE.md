@@ -2805,6 +2805,14 @@ the `generic-rules` and `dynamic` jobs in `scan.yml`.
 - **`pg_isready` WITH NO `-U` CONNECTS AS THE RUNNER'S USER**, so every
   Postgres service logged `role "root" does not exist` every ten seconds and
   buried whatever else it said.
+- **A NEXT.JS PATCH TAKEN WITH `npm install next@x -w apps/web` NESTS IT**
+  under `apps/web/node_modules`, with its `@next/*` binaries — and
+  `Dockerfile.web` ships only the ROOT `node_modules`, so the image would
+  build and then have no Next to start. The critical `next/og` advisory of
+  October 2026 (16.3.8) was taken by editing the hoisted lockfile entries
+  with the registry's integrity hashes and letting `npm ci` verify them, the
+  same method as the scoped overrides; `next-hoisted.test.ts` fails on a
+  nested one.
 
 ### The reset code, and a sender Brevo never verified — non-obvious rules
 
