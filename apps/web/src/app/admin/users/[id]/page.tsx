@@ -24,6 +24,10 @@ export default function UserDetail({ params }: { params: Promise<{ id: string }>
   const admin = useAdmin();
   const detail = useLoad(() => admin.user(id), [admin, id]);
   const [copied, setCopied] = useState(false);
+  /* Held HERE, not in the reset panel: a reset retires the address, the page
+     reloads, the account is no longer on the test list and the panel goes —
+     taking its own confirmation with it. */
+  const [resetNote, setResetNote] = useState<string | undefined>();
 
   function copyId(): void {
     // Best effort. `navigator.clipboard` is unavailable over plain HTTP and
@@ -260,6 +264,22 @@ export default function UserDetail({ params }: { params: Promise<{ id: string }>
         })}
       </div>
 
+      {resetNote !== undefined && (
+        <div className="panel">
+          <p className="ok">{resetNote}</p>
+        </div>
+      )}
+      {detail.data?.test_account === true && (
+        <ResetTestAccount
+          email={typeof profile['email'] === 'string' ? profile['email'] : undefined}
+          phone={typeof profile['account_phone'] === 'string' ? profile['account_phone'] : undefined}
+          onDone={(note) => {
+            setResetNote(note);
+            detail.reload();
+          }}
+        />
+      )}
+
       <ChangeStatus id={id} current={profile['status'] ?? 'active'} onChanged={detail.reload} />
 
       <div className="panel">
@@ -282,6 +302,89 @@ export default function UserDetail({ params }: { params: Promise<{ id: string }>
         })}
       </div>
     </>
+  );
+}
+
+/**
+ * DELETING A TEST ACCOUNT FOR GOOD — shown only for an account on the
+ * server's test list.
+ *
+ * The ordinary Delete below closes an account and keeps its email and phone,
+ * which is right for a customer and is why a deleted test account could not
+ * sign up again. This one runs the reset: sign-in, PIN, devices, KYC and
+ * saved details go, the account number is switched off at the bank, and the
+ * email and phone are freed for a brand-new registration. What moved money is
+ * kept, under a retired name nobody can sign in with — the books must still
+ * add up after the account is gone.
+ */
+function ResetTestAccount({
+  email,
+  phone,
+  onDone,
+}: {
+  email: string | undefined;
+  phone: string | undefined;
+  onDone: (note: string) => void;
+}) {
+  const admin = useAdmin();
+  const [pin, setPin] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | undefined>();
+  const who = email !== undefined ? { email } : phone !== undefined ? { phone } : undefined;
+
+  return (
+    <form
+      className="panel"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (who === undefined) return;
+        setBusy(true);
+        setError(undefined);
+        void (async () => {
+          try {
+            const outcome = await admin.resetTestAccount(who, pin);
+            setPin('');
+            onDone(
+              outcome.left_behind === null
+                ? `Deleted. ${email ?? phone} can sign up again as a new customer.`
+                : `Deleted. ${email ?? phone} can sign up again. The retired record still holds ${outcome.left_behind} (minor units), which stays in the books.`,
+            );
+          } catch (cause) {
+            setError(messageFor(cause));
+          } finally {
+            setBusy(false);
+          }
+        })();
+      }}
+    >
+      <h2>Delete this test account permanently</h2>
+      <div className="notice">
+        <p>
+          This account is on the test list. Deleting it removes its sign-in, PIN, devices,
+          identity details and saved recipients, switches off its account number, and frees{' '}
+          <strong>{email ?? phone}</strong> to register again as a brand-new customer.
+        </p>
+        <p className="hint">
+          Payments it made stay in the books under a retired name nobody can sign in with,
+          so every other balance still adds up.
+        </p>
+      </div>
+      <label>
+        Your transaction PIN
+        <input
+          type="password"
+          inputMode="numeric"
+          autoComplete="off"
+          value={pin}
+          onChange={(e) => setPin(e.target.value)}
+          required
+        />
+      </label>
+      <button type="submit" className="danger" disabled={busy || who === undefined}>
+        {busy ? 'Deleting…' : 'Delete permanently'}
+      </button>
+      {error !== undefined && <p className="error">{error}</p>}
+    </form>
   );
 }
 

@@ -141,6 +141,19 @@ export interface AdminUserDetail {
   /** Their cards. Four digits of the number and no more — the same amount the
    *  database stores. */
   readonly cards: readonly Record<string, unknown>[];
+  /** On `TEST_ACCOUNT_EMAILS` / `TEST_ACCOUNT_PHONES`: Delete is the permanent
+   *  reset rather than the ordinary close. Decided by the server's list. */
+  readonly test_account?: boolean;
+}
+
+/** What `POST /v1/admin/test-accounts/reset` answers. */
+export interface AdminTestAccountReset {
+  readonly reset: true;
+  readonly removed: string;
+  /** Money the retired record still holds, minor units, or null. */
+  readonly left_behind: string | null;
+  readonly account_numbers_deactivated: number;
+  readonly account_numbers_left_live: number;
 }
 
 /** Mirrors `SettingView` on the server, field for field. It did not, once:
@@ -1243,6 +1256,21 @@ export class AdminClient {
 
   async user(id: string): Promise<AdminUserDetail> {
     return this.#get(`/v1/admin/users/${encodeURIComponent(id)}`);
+  }
+
+  /**
+   * Permanently delete a TEST account so its email and phone register again.
+   * Refused with `test_account_not_whitelisted` for anything not on the
+   * server's list, whatever this page believes.
+   */
+  async resetTestAccount(
+    who: { readonly email: string } | { readonly phone: string },
+    pin: string,
+  ): Promise<AdminTestAccountReset> {
+    return this.#post<AdminTestAccountReset>('/v1/admin/test-accounts/reset', {
+      ...who,
+      transaction_pin: pin,
+    });
   }
 
   /**

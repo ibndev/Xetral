@@ -1,5 +1,15 @@
 import { useState } from 'react';
-import { FlatList, Modal, Pressable, Text, TextInput, View } from 'react-native';
+import {
+  FlatList,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { optionKey, rankOptions } from '@xetral/client';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '@/icon';
 import { font, radius, space, useStyles, useTheme } from '@/theme';
@@ -89,15 +99,11 @@ export function Select({
   const selected = options.find((o) => o.value === value);
 
   /*
-   * Matched ANYWHERE in the label, not at the start. Somebody looking for
-   * "GTBank" in a list that calls it "Guaranty Trust Bank" is exactly the
-   * case a prefix match fails, and it is the commonest bank in the country.
+   * Matched ANYWHERE in the label and ranked — a label starting with what was
+   * typed comes first — by the same `rankOptions` the web uses, so "Zenith"
+   * finds the same banks on both.
    */
-  const needle = query.trim().toLowerCase();
-  const shown =
-    searchable && needle !== ''
-      ? options.filter((o) => o.label.toLowerCase().includes(needle))
-      : options;
+  const shown = searchable ? rankOptions(options, query) : options;
 
   /** The filter belongs to one opening of the sheet. */
   function dismiss(): void {
@@ -195,143 +201,154 @@ export function Select({
         // customer out of the flow they were halfway through.
         onRequestClose={dismiss}
       >
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Close"
-          onPress={dismiss}
-          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' }}
+        {/* THE SHEET RISES WITH THE KEYBOARD. A Modal is its own window, so
+            the Shell's keyboard handling does not reach it, and the rows a
+            customer had just searched for sat underneath the keyboard. */}
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
-          {/* Its own Pressable with no handler, so a tap on the sheet does not
-              fall through to the scrim behind it and close what it landed on. */}
           <Pressable
-            onPress={() => undefined}
-            style={{
-              // `surfaceRaised`, because a sheet over a scrim is in front of
-              // the page. `surface` is the recessed fill every container uses
-              // and would put this visually BEHIND what it is covering.
-              backgroundColor: colors.surfaceRaised,
-              borderTopLeftRadius: radius.xl,
-              borderTopRightRadius: radius.xl,
-              borderTopWidth: 1,
-              borderColor: colors.line,
-              paddingTop: space.sm,
-              // The gesture bar sits under the last row otherwise, and the
-              // last row is the one a thumb reaches first.
-              paddingBottom: insets.bottom + space.md,
-              maxHeight: '70%',
-            }}
+            accessibilityRole="button"
+            accessibilityLabel="Close"
+            onPress={dismiss}
+            style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' }}
           >
-            <View
+            {/* Its own Pressable with no handler, so a tap on the sheet does not
+                fall through to the scrim behind it and close what it landed on. */}
+            <Pressable
+              onPress={() => undefined}
               style={{
-                alignSelf: 'center',
-                width: 40,
-                height: 4,
-                borderRadius: radius.pill,
-                backgroundColor: colors.lineStrong,
-                marginBottom: space.sm,
+                // `surfaceRaised`, because a sheet over a scrim is in front of
+                // the page. `surface` is the recessed fill every container uses
+                // and would put this visually BEHIND what it is covering.
+                backgroundColor: colors.surfaceRaised,
+                borderTopLeftRadius: radius.xl,
+                borderTopRightRadius: radius.xl,
+                borderTopWidth: 1,
+                borderColor: colors.line,
+                paddingTop: space.sm,
+                // The gesture bar sits under the last row otherwise, and the
+                // last row is the one a thumb reaches first.
+                paddingBottom: insets.bottom + space.md,
+                maxHeight: '70%',
               }}
-            />
-            <Text
-              style={[styles.label, { paddingHorizontal: space.lg, marginBottom: space.xs }]}
             >
-              {label}
-            </Text>
-
-            {searchable && (
               <View
                 style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: space.sm,
-                  marginHorizontal: space.lg,
+                  alignSelf: 'center',
+                  width: 40,
+                  height: 4,
+                  borderRadius: radius.pill,
+                  backgroundColor: colors.lineStrong,
                   marginBottom: space.sm,
-                  paddingHorizontal: space.md,
-                  height: 44,
-                  borderRadius: radius.md,
-                  backgroundColor: colors.surface,
                 }}
-              >
-                <Icon name="search" size={16} color={colors.text3} />
-                <TextInput
-                  style={{ flex: 1, color: colors.text, fontSize: 16, fontFamily: font.sans }}
-                  placeholder={searchPlaceholder}
-                  placeholderTextColor={colors.text3}
-                  value={query}
-                  onChangeText={setQuery}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  // A bank's name is not a word, so neither correction nor
-                  // capitalisation helps, and both get in the way.
-                  autoFocus
-                  returnKeyType="search"
-                />
-              </View>
-            )}
-
-            {searchable && shown.length === 0 && (
-              // SAYS SO rather than showing an empty sheet, which is
-              // indistinguishable from a list that failed to load.
+              />
               <Text
-                style={{
-                  color: colors.text3,
-                  fontSize: 14,
-                  paddingHorizontal: space.lg,
-                  paddingVertical: space.lg,
-                }}
+                style={[styles.label, { paddingHorizontal: space.lg, marginBottom: space.xs }]}
               >
-                No match for “{query.trim()}”.
+                {label}
               </Text>
-            )}
 
-            <FlatList
-              data={[...shown]}
-              keyboardShouldPersistTaps="handled"
-              keyExtractor={(o) => o.value}
-              renderItem={({ item }) => {
-                const on = item.value === value;
-                return (
-                  <Pressable
-                    accessibilityRole="radio"
-                    accessibilityState={{ selected: on }}
-                    onPress={() => {
-                      onChange(item.value);
-                      dismiss();
-                    }}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: space.sm,
-                      paddingHorizontal: space.lg,
-                      // 52, comfortably past the 44 minimum: this is a list a
-                      // thumb scrolls and taps in one motion.
-                      minHeight: 52,
-                      paddingVertical: space.sm,
-                    }}
-                  >
-                    {renderMark !== undefined && renderMark(item.value)}
-                    <View style={{ flex: 1 }}>
-                      <Text
-                        style={{
-                          color: colors.text,
-                          fontSize: 16,
-                          fontWeight: on ? '600' : '400',
-                        }}
-                      >
-                        {item.label}
-                      </Text>
-                      {item.hint !== undefined && (
-                        <Text style={{ color: colors.text3, fontSize: 13, marginTop: 2 }}>
-                          {item.hint}
+              {searchable && (
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: space.sm,
+                    marginHorizontal: space.lg,
+                    marginBottom: space.sm,
+                    paddingHorizontal: space.md,
+                    // A field's height: at 44 the box read as a label.
+                    height: 50,
+                    borderRadius: radius.md,
+                    backgroundColor: colors.surface,
+                  }}
+                >
+                  <Icon name="search" size={16} color={colors.text3} />
+                  <TextInput
+                    style={{ flex: 1, color: colors.text, fontSize: 16, fontFamily: font.sans }}
+                    placeholder={searchPlaceholder}
+                    placeholderTextColor={colors.text3}
+                    value={query}
+                    onChangeText={setQuery}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    // A bank's name is not a word, so neither correction nor
+                    // capitalisation helps, and both get in the way.
+                    autoFocus
+                    returnKeyType="search"
+                  />
+                </View>
+              )}
+
+              {searchable && shown.length === 0 && (
+                // SAYS SO rather than showing an empty sheet, which is
+                // indistinguishable from a list that failed to load.
+                <Text
+                  style={{
+                    color: colors.text3,
+                    fontSize: 14,
+                    paddingHorizontal: space.lg,
+                    paddingVertical: space.lg,
+                  }}
+                >
+                  No match for “{query.trim()}”.
+                </Text>
+              )}
+
+              <FlatList
+                data={[...shown]}
+                keyboardShouldPersistTaps="handled"
+                // Unique even where two banks share a code — Paystack's list
+                // has some — or the list keeps rows the filter removed.
+                keyExtractor={(o, i) => optionKey(o, i)}
+                renderItem={({ item }) => {
+                  const on = item.value === value;
+                  return (
+                    <Pressable
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: on }}
+                      onPress={() => {
+                        onChange(item.value);
+                        dismiss();
+                      }}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: space.sm,
+                        paddingHorizontal: space.lg,
+                        // 52, comfortably past the 44 minimum: this is a list a
+                        // thumb scrolls and taps in one motion.
+                        minHeight: 52,
+                        paddingVertical: space.sm,
+                      }}
+                    >
+                      {renderMark !== undefined && renderMark(item.value)}
+                      <View style={{ flex: 1 }}>
+                        <Text
+                          style={{
+                            color: colors.text,
+                            fontSize: 16,
+                            fontWeight: on ? '600' : '400',
+                          }}
+                        >
+                          {item.label}
                         </Text>
-                      )}
-                    </View>
-                    {on && <Icon name="check" size={18} color={colors.link} />}
-                  </Pressable>
-                );
-              }}
-            />
+                        {item.hint !== undefined && (
+                          <Text style={{ color: colors.text3, fontSize: 13, marginTop: 2 }}>
+                            {item.hint}
+                          </Text>
+                        )}
+                      </View>
+                      {on && <Icon name="check" size={18} color={colors.link} />}
+                    </Pressable>
+                  );
+                }}
+              />
+            </Pressable>
           </Pressable>
-        </Pressable>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );

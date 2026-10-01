@@ -55,6 +55,7 @@ import { webhookEndpoints } from '../settings/webhook-endpoints.js';
 import { API_CONFIG } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
 import { uuidOr404 } from '../uuid-param.js';
+import { isTestEmail, isTestPhone } from '../auth/test-accounts.js';
 
 /**
  * The operations backend.
@@ -628,7 +629,26 @@ export class AdminController {
 
   @Get('users/:id')
   async user(@Param('id', uuidOr404('user_not_found')) id: string): Promise<Record<string, unknown>> {
-    return this.admin.user(id);
+    const detail = await this.admin.user(id);
+    const profile = (detail['profile'] ?? {}) as { email?: unknown; account_phone?: unknown };
+    /*
+     * WHETHER THIS ACCOUNT IS ON THE TEST LIST, so the delete panel can offer
+     * the permanent reset instead of the ordinary close.
+     *
+     * The owner "deleted" a test account with the ordinary Delete — which
+     * closes it and keeps the email and phone, correctly for a customer — and
+     * could not register again, because the reset existed only as an API call
+     * nothing on the dashboard made. Derived from `TEST_ACCOUNT_EMAILS` and
+     * `TEST_ACCOUNT_PHONES` on the server, never from anything the page says;
+     * the reset route checks the same list again on its own.
+     */
+    const testAccount =
+      isTestEmail(this.config, typeof profile.email === 'string' ? profile.email : undefined) ||
+      isTestPhone(
+        this.config,
+        typeof profile.account_phone === 'string' ? profile.account_phone : undefined,
+      );
+    return { ...detail, test_account: testAccount };
   }
 
   /**

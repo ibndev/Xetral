@@ -2235,11 +2235,52 @@ Schema: `packages/ledger/sql/091_test_account_reset.sql`. Service in
   the function, so a reset without a record cannot happen), `admin_audit_log`
   as `test_account.reset` (on the must-say-why list), and a log line naming
   the account by uuid rather than address.
+- **THE DASHBOARD'S DELETE IS THE RESET, FOR A LISTED ACCOUNT.** The owner
+  "deleted" a test account with the ordinary Delete, which CLOSES and keeps
+  the email and phone — right for a customer, and why they could not sign up
+  again. `GET /v1/admin/users/:id` now says `test_account` (from the server's
+  list, never the page's), and the customer page then shows "Delete this test
+  account permanently", which calls the reset. The list lives in Coolify, on
+  the `api` service: `TEST_ACCOUNT_EMAILS`, `TEST_ACCOUNT_PHONES`.
 - **`TEST_OTP` IS THE SIGNUP CODE, BECAUSE THERE IS NO SMS.** The only code
   at signup is the one emailed to the address. For a whitelisted email no
   code is mailed and `TEST_OTP` is accepted; for a whitelisted phone it is
   accepted too. It opens nothing but a whitelisted account, it is six digits
   or refused at boot, and it is compared in constant time.
+
+### Text fields, the bank picker and the keyboard — non-obvious rules
+
+`apps/web/src/ui/select.tsx`, `apps/web/src/ui/keyboard-aware.tsx`,
+`packages/client/src/option-search.ts`, guarded by `field-focus.test.ts`.
+
+- **NO LINE INSIDE A TEXT FIELD.** Focus drew a 4px halo outside the border,
+  and on every field whose input sits in a wrapper (the bank search, a dial
+  code, an amount) it landed INSIDE the box as a second rounded line round the
+  text. The global `:focus-visible` ring also set `border-radius: 4px`, which
+  squared a field's corners the moment it was tapped. A field now signals
+  focus with its own border colour only, and the product-wide ring skips
+  `input`, `select` and `textarea`. `field-focus.test.ts` fails on a halo or
+  outline returning to any field's focus rule.
+- **THE BANK LIST SHOWED BANKS THAT DID NOT MATCH.** Paystack's list carries
+  more than one row under some codes, and rows were keyed on the code — so
+  React reconciled two rows into one node and typing "Zenith" left unrelated
+  microfinance banks on screen. Rows are keyed by `optionKey` (value and
+  position), on both apps, and exact duplicates are dropped by the adapter.
+- **RANKED, NOT MERELY FILTERED** (`rankOptions`, shared): a label starting
+  with the query first, then a word starting with it, then the rest — so the
+  bank meant is in the half of the sheet a keyboard leaves visible.
+- **THE SHEET SITS ON THE KEYBOARD, NOT UNDER IT.** A `fixed` element is laid
+  out against the layout viewport, which a phone keyboard does not shrink.
+  `KeyboardAware` publishes `--vv-height` and `--vv-top` from
+  `visualViewport`, and the sheet's backdrop is sized from them. The phone
+  wraps its picker Modal in a `KeyboardAvoidingView`, because a Modal is its
+  own window and the Shell's handling never reached it.
+- **PAYSTACK'S BVN QUESTION IS NOT OURS TO REMOVE.** The reference plugin made
+  exactly the calls this adapter makes — `POST /customer` (name, email,
+  phone) then `POST /dedicated_account` — and its own docs record the same
+  refusal on a live Financial Services business and the same BVN form as the
+  fix. With a TEST key both work without a BVN, which is what made it look as
+  though the plugin needed none. Only Paystack can lift it.
 
 ### The assignment, the refusal nobody could read, and a paused service — non-obvious rules
 

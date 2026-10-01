@@ -17,3 +17,4 @@ export * from './retry.js';
 export * from './services.js';
 export * from './announcements.js';
 export * from './pay-methods.js';
+export * from './option-search.js';

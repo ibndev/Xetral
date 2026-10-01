@@ -303,8 +303,17 @@ export class PaystackFundingAdapter
         parsed.error,
       );
     }
+    // The same bank can appear twice under one code; one row each is enough
+    // to choose from, and a doubled row reads as two different banks.
+    const seen = new Set<string>();
     return parsed.data.data
       .filter((bank) => bank.active !== false && (bank.type ?? 'nuban') === 'nuban')
+      .filter((bank) => {
+        const key = `${bank.code}\u0000${bank.name.trim().toLowerCase()}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
       .map((bank) => ({ code: bank.code, name: bank.name }));
   }
 

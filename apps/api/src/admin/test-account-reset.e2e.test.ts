@@ -204,8 +204,25 @@ describe('resetting it', () => {
       [old, TEST_PHONE, `e2e-${accountId}`],
     );
 
+    // The dashboard is told this account is on the list, so its Delete is the
+    // permanent reset — and told the opposite once the reset has run.
+    const uuid = (
+      await pool.query<{ uuid: string }>(`SELECT uuid::text FROM users WHERE id = $1::bigint`, [old])
+    ).rows[0]?.uuid as string;
+    const before = await request(app.getHttpServer())
+      .get(`/v1/admin/users/${uuid}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
+    expect(before.body.test_account).toBe(true);
+
     // By PHONE, the second way in.
     const done = await reset({ phone: TEST_PHONE }).expect(200);
+
+    const after = await request(app.getHttpServer())
+      .get(`/v1/admin/users/${uuid}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
+    expect(after.body.test_account).toBe(false);
     expect(done.body).toMatchObject({ reset: true, account_numbers_deactivated: 1 });
     expect(String(done.body.removed)).toContain('account number');
     expect(funding.deactivated).toContainEqual({ provider: 'paystack', id: accountId });

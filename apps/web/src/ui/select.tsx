@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { optionKey, rankOptions } from '@xetral/client';
 import { Icon } from '@/ui/icon';
 
 export interface SelectOption {
@@ -135,15 +136,10 @@ export function Select({
    * Mixing the two is how a filtered list commits the wrong row, which is a
    * bug that only appears once somebody types.
    *
-   * Matched anywhere in the label rather than at the start: a customer looking
-   * for "GTBank" in a list that calls it "Guaranty Trust Bank" is exactly the
-   * case a prefix match fails.
+   * Matched anywhere in the label and RANKED — a label starting with what was
+   * typed first — by `rankOptions`, which the phone uses too.
    */
-  const needle = query.trim().toLowerCase();
-  const shown =
-    searchable && needle !== ''
-      ? options.filter((o) => o.label.toLowerCase().includes(needle))
-      : options;
+  const shown = searchable ? rankOptions(options, query) : options;
 
   const selectedIndex = shown.findIndex((o) => o.value === value);
   const selected = options.find((o) => o.value === value);
@@ -237,10 +233,22 @@ export function Select({
     };
   }, [open]);
 
-  // Keeps the highlighted row visible when the list is taller than its box.
+  /*
+   * Keeps the highlighted row visible when the list is taller than its box —
+   * by scrolling THE LIST, never the page. `scrollIntoView` also scrolls every
+   * scrollable ancestor, which on a phone includes the visual viewport, so the
+   * page slid under a sheet pinned above the keyboard.
+   */
   useEffect(() => {
     if (!open) return;
-    list.current?.querySelector('[data-active="true"]')?.scrollIntoView({ block: 'nearest' });
+    const box = list.current;
+    const row = box?.querySelector<HTMLElement>('[data-active="true"]');
+    if (box === null || box === undefined || row === null || row === undefined) return;
+    const top = row.offsetTop - box.offsetTop;
+    if (top < box.scrollTop) box.scrollTop = top;
+    else if (top + row.offsetHeight > box.scrollTop + box.clientHeight) {
+      box.scrollTop = top + row.offsetHeight - box.clientHeight;
+    }
   }, [open, active]);
 
   function commit(index: number): void {
@@ -497,7 +505,7 @@ export function Select({
         >
           {shown.map((option, index) => (
             <li
-              key={option.value}
+              key={optionKey(option, index)}
               id={`${listId}-${index}`}
               role="option"
               aria-selected={option.value === value}

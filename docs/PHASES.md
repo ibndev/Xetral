@@ -49,6 +49,7 @@ shipped, that is called out explicitly.
 | 38 — Naira accounts on Paystack alone, and the identity Paystack asks for | ✅ | migration 089; Paystack's assign webhooks on the deposit URL |
 | 39 — A sign-in from Germany that was our own server | ✅ | migration 090; `WEB_PROXY_SECRET` on the api and web services |
 | 40 — Resetting a test account | ✅ | migration 091 and 099 re-applied; `TEST_ACCOUNT_EMAILS`, `TEST_ACCOUNT_PHONES`, `TEST_OTP` |
+| 41 — No line in a text field, a bank list above the keyboard, Delete that resets | ✅ | `TEST_ACCOUNT_EMAILS` on the api service; Paystack lifting BVN validation |
 
 All eleven phases are built, a **pre-deployment audit** (Phase 12) closed what
 building them phase by phase had left between the phases, and **Phase 13** is
@@ -2916,3 +2917,29 @@ does not fire — quiet, never wrong.
 **099**; set `TEST_ACCOUNT_EMAILS` and/or `TEST_ACCOUNT_PHONES` (phones with
 the country code) and, if wanted, a six-digit `TEST_OTP`. Never list a real
 customer.
+
+---
+
+## Phase 41 — No line in a text field, a bank list above the keyboard, Delete that resets ✅
+
+| File | What it is |
+|---|---|
+| `apps/web/src/app/globals.css` | focus is the field's border colour; the sheet sized to the visible area |
+| `apps/web/src/ui/keyboard-aware.tsx` | `--vv-height` and `--vv-top` from `visualViewport` |
+| `packages/client/src/option-search.ts` | `rankOptions` and `optionKey`, for both apps |
+| `apps/mobile/src/select.tsx` | the same ranking, unique keys, and a sheet that rises with the keyboard |
+| `apps/web/src/app/admin/users/[id]/page.tsx` | "Delete this test account permanently" |
+
+1. **A rounded line was drawn round the text in every wrapped field**, and the
+   global focus ring squared a field's corners. Both are gone.
+2. **Typing "Zenith" left six unrelated banks on screen** — rows keyed on a
+   bank code Paystack uses twice. And the list sat under the keyboard.
+3. **Delete on a test account closed it and kept its email**, because the
+   reset was only an API call. The dashboard now offers it for a listed account.
+4. **Paystack still asks for a BVN**, and the reference plugin's own calls and
+   notes show it always did on a live Financial Services business.
+
+**Before this goes live, an operator must:** set `TEST_ACCOUNT_EMAILS` (and/or
+`TEST_ACCOUNT_PHONES`) on the api service in Coolify and redeploy, then open
+the closed test account on `/admin/users` and press **Delete permanently**.
+

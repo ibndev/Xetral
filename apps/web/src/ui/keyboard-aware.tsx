@@ -51,6 +51,16 @@ export function KeyboardAware() {
     function update(): void {
       const viewport = window.visualViewport;
       if (viewport === undefined || viewport === null) return;
+      /*
+       * THE VISIBLE AREA, as two custom properties. A `position: fixed`
+       * element is laid out against the LAYOUT viewport, which a keyboard
+       * does not shrink — so a bottom sheet sat behind the keyboard and the
+       * bank a customer had just searched for was underneath it. The picker
+       * sizes its backdrop from these instead, so the sheet's bottom edge is
+       * the keyboard's top edge.
+       */
+      root.style.setProperty('--vv-height', `${viewport.height}px`);
+      root.style.setProperty('--vv-top', `${viewport.offsetTop}px`);
       const hidden = window.innerHeight - viewport.height;
       const open = hidden > window.innerHeight * 0.2;
       if (open) root.dataset['keyboard'] = 'open';
@@ -77,6 +87,9 @@ export function KeyboardAware() {
       // keyboard, and scrolling the page under somebody's thumb as they tick a
       // box is a jump they did not ask for.
       if (target instanceof HTMLInputElement && ['checkbox', 'radio'].includes(target.type)) return;
+      // A field in a sheet is already where it should be: the sheet is pinned
+      // to the visible area, and scrolling would move the page beneath it.
+      if (target.closest('.xsheet') !== null) return;
 
       window.setTimeout(() => {
         // Still focused? A customer who tapped away in the meantime must not
@@ -96,6 +109,8 @@ export function KeyboardAware() {
       window.visualViewport?.removeEventListener('resize', update);
       window.visualViewport?.removeEventListener('scroll', update);
       delete root.dataset['keyboard'];
+      root.style.removeProperty('--vv-height');
+      root.style.removeProperty('--vv-top');
     };
   }, []);
 

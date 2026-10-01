@@ -60,12 +60,21 @@ describe('css custom properties', () => {
     // ramp is generated in TypeScript so the SVG gradient and the CSS one
     // cannot drift. Read from the SOURCE rather than listed here, so deleting
     // that line turns this test red instead of quietly widening the hole.
-    const setInComponents = new Set(
-      Array.from(
+    const setInComponents = new Set([
+      ...Array.from(
         readFileSync(join(HERE, 'logo.tsx'), 'utf8').matchAll(/'(--[a-z0-9-]+)' as string/g),
         (m) => m[1] as string,
       ),
-    );
+      // And the visible-area height and offset, which `KeyboardAware` writes
+      // on the root from `visualViewport` so a bottom sheet clears the
+      // keyboard. Every read of them carries a fallback for the first paint.
+      ...Array.from(
+        readFileSync(join(HERE, 'keyboard-aware.tsx'), 'utf8').matchAll(
+          /setProperty\('(--[a-z0-9-]+)'/g,
+        ),
+        (m) => m[1] as string,
+      ),
+    ]);
     const missing = [...read]
       .filter((name) => !light.has(name) && !dark.has(name))
       .filter((name) => !framework.has(name) && !setInComponents.has(name))
