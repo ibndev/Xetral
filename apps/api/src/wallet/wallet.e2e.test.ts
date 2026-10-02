@@ -14,6 +14,7 @@ import { AppModule } from '../app.module.js';
 import type { ApiConfig } from '../config.js';
 import { systemClock } from '../tokens.js';
 import { testApiConfig } from '../test-support/api-config.js';
+import { pinListener } from '../test-support/listener.js';
 
 /**
  * The first real money flow, end to end over HTTP: sign in, set a PIN, read a
@@ -264,6 +265,41 @@ describe('transfers', () => {
     // A correct PIN during a lockout must not lift it.
     const correct = await attempt(PIN);
     expect(correct.status).toBe(423);
+  });
+
+  it('checks AT MOST FIVE guesses when they arrive all at once', async () => {
+    // The lockout was asked about BEFORE scrypt ran and counted after it, so
+    // a parallel burst had every guess checked. Ten at once must still mean
+    // five checked and five refused as locked — and a correct PIN among the
+    // refused ones moves nothing.
+    await pinListener(app);
+    const alice = await onboard();
+    const bob = await onboard();
+    await fund(alice.userId, 1_000_00);
+
+    const attempt = (pin: string) =>
+      transfer(alice, {
+        recipient: bob.identifier,
+        amount: '10.00',
+        currency: 'NGN',
+        transaction_pin: pin,
+        idempotency_key: randomUUID(),
+      });
+
+    const answers = await Promise.all(Array.from({ length: 10 }, () => attempt('999999')));
+    const checked = answers.filter((r) => r.status === 401).length;
+    const locked = answers.filter((r) => r.status === 423).length;
+    expect(checked).toBeLessThanOrEqual(4);
+    expect(checked + locked).toBe(10);
+    // The database counted five guesses, not ten: the other five were refused
+    // before their PIN was ever compared.
+    const counted = await pool.query<{ failed_attempts: number }>(
+      `SELECT failed_attempts FROM transaction_pins WHERE user_id = $1::bigint`,
+      [alice.userId],
+    );
+    expect(counted.rows[0]?.failed_attempts).toBe(5);
+    expect((await attempt(PIN)).status).toBe(423);
+    expect((await balancesOf(alice))[0]?.spendable).toBe('1000.00');
   });
 
   it('refuses an overdraft without revealing the balance', async () => {

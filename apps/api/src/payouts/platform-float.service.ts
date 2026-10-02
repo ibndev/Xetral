@@ -64,6 +64,14 @@ export class PlatformFloatService {
   async precondition(options: {
     readonly prefunded: boolean;
     readonly amount: Money<Currency>;
+    /**
+     * The reserve's ledger key. A replay of a reserve already posted is not a
+     * new commitment — the payout is already counted in `committed`, so
+     * checking it again would subtract it twice and refuse a retry of a
+     * payout the platform had already accepted. The daily ceiling skips a
+     * replay for the same reason.
+     */
+    readonly idempotencyKey?: string;
   }): Promise<((client: PoolClient) => Promise<void>) | undefined> {
     if (!options.prefunded) return undefined;
 
@@ -87,6 +95,14 @@ export class PlatformFloatService {
         FLOAT_LOCK_SPACE,
         lockKeyFor(currency),
       ]);
+
+      if (options.idempotencyKey !== undefined) {
+        const posted = await client.query(
+          `SELECT 1 FROM journal_entries WHERE idempotency_key = $1`,
+          [options.idempotencyKey],
+        );
+        if ((posted.rowCount ?? 0) > 0) return;
+      }
 
       const read = await client.query<{ held_minor: string; committed_minor: string }>(
         `SELECT held_minor::text, committed_minor::text

@@ -183,6 +183,12 @@ const API_ERROR_CODES = [
 
   /* purchases */
   'purchase_failed',
+  /* The provider's price for the item is not the amount sent: the screen
+     priced it from a catalogue that has since moved. Nothing was charged. */
+  'price_changed',
+  /* An item the provider does not list — a plan withdrawn since the
+     catalogue loaded, or a code nobody offered. */
+  'item_not_found',
   /*
    * `payout_failed` IS A REFUSAL, and it used to arrive as a 201.
    *
@@ -389,6 +395,9 @@ const API_ERROR_CODES = [
   'test_account_not_found',
   'test_account_is_staff',
   'test_account_provider_refused',
+  /* Attributing a suspense deposit to a customer with no account number in
+     its currency: a credited deposit must name one. */
+  'customer_has_no_account',
   'account_not_supported_here',
   'momo_already_linked',
   'momo_not_supported_here',

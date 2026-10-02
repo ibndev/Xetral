@@ -1,8 +1,16 @@
-import { Inject, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import type { Pool } from 'pg';
 import { LedgerService } from '@xetral/ledger';
 import {
+  DEDICATED_ACCOUNT_CHANNEL,
   DepositCeilingError,
+  PAYSTACK_EVENTS,
   handlePaystackDeposit,
   parsePaystackWebhook,
   verifyPaystackSignature,
@@ -151,8 +159,31 @@ export class PaystackWebhookService {
      * swallow one.
      */
     const link = await this.links.settle(event.data.reference);
-    if (link !== 'pending') {
+    if (link === 'pending') {
+      /* OURS, and Paystack has not confirmed it to us yet. Refusing the
+         delivery is what makes Paystack send it again; acknowledging it
+         would leave a paid link uncredited, because nothing else asks. */
+      throw new ServiceUnavailableException({ error: 'payment_unconfirmed' });
+    }
+    if (link !== 'unknown') {
       this.#logger.log(`payment link charge ${event.data.reference}: ${link}`);
+      return;
+    }
+
+    /*
+     * EVERY EVENT ON THE INTEGRATION ARRIVES HERE — refunds, disputes, card
+     * charges for other products — and only a dedicated-account credit is
+     * this path's to post. Anything else used to throw a contract error,
+     * answer 500, and be redelivered by Paystack for three days, each
+     * attempt recorded as a server fault. It is acknowledged, and logged.
+     */
+    if (
+      event.event !== PAYSTACK_EVENTS.chargeSuccess ||
+      event.data.channel !== DEDICATED_ACCOUNT_CHANNEL
+    ) {
+      this.#logger.log(
+        `paystack ${event.event} (${String(event.data.channel)}) ${event.data.reference}: not a deposit; acknowledged`,
+      );
       return;
     }
 

@@ -13,11 +13,14 @@ import {
 import type { Pool } from 'pg';
 import { InsufficientFundsError, LedgerService, posting } from '@xetral/ledger';
 import {
+  supportsGroups,
   supportsVerification,
   ProviderNotSentError,
+  ProviderRejectedError,
   providerDidNothing,
 } from '@xetral/providers';
 import type {
+  CatalogueGroup,
   CatalogueItem,
   FulfilmentPort,
   PurchaseResult,
@@ -144,6 +147,17 @@ export class PurchaseService {
 
   /** Confirms a meter or smartcard number belongs to who the customer thinks.
    *  Only some providers can; the rest say so rather than guessing. */
+  /**
+   * The networks or electricity companies a service is sold for. A provider
+   * with one catalogue per service has none, and the answer is empty — the
+   * screen then asks for the catalogue directly.
+   */
+  async groups(service: ServiceKind): Promise<readonly CatalogueGroup[]> {
+    const port = this.#port(service);
+    if (!supportsGroups(port)) return [];
+    return this.#asked(service, () => port.groups());
+  }
+
   async verifyTarget(service: ServiceKind, itemCode: string, target: string): Promise<VerifiedTarget> {
     await this.settings.assertServiceEnabled('bills');
     const port = this.#port(service);
@@ -177,7 +191,33 @@ export class PurchaseService {
     const existing = await this.#byKey(userId, body.idempotency_key);
     if (existing !== undefined) return this.#toView(existing);
 
+    /*
+     * THE PRICE IS THE PROVIDER'S, NOT THE REQUEST'S.
+     *
+     * The provider is sent the PRODUCT — an eSIM package, a number, a data
+     * plan — and fulfils it at its own price whatever we charged. Nothing
+     * compared the request's `amount` with that price, so a stolen session or
+     * an edited request bought a $20 eSIM for one cent and the float paid the
+     * rest. Read from the provider here, before anything is held; a fixed
+     * price the request does not match is refused rather than corrected, so a
+     * customer is never charged a figure their screen did not show.
+     */
+    const price = await this.#priceOf(body.service, port, body.item_code);
+    if (price !== null && price !== amount.amount) {
+      throw new ConflictException({ error: 'price_changed' });
+    }
+
     const reserve = await this.#reserve(userId, body, reference, amount, currency);
+
+    /*
+     * ONLY THE REQUEST THAT WROTE THE ROW ORDERS IT. A second submission of
+     * one attempt reserves as a replay and loses the row insert; it used to
+     * order the same product again under the same reference — a second eSIM
+     * or number from a provider that does not de-duplicate, or a duplicate
+     * refusal that `providerDidNothing` read as "nothing happened" and
+     * reversed while the first was being delivered.
+     */
+    if (!reserve.created) return this.#toView(await this.#reload(reserve.purchaseId));
 
     let result: PurchaseResult;
     try {
@@ -206,7 +246,11 @@ export class PurchaseService {
       }
       // A definite refusal. The customer's money comes straight back.
       await this.outcomes.reverse(await this.#reserved(reserve.purchaseId), describe(error));
-      throw new UnprocessableEntityException({ error: 'purchase_failed', detail: describe(error) });
+      /* NO DETAIL. The provider's sentence names our integration — 006's
+         rule — so it is on the row's `failure_reason` and in this log line,
+         and the customer gets the code. */
+      this.#logger.warn(`purchase ${reference} refused by ${port.provider}: ${describe(error)}`);
+      throw new UnprocessableEntityException({ error: 'purchase_failed' });
     }
 
     if (result.status === 'pending') {
@@ -228,13 +272,25 @@ export class PurchaseService {
 
   /* ------------------------------------------------------------------ */
 
+  /** The item's price at the provider, refusing one it does not list. */
+  async #priceOf(service: ServiceKind, port: FulfilmentPort, itemCode: string): Promise<bigint | null> {
+    try {
+      return await this.#asked(service, () => port.priceOf(itemCode));
+    } catch (error) {
+      if (error instanceof ProviderRejectedError) {
+        throw new NotFoundException({ error: 'item_not_found' });
+      }
+      throw error;
+    }
+  }
+
   async #reserve(
     userId: string,
     body: PurchaseRequestBody,
     reference: string,
     amount: Money<Currency>,
     currency: Currency,
-  ): Promise<{ purchaseId: string; entryId: string; initiatedAt: Date }> {
+  ): Promise<{ purchaseId: string; entryId: string; initiatedAt: Date; created: boolean }> {
     const idempotencyKey = `purchase-reserve:${reference}`;
 
     // The daily ceiling is applied to the RESERVE, which is the moment the
@@ -293,7 +349,7 @@ export class PurchaseService {
     );
     const row = inserted.rows[0];
     if (row !== undefined) {
-      return { purchaseId: row.id, entryId, initiatedAt: new Date(row.created_at) };
+      return { purchaseId: row.id, entryId, initiatedAt: new Date(row.created_at), created: true };
     }
 
     // Two identical requests arrived at once. Both posted the reserve — the
@@ -304,7 +360,12 @@ export class PurchaseService {
     // describe a purchase that did happen as one that did not.
     const existing = await this.#byKey(userId, body.idempotency_key);
     if (existing === undefined) throw new Error('purchase insert returned no row');
-    return { purchaseId: existing.id, entryId, initiatedAt: new Date(existing.created_at) };
+    return {
+      purchaseId: existing.id,
+      entryId,
+      initiatedAt: new Date(existing.created_at),
+      created: false,
+    };
   }
 
   #port(service: ServiceKind): FulfilmentPort {

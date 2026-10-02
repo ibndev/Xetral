@@ -408,6 +408,33 @@ export class StaffTotpService {
       throw new ForbiddenException(TOTP_LOCKED);
     }
 
+    /*
+     * THE ATTEMPT IS CLAIMED BEFORE THE CODE IS CHECKED, in one UPDATE that
+     * only succeeds while the factor is unlocked.
+     *
+     * The count was a read-modify-write: every failure wrote `failed_attempts
+     * = <what this request read> + 1`, so a burst of parallel guesses each
+     * read 0, each wrote 1, and the lockout never arrived — the five-code
+     * limit held only against guesses made one at a time, and six digits are
+     * a million codes with three valid at any moment. Claiming first means at
+     * most five codes are ever checked per lockout, however they arrive; a
+     * correct one then clears the count.
+     */
+    const claimed = await this.pool.query<{ failed_attempts: number }>(
+      `UPDATE staff_totp t
+          SET failed_attempts = CASE WHEN t.failed_attempts + 1 >= $2 THEN 0 ELSE t.failed_attempts + 1 END,
+              locked_until = CASE WHEN t.failed_attempts + 1 >= $2
+                                  THEN now() + make_interval(mins => $3::int)
+                                  ELSE NULL END
+         FROM users u
+        WHERE u.id = t.user_id AND u.uuid = $1
+          AND (t.locked_until IS NULL OR t.locked_until <= now())
+        RETURNING t.failed_attempts, (t.locked_until IS NOT NULL) AS locking`,
+      [userUuid, MAX_ATTEMPTS, LOCKOUT_MINUTES],
+    );
+    const claim = claimed.rows[0] as { failed_attempts: number; locking: boolean } | undefined;
+    if (claim === undefined) throw new ForbiddenException(TOTP_LOCKED);
+
     const result = verifyTotp(
       open(row.secret_sealed, this.#keyring()),
       code,
@@ -415,7 +442,12 @@ export class StaffTotpService {
     );
 
     if (!result.valid || result.timeStep === undefined) {
-      await this.#recordFailure(userUuid, row);
+      if (claim.locking) {
+        this.#logger.error(
+          `second factor for user ${userUuid} locked for ${LOCKOUT_MINUTES} minutes after ` +
+            `${MAX_ATTEMPTS} failed codes`,
+        );
+      }
       throw new UnauthorizedException(TOTP_INVALID);
     }
 
@@ -426,11 +458,11 @@ export class StaffTotpService {
         [userUuid, result.timeStep],
       );
     } catch (error) {
-      // A duplicate key means this exact code has already been spent. It is
-      // NOT counted as a failed attempt: the operator typed a correct code,
-      // and locking them out for the six digits their authenticator is
-      // currently showing would make the surface unusable for anybody who
-      // clicks twice.
+      // A duplicate key means this exact code has already been spent. It
+      // stays COUNTED: a spent code is somebody else's view of the operator's
+      // screen as often as it is a double click, and undoing the count for
+      // one would let a code read off a screen reset the lockout between
+      // guesses. A double click costs one attempt, cleared by the next code.
       if (isUniqueViolation(error)) {
         this.#logger.warn(`user ${userUuid} presented an already-spent one-time code`);
         throw new UnauthorizedException(TOTP_INVALID);
@@ -438,33 +470,11 @@ export class StaffTotpService {
       throw error;
     }
 
-    if (row.failed_attempts > 0) {
-      await this.pool.query(
-        `UPDATE staff_totp SET failed_attempts = 0, locked_until = NULL
-          WHERE user_id = (SELECT id FROM users WHERE uuid = $1)`,
-        [userUuid],
-      );
-    }
-  }
-
-  async #recordFailure(userUuid: string, row: TotpRow): Promise<void> {
-    const attempts = row.failed_attempts + 1;
-    const lock = attempts >= MAX_ATTEMPTS;
-
     await this.pool.query(
-      `UPDATE staff_totp
-          SET failed_attempts = $2,
-              locked_until = CASE WHEN $3 THEN now() + make_interval(mins => $4::int) ELSE NULL END
+      `UPDATE staff_totp SET failed_attempts = 0, locked_until = NULL
         WHERE user_id = (SELECT id FROM users WHERE uuid = $1)`,
-      [userUuid, lock ? 0 : attempts, lock, LOCKOUT_MINUTES],
+      [userUuid],
     );
-
-    if (lock) {
-      this.#logger.error(
-        `second factor for user ${userUuid} locked for ${LOCKOUT_MINUTES} minutes after ` +
-          `${MAX_ATTEMPTS} failed codes`,
-      );
-    }
   }
 
   #keyring() {

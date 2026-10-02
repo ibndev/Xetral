@@ -51,6 +51,8 @@ let stub: Server;
 let stubPort = 0;
 /** Every request the stub received, so the WIRE can be asserted. */
 const seen: { url: string; auth: string | undefined; body: unknown }[] = [];
+/** What the stub says when a payment is verified by its reference. */
+let verifyAnswer: { status: string; amount: string; currency: string } | undefined;
 
 beforeAll(async () => {
   stub = createServer((req, res) => {
@@ -63,6 +65,17 @@ beforeAll(async () => {
         body: raw === '' ? undefined : JSON.parse(raw),
       });
       res.setHeader('content-type', 'application/json');
+      if ((req.url ?? '').startsWith('/v3/transactions/verify_by_reference') && verifyAnswer !== undefined) {
+        const txRef = new URL(req.url ?? '', 'http://stub').searchParams.get('tx_ref') ?? '';
+        res.end(
+          JSON.stringify({
+            status: 'success',
+            message: 'Transaction fetched successfully',
+            data: { ...verifyAnswer, tx_ref: txRef, id: 4242, payment_type: 'mobilemoneygh' },
+          }),
+        );
+        return;
+      }
       if ((req.url ?? '').startsWith('/v3/payments')) {
         res.end(
           JSON.stringify({
@@ -88,13 +101,14 @@ beforeAll(async () => {
           ...testApiConfig(DATABASE_URL as string),
           flutterwaveBaseUrl: `http://127.0.0.1:${stubPort}`,
           flutterwaveSecretKey: 'FLWSECK_TEST-not-a-real-key',
+          flutterwaveWebhookHash: 'checkout-e2e-hash',
         },
         pool,
         clock: systemClock,
       }),
     ],
   }).compile();
-  app = mod.createNestApplication(new ExpressAdapter());
+  app = mod.createNestApplication(new ExpressAdapter(), { rawBody: true });
   await app.init();
 });
 
@@ -286,6 +300,41 @@ describe('paying a link in a currency Flutterwave collects', () => {
       currency: 'GHS',
       status: 'pending',
     });
+  });
+
+  it('ASKS FOR THE EVENT AGAIN while the rail has not confirmed the payment, then credits it once', async () => {
+    // A charge event for a payment Flutterwave had not finished was
+    // acknowledged and dropped, and nothing else ever asks about a link
+    // payment: the payee was never credited unless the payer came back.
+    const slug = await ghanaian();
+    const res = await charge(slug, 'GHS', '25.00').expect(200);
+    const reference = res.body.reference as string;
+    const event = (status: string) =>
+      request(app.getHttpServer())
+        .post('/v1/webhooks/flutterwave/deposits')
+        .set('verif-hash', 'checkout-e2e-hash')
+        .set('content-type', 'application/json')
+        .send(JSON.stringify({ event: 'charge.completed', data: { id: 4242, tx_ref: reference, status } }));
+
+    try {
+      verifyAnswer = { status: 'pending', amount: '25.00', currency: 'GHS' };
+      await event('successful').expect(503);
+
+      verifyAnswer = { status: 'successful', amount: '25.00', currency: 'GHS' };
+      await event('successful').expect(200);
+      await event('successful').expect(200);
+    } finally {
+      verifyAnswer = undefined;
+    }
+
+    const row = await pool.query<{ status: string; entries: string }>(
+      `SELECT l.status,
+              (SELECT count(*)::text FROM journal_entries e
+                WHERE e.metadata->>'reference' = l.reference) AS entries
+         FROM link_payments l WHERE l.reference = $1`,
+      [reference],
+    );
+    expect(row.rows[0]?.status).toBe('paid');
   });
 
   it('SAYS A MISSING KEY IS A MISSING KEY, not "try again later"', async () => {

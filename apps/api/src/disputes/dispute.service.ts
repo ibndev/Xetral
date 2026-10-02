@@ -337,55 +337,20 @@ export class DisputeService {
     const dispute = found.rows[0];
     if (dispute === undefined) throw new NotFoundException({ error: 'dispute_not_found' });
 
-    let refundEntryId: string | null = null;
-
-    if (decision.outcome === 'accepted') {
-      const currency = dispute.currency as Currency;
-      let refund: Money<Currency>;
-      try {
-        refund = fromMajor(decision.refund_amount, currency);
-      } catch {
-        throw new UnprocessableEntityException({ error: 'invalid_amount' });
-      }
-      if (refund.amount <= 0n) {
-        throw new UnprocessableEntityException({ error: 'invalid_amount' });
-      }
-
-      const posted = await this.ledger.post({
-        // The reviewer's key, namespaced. A click that timed out and was made
-        // again refunds once — the ledger answers `replayed: true` and the
-        // UPDATE below then finds the dispute already resolved.
-        idempotencyKey: `dispute-refund:${decision.idempotency_key}`,
-        // THE CHARGE THIS ANSWERS. Without it the refund is a floating credit:
-        // money appearing in the wallet with nothing in the books saying what
-        // it was for, so `entry_status` cannot report the disputed entry as
-        // refunded and the customer reads a debit and an unexplained credit.
-        // The id is the one the claim was raised against, so it is never a
-        // guess — `disputes.entry_id` is a foreign key.
-        reversesEntryId: dispute.entry_id,
-        kind: 'dispute_refund',
-        occurredAt: new Date(),
-        description: 'dispute upheld',
-        metadata: { dispute: disputeUuid, reviewer: reviewerUuid },
-        postings: [
-          posting(
-            { kind: 'customer_wallet', ownerId: dispute.user_id, currency },
-            refund,
-          ),
-          // OURS. There is no clawback from the recipient — see 018's header.
-          // Posting the loss to an expense account rather than netting it
-          // against revenue is what makes it a number somebody has to look at,
-          // and a fraud rate nobody can see is a fraud rate nobody manages.
-          posting({ kind: 'expense_dispute_loss', currency }, negate(refund)),
-        ],
-      });
-      refundEntryId = posted.entryId;
-    }
-
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-
+    /*
+     * ONE OUTCOME PER DISPUTE, AND THE REFUND IS PART OF IT.
+     *
+     * The refund was posted first, under a key the REVIEWER's form minted,
+     * and the dispute was closed afterwards in a separate transaction guarded
+     * on `status = 'open'`. Two reviewers accepting at once each posted a
+     * refund under their own key — the customer was paid twice — and the
+     * loser was then told the dispute was no longer open. A reviewer accepting
+     * while another rejected left a refund on a rejected dispute. Now the
+     * refund is keyed on the DISPUTE, and the status changes on the refund's
+     * own transaction under a lock, so a dispute closes once and pays at most
+     * once.
+     */
+    const close = async (client: PoolClient, refundEntryId: string | null): Promise<DisputeRow> => {
       const updated = await client.query<DisputeRow>(
         `UPDATE disputes d
             SET status = $3::dispute_status, resolved_at = now(),
@@ -399,32 +364,127 @@ export class DisputeService {
                   d.resolved_at, d.resolution`,
         [disputeUuid, reviewerUuid, decision.outcome, decision.resolution, refundEntryId],
       );
-
       const row = updated.rows[0];
       if (row === undefined) throw new ConflictException({ error: 'dispute_not_open' });
-
       await this.#notify(client, dispute.user_uuid, decision.outcome, row);
-      await client.query('COMMIT');
+      return row;
+    };
 
-      await this.audit.record({
-        actorId: reviewerUuid,
-        action: decision.outcome === 'accepted' ? 'dispute.accept' : 'dispute.reject',
-        subjectType: 'dispute',
-        subjectId: disputeUuid,
-        detail: { outcome: decision.outcome },
-        // Required by CHECK on a destructive action, and required here for a
-        // better reason: an outcome nobody explained is one nobody can review.
-        reason: decision.resolution,
-        ...(ip === undefined ? {} : { ip }),
-      });
+    let closed: DisputeRow | undefined;
 
-      return view(row);
-    } catch (error) {
-      await client.query('ROLLBACK').catch(() => undefined);
-      throw translate(error);
-    } finally {
-      client.release();
+    if (decision.outcome === 'accepted') {
+      const currency = dispute.currency as Currency;
+      let refund: Money<Currency>;
+      try {
+        refund = fromMajor(decision.refund_amount, currency);
+      } catch {
+        throw new UnprocessableEntityException({ error: 'invalid_amount' });
+      }
+      if (refund.amount <= 0n) {
+        throw new UnprocessableEntityException({ error: 'invalid_amount' });
+      }
+
+      /*
+       * NEVER MORE THAN LEFT THE CUSTOMER. An upheld dispute gives back what
+       * the disputed entry took — in full or in part — and a refund above that
+       * is not a refund but a payment out of `expense_dispute_loss`, one typed
+       * zero away. The customer's own legs in this currency say what left.
+       */
+      const took = await this.pool.query<{ took: string }>(
+        `SELECT COALESCE(-SUM(p.amount_minor), 0)::text AS took
+           FROM postings p JOIN accounts a ON a.id = p.account_id
+          WHERE p.journal_entry_id = $1::bigint
+            AND a.owner_type = 'user' AND a.owner_id = $2::bigint
+            AND a.currency = $3`,
+        [dispute.entry_id, dispute.user_id, currency],
+      );
+      if (refund.amount > BigInt(took.rows[0]?.took ?? '0')) {
+        throw new UnprocessableEntityException({ error: 'invalid_amount' });
+      }
+
+      let posted;
+      try {
+        posted = await this.ledger.post(
+          {
+            idempotencyKey: `dispute-refund:${disputeUuid}`,
+            // Names the disputed entry, so `entry_status` can say the charge
+            // was refunded rather than leaving a credit nothing explains.
+            reversesEntryId: dispute.entry_id,
+            kind: 'dispute_refund',
+            occurredAt: new Date(),
+            description: 'dispute upheld',
+            metadata: { dispute: disputeUuid, reviewer: reviewerUuid },
+            postings: [
+              posting({ kind: 'customer_wallet', ownerId: dispute.user_id, currency }, refund),
+              // Our loss, in its own account rather than netted against
+              // revenue, so somebody has to look at the number.
+              posting({ kind: 'expense_dispute_loss', currency }, negate(refund)),
+            ],
+          },
+          {
+            precondition: async (client) => {
+              const locked = await client.query<{ status: string }>(
+                `SELECT status::text AS status FROM disputes WHERE uuid = $1::uuid FOR UPDATE`,
+                [disputeUuid],
+              );
+              if (locked.rows[0]?.status !== 'open') {
+                throw new ConflictException({ error: 'dispute_not_open' });
+              }
+            },
+            onEntry: async (client, entry) => {
+              closed = await close(client, entry.entryId);
+            },
+          },
+        );
+      } catch (error) {
+        throw translate(error);
+      }
+
+      /* A replay: refunded by an attempt that died before the dispute closed
+         (only possible for a refund posted before the two shared a
+         transaction). Close it now, naming that refund. */
+      if (posted.replayed) {
+        const client = await this.pool.connect();
+        try {
+          await client.query('BEGIN');
+          closed = await close(client, posted.entryId);
+          await client.query('COMMIT');
+        } catch (error) {
+          await client.query('ROLLBACK').catch(() => undefined);
+          throw translate(error);
+        } finally {
+          client.release();
+        }
+      }
+    } else {
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+        closed = await close(client, null);
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK').catch(() => undefined);
+        throw translate(error);
+      } finally {
+        client.release();
+      }
     }
+
+    if (closed === undefined) throw new ConflictException({ error: 'dispute_not_open' });
+
+    await this.audit.record({
+      actorId: reviewerUuid,
+      action: decision.outcome === 'accepted' ? 'dispute.accept' : 'dispute.reject',
+      subjectType: 'dispute',
+      subjectId: disputeUuid,
+      detail: { outcome: decision.outcome },
+      // Required by CHECK on a destructive action, and required here for a
+      // better reason: an outcome nobody explained is one nobody can review.
+      reason: decision.resolution,
+      ...(ip === undefined ? {} : { ip }),
+    });
+
+    return view(closed);
   }
 
   /**

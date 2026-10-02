@@ -111,6 +111,11 @@ export class TwilioAdapter implements FulfilmentPort {
     }));
   }
 
+  /** OUR price, the same for every number — see `catalogue`. */
+  async priceOf(_itemCode: string): Promise<bigint | null> {
+    return this.#options.priceCents;
+  }
+
   async purchase(request: PurchaseRequest): Promise<PurchaseResult> {
     if (request.currency !== 'USD') {
       throw new ProviderContractError(PROVIDER, `Twilio settles in USD; got ${request.currency}`);

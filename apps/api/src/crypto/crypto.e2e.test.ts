@@ -25,6 +25,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { AppModule } from '../app.module.js';
 import type { ApiConfig } from '../config.js';
 import { CryptoReconciliationService } from './crypto-reconciliation.service.js';
+import { CryptoService } from './crypto.service.js';
 import { systemClock } from '../tokens.js';
 import { testApiConfig } from '../test-support/api-config.js';
 import { CryptoDepositReconciliationService } from './crypto-deposit-reconciliation.service.js';
@@ -521,6 +522,46 @@ describe('withdrawing', () => {
     expect(res.body.status).toBe('reserved');
     expect(await usdtBalance(customer)).toMatchObject({
       spendable: '49.000000',
+      pending: '51.000000',
+    });
+  });
+});
+
+describe('one outcome per withdrawal', () => {
+  it('a confirmation after the withdrawal was given back posts nothing, and spends no other hold', async () => {
+    // Settling and reversing are two ledger keys and every resolver acts on a
+    // row it read earlier. A confirmation after a reversal posted its
+    // settlement out of the shared `customer_pending` — here, the second
+    // withdrawal's hold — and only then was the status change refused.
+    const customer = await onboard();
+    await fundUsdt(customer.userId, 200_000_000n);
+    port.sendAnswer = new ProviderTimeoutError('bitnob', 'no response');
+    await withdraw(customer).expect(200);
+    await withdraw(customer).expect(200);
+
+    const rows = await pool.query(
+      `SELECT id, uuid, user_id, reference, asset, network::text, destination,
+              amount_minor, fee_minor, status::text, tx_hash, failure_reason, reserve_entry_id
+         FROM crypto_withdrawals WHERE user_id = $1::bigint ORDER BY id`,
+      [customer.userId],
+    );
+    const stale = rows.rows[0];
+    const crypto = app.get(CryptoService);
+    await crypto.applyReceipt(stale, {
+      providerReference: 'cxw_failed',
+      state: 'failed',
+      txHash: undefined,
+      failureReason: 'refused',
+    });
+    await crypto.applyReceipt(stale, {
+      providerReference: 'cxw_failed',
+      state: 'confirmed',
+      txHash: '0xlate',
+      failureReason: undefined,
+    });
+
+    expect(await usdtBalance(customer)).toMatchObject({
+      spendable: '149.000000',
       pending: '51.000000',
     });
   });

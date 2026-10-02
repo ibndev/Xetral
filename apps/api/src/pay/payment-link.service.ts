@@ -530,7 +530,21 @@ export class PaymentLinkService {
    * customer see their money the moment the payer comes back instead of
    * whenever the webhook lands.
    */
-  async settle(reference: string): Promise<'credited' | 'replayed' | 'pending' | 'failed'> {
+  /*
+   * FIVE ANSWERS, and `unknown` is its own because the webhooks act on the
+   * difference. A reference we never issued is somebody else's charge — a
+   * dedicated-account credit, another product — and is acknowledged. A
+   * reference we DID issue whose payment the rail has not confirmed yet is
+   * `pending`, and a webhook carrying it must be retried rather than
+   * acknowledged: there is no sweep for link payments, so an acknowledged
+   * event the rail had not finished was a payer's money that never reached
+   * the customer unless the payer came back to the page. `refused` is a paid
+   * amount or currency that is not what was asked for — a person looks, and
+   * asking again changes nothing.
+   */
+  async settle(
+    reference: string,
+  ): Promise<'credited' | 'replayed' | 'pending' | 'failed' | 'refused' | 'unknown'> {
     const found = await this.pool.query<{
       id: string;
       user_id: string;
@@ -548,7 +562,7 @@ export class PaymentLinkService {
     // A reference we never issued. NOT an error to the caller: the webhook
     // handler asks this of every charge event, and most of them are dedicated
     // account credits that belong to 044's path.
-    if (row === undefined) return 'pending';
+    if (row === undefined) return 'unknown';
     if (row.status === 'paid') return 'replayed';
     if (row.status === 'abandoned') return 'failed';
 
@@ -599,14 +613,14 @@ export class PaymentLinkService {
         `payment ${reference} was initialised for ${row.amount_minor} and paid ` +
           `${paid.toString()}; refusing to credit`,
       );
-      return 'pending';
+      return 'refused';
     }
     if (outcome.currency.toUpperCase() !== row.currency) {
       this.#logger.error(
         `payment ${reference} was initialised in ${row.currency} and paid in ` +
           `${outcome.currency}; refusing to credit`,
       );
-      return 'pending';
+      return 'refused';
     }
 
     const currency = row.currency as Currency;

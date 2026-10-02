@@ -387,12 +387,18 @@ function sentenceFor(error: ApiError): string {
       return 'Recovery is not available on this deployment yet — migration 049 has not been applied.';
     case 'not_recoverable':
       return 'That is no longer waiting to be recovered. Reload the queue.';
+    case 'customer_has_no_account':
+      return 'That customer has no account number in this currency, so the deposit cannot be credited to them. Check you chose the right person.';
     case 'refund_refused_delivered':
       return 'The provider says this was delivered, so it cannot be refunded as well. Mark it resolved instead.';
 
     /* purchases */
     case 'purchase_failed':
       return 'That purchase did not go through. You have not been charged.';
+    case 'price_changed':
+      return 'The price of that item has changed. Reload the list and try again — you have not been charged.';
+    case 'item_not_found':
+      return 'That item is no longer available. Reload the list and choose again.';
     case 'profile_locked':
       return 'Your details are verified and can no longer be edited here. Contact support if something is wrong.';
     case 'country_required':

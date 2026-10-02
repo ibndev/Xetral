@@ -17,6 +17,10 @@ export const catalogueQuerySchema = z.object({
   group: z.string().trim().min(1).max(64).optional(),
 });
 
+export const groupsQuerySchema = z.object({
+  service: z.enum(['airtime', 'data', 'utility', 'esim', 'number']),
+});
+
 export const verifyTargetSchema = z.object({
   service: z.enum(['airtime', 'data', 'utility', 'esim', 'number']),
   item_code: z.string().trim().min(1).max(128),

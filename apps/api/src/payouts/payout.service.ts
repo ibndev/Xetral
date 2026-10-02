@@ -335,7 +335,7 @@ export class PayoutService {
     const rail = await this.#payingRail(destination, amount, debitCurrency);
 
     const reference = payoutReferenceFor(userUuid, body.idempotency_key);
-    const reserved = await this.#reserve(
+    const { row: reserved, created } = await this.#reserve(
       userId,
       body,
       destination,
@@ -346,6 +346,20 @@ export class PayoutService {
       total,
       rail,
     );
+
+    /*
+     * ONLY THE REQUEST THAT WROTE THE ROW SENDS.
+     *
+     * Two submissions of one attempt — a double tap, a client retrying a
+     * request that is still running — both pass the `#byKey` check above,
+     * both reserve under one ledger key (the second is a replay) and one of
+     * them loses the row insert. The loser went on to send as well, under
+     * the same reference: the rail refused the duplicate, `providerDidNothing`
+     * read that refusal as "nothing moved", and `fail()` REVERSED a payout the
+     * winner had just sent. The customer was refunded and the beneficiary
+     * paid. The loser now answers with the row as it stands.
+     */
+    if (!created) return refuseIfFailed(toView(await this.#reload(reserved.id)));
 
     const request = {
       country: destination.country,
@@ -1153,7 +1167,30 @@ export class PayoutService {
     const taxMinor = BigInt(row.tax_minor);
     const feeNet = feeGross - taxMinor;
 
-    const posted = await this.ledger.post({
+    /*
+     * THE STATE CHANGE AND THE POSTING ARE ONE TRANSACTION, decided under a
+     * lock on the payout row.
+     *
+     * They were two: the settle posted, THEN a separate UPDATE moved the row
+     * to `sent`. Every path that resolves a payout — the request, both rails'
+     * `transfer.*` events, the sweep, the recovery list and its buttons —
+     * reads the row first and acts on that snapshot, and several run at once
+     * by design. A `fail()` holding a snapshot taken before this settle
+     * committed still saw `settle_entry_id` null, posted the RESERVE's
+     * reversal (pending → wallet), and the overdraft guard let it through
+     * whenever the customer had any other money in `customer_pending` — a
+     * card hold, a gift card hold, a second payout. The beneficiary was paid
+     * and the customer was refunded, and every entry balanced. A process
+     * dying between the posting and the UPDATE left the same trap behind.
+     *
+     * Now the row is locked on the entry's own connection and re-read there;
+     * a payout no longer `reserved`, or already reversed, is left alone; and
+     * the row moves in `onEntry`, so the posting and the state commit
+     * together or not at all.
+     */
+    let posted;
+    try {
+      posted = await this.ledger.post({
       idempotencyKey: `bank-payout-settle:${row.reference}`,
       kind: 'wallet_withdrawal',
       occurredAt: new Date(),
@@ -1176,6 +1213,10 @@ export class PayoutService {
       ],
     },
     {
+      precondition: async (client) => {
+        const locked = await lockForResolution(client, row.id);
+        if (locked.status !== 'reserved' || locked.reversed) throw new PayoutMoved(true);
+      },
       /*
        * THE RECEIPT IS WRITTEN ON THE ENTRY'S OWN TRANSACTION.
        *
@@ -1187,6 +1228,7 @@ export class PayoutService {
        * and a second would deadlock the pool at `pool.max` writers.
        */
       onEntry: async (client, entry) => {
+        await markSent(client, row.id, providerPayoutId, entry.entryId);
         const email = await this.#emailFor(client, row.user_id);
         if (email === undefined) return;
         await this.notifications.enqueueBestEffort(client, {
@@ -1205,16 +1247,19 @@ export class PayoutService {
         });
       },
     });
+    } catch (error) {
+      // Somebody else decided this payout first. Their decision stands.
+      if (error instanceof PayoutMoved) return;
+      throw error;
+    }
 
-    // Guarded on `status = 'reserved'`, so a redelivered receipt cannot move a
-    // payout that has already settled.
-    await this.pool.query(
-      `UPDATE bank_payouts
-          SET status = 'sent', provider_payout_id = $2, settle_entry_id = $3::bigint
-        WHERE id = $1::bigint AND status = 'reserved'`,
-      [row.id, providerPayoutId, posted.entryId],
-    );
-
+    /* A REPLAY skips `onEntry`: the settlement was posted by an attempt that
+       died before its row moved (only possible for a row written before the
+       two shared a transaction). Guarded on `reserved`, so it cannot move a
+       payout anything else has decided. */
+    if (posted.replayed) {
+      await markSent(this.pool, row.id, providerPayoutId, posted.entryId);
+    }
   }
 
   /** Reads on the entry's OWN connection — never taking one of its own, which
@@ -1239,6 +1284,34 @@ export class PayoutService {
    * from the outside even when the ledger is right.
    */
   async fail(row: PayoutRow, reason: string): Promise<void> {
+    /*
+     * DECIDED UNDER THE ROW LOCK, and retried once on a moved row.
+     *
+     * Which reversal is true depends on whether the payout has settled, and
+     * that was read off a snapshot the caller took before asking a provider
+     * — seconds or minutes earlier, while a webhook or the sweep may have
+     * settled it in between. A reserve's reversal posted against a settled
+     * payout refunds the customer for money that has left, and the overdraft
+     * guard only catches it when nothing else sits in `customer_pending`.
+     * So the shape is chosen from the snapshot, CHECKED against the locked
+     * row on the entry's own transaction, and rebuilt from a fresh read if
+     * the two disagree.
+     */
+    let current = row;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        await this.#reverse(current, reason);
+        return;
+      } catch (error) {
+        if (!(error instanceof PayoutMoved)) throw error;
+        if (error.final) return;
+        current = await this.#reload(row.id);
+      }
+    }
+    throw new Error(`payout ${row.reference} kept moving while it was being reversed`);
+  }
+
+  async #reverse(row: PayoutRow, reason: string): Promise<void> {
     const currency = row.currency as Currency;
     const amount = BigInt(row.amount_minor);
     const feeGross = BigInt(row.fee_minor);
@@ -1275,9 +1348,15 @@ export class PayoutService {
      * with it, because a payout that never happened earned no fee and owes no
      * tax on one.
      */
-    const settled = row.settle_entry_id !== null;
+    /* The settlement as the LEDGER knows it, not only as the row does: a
+       settle whose row update was lost to a crash is still a settlement. */
+    const settleEntryId = row.settle_entry_id ?? (await this.#entryByKey(
+      this.pool,
+      `bank-payout-settle:${row.reference}`,
+    ));
+    const settled = settleEntryId !== null;
 
-    await this.ledger.post({
+    const posted = await this.ledger.post({
       idempotencyKey: `bank-payout-reverse:${row.reference}`,
       kind: 'reversal',
       /*
@@ -1285,7 +1364,7 @@ export class PayoutService {
        * is the settlement, not the reserve: naming the reserve would describe
        * an entry whose postings this one does not undo.
        */
-      reversesEntryId: settled ? (row.settle_entry_id as string) : row.reserve_entry_id,
+      reversesEntryId: settled ? (settleEntryId as string) : row.reserve_entry_id,
       occurredAt: new Date(),
       description: 'bank payout failed',
       metadata: { reference: row.reference, reason, reversed: settled ? 'settle' : 'reserve' },
@@ -1314,6 +1393,12 @@ export class PayoutService {
           ],
     },
     {
+      precondition: async (client) => {
+        const locked = await lockForResolution(client, row.id);
+        if (locked.status !== 'reserved' && locked.status !== 'sent') throw new PayoutMoved(true);
+        const nowSettled = locked.settle_entry_id ?? locked.settle_posted;
+        if ((nowSettled ?? null) !== (settleEntryId ?? null)) throw new PayoutMoved(false);
+      },
       /*
        * ON THE REVERSAL'S OWN TRANSACTION, the rule 012 states and the same
        * hook the settlement uses. A message enqueued afterwards is lost when
@@ -1326,6 +1411,7 @@ export class PayoutService {
        * holding one, and a second would deadlock the pool at `pool.max`.
        */
       onEntry: async (client, entry) => {
+        await markFailed(client, row.id, reason);
         const email = await this.#emailFor(client, row.user_id);
         if (email === undefined) return;
         await this.notifications.enqueueBestEffort(client, {
@@ -1349,11 +1435,16 @@ export class PayoutService {
       },
     });
 
-    await this.pool.query(
-      `UPDATE bank_payouts SET status = 'failed', failure_reason = $2
-        WHERE id = $1::bigint AND status IN ('reserved', 'sent')`,
-      [row.id, reason],
+    // A replay skips `onEntry` — see `#settle`.
+    if (posted.replayed) await markFailed(this.pool, row.id, reason);
+  }
+
+  async #entryByKey(db: Pool | PoolClient, key: string): Promise<string | null> {
+    const found = await db.query<{ id: string }>(
+      `SELECT id::text FROM journal_entries WHERE idempotency_key = $1`,
+      [key],
     );
+    return found.rows[0]?.id ?? null;
   }
 
   /* ------------------------------------------------------------------ */
@@ -1450,8 +1541,37 @@ export class PayoutService {
     split: { gross: Money<Currency>; tax: Money<Currency> },
     total: Money<Currency>,
     rail: PayoutRail,
-  ): Promise<PayoutRow> {
+  ): Promise<{ row: PayoutRow; created: boolean }> {
     const currency = body.currency as Currency;
+
+    /*
+     * THE RIGHT CATALOGUE, or the name beside the code is wrong: a Ghanaian
+     * bank code looked up in the wallet list finds nothing.
+     *
+     * THE BANK'S NAME IS READ BEFORE THE MONEY IS HELD, AND IS BEST EFFORT.
+     *
+     * It was read AFTER the reserve, unguarded: a bank list that failed to
+     * load at that moment threw between the reserve and the row insert, so
+     * the customer's money sat in `customer_pending` with no payout row —
+     * invisible to the sweep, to recovery and to `bank_payouts_stuck`, which
+     * all start from the row. A name is a label for an operator; the code
+     * stands in for it rather than stranding a balance.
+     */
+    let bankName = destination.bank_code;
+    try {
+      const banks = await this.port.banks(
+        destination.country,
+        destination.mobile_money ? 'mobile_money' : 'bank',
+      );
+      bankName =
+        banks.find((bank: PayoutBank) => bank.code === destination.bank_code)?.name ??
+        destination.bank_code;
+    } catch (error) {
+      this.#logger.warn(
+        `payout ${reference}: the destination list could not be read (${describe(error)}); ` +
+          'the row records the code in place of the name',
+      );
+    }
 
     let entryId: string;
     try {
@@ -1498,6 +1618,7 @@ export class PayoutService {
           ((await this.port.prefundedFor?.(destination.country)) ??
             this.port.prefunded === true),
         amount: total,
+        idempotencyKey: `bank-payout-reserve:${reference}`,
       });
 
       /*
@@ -1541,17 +1662,6 @@ export class PayoutService {
       }
       throw error;
     }
-
-    /* THE RIGHT CATALOGUE, or the name beside the code is wrong. A Ghanaian
-       bank code looked up in the wallet list finds nothing and the row records
-       the code as its own name — which is what an operator then reads. */
-    const banks = await this.port.banks(
-      destination.country,
-      destination.mobile_money ? 'mobile_money' : 'bank',
-    );
-    const bankName =
-      banks.find((bank: PayoutBank) => bank.code === destination.bank_code)?.name ??
-      destination.bank_code;
 
     const inserted = await this.pool.query<{ id: string }>(
       `INSERT INTO bank_payouts
@@ -1611,11 +1721,11 @@ export class PayoutService {
     );
 
     const row = inserted.rows[0];
-    if (row !== undefined) return this.#reload(row.id);
+    if (row !== undefined) return { row: await this.#reload(row.id), created: true };
 
     const raced = await this.#byKey(userId, body.idempotency_key);
     if (raced === undefined) throw new Error('payout insert returned no row');
-    return raced;
+    return { row: raced, created: false };
   }
 
   #parseAmount(raw: string, currency: Currency): Money<Currency> {
@@ -1731,3 +1841,72 @@ function verdictOf(receipt: PayoutReceipt): RailVerdict {
     : { kind: 'arrived', receipt };
 }
 
+/**
+ * Somebody else moved this payout while we were deciding about it. `final`
+ * means it has been decided for good and there is nothing left to do;
+ * otherwise the caller re-reads the row and decides again.
+ */
+class PayoutMoved extends Error {
+  constructor(readonly final: boolean) {
+    super(final ? 'the payout was already decided' : 'the payout moved while it was being decided');
+  }
+}
+
+/**
+ * LOCKS the payout row on the entry's own connection and reads what the
+ * ledger already holds for it. Every path that settles or reverses a payout
+ * goes through this before posting, so two of them can never both act on one.
+ */
+async function lockForResolution(
+  client: PoolClient,
+  payoutId: string,
+): Promise<{
+  status: string;
+  settle_entry_id: string | null;
+  settle_posted: string | null;
+  reversed: boolean;
+}> {
+  const found = await client.query<{
+    status: string;
+    settle_entry_id: string | null;
+    settle_posted: string | null;
+    reversed: boolean;
+  }>(
+    `SELECT b.status::text AS status,
+            b.settle_entry_id::text AS settle_entry_id,
+            (SELECT e.id::text FROM journal_entries e
+              WHERE e.idempotency_key = 'bank-payout-settle:' || b.reference) AS settle_posted,
+            EXISTS (SELECT 1 FROM journal_entries e
+                     WHERE e.idempotency_key = 'bank-payout-reverse:' || b.reference) AS reversed
+       FROM bank_payouts b
+      WHERE b.id = $1::bigint
+        FOR UPDATE OF b`,
+    [payoutId],
+  );
+  const row = found.rows[0];
+  if (row === undefined) throw new NotFoundException({ error: 'not_found' });
+  return row;
+}
+
+/** Guarded on `reserved`, so it cannot move a payout already decided. */
+async function markSent(
+  db: Pool | PoolClient,
+  payoutId: string,
+  providerPayoutId: string,
+  settleEntryId: string,
+): Promise<void> {
+  await db.query(
+    `UPDATE bank_payouts
+        SET status = 'sent', provider_payout_id = $2, settle_entry_id = $3::bigint
+      WHERE id = $1::bigint AND status = 'reserved'`,
+    [payoutId, providerPayoutId, settleEntryId],
+  );
+}
+
+async function markFailed(db: Pool | PoolClient, payoutId: string, reason: string): Promise<void> {
+  await db.query(
+    `UPDATE bank_payouts SET status = 'failed', failure_reason = $2
+      WHERE id = $1::bigint AND status IN ('reserved', 'sent')`,
+    [payoutId, reason],
+  );
+}

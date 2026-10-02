@@ -471,7 +471,10 @@ export class FxService {
         this.#logger.warn(`fx trade ${reference} timed out; not recorded`);
         throw new ConflictException({ error: 'fx_outcome_unknown', reference });
       }
-      throw new UnprocessableEntityException({ error: 'fx_failed', detail: describe(error) });
+      /* The provider's sentence names our integration — 006's rule — so it
+         goes to the log and the customer gets the code. */
+      this.#logger.warn(`fx trade ${reference} refused at the provider: ${describe(error)}`);
+      throw new UnprocessableEntityException({ error: 'fx_failed' });
     }
     }
 

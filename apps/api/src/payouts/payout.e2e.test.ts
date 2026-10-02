@@ -27,6 +27,7 @@ import type { Currency, Money } from '@xetral/shared';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { PayoutReconciliationService } from './payout-reconciliation.service.js';
 import { PayoutService } from './payout.service.js';
+import type { PayoutRow } from './payout.service.js';
 import { RecoveryService } from '../admin/recovery.service.js';
 import { ProviderLiquidityService } from './provider-liquidity.service.js';
 import { AppModule } from '../app.module.js';
@@ -112,7 +113,12 @@ class FakePayoutPort implements PayoutPort {
    */
   prefunded = false;
 
+  /** Holds the bank list back, so two requests are both past the "already
+   *  sent?" check before either writes its row. */
+  banksDelayMs = 0;
+
   async banks(): Promise<readonly PayoutBank[]> {
+    if (this.banksDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, this.banksDelayMs));
     return [
       { code: '058', name: 'GTBank' },
       { code: '057', name: 'Zenith Bank' },
@@ -444,6 +450,69 @@ describe('sending', () => {
     // connection must not pay their landlord twice.
     expect(port.sends).toHaveLength(1);
     expect((await nairaBalance(customer)).spendable).toBe('15000.00');
+  });
+
+  it('sends once when one attempt is submitted twice at the same moment', async () => {
+    // The loser of the row insert used to send as well, under the same
+    // reference; the rail refused the duplicate and that refusal REVERSED the
+    // payout the winner had just sent.
+    const customer = await onboard();
+    await fund(customer.userId, 2_000_000n);
+    const key = randomUUID();
+
+    port.banksDelayMs = 300;
+    const [first, second] = await Promise.all([
+      pay(customer, { idempotency_key: key }),
+      pay(customer, { idempotency_key: key }),
+    ]).finally(() => {
+      port.banksDelayMs = 0;
+    });
+
+    expect([first.status, second.status]).toEqual([200, 200]);
+    expect(second.body.id).toBe(first.body.id);
+    expect(port.sends).toHaveLength(1);
+    const after = await nairaBalance(customer);
+    expect(after.spendable).toBe('15000.00');
+  });
+
+  it('a STALE snapshot cannot reverse the reserve of a payout that has settled', async () => {
+    // Every resolver reads the row, asks a provider, then acts. A `fail()`
+    // holding a snapshot from before a settle took the RESERVE's reversal out
+    // of `customer_pending` — paid for by whatever else was held there — and
+    // the customer was refunded for a payout that had left.
+    const customer = await onboard();
+    await fund(customer.userId, 2_000_000n);
+    port.sendAnswer = new ProviderTimeoutError('bitnob', 'no answer');
+    await pay(customer).expect(200); // an unrelated hold of 5,000
+    await pay(customer).expect(200); // the payout under test
+
+    const rows = await pool.query<PayoutRow>(
+      `SELECT * FROM bank_payouts WHERE user_id = $1::bigint ORDER BY id`,
+      [customer.userId],
+    );
+    const stale = rows.rows[1]!;
+    const payouts = app.get(PayoutService);
+    await payouts.applyReceipt(stale, { providerPayoutId: 'po_settled', state: 'sent', reference: stale.reference });
+    await payouts.fail(stale, 'returned by the bank');
+
+    const after = await nairaBalance(customer);
+    expect(after.pending).toBe('5000.00');
+    expect(after.spendable).toBe('15000.00');
+
+    const entries = await pool.query<{ reverses_id: string; settle_entry_id: string; status: string }>(
+      `SELECT e.reverses_id::text, b.settle_entry_id::text, b.status::text
+         FROM bank_payouts b
+         JOIN journal_entries e ON e.idempotency_key = 'bank-payout-reverse:' || b.reference
+        WHERE b.id = $1::bigint`,
+      [stale.id],
+    );
+    expect(entries.rows[0]?.status).toBe('failed');
+    expect(entries.rows[0]?.reverses_id).toBe(entries.rows[0]?.settle_entry_id);
+
+    // And a second decision about it, from another stale snapshot, does nothing.
+    await payouts.applyReceipt(stale, { providerPayoutId: 'po_settled', state: 'sent', reference: stale.reference });
+    await payouts.fail(stale, 'again');
+    expect(await nairaBalance(customer)).toEqual(after);
   });
 });
 

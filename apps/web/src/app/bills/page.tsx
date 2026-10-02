@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { formatAmount, PURCHASE_SERVICES } from '@xetral/client';
-import type { CatalogueItem, Purchase, PurchaseService } from '@xetral/client';
+import type { CatalogueGroup, CatalogueItem, Purchase, PurchaseService } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { Select } from '@/ui/select';
 import { FormError } from '@/ui/form-error';
@@ -63,7 +63,9 @@ export default function Bills() {
         ))}
       </div>
 
-      <Buy service={service} onBought={history.reload} />
+      {/* Keyed: a new service is a new form, so no network or plan from the last
+          one is asked about under this one. */}
+      <Buy key={service} service={service} onBought={history.reload} />
 
       <div className="card">
         <h2>Recent purchases</h2>
@@ -82,9 +84,21 @@ export default function Bills() {
 function Buy({ service, onBought }: { service: ServiceCode; onBought: () => void }) {
   const client = useXetral();
   const meta = SERVICES.find((s) => s.code === service);
+  /* Read through the interface: the literal union of five services has no
+     `group` on the two that are not sold per network. */
+  const groupLabel = (meta as PurchaseService | undefined)?.group;
   const [items, setItems] = useState<readonly CatalogueItem[]>([]);
   const [catalogueError, setCatalogueError] = useState<string | undefined>();
-  const [itemCode, setItemCode] = useState('');
+  /*
+   * WHO WITHIN THE SERVICE — the network, the electricity company. VTpass
+   * sells per `serviceID`, and the catalogue was asked for with none, so data
+   * and electricity offered no plans and airtime had no item at all. For
+   * airtime the network IS what is bought: the customer names the amount.
+   */
+  const [groups, setGroups] = useState<readonly CatalogueGroup[]>([]);
+  const [group, setGroup] = useState('');
+  const [item, setItem] = useState('');
+  const itemCode = service === 'airtime' ? group : item;
   const [target, setTarget] = useState('');
   const [amount, setAmount] = useState('');
   const [pin, setPin] = useState('');
@@ -94,17 +108,26 @@ function Buy({ service, onBought }: { service: ServiceCode; onBought: () => void
 
   useEffect(() => {
     let cancelled = false;
+    setGroups([]);
+    setGroup('');
     setItems([]);
-    setItemCode('');
+    setItem('');
     setVerified(undefined);
     setCatalogueError(undefined);
 
     void (async () => {
       try {
-        const loaded = await client.catalogue(service);
-        if (!cancelled) {
-          setItems(loaded);
-          setItemCode(loaded[0]?.code ?? '');
+        const loaded = groupLabel === undefined ? [] : await client.purchaseGroups(service);
+        if (cancelled) return;
+        setGroups(loaded);
+        setGroup(loaded[0]?.code ?? '');
+        // A service sold in one catalogue has no groups: ask for it directly.
+        if (groupLabel === undefined) {
+          const catalogue = await client.catalogue(service);
+          if (!cancelled) {
+            setItems(catalogue);
+            setItem(catalogue[0]?.code ?? '');
+          }
         }
       } catch (cause) {
         // A catalogue that will not load is a configured-provider problem, and
@@ -116,9 +139,31 @@ function Buy({ service, onBought }: { service: ServiceCode; onBought: () => void
     return () => {
       cancelled = true;
     };
-  }, [client, service]);
+  }, [client, service, groupLabel]);
 
-  const selected = items.find((i) => i.code === itemCode);
+  useEffect(() => {
+    if (groupLabel === undefined || service === 'airtime' || group === '') return;
+    let cancelled = false;
+    setItems([]);
+    setItem('');
+    setVerified(undefined);
+    void (async () => {
+      try {
+        const catalogue = await client.catalogue(service, group);
+        if (!cancelled) {
+          setItems(catalogue);
+          setItem(catalogue[0]?.code ?? '');
+        }
+      } catch (cause) {
+        if (!cancelled) setCatalogueError(messageFor(cause));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [client, service, group, groupLabel]);
+
+  const selected = items.find((i) => i.code === item);
   // A fixed-price item has nothing for the customer to type; a variable one
   // (airtime, electricity) does. Showing an amount box for a ₦500 data bundle
   // invites somebody to type a different number and be confused when it is
@@ -162,14 +207,29 @@ function Buy({ service, onBought }: { service: ServiceCode; onBought: () => void
         </div>
       )}
 
+      {groupLabel !== undefined && (
+        <label className="field" id="bills-group-label">
+          <span className="field-label">{groupLabel}</span>
+          <Select
+            labelledBy="bills-group-label"
+            value={group}
+            placeholder={groups.length === 0 ? 'Nothing available' : 'Choose one'}
+            disabled={groups.length === 0}
+            onChange={setGroup}
+            options={groups.map((g) => ({ value: g.code, label: g.name }))}
+          />
+        </label>
+      )}
+
+      {service !== 'airtime' && (
       <label className="field" id="bills-item-label">
         <span className="field-label">What to buy</span>
         <Select
           labelledBy="bills-item-label"
-          value={itemCode}
+          value={item}
           placeholder={items.length === 0 ? 'Nothing available' : 'Choose one'}
           disabled={items.length === 0}
-          onChange={setItemCode}
+          onChange={setItem}
           options={items.map((item) => ({
             value: item.code,
             label: item.name,
@@ -180,6 +240,7 @@ function Buy({ service, onBought }: { service: ServiceCode; onBought: () => void
           }))}
         />
       </label>
+      )}
 
       <label className="field">
         <span className="field-label">{meta?.target}</span>
@@ -198,7 +259,7 @@ function Buy({ service, onBought }: { service: ServiceCode; onBought: () => void
           nothing to confirm, and the server says so rather than pretending —
           so a failure here is information, not a blocker.
         */}
-        {(service === 'electricity' || service === 'data') && (
+        {(service === 'utility' || service === 'data') && (
           <span className="row toggle" style={{ borderTop: 0, paddingTop: 8, marginTop: 6 }}>
             <button
               type="button"

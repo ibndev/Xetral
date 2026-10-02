@@ -113,6 +113,26 @@ export interface FulfilmentPort {
 
   catalogue(query: CatalogueQuery): Promise<readonly CatalogueItem[]>;
 
+  /**
+   * WHAT THIS ITEM COSTS, read from the provider at the moment of purchase —
+   * or null where the customer names the amount (airtime, a meter top-up).
+   *
+   * THE AMOUNT ON A PURCHASE REQUEST IS THE CUSTOMER'S, and nothing used to
+   * compare it with anything. The reserve took whatever figure the request
+   * carried and the provider was sent the PRODUCT CODE — an Airalo package,
+   * a Twilio number, a VTpass data plan — which it fulfils at its own price
+   * whatever we were paid. A request for a $20 eSIM carrying `"amount":
+   * "0.01"` was charged one cent and delivered the eSIM; the platform paid
+   * the difference out of its float, with every entry balanced. So the
+   * service asks this before anything is held, and refuses a request whose
+   * amount is not the price.
+   *
+   * An item the provider does not list is a REJECTION
+   * (`ProviderRejectedError`, code `item_not_found`), never a null: a null
+   * would let a made-up code through as "customer names the amount".
+   */
+  priceOf(itemCode: string): Promise<bigint | null>;
+
   purchase(request: PurchaseRequest): Promise<PurchaseResult>;
 
   /**
@@ -143,6 +163,26 @@ export interface VerifiedTarget {
  */
 export interface TargetVerification {
   verifyTarget(itemCode: string, target: string): Promise<VerifiedTarget>;
+}
+
+/**
+ * WHO WITHIN A SERVICE: the networks airtime and data are sold for, the
+ * electricity companies a meter belongs to. An optional capability, for the
+ * provider whose catalogue is per group (VTpass's `serviceID`); a provider
+ * with one catalogue per service has no groups and does not implement it.
+ */
+export interface CatalogueGroup {
+  /** The provider's own id, which is what a catalogue is asked for by. */
+  readonly code: string;
+  readonly name: string;
+}
+
+export interface CatalogueGroups {
+  groups(): Promise<readonly CatalogueGroup[]>;
+}
+
+export function supportsGroups(port: FulfilmentPort): port is FulfilmentPort & CatalogueGroups {
+  return typeof (port as Partial<CatalogueGroups>).groups === 'function';
 }
 
 export function supportsVerification(

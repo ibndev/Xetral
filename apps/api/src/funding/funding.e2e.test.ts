@@ -1021,4 +1021,27 @@ describe('a rail that will not open an account until it has identified the custo
   it('acknowledges an identification event it cannot place, rather than having it retried for ever', async () => {
     await paystackEvent('customeridentification.success', `nobody-${randomUUID()}@example.ng`).expect(200);
   });
+
+  it('ACKNOWLEDGES AN EVENT THAT IS NOT A DEPOSIT, rather than answering 500 for three days', async () => {
+    // Paystack posts every event on the integration to this one URL. A card
+    // charge for another product, or a refund, threw a contract error.
+    const charge = {
+      id: 1,
+      reference: `other-${randomUUID()}`,
+      amount: 500_000,
+      currency: 'NGN',
+      channel: 'card',
+      status: 'success',
+    };
+    await paystackEvent('charge.success', `nobody-${randomUUID()}@example.ng`, charge).expect(200);
+    await paystackEvent('refund.processed', `nobody-${randomUUID()}@example.ng`, {
+      ...charge,
+      reference: `refund-${randomUUID()}`,
+    }).expect(200);
+    const credited = await pool.query(
+      `SELECT 1 FROM journal_entries WHERE idempotency_key = $1`,
+      [`paystack:${charge.reference}`],
+    );
+    expect(credited.rowCount).toBe(0);
+  });
 });

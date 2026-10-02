@@ -44,6 +44,13 @@ const INTERNAL: Readonly<Record<string, string>> = {
   // A payout webhook answered 503 so the RAIL retries while it cannot say what
   // happened. Only a provider ever receives it.
   payout_unconfirmed: 'answered to a provider webhook, never to a customer',
+  // A charge event for a link payment the rail has not confirmed yet: 503 so
+  // the rail delivers it again, because nothing else asks about link payments.
+  payment_unconfirmed: 'answered to a provider webhook, never to a customer',
+  // A card settlement or expiry naming a hold we have not seen, or one that
+  // moved under us: 503 so Bitnob retries.
+  authorization_unknown: 'answered to a provider webhook, never to a customer',
+  authorization_moved: 'answered to a provider webhook, never to a customer',
 };
 
 function sourceFiles(dir: string): string[] {

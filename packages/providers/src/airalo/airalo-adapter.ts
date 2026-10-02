@@ -132,6 +132,16 @@ export class AiraloAdapter implements FulfilmentPort {
     );
   }
 
+  /** The package's own price, read from Airalo's catalogue. A package Airalo
+   *  does not list is refused rather than priced by the request. */
+  async priceOf(itemCode: string): Promise<bigint | null> {
+    const item = (await this.catalogue({})).find((candidate) => candidate.code === itemCode);
+    if (item === undefined) {
+      throw new ProviderRejectedError(PROVIDER, `Airalo lists no package '${itemCode}'`, 'item_not_found');
+    }
+    return item.priceMinor;
+  }
+
   async purchase(request: PurchaseRequest): Promise<PurchaseResult> {
     if (request.currency !== 'USD') {
       throw new ProviderContractError(PROVIDER, `Airalo settles in USD; got ${request.currency}`);

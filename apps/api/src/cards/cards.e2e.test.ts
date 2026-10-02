@@ -1642,7 +1642,7 @@ describe('the two halves of a card spend', () => {
           authorizationId: 'txn_this_card_never_saw',
         })
       ).status,
-    ).toBe(500);
+    ).toBe(503);
   });
 
   it('succeeds on the retry once the missing authorization arrives', async () => {
@@ -1662,7 +1662,7 @@ describe('the two halves of a card spend', () => {
           authorizationId: authTxn,
         })
       ).status,
-    ).toBe(500);
+    ).toBe(503);
 
     expect(
       (
@@ -2160,5 +2160,67 @@ describe('the dollar total on the home screen', () => {
         await pool.query(`UPDATE fx_published_rates SET retired_at = now() WHERE id = $1`, [ours]);
       }
     }
+  });
+});
+
+describe('one outcome per hold', () => {
+  /*
+   * `customer_pending` is one account for every hold a customer has, so the
+   * overdraft guard cannot tell a second outcome for one hold from the first
+   * outcome of another. Each test keeps a SECOND hold open on the same card,
+   * which is exactly the money a double release used to spend.
+   */
+  async function twoHolds(): Promise<{ customer: Customer; card: { id: string; providerCardId: string }; first: string }> {
+    const customer = await onboard();
+    await fundWallet(customer.userId, 200_00);
+    const card = await issueCard(customer, '50.00');
+    const first = `txn_hold_${randomUUID()}`;
+    expect((await deliverWebhook(BITNOB_EVENTS.cardAuthorization, card.providerCardId, '10000000', { txnId: first })).status).toBe(200);
+    expect((await deliverWebhook(BITNOB_EVENTS.cardAuthorization, card.providerCardId, '10000000')).status).toBe(200);
+    return { customer, card, first };
+  }
+
+  it('an expiry after the hold has settled releases nothing', async () => {
+    const { customer, card, first } = await twoHolds();
+    await deliverWebhook(BITNOB_EVENTS.cardSettlement, card.providerCardId, '10000000', { authorizationId: first });
+    const expired = await deliverWebhook(BITNOB_EVENTS.cardAuthorizationExpired, card.providerCardId, '10000000', {
+      authorizationId: first,
+    });
+    expect(expired.status).toBe(200);
+    // The other hold is still held, and the card did not get the first back.
+    expect(await balance(pendingAccount(customer.userId))).toBe(1000n);
+    expect(await balance(cardAccount(customer.userId))).toBe(3000n);
+  });
+
+  it('a settlement after the hold has expired takes the spend off the card, not another hold', async () => {
+    const { customer, card, first } = await twoHolds();
+    await deliverWebhook(BITNOB_EVENTS.cardAuthorizationExpired, card.providerCardId, '10000000', {
+      authorizationId: first,
+    });
+    expect(await balance(cardAccount(customer.userId))).toBe(4000n);
+
+    const settled = await deliverWebhook(BITNOB_EVENTS.cardSettlement, card.providerCardId, '10000000', {
+      authorizationId: first,
+    });
+    expect(settled.status).toBe(200);
+    expect(await balance(pendingAccount(customer.userId))).toBe(1000n);
+    expect(await balance(cardAccount(customer.userId))).toBe(3000n);
+  });
+
+  it('a second settlement for one hold, under a new event id, posts nothing', async () => {
+    const { customer, card, first } = await twoHolds();
+    await deliverWebhook(BITNOB_EVENTS.cardSettlement, card.providerCardId, '10000000', { authorizationId: first });
+    await deliverWebhook(BITNOB_EVENTS.cardSettlement, card.providerCardId, '10000000', { authorizationId: first });
+    expect(await balance(pendingAccount(customer.userId))).toBe(1000n);
+    expect(await balance(cardAccount(customer.userId))).toBe(3000n);
+  });
+
+  it('an expiry for a hold it has no record of is refused, and releases nothing', async () => {
+    const { customer, card } = await twoHolds();
+    const res = await deliverWebhook(BITNOB_EVENTS.cardAuthorizationExpired, card.providerCardId, '10000000', {
+      authorizationId: 'txn_never_seen',
+    });
+    expect(res.status).toBe(503);
+    expect(await balance(pendingAccount(customer.userId))).toBe(2000n);
   });
 });

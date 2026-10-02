@@ -1,4 +1,10 @@
-import { Inject, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { parseFlutterwaveEvent, verifyFlutterwaveWebhook } from '@xetral/providers';
 import { API_CONFIG } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
@@ -154,8 +160,15 @@ export class FlutterwaveWebhookService {
      * passing on a reference is the whole of its authority.
      */
     const outcome = await this.links.settle(event.reference);
-    if (outcome === 'credited' || outcome === 'replayed') {
-      this.#logger.log(`flutterwave ${event.reference}: ${outcome}`);
+    this.#logger.log(`flutterwave ${event.reference}: ${outcome}`);
+    /* OURS, and Flutterwave did not call it successful when asked. A
+       charge event for a payment still processing was acknowledged and
+       dropped, and nothing else ever asks about a link payment: refusing the
+       delivery is what makes Flutterwave send it again. A payment still
+       pending because the payer abandoned it is retried until Flutterwave
+       stops, which costs nothing. */
+    if (outcome === 'pending') {
+      throw new ServiceUnavailableException({ error: 'payment_unconfirmed' });
     }
   }
 }

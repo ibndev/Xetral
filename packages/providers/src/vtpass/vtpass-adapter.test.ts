@@ -284,3 +284,68 @@ describe('keys pasted on the dashboard', () => {
     expect(transport.calls).toHaveLength(0);
   });
 });
+
+describe('VtpassAdapter prices an item from VTpass, never from the request', () => {
+  it('reads a variation price by serviceID:variation', async () => {
+    const { transport, port } = harness();
+    transport.script([{ json: variations }]);
+    await expect(port.priceOf('mtn-data:mtn-10gb')).resolves.toBe(450_000n);
+    expect(transport.calls[0]?.url).toContain('serviceID=mtn-data');
+  });
+
+  it('refuses a variation VTpass does not list, and a code with no variation', async () => {
+    const { transport, port } = harness();
+    transport.script([{ json: variations }]);
+    await expect(port.priceOf('mtn-data:mtn-made-up')).rejects.toBeInstanceOf(ProviderRejectedError);
+    await expect(port.priceOf('mtn-data')).rejects.toBeInstanceOf(ProviderRejectedError);
+  });
+
+  it('reads a zero-priced variation as an amount the customer names', async () => {
+    const { transport, port } = harness();
+    transport.script([
+      {
+        json: {
+          content: {
+            variations: [{ variation_code: 'prepaid', name: 'Prepaid', variation_amount: '0' }],
+          },
+        },
+      },
+    ]);
+    await expect(port.priceOf('ikeja-electric:prepaid')).resolves.toBeNull();
+  });
+});
+
+describe('VtpassAdapter groups and item codes', () => {
+  it('reads the networks for a service from VTpass, by its category', async () => {
+    const { transport, port } = harness();
+    transport.script([
+      {
+        json: {
+          response_description: '000',
+          content: [
+            { serviceID: 'mtn-data', name: 'MTN Data' },
+            { serviceID: 'glo-data', name: 'GLO Data' },
+          ],
+        },
+      },
+    ]);
+    await expect(port.groups()).resolves.toEqual([
+      { code: 'mtn-data', name: 'MTN Data' },
+      { code: 'glo-data', name: 'GLO Data' },
+    ]);
+    expect(transport.calls[0]?.url).toContain('/api/services?identifier=data');
+  });
+
+  it('names each item by the code purchase sends — serviceID:variation', async () => {
+    const { transport, port } = harness();
+    transport.script([{ json: variations }]);
+    const items = await port.catalogue({ group: 'mtn-data' });
+    expect(items.map((i) => i.code)).toEqual(['mtn-data:mtn-10gb', 'mtn-data:mtn-1gb']);
+  });
+
+  it('asks VTpass for nothing when no group is named', async () => {
+    const { transport, port } = harness();
+    await expect(port.catalogue({})).resolves.toEqual([]);
+    expect(transport.calls).toHaveLength(0);
+  });
+});

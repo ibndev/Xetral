@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../app.module.js';
 import { systemClock } from '../tokens.js';
 import { testApiConfig } from '../test-support/api-config.js';
+import { pinListener } from '../test-support/listener.js';
 
 /**
  * The staff second factor, through the real guard.
@@ -421,6 +422,34 @@ describe('the staff surface', () => {
     },
     WAIT_FOR_STEP_TIMEOUT_MS,
   );
+
+  it('checks AT MOST FIVE codes when they arrive all at once', async () => {
+    // Each failure used to write `failed_attempts = <read> + 1`, so a burst
+    // of parallel guesses each read 0, each wrote 1, and the lockout never
+    // came. Ten wrong codes at once must still lock the factor after five.
+    await pinListener(app);
+    const operator = await register();
+    await grant(operator, 'admin');
+    const code = await enrol(operator);
+    const token = await signInAgain(operator);
+    const wrong = code() === '000000' ? '000001' : '000000';
+
+    const answers = await Promise.all(
+      Array.from({ length: 10 }, () =>
+        request(app.getHttpServer())
+          .post('/v1/auth/totp/elevate')
+          .set('Authorization', `Bearer ${token}`)
+          .send({ totp_code: wrong }),
+      ),
+    );
+    expect(answers.filter((r) => r.status === 401)).toHaveLength(5);
+    expect(answers.filter((r) => r.status === 403)).toHaveLength(5);
+    const row = await pool.query<{ locked: boolean }>(
+      `SELECT locked_until > now() AS locked FROM staff_totp WHERE user_id = $1::bigint`,
+      [operator.userId],
+    );
+    expect(row.rows[0]?.locked).toBe(true);
+  });
 
   it('refuses to elevate for somebody with no second factor', async () => {
     // The endpoint is declared `authenticated` rather than `staff`, because it

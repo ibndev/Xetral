@@ -10,7 +10,7 @@ import {
   ServiceUnavailableException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { InsufficientFundsError, LedgerService, posting } from '@xetral/ledger';
 import {
   assertValidAddress,
@@ -265,7 +265,19 @@ export class CryptoService {
     const reference = referenceFor(userUuid, body.idempotency_key);
     const total = money(amount.amount + quote.feeMinor, asset);
 
-    const reserved = await this.#reserve(userId, body, reference, amount, quote.feeMinor, total);
+    const { row: reserved, created } = await this.#reserve(
+      userId,
+      body,
+      reference,
+      amount,
+      quote.feeMinor,
+      total,
+    );
+    /* ONLY THE REQUEST THAT WROTE THE ROW SENDS — a second submission of one
+       attempt reserves as a replay and loses the row insert, and sending again
+       is how one withdrawal reaches the chain twice or a duplicate refusal
+       reverses the one that went. */
+    if (!created) return toView(await this.#reload(reserved.id));
 
     let receipt: WithdrawalReceipt;
     try {
@@ -320,7 +332,23 @@ export class CryptoService {
     const asset = row.asset as Currency;
     const total = money(BigInt(row.amount_minor) + BigInt(row.fee_minor), asset);
 
-    const posted = await this.ledger.post({
+    /*
+     * ON THE CHAIN, AND DECIDED UNDER A LOCK ON THE ROW.
+     *
+     * Settling and reversing are two ledger keys, and the request path, the
+     * webhook and the sweep each act on a row they read earlier. A
+     * confirmation arriving after the sweep had reversed a withdrawal posted
+     * its settlement anyway — out of `customer_pending`, which is shared with
+     * every deposit still awaiting confirmations — and only then did 007's
+     * trigger refuse the status change. The coins left and the customer was
+     * refunded. Now the row is locked and re-read on the entry's own
+     * transaction, a withdrawal that is not `broadcast` (or was reversed) is
+     * left alone, and the status moves with the posting.
+     */
+    await this.#markBroadcast(row, receipt);
+    let posted;
+    try {
+      posted = await this.ledger.post({
       idempotencyKey: `crypto-withdraw-settle:${row.reference}`,
       kind: 'crypto_withdrawal',
       occurredAt: new Date(),
@@ -330,15 +358,21 @@ export class CryptoService {
         posting(pendingAccount(row.user_id, asset), money(-total.amount, asset)),
         posting({ kind: 'provider_float', currency: asset }, total),
       ],
+    }, {
+      precondition: async (client) => {
+        const locked = await lockWithdrawal(client, row.id);
+        if (locked.status !== 'broadcast' || locked.reversed) throw new WithdrawalDecided();
+      },
+      onEntry: async (client, entry) => {
+        await markConfirmed(client, row.id, entry.entryId);
+      },
     });
+    } catch (error) {
+      if (error instanceof WithdrawalDecided) return;
+      throw error;
+    }
 
-    await this.#markBroadcast(row, receipt);
-    await this.pool.query(
-      `UPDATE crypto_withdrawals
-          SET status = 'confirmed', settle_entry_id = $2::bigint
-        WHERE id = $1::bigint AND status = 'broadcast'`,
-      [row.id, posted.entryId],
-    );
+    if (posted.replayed) await markConfirmed(this.pool, row.id, posted.entryId);
   }
 
   /**
@@ -396,7 +430,7 @@ export class CryptoService {
     amount: Money<Currency>,
     feeMinor: bigint,
     total: Money<Currency>,
-  ): Promise<WithdrawalRow> {
+  ): Promise<{ row: WithdrawalRow; created: boolean }> {
     const asset = body.asset as Currency;
 
     let entryId: string;
@@ -465,11 +499,11 @@ export class CryptoService {
     );
 
     const row = inserted.rows[0];
-    if (row !== undefined) return this.#reload(row.id);
+    if (row !== undefined) return { row: await this.#reload(row.id), created: true };
 
     const raced = await this.#byKey(userId, body.idempotency_key);
     if (raced === undefined) throw new Error('withdrawal insert returned no row');
-    return raced;
+    return { row: raced, created: false };
   }
 
   /** Gives the money back by appending a reversal naming the reservation. */
@@ -477,7 +511,9 @@ export class CryptoService {
     const asset = row.asset as Currency;
     const total = money(BigInt(row.amount_minor) + BigInt(row.fee_minor), asset);
 
-    await this.ledger.post({
+    let posted;
+    try {
+      posted = await this.ledger.post({
       idempotencyKey: `crypto-withdraw-reverse:${row.reference}`,
       kind: 'reversal',
       reversesEntryId: row.reserve_entry_id,
@@ -488,13 +524,26 @@ export class CryptoService {
         posting(pendingAccount(row.user_id, asset), money(-total.amount, asset)),
         posting(walletAccount(row.user_id, asset), total),
       ],
+    }, {
+      precondition: async (client) => {
+        const locked = await lockWithdrawal(client, row.id);
+        if (
+          (locked.status !== 'reserved' && locked.status !== 'broadcast') ||
+          locked.settled
+        ) {
+          throw new WithdrawalDecided();
+        }
+      },
+      onEntry: async (client) => {
+        await markWithdrawalFailed(client, row.id, reason);
+      },
     });
+    } catch (error) {
+      if (error instanceof WithdrawalDecided) return;
+      throw error;
+    }
 
-    await this.pool.query(
-      `UPDATE crypto_withdrawals SET status = 'failed', failure_reason = $2
-        WHERE id = $1::bigint AND status IN ('reserved', 'broadcast')`,
-      [row.id, reason],
-    );
+    if (posted.replayed) await markWithdrawalFailed(this.pool, row.id, reason);
   }
 
   #parseAmount(raw: string, asset: Currency): Money<Currency> {
@@ -590,4 +639,50 @@ const pendingAccount = (userId: string, currency: Currency) =>
 
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : 'the provider refused the withdrawal';
+}
+
+/** Somebody else decided this withdrawal first. Their outcome stands. */
+class WithdrawalDecided extends Error {
+  constructor() {
+    super('the withdrawal was already decided');
+  }
+}
+
+/** Locks the row on the entry's own connection and reads what the ledger
+ *  already holds for it. */
+async function lockWithdrawal(
+  client: PoolClient,
+  withdrawalId: string,
+): Promise<{ status: string; settled: boolean; reversed: boolean }> {
+  const found = await client.query<{ status: string; settled: boolean; reversed: boolean }>(
+    `SELECT w.status::text AS status,
+            EXISTS (SELECT 1 FROM journal_entries e
+                     WHERE e.idempotency_key = 'crypto-withdraw-settle:' || w.reference) AS settled,
+            EXISTS (SELECT 1 FROM journal_entries e
+                     WHERE e.idempotency_key = 'crypto-withdraw-reverse:' || w.reference) AS reversed
+       FROM crypto_withdrawals w
+      WHERE w.id = $1::bigint
+        FOR UPDATE OF w`,
+    [withdrawalId],
+  );
+  const row = found.rows[0];
+  if (row === undefined) throw new NotFoundException({ error: 'not_found' });
+  return row;
+}
+
+async function markConfirmed(db: Pool | PoolClient, withdrawalId: string, entryId: string): Promise<void> {
+  await db.query(
+    `UPDATE crypto_withdrawals
+        SET status = 'confirmed', settle_entry_id = $2::bigint
+      WHERE id = $1::bigint AND status = 'broadcast'`,
+    [withdrawalId, entryId],
+  );
+}
+
+async function markWithdrawalFailed(db: Pool | PoolClient, withdrawalId: string, reason: string): Promise<void> {
+  await db.query(
+    `UPDATE crypto_withdrawals SET status = 'failed', failure_reason = $2
+      WHERE id = $1::bigint AND status IN ('reserved', 'broadcast')`,
+    [withdrawalId, reason],
+  );
 }

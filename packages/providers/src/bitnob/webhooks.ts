@@ -157,10 +157,14 @@ export interface WebhookContext {
    * retries, the spend never reaches our books, and the customer keeps money
    * they actually spent.
    *
-   * Resolved by the CALLER, because it is a database lookup. Absent when the
-   * settlement names no authorization we hold, in which case the whole amount
-   * comes from pending and the guard decides — which is the old behaviour, and
-   * correct, because we have no basis for saying any of it was held.
+   * Resolved by the CALLER, because it is a database lookup. ZERO when the
+   * hold has already been released by an expiry, so the spend comes off the
+   * card. For an expiry it is the amount released.
+   *
+   * The caller REFUSES a settlement or an expiry naming no authorization it
+   * holds, rather than leaving this absent: `customer_pending` is one account
+   * per currency for all of a customer's holds, so "take it from pending and
+   * let the guard decide" spent another hold's money whenever there was one.
    */
   readonly authorizedMinor?: bigint;
 }
@@ -280,7 +284,12 @@ export function toLedgerIntent(
         postings:
           excess === 0n
             ? legs(amount, pending, float)
-            : [
+            : held === 0n
+              /* NOTHING IS HELD ANY MORE — the hold expired and its money
+                 went back to the card before this settlement arrived. The
+                 spend happened all the same, so it comes off the card. */
+              ? legs(amount, card, float)
+              : [
                 posting(pending, negateUsd(money(held, 'USD'))),
                 posting(card, negateUsd(money(excess, 'USD'))),
                 posting(float, amount),
@@ -297,10 +306,13 @@ export function toLedgerIntent(
     }
 
     case BITNOB_EVENTS.cardAuthorizationExpired: {
+      /* WHAT THE HOLD HELD, when the caller knows it: an expiry releases the
+         hold, and releasing the payload's figure instead would move another
+         hold's money out of a `customer_pending` they share. */
       // The hold lapsed and the money returns. An ordinary reversal of the
       // authorization's direction, which is why no special-casing is needed
       // anywhere else.
-      const amount = microToUsdExact(micro);
+      const amount = authorizedMinor === undefined ? microToUsdExact(micro) : money(authorizedMinor, 'USD');
       intent = {
         ...base,
         kind: 'card_auth_expiry',

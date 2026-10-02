@@ -14,6 +14,7 @@ import { AppModule } from '../app.module.js';
 import { systemClock } from '../tokens.js';
 import { testApiConfig } from '../test-support/api-config.js';
 import { enrolAndElevate } from '../test-support/staff-totp.js';
+import { AdminService } from './admin.service.js';
 
 /**
  * Registration, identity, and the operations backend, over HTTP.
@@ -999,5 +1000,91 @@ describe('a customer id that is not one', () => {
 
     expect(missing.status).toBe(malformed.status);
     expect(missing.body).toEqual(malformed.body);
+  });
+});
+
+describe('attributing a suspense deposit', () => {
+  /** A deposit that arrived and could not be attributed, as each rail records one. */
+  async function inSuspense(provider: string, reference: string, kobo: bigint): Promise<string> {
+    const entry = await ledger.post({
+      idempotencyKey: `${provider}:${reference}`,
+      kind: 'wallet_funding',
+      occurredAt: new Date(),
+      description: 'unattributed NGN deposit',
+      metadata: { provider_reference: reference },
+      postings: [
+        posting({ kind: 'suspense', currency: 'NGN' }, ngn(kobo)),
+        posting({ kind: 'provider_float', currency: 'NGN' }, ngn(-kobo)),
+      ],
+    });
+    const row = await pool.query<{ uuid: string }>(
+      `INSERT INTO deposits (provider, provider_reference, amount_minor, currency, status, entry_id, suspense_reason)
+       VALUES ($1, $2, $3::bigint, 'NGN', 'suspense', $4::bigint, 'test')
+       RETURNING uuid`,
+      [provider, reference, kobo.toString(), entry.entryId],
+    );
+    return row.rows[0]!.uuid;
+  }
+
+  /** A credited deposit names an account number, so each customer here has one. */
+  async function withAccount(person: Person): Promise<Person> {
+    await pool.query(
+      `INSERT INTO virtual_accounts
+         (user_id, provider, provider_account_id, account_number, bank_name, account_name, currency, status)
+       VALUES ($1::bigint, 'paystack', $2, $3, 'Wema Bank', 'Chidinma Eze', 'NGN', 'active')`,
+      [person.userId, `dva-${randomUUID()}`, String(9000000000 + Math.floor(Math.random() * 999999999))],
+    );
+    return person;
+  }
+
+  const walletOf = async (userId: string): Promise<bigint> =>
+    (await ledger.balanceOf({ kind: 'customer_wallet', ownerId: userId, currency: 'NGN' }))?.balanceMinor ?? 0n;
+
+  it('pays two rails\' deposits that share a reference string to the customers they belong to', async () => {
+    // References are unique per provider, and the attribution key was the
+    // bare reference: the second rail's deposit replayed the first one's
+    // entry, moved nothing, and was marked credited anyway.
+    const reference = `shared-${randomUUID()}`;
+    const one = await inSuspense('paystack', reference, 5_000_00n);
+    const two = await inSuspense('flutterwave', reference, 7_000_00n);
+    const [ada, ben, actor] = [await withAccount(await register()), await withAccount(await register()), await register()];
+
+    const admin = app.get(AdminService);
+    await admin.attributeDeposit(one, ada.uuid, actor.uuid, 'matched the sender name');
+    await admin.attributeDeposit(two, ben.uuid, actor.uuid, 'matched the sender name');
+
+    expect(await walletOf(ada.userId)).toBe(5_000_00n);
+    expect(await walletOf(ben.userId)).toBe(7_000_00n);
+  });
+
+  it('gives one deposit to ONE customer when two operators attribute it at once', async () => {
+    const deposit = await inSuspense('paystack', `race-${randomUUID()}`, 3_000_00n);
+    const [ada, ben, actor] = [await withAccount(await register()), await withAccount(await register()), await register()];
+    const admin = app.get(AdminService);
+
+    const outcomes = await Promise.allSettled([
+      admin.attributeDeposit(deposit, ada.uuid, actor.uuid, 'operator one'),
+      admin.attributeDeposit(deposit, ben.uuid, actor.uuid, 'operator two'),
+    ]);
+    expect(outcomes.filter((o) => o.status === 'fulfilled')).toHaveLength(1);
+
+    const row = await pool.query<{ user_id: string }>(
+      `SELECT user_id::text FROM deposits WHERE uuid = $1`,
+      [deposit],
+    );
+    const paid = (await walletOf(ada.userId)) > 0n ? ada : ben;
+    expect(row.rows[0]?.user_id).toBe(paid.userId);
+    expect((await walletOf(ada.userId)) + (await walletOf(ben.userId))).toBe(3_000_00n);
+  });
+
+  it('refuses a customer with no account number in the currency, and moves nothing', async () => {
+    // The wallet used to be credited and THEN the row failed its CHECK, so
+    // the money moved while the deposit stayed in suspense.
+    const deposit = await inSuspense('paystack', `noacct-${randomUUID()}`, 1_000_00n);
+    const [ada, actor] = [await register(), await register()];
+    await expect(
+      app.get(AdminService).attributeDeposit(deposit, ada.uuid, actor.uuid, 'no account'),
+    ).rejects.toMatchObject({ response: { error: 'customer_has_no_account' } });
+    expect(await walletOf(ada.userId)).toBe(0n);
   });
 });

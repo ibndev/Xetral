@@ -376,6 +376,12 @@ export interface VirtualAccount {
   readonly status: string;
 }
 
+/** A network or electricity company a service is sold for. */
+export interface CatalogueGroup {
+  readonly code: string;
+  readonly name: string;
+}
+
 export interface CatalogueItem {
   readonly code: string;
   readonly name: string;
@@ -1301,6 +1307,17 @@ export class XetralClient {
       `/v1/purchases/catalogue?${query.toString()}`,
     );
     return body.items;
+  }
+
+  /**
+   * The networks or electricity companies a service is sold for — empty for a
+   * service with one catalogue. For airtime, the group IS the item bought.
+   */
+  async purchaseGroups(service: string): Promise<readonly CatalogueGroup[]> {
+    const body = await this.#get<{ groups: CatalogueGroup[] }>(
+      `/v1/purchases/groups?${new URLSearchParams({ service }).toString()}`,
+    );
+    return body.groups;
   }
 
   async verifyTarget(input: {

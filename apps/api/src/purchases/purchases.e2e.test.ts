@@ -8,7 +8,7 @@ import pg from 'pg';
 import type { Pool } from 'pg';
 import { hashPassword } from '@xetral/identity';
 import { LedgerService, posting } from '@xetral/ledger';
-import { ProviderTimeoutError } from '@xetral/providers';
+import { ProviderRejectedError, ProviderTimeoutError } from '@xetral/providers';
 import type {
   CatalogueItem,
   CatalogueQuery,
@@ -25,6 +25,7 @@ import { AppModule } from '../app.module.js';
 import type { ApiConfig } from '../config.js';
 import { systemClock } from '../tokens.js';
 import { testApiConfig } from '../test-support/api-config.js';
+import { pinListener } from '../test-support/listener.js';
 
 /**
  * Buying airtime, data, a utility token, an eSIM or a number — end to end over
@@ -82,6 +83,18 @@ class FakePort implements FulfilmentPort {
     ];
   }
 
+  /** The price the catalogue above names; anything else is not listed. */
+  /** Holds the price read back, so two submissions are both past the
+   *  "already bought?" check before either writes its row. */
+  priceDelayMs = 0;
+
+  async priceOf(itemCode: string): Promise<bigint | null> {
+    if (this.priceDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, this.priceDelayMs));
+    if (itemCode === 'mtn:1gb') return 350_00n;
+    if (itemCode === 'ng-1gb') return 5_00n;
+    throw new ProviderRejectedError('fake', `no item ${itemCode}`, 'item_not_found');
+  }
+
   async purchase(req: PurchaseRequest): Promise<PurchaseResult> {
     this.calls.push(req);
     if (this.#next instanceof Error) throw this.#next;
@@ -98,6 +111,11 @@ class FakePort implements FulfilmentPort {
 class VerifyingPort extends FakePort {
   async verifyTarget(_itemCode: string, target: string): Promise<VerifiedTarget> {
     return { target, name: 'ADEBAYO O.', metadata: {} };
+  }
+
+  /** Sold per network, as VTpass sells data. */
+  async groups(): Promise<readonly { code: string; name: string }[]> {
+    return [{ code: 'mtn', name: 'MTN Data' }];
   }
 }
 
@@ -265,6 +283,23 @@ describe('catalogue', () => {
 
     expect(res.status).toBe(503);
     expect(res.body.error).toBe('service_not_configured');
+  });
+});
+
+describe('the networks a service is sold for', () => {
+  it('lists them where the provider sells per network, and nothing where it does not', async () => {
+    const customer = await onboard();
+    const data = await request(app.getHttpServer())
+      .get('/v1/purchases/groups?service=data')
+      .set('Authorization', `Bearer ${customer.token}`)
+      .expect(200);
+    expect(data.body.groups).toEqual([{ code: 'mtn', name: 'MTN Data' }]);
+
+    const esim = await request(app.getHttpServer())
+      .get('/v1/purchases/groups?service=esim')
+      .set('Authorization', `Bearer ${customer.token}`)
+      .expect(200);
+    expect(esim.body.groups).toEqual([]);
   });
 });
 
@@ -448,6 +483,52 @@ describe('buying', () => {
     const res = await buy(customer, airtimeBody({ amount: '350.005' }));
     expect(res.status).toBe(400);
     expect(data.calls).toHaveLength(0);
+  });
+
+  it('charges the provider\'s price, refusing an amount that is not it', async () => {
+    // The provider fulfils the PRODUCT at its own price. A request carrying a
+    // smaller amount used to be charged that amount and delivered in full.
+    const customer = await onboard();
+    await fund(customer.userId, 10_000_00);
+
+    const cheap = await buy(customer, airtimeBody({ amount: '0.01' }));
+    expect(cheap.status).toBe(409);
+    expect(cheap.body.error).toBe('price_changed');
+    expect(data.calls).toHaveLength(0);
+
+    const [ngnBalance] = (await balances(customer)).filter((b) => b.currency === 'NGN');
+    expect(ngnBalance?.spendable).toBe('10000.00');
+    expect(ngnBalance?.pending).toBe('0.00');
+  });
+
+  it('refuses an item the provider does not list', async () => {
+    const customer = await onboard();
+    await fund(customer.userId, 10_000_00);
+
+    const res = await buy(customer, airtimeBody({ item_code: 'mtn:made-up' }));
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe('item_not_found');
+    expect(data.calls).toHaveLength(0);
+  });
+
+  it('orders once when one attempt is submitted twice at the same moment', async () => {
+    // The loser of the row insert used to order the product again under the
+    // same reference.
+    await pinListener(app);
+    const customer = await onboard();
+    await fund(customer.userId, 10_000_00);
+
+    const body = airtimeBody();
+    data.priceDelayMs = 300;
+    const [first, second] = await Promise.all([buy(customer, body), buy(customer, body)]).finally(() => {
+      data.priceDelayMs = 0;
+    });
+
+    expect([first.status, second.status].sort()).toEqual([200, 200]);
+    expect(first.body.id).toBe(second.body.id);
+    expect(data.calls).toHaveLength(1);
+    const [ngnBalance] = (await balances(customer)).filter((b) => b.currency === 'NGN');
+    expect(ngnBalance?.spendable).toBe('9650.00');
   });
 
   it('lists a customer only their own purchases', async () => {

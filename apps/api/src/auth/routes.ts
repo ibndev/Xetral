@@ -286,6 +286,8 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
       // Airtime, data, utilities, eSIMs, numbers.
       .authenticated('GET', '/v1/purchases', { pin: false })
       .authenticated('GET', '/v1/purchases/catalogue', { pin: false })
+      // The networks or discos a service is sold for. Reads a provider list.
+      .authenticated('GET', '/v1/purchases/groups', { pin: false })
       // Verifying a meter reads a name from the provider and moves nothing, so
       // no PIN. It is authenticated all the same: an open endpoint that turns a
       // meter number into a customer's name is a lookup service for anyone who

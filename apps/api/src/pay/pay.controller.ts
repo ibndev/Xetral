@@ -152,7 +152,11 @@ export class PayController {
   async settle(@Body() body: unknown): Promise<{ status: string }> {
     const parsed = settleSchema.safeParse(body);
     if (!parsed.success) throw new BadRequestException({ error: 'invalid_request' });
-    return { status: await this.links.settle(parsed.data.reference) };
+    const status = await this.links.settle(parsed.data.reference);
+    /* The page knows four words. A reference nobody issued, and a payment
+       that was refused for a mismatch, both read as "not credited yet" to a
+       payer — the second is an operator's to resolve, not theirs. */
+    return { status: status === 'unknown' || status === 'refused' ? 'pending' : status };
   }
 }
 

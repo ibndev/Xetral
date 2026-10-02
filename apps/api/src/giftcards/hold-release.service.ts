@@ -1,10 +1,11 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { OnApplicationShutdown } from '@nestjs/common';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { LedgerService, posting } from '@xetral/ledger';
 import type { Currency, Money } from '@xetral/shared';
 import { API_CONFIG, DATABASE, LEDGER } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
+import { lockSubmission } from './giftcard.service.js';
 
 /**
  * Releasing gift card holds that have matured.
@@ -139,6 +140,16 @@ export class GiftCardHoldService implements OnApplicationShutdown {
       currency,
     };
 
+    /*
+     * THE STATUS MOVES ON THE ENTRY'S OWN TRANSACTION, and that is what makes
+     * the database clock a control rather than a comment. The trigger
+     * refuses a release whose `hold_until` has not passed — but it fired on
+     * an UPDATE that ran AFTER the posting had committed, so a refusal left
+     * the money in the wallet anyway and the row merely saying `approved`.
+     * Inside the entry's transaction the trigger's refusal rolls the posting
+     * back with it. The row is locked first, so a clawback racing this one
+     * cannot both post.
+     */
     const posted = await this.ledger.post({
       idempotencyKey: `giftcard-release:${hold.reference}`,
       kind: 'giftcard_hold_release',
@@ -152,20 +163,40 @@ export class GiftCardHoldService implements OnApplicationShutdown {
         ),
         posting({ kind: 'customer_wallet', ownerId: hold.user_id, currency }, amount),
       ],
+    }, {
+      precondition: async (client) => {
+        const status = await lockSubmission(client, hold.submission_id);
+        if (status !== 'approved') throw new HoldDecided();
+      },
+      onEntry: async (client, entry) => {
+        await markReleased(client, hold.submission_id, entry.entryId);
+      },
+    }).catch((error: unknown) => {
+      if (error instanceof HoldDecided) return undefined;
+      throw error;
     });
 
-    // The trigger re-checks hold_until against the database clock, so a row
-    // that matured between the SELECT and here is still safe, and one that did
-    // not is refused rather than released.
-    await this.pool.query(
-      `UPDATE giftcard_submissions
-          SET status = 'released', release_entry_id = $2::bigint
-        WHERE id = $1::bigint AND status = 'approved'`,
-      [hold.submission_id, posted.entryId],
-    );
+    if (posted?.replayed === true) await markReleased(this.pool, hold.submission_id, posted.entryId);
   }
 }
 
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** The hold was clawed back (or released) by somebody else first. */
+class HoldDecided extends Error {
+  constructor() {
+    super('the gift card hold was already decided');
+  }
+}
+
+/** The database clock is re-checked by 005's trigger on this UPDATE. */
+async function markReleased(db: Pool | PoolClient, submissionId: string, entryId: string): Promise<void> {
+  await db.query(
+    `UPDATE giftcard_submissions
+        SET status = 'released', release_entry_id = $2::bigint
+      WHERE id = $1::bigint AND status = 'approved'`,
+    [submissionId, entryId],
+  );
 }

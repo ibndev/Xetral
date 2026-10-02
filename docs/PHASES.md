@@ -51,6 +51,7 @@ shipped, that is called out explicitly.
 | 40 — Resetting a test account | ✅ | migration 091 and 099 re-applied; `TEST_ACCOUNT_EMAILS`, `TEST_ACCOUNT_PHONES`, `TEST_OTP` |
 | 41 — No line in a text field, a bank list above the keyboard, Delete that resets | ✅ | `TEST_ACCOUNT_EMAILS` on the api service; Paystack lifting BVN validation |
 | 42 — An account number without a BVN, tiers counted from one, a request in another currency | ✅ | migration 092 |
+| 43 — A whole-code money audit: one outcome per thing | ✅ | |
 
 All eleven phases are built, a **pre-deployment audit** (Phase 12) closed what
 building them phase by phase had left between the phases, and **Phase 13** is
@@ -2970,3 +2971,29 @@ the closed test account on `/admin/users` and press **Delete permanently**.
 5. **A deleted test account kept its name.**
 
 **Before this goes live, an operator must:** apply **092**.
+
+---
+
+## Phase 43 — A whole-code money audit: one outcome per thing ✅
+
+| File | What it is |
+|---|---|
+| `apps/api/src/payouts/payout.service.ts` | settle and fail under a row lock; only the row's writer sends |
+| `apps/api/src/purchases/purchase-outcome.ts`, `purchase.service.ts` | the same, and the provider's price |
+| `apps/api/src/crypto/crypto.service.ts` | one outcome per withdrawal |
+| `apps/api/src/cards/webhook.service.ts` | one outcome per card hold |
+| `apps/api/src/giftcards/` | approve, claw back and release under a lock |
+| `apps/api/src/disputes/dispute.service.ts` | one refund per dispute, capped |
+| `apps/api/src/admin/admin.service.ts` | attribution keyed per provider, locked |
+| `apps/api/src/auth/pin.service.ts`, `staff-totp.service.ts` | attempts claimed before they are checked |
+| `packages/providers/src/vtpass/vtpass-adapter.ts` | networks, `serviceID:variation` codes, prices |
+
+1. **Every settle-or-give-back pair could post both** when two resolvers
+   raced, paid for out of the customer's other holds.
+2. **A purchase was charged the request's amount** whatever the product cost.
+3. **A double submit sent twice**, and the duplicate refusal reversed the first.
+4. **A dispute could be refunded twice**; a deposit attributed to the wrong
+   rail's entry; a PIN or TOTP burst guessed past the lockout.
+5. **Bills could not be bought at all** — electricity's code, and no network.
+
+**An operator need do nothing for this one.** No schema or setting changes.

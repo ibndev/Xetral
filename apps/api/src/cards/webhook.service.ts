@@ -1,4 +1,10 @@
-import { Inject, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import type { Pool } from 'pg';
 import { InsufficientFundsError, LedgerService } from '@xetral/ledger';
 import {
@@ -100,17 +106,50 @@ export class CardWebhookService {
         ? await this.#authorizationEntry(card.id, envelope.data.authorization_id)
         : undefined;
 
-    // What the hold actually held, when this settlement resolves one.
-    //
-    // A settlement may exceed its authorization — a tip, a currency conversion
-    // — and only the hold is in `customer_pending`. Without this the entry
-    // tries to take the whole settled amount out of pending, the overdraft
-    // guard refuses, and Bitnob retries for ever while the spend never reaches
-    // our books.
+    /*
+     * WHICH HOLD THIS CLOSES, and whether it is still open.
+     *
+     * A settlement and an expiry each resolve ONE authorization, and both
+     * move money out of `customer_pending` — which is one account per
+     * currency for every hold the customer has. So an event naming no hold we
+     * know, or a second outcome for a hold already closed (a settlement after
+     * an expiry, an expiry after a settlement, a second settlement under a new
+     * event id), used to post anyway and was paid for out of OTHER holds:
+     * the overdraft guard only refuses when pending as a whole runs dry.
+     *
+     * Unknown (named, and not ours): refused, so Bitnob retries — the authorization may simply not
+     * have arrived yet, which is the rule CLAUDE.md records. Closed: an expiry
+     * or a repeat settlement posts nothing; a settlement after an EXPIRY takes
+     * the spend off the card, because the hold's money went back there.
+     */
+    const resolvesHold =
+      envelope.event === BITNOB_EVENTS.cardSettlement ||
+      envelope.event === BITNOB_EVENTS.cardAuthorizationExpired;
+    /* An event that names NO authorization cannot be matched to a hold at
+       all, and refusing it would refuse every one for ever if the issuer never
+       names them; it posts as it always did and the guard decides. One that
+       names an authorization we do not hold is refused. */
+    const named = resolvesHold && envelope.data.authorization_id !== undefined;
+    const hold = named ? await this.#holdOf(card.id, envelope.data.authorization_id) : undefined;
+    if (named) {
+      if (hold === undefined) {
+        this.#logger.warn(
+          `${envelope.event} ${envelope.data.id} names authorization ` +
+            `${envelope.data.authorization_id ?? '(none)'}, which this card has no record of; ` +
+            'refused so the provider retries once the authorization has arrived',
+        );
+        throw new ServiceUnavailableException({ error: 'authorization_unknown' });
+      }
+      if (hold.closed !== null && !(envelope.event === BITNOB_EVENTS.cardSettlement && hold.closed === 'expired')) {
+        this.#logger.log(
+          `${envelope.event} ${envelope.data.id}: authorization ${envelope.data.authorization_id} ` +
+            `is already ${hold.closed}; nothing more to post`,
+        );
+        return { received: true };
+      }
+    }
     const authorizedMinor =
-      envelope.event === BITNOB_EVENTS.cardSettlement
-        ? await this.#authorizedAmount(card.id, envelope.data.authorization_id)
-        : undefined;
+      hold === undefined ? undefined : hold.closed === 'expired' ? 0n : hold.amountMinor;
 
     const intent = toLedgerIntent(envelope, {
       ownerId,
@@ -124,6 +163,7 @@ export class CardWebhookService {
     // counting it again would double every card's daily total; a refund moves
     // money the other way.
     const guardThis = envelope.event === BITNOB_EVENTS.cardAuthorization;
+    const closesHold = hold !== undefined && hold.closed === null;
 
     let verdict: { readonly flagged: readonly string[] } = { flagged: [] };
     let posted;
@@ -132,17 +172,11 @@ export class CardWebhookService {
         intent,
         guardThis
           ? {
-              // Inside the entry's transaction, so the row that the duplicate
-              // check counts exists if and only if the posting does.
               onEntry: async (client, written) => {
                 verdict = await this.protection.recordAuthorization(client, {
                   cardId: card.id,
                   providerTxnId: envelope.data.id,
                   merchantLabel: envelope.data.merchant,
-                  // Through the ONE audited conversion boundary. A second
-                  // micro-to-cents division written inline here is how a
-                  // settlement ends up off by a factor of ten thousand, and
-                  // the guard would then be comparing cents to micro-units.
                   amountMinor: microToUsdExact(parseMicro(envelope.data.amount)).amount,
                   currency: 'USD',
                   entryId: written.entryId,
@@ -150,7 +184,37 @@ export class CardWebhookService {
                 });
               },
             }
-          : {},
+          : closesHold
+            ? {
+                /* Under a lock on the authorization, re-checked, and closed on
+                   the entry's own transaction — so a settlement and an expiry
+                   racing each other cannot both release one hold. */
+                precondition: async (client) => {
+                  const locked = await client.query<{ open: boolean }>(
+                    `SELECT NOT EXISTS (SELECT 1 FROM card_settlements s WHERE s.authorization_id = a.id) AS open
+                       FROM card_authorizations a WHERE a.id = $1::bigint FOR UPDATE OF a`,
+                    [hold.id],
+                  );
+                  if (locked.rows[0]?.open !== true) {
+                    throw new ServiceUnavailableException({ error: 'authorization_moved' });
+                  }
+                },
+                onEntry: async (client, written) => {
+                  await client.query(
+                    `INSERT INTO card_settlements
+                       (authorization_id, outcome, entry_id, amount_minor, currency, occurred_at)
+                     VALUES ($1::bigint, $2::card_hold_outcome, $3::bigint, $4::bigint, 'USD', $5)`,
+                    [
+                      hold.id,
+                      envelope.event === BITNOB_EVENTS.cardSettlement ? 'settled' : 'expired',
+                      written.entryId,
+                      microToUsdExact(parseMicro(envelope.data.amount)).amount.toString(),
+                      new Date(envelope.created_at),
+                    ],
+                  );
+                },
+              }
+            : {},
       );
     } catch (error) {
       if (error instanceof InsufficientFundsError) {
@@ -188,7 +252,6 @@ export class CardWebhookService {
     //
     // After the posting, deliberately. A settlement recorded against a hold
     // whose entry failed to post would claim money moved that did not.
-    await this.#closeHold(card.id, envelope, posted.entryId);
 
     if (posted.replayed) {
       // Bitnob retries. The ledger's UNIQUE constraint made the second
@@ -281,109 +344,29 @@ export class CardWebhookService {
     return result.rows[0];
   }
 
+
+
   /**
-   * What the authorization held, in minor units.
-   *
-   * Scoped to the card for the same reason every other lookup here is:
-   * `provider_txn_id` is unique per card and not globally, so an unscoped
-   * match could size one customer's settlement by another customer's hold.
-   *
-   * Undefined when the settlement names no authorization we hold. The whole
-   * amount then comes from pending and the guard decides, which is the right
-   * answer: we have no basis for claiming any of it was held.
+   * The authorization an event resolves: its id, what it held, and how it
+   * was closed if it was. Scoped to the card — `provider_txn_id` is unique
+   * per card, not globally.
    */
-  async #authorizedAmount(
+  async #holdOf(
     cardId: string,
     authorizationId: string | undefined,
-  ): Promise<bigint | undefined> {
+  ): Promise<{ id: string; amountMinor: bigint; closed: 'settled' | 'expired' | null } | undefined> {
     if (authorizationId === undefined) return undefined;
-    const result = await this.pool.query<{ amount_minor: string }>(
-      `SELECT amount_minor FROM card_authorizations
-        WHERE card_id = $1::bigint AND provider_txn_id = $2`,
+    const result = await this.pool.query<{ id: string; amount_minor: string; closed: 'settled' | 'expired' | null }>(
+      `SELECT a.id::text, a.amount_minor::text,
+              (SELECT s.outcome::text FROM card_settlements s WHERE s.authorization_id = a.id) AS closed
+         FROM card_authorizations a
+        WHERE a.card_id = $1::bigint AND a.provider_txn_id = $2`,
       [cardId, authorizationId],
     );
-    const found = result.rows[0]?.amount_minor;
-    return found === undefined ? undefined : BigInt(found);
-  }
-
-  /**
-   * Records how a hold resolved, against the authorization it resolved.
-   *
-   * Matched on Bitnob's `authorization_id`, SCOPED TO THE CARD, for the same
-   * reason the refund lookup is: `provider_txn_id` is unique per card and not
-   * globally, so an unscoped match could close one customer's hold with
-   * another customer's settlement.
-   *
-   * Swallows a duplicate. A redelivered settlement is a replay at the ledger
-   * and must be a replay here too — the UNIQUE constraint is what enforces
-   * that, and tripping it is the expected outcome rather than a failure.
-   *
-   * A settlement we cannot match is LOGGED AND LEFT. It has already posted, so
-   * the money is right; what is missing is the link, and inventing one by
-   * guessing which hold it belonged to would be worse than the gap. It shows
-   * up as a hold that never resolved, which is a person's problem and is
-   * exactly where this belongs.
-   */
-  async #closeHold(
-    cardId: string,
-    envelope: BitnobWebhookEnvelope,
-    entryId: string,
-  ): Promise<void> {
-    const outcome =
-      envelope.event === BITNOB_EVENTS.cardSettlement
-        ? 'settled'
-        : envelope.event === BITNOB_EVENTS.cardAuthorizationExpired
-          ? 'expired'
-          : undefined;
-    if (outcome === undefined) return;
-
-    const authorizationId = envelope.data.authorization_id;
-    if (authorizationId === undefined) {
-      this.#logger.warn(
-        `${envelope.event} ${envelope.data.id} named no authorization; the hold it ` +
-          `resolved cannot be closed and will be reported as stuck`,
-      );
-      return;
-    }
-
-    try {
-      const written = await this.pool.query(
-        `INSERT INTO card_settlements
-           (authorization_id, outcome, entry_id, amount_minor, currency, occurred_at)
-         SELECT a.id, $3::card_hold_outcome, $4::bigint, $5::bigint, 'USD', $6
-           FROM card_authorizations a
-          WHERE a.card_id = $1::bigint AND a.provider_txn_id = $2
-         ON CONFLICT (authorization_id) DO NOTHING`,
-        [
-          cardId,
-          authorizationId,
-          outcome,
-          entryId,
-          // Through the ONE audited conversion boundary, the same as the
-          // authorization above. A second micro-to-cents division written
-          // inline is how a settlement ends up off by a factor of ten
-          // thousand.
-          microToUsdExact(parseMicro(envelope.data.amount)).amount.toString(),
-          new Date(envelope.created_at),
-        ],
-      );
-
-      if (written.rowCount === 0) {
-        this.#logger.warn(
-          `${envelope.event} named authorization ${authorizationId}, which this card has ` +
-            `no record of. The money posted; the hold it closes is unknown.`,
-        );
-      }
-    } catch (error) {
-      // Never fails the webhook. The money is already recorded correctly, and
-      // refusing here would make Bitnob retry a settlement that has already
-      // posted — turning a bookkeeping gap into repeated delivery of an event
-      // the ledger will keep answering as a replay.
-      this.#logger.error(
-        `could not record the outcome of authorization ${authorizationId}: ` +
-          `${error instanceof Error ? error.message : 'unknown'}`,
-      );
-    }
+    const row = result.rows[0];
+    return row === undefined
+      ? undefined
+      : { id: row.id, amountMinor: BigInt(row.amount_minor), closed: row.closed };
   }
 
   /**

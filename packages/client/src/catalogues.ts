@@ -69,7 +69,13 @@ export const CRYPTO_PAIRS = [
  * and both apps have one form.
  */
 export interface PurchaseService {
-  readonly code: 'airtime' | 'data' | 'electricity' | 'esim' | 'number';
+  /**
+   * The API's own service code. Electricity is `utility` there, and it was
+   * `electricity` here — a code the API's schema refuses — so the Electricity
+   * tile's catalogue and every purchase from it answered 400.
+   * `purchase-services.test.ts` binds this list to the API's enum.
+   */
+  readonly code: 'airtime' | 'data' | 'utility' | 'esim' | 'number';
   readonly label: string;
   /** What the recipient field is called, in the customer's words. */
   readonly target: string;
@@ -79,6 +85,12 @@ export interface PurchaseService {
   readonly icon: IconName;
   /** Which tint the mark sits on. One of the four the tiles already use. */
   readonly tone: 'warn' | 'info' | 'ok' | 'iris';
+  /**
+   * What the provider sells this service PER — a network, an electricity
+   * company — in the customer's words. Absent where there is one catalogue
+   * for the whole service.
+   */
+  readonly group?: string;
 }
 
 /*
@@ -92,9 +104,9 @@ export interface PurchaseService {
  * support by the wrong name.
  */
 export const PURCHASE_SERVICES = [
-  { code: 'airtime', label: 'Airtime', target: 'Phone number', mode: 'tel', icon: 'phone', tone: 'warn' },
-  { code: 'data', label: 'Data', target: 'Phone number', mode: 'tel', icon: 'globe', tone: 'info' },
-  { code: 'electricity', label: 'Electricity', target: 'Meter number', mode: 'numeric', icon: 'zap', tone: 'ok' },
+  { code: 'airtime', label: 'Airtime', target: 'Phone number', mode: 'tel', icon: 'phone', tone: 'warn', group: 'Network' },
+  { code: 'data', label: 'Data', target: 'Phone number', mode: 'tel', icon: 'globe', tone: 'info', group: 'Network' },
+  { code: 'utility', label: 'Electricity', target: 'Meter number', mode: 'numeric', icon: 'zap', tone: 'ok', group: 'Electricity company' },
   { code: 'esim', label: 'eSIM', target: 'Email for the QR code', mode: 'email', icon: 'sim', tone: 'iris' },
   { code: 'number', label: 'Virtual number', target: 'Country code', mode: 'text', icon: 'receipt', tone: 'info' },
 ] as const satisfies readonly PurchaseService[];

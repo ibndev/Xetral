@@ -9,11 +9,11 @@ import {
   Query,
   Req,
 } from '@nestjs/common';
-import type { VerifiedTarget } from '@xetral/providers';
+import type { CatalogueGroup, VerifiedTarget } from '@xetral/providers';
 import type { AuthenticatedRequest } from '../auth/auth.guard.js';
 import { PurchaseService } from './purchase.service.js';
 import type { CatalogueItemView, PurchaseView } from './purchase.service.js';
-import { catalogueQuerySchema, purchaseSchema, verifyTargetSchema } from './dto.js';
+import { catalogueQuerySchema, groupsQuerySchema, purchaseSchema, verifyTargetSchema } from './dto.js';
 
 /**
  * Airtime, data, utilities, eSIMs and virtual numbers — one controller, because
@@ -45,6 +45,15 @@ export class PurchaseController {
    * and credits a stranger, and there is no reversal for that. This is the one
    * chance to show a customer the name on the account.
    */
+  /** The networks or electricity companies a service is sold for — see
+   *  `PurchaseService.groups`. */
+  @Get('groups')
+  async groups(@Query() query: unknown): Promise<{ groups: readonly CatalogueGroup[] }> {
+    const parsed = groupsQuerySchema.safeParse(query);
+    if (!parsed.success) throw invalidRequest(parsed.error.issues);
+    return { groups: await this.purchases.groups(parsed.data.service) };
+  }
+
   @Post('verify')
   @HttpCode(200)
   async verify(@Body() body: unknown): Promise<VerifiedTarget> {

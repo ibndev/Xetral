@@ -2335,6 +2335,76 @@ Schema: `packages/ledger/sql/091_test_account_reset.sql`. Service in
   keeps the name it removed; accounts already reset are cleared too. A closed
   account number's `account_name` is untouched — it is what the bank was given.
 
+### A whole-code money audit: one outcome per thing — non-obvious rules
+
+`PayoutService.fail`/`#settle`, `PurchaseOutcome`, `CryptoService.applyReceipt`,
+`CardWebhookService`, the gift card hold, `DisputeService.resolve`,
+`AdminService.attributeDeposit`, `PinService`, `StaffTotpService`.
+
+- **EVERY "SETTLE OR GIVE BACK" PAIR WAS TWO LEDGER KEYS AND A LATE UPDATE.**
+  Payouts, purchases, crypto withdrawals, card holds and gift card holds all
+  posted the outcome, then moved the row in a separate statement, and every
+  resolver acted on a row read earlier. Two resolvers racing (the request, a
+  webhook, the sweep, the recovery list) could both post — and
+  `customer_pending` is ONE account per currency for all a customer's holds,
+  so the overdraft guard let the second through whenever anything else was
+  held. Paid out AND refunded, every entry balanced, `ledger_drift` silent.
+  Now each outcome LOCKS the row in `precondition`, re-reads it (and the
+  ledger, by key), and moves the row in `onEntry`, so the posting and the
+  state commit together. A replay still moves the row, guarded.
+- **A STALE PAYOUT SNAPSHOT CHOSE THE WRONG REVERSAL.** `fail()` decided
+  reserve-vs-settlement from the row it was handed; a settle landing in
+  between made it reverse the RESERVE of a payout that had left. It now
+  checks the shape against the locked row and rebuilds from a fresh read.
+- **THE LOSER OF A DOUBLE SUBMIT SENT TOO.** Payouts, purchases and crypto
+  withdrawals: two submissions of one attempt both passed the "already
+  sent?" read, one lost the row insert and sent anyway under the same
+  reference — a duplicate refusal then REVERSED the winner's payout. Only
+  the request that wrote the row talks to the provider.
+- **A PURCHASE WAS CHARGED WHATEVER THE REQUEST SAID.** The provider is sent
+  the product and fulfils it at its own price; nothing compared the amount.
+  `FulfilmentPort.priceOf` reads the price from the provider before anything
+  is held, and a fixed price the request does not match is `price_changed`.
+- **A SETTLEMENT OR EXPIRY RESOLVES ONE HOLD, ONCE.** A second outcome for a
+  hold (settle after expiry, expiry after settle, a second settlement) posts
+  nothing, except a settlement after an EXPIRY, which takes the spend off the
+  card. One naming a hold we do not know is refused (503) so Bitnob retries;
+  one naming none still posts as before. An expiry releases the HOLD's
+  amount, not the payload's.
+- **THE GIFT CARD HOLD'S DATABASE CLOCK WAS A COMMENT.** The trigger refusing
+  an early release fired on an UPDATE after the posting had committed. It is
+  inside the entry's transaction now, so its refusal rolls the release back.
+- **A DISPUTE PAYS AT MOST ONCE.** The refund was keyed on the reviewer's form
+  and posted before the dispute closed; two reviewers upholding together
+  paid twice. It is keyed on the dispute, closes in the same transaction, and
+  cannot exceed what the disputed entry took from the customer.
+- **ATTRIBUTION KEYS NAME THE PROVIDER.** References are unique per provider,
+  so a second rail's deposit with the same reference string replayed the
+  first's attribution and was marked credited with nothing moved. And a
+  credited deposit must name an account (006's CHECK): attributing to a
+  customer with none credited the wallet and then failed; it is now
+  `customer_has_no_account` before anything moves.
+- **A PIN OR TOTP ATTEMPT IS CLAIMED BEFORE IT IS CHECKED.** The lockout was
+  asked before scrypt and counted after it (the TOTP count was even a
+  read-modify-write), so a parallel burst had every guess checked. One UPDATE
+  now claims an attempt only while unlocked; at most five are ever checked
+  per lockout, and a correct one clears the count.
+- **A LINK PAYMENT THE RAIL HAS NOT CONFIRMED IS RETRIED, NOT ACKNOWLEDGED.**
+  Nothing sweeps link payments, so an acknowledged early event was a payer's
+  money the customer never got. `settle()` says `unknown` for a reference we
+  never issued and `refused` for a mismatch; only `pending` is retried.
+  Paystack events that are not a dedicated-account credit are acknowledged
+  rather than answered 500 for three days.
+- **BILLS COULD NOT BE BOUGHT.** The Electricity tile sent `electricity`; the
+  API's enum says `utility` (`purchase-services.test.ts` binds them now). And
+  VTpass sells per `serviceID`, asked for with none: no plans, and airtime had
+  no item at all. `GET /v1/purchases/groups` reads VTpass's own list
+  (`/api/services?identifier=`), both apps ask the network first, and a
+  VTpass item code is `serviceID:variation`, what `purchase` splits.
+- **A PAYOUT ROW'S BANK NAME IS BEST EFFORT AND READ FIRST.** A bank list
+  failing after the reserve stranded money in pending with no payout row —
+  invisible to the sweep and to recovery.
+
 ### The assignment, the refusal nobody could read, and a paused service — non-obvious rules
 
 Schema: `packages/ledger/sql/082_refusals_and_details.sql`,

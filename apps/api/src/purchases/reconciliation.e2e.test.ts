@@ -69,6 +69,10 @@ class FakePort implements FulfilmentPort {
     return [];
   }
 
+  async priceOf(_itemCode: string): Promise<bigint | null> {
+    return 350_00n;
+  }
+
   async purchase(_req: PurchaseRequest): Promise<PurchaseResult> {
     if (this.purchaseAnswer instanceof Error) throw this.purchaseAnswer;
     return this.purchaseAnswer;

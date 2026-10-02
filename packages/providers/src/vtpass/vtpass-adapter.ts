@@ -6,6 +6,7 @@ import {
   ProviderUnavailableError,
 } from '../ports/errors.js';
 import type {
+  CatalogueGroup,
   CatalogueItem,
   CatalogueQuery,
   FulfilmentPort,
@@ -66,6 +67,9 @@ export function vtpassRequestId(reference: string, initiatedAt: Date): string {
 }
 
 export const VTPASS_ENDPOINTS = {
+  /** The providers within a category — the networks, the discos — each with
+   *  the `serviceID` the rest of the API is asked by. */
+  services: '/api/services',
   purchase: '/api/pay',
   status: '/api/requery',
   variations: '/api/service-variations',
@@ -122,6 +126,25 @@ const purchaseResponse = z.object({
   mainToken: z.string().optional(),
 });
 
+const servicesResponse = z.object({
+  content: z.array(
+    z.object({
+      serviceID: z.string().min(1),
+      name: z.string().min(1),
+    }),
+  ),
+});
+
+/**
+ * VTpass's category `identifier` for each service of ours. A utility is an
+ * electricity bill there.
+ */
+const CATEGORY: Partial<Record<ServiceKind, string>> = {
+  airtime: 'airtime',
+  data: 'data',
+  utility: 'electricity-bill',
+};
+
 const verifyResponse = z.object({
   code: z.string().min(1),
   content: z.object({
@@ -138,6 +161,29 @@ export class VtpassAdapter implements FulfilmentPort, TargetVerification {
   readonly #options: VtpassOptions;
   readonly #fetch: (url: string, init: RequestInit) => Promise<Response>;
 
+  /**
+   * THE NETWORKS OR DISCOS THIS SERVICE IS SOLD FOR, read from VTpass.
+   *
+   * A VTpass catalogue is per `serviceID` — `mtn-data`, `ikeja-electric` —
+   * and both apps asked for one with no group at all, which VTpass answers
+   * with nothing: data and electricity offered no plans, and airtime had no
+   * item to buy. The groups come from VTpass's own list rather than one typed
+   * here, so a network they add or rename is offered without a release.
+   */
+  async groups(): Promise<readonly CatalogueGroup[]> {
+    const category = CATEGORY[this.service];
+    if (category === undefined) return [];
+    const payload = await this.#request(
+      'GET',
+      `${VTPASS_ENDPOINTS.services}?identifier=${encodeURIComponent(category)}`,
+    );
+    const parsed = servicesResponse.safeParse(payload);
+    if (!parsed.success) {
+      throw new ProviderContractError(PROVIDER, 'unexpected services shape', parsed.error);
+    }
+    return parsed.data.content.map((service) => ({ code: service.serviceID, name: service.name }));
+  }
+
   constructor(options: VtpassOptions) {
     this.#options = options;
     this.service = options.service;
@@ -145,10 +191,11 @@ export class VtpassAdapter implements FulfilmentPort, TargetVerification {
   }
 
   async catalogue(query: CatalogueQuery): Promise<readonly CatalogueItem[]> {
-    // Airtime has no catalogue: the customer names the amount. Returning an
-    // empty list rather than inventing a single "any amount" product keeps
-    // "you choose" out of the price field.
+    // Airtime has no catalogue: the customer names the amount, and the item
+    // is the network itself — one of `groups()`.
     if (this.service === 'airtime') return [];
+    // No group, no catalogue: VTpass lists variations per `serviceID`.
+    if (query.group === undefined || query.group === '') return [];
 
     const payload = await this.#request(
       'GET',
@@ -160,16 +207,42 @@ export class VtpassAdapter implements FulfilmentPort, TargetVerification {
       throw new ProviderContractError(PROVIDER, 'unexpected service-variations shape', parsed.error);
     }
 
+    /*
+     * THE CODE IS `serviceID:variation`, WHICH IS WHAT `purchase` AND
+     * `verifyTarget` SPLIT. It was the bare variation, so an item chosen from
+     * this list and sent back as-is ordered `serviceID: mtn-10gb` with no
+     * variation at all.
+     */
     return parsed.data.content.variations.map((variation) => ({
-      code: variation.variation_code,
+      code: `${query.group ?? ''}:${variation.variation_code}`,
       name: variation.name,
       // VTpass prices are naira as a decimal STRING ("1500.00"). Parsed to kobo
       // through text, never through a float: 1500.00 * 100 is fine and
       // 0.07 * 100 is 7.000000000000001, and only one of those is obvious.
-      priceMinor: nairaToKobo(variation.variation_amount),
+      priceMinor: fixedPrice(nairaToKobo(variation.variation_amount)),
       currency: 'NGN' as const,
       metadata: { service_id: query.group ?? '' },
     }));
+  }
+
+  /**
+   * The variation's own price, read from VTpass — `serviceID:variation`, the
+   * item code `purchase` sends. Airtime has no variations: the customer names
+   * the amount. A variation VTpass does not list is refused, never priced as
+   * "whatever the customer typed".
+   */
+  async priceOf(itemCode: string): Promise<bigint | null> {
+    if (this.service === 'airtime') return null;
+    const [serviceId, variation] = itemCode.split(':');
+    if (serviceId === undefined || serviceId === '' || variation === undefined || variation === '') {
+      throw new ProviderRejectedError(PROVIDER, `not a VTpass item code: '${itemCode}'`, 'item_not_found');
+    }
+    const items = await this.catalogue({ group: serviceId });
+    const item = items.find((candidate) => candidate.code === itemCode);
+    if (item === undefined) {
+      throw new ProviderRejectedError(PROVIDER, `VTpass lists no '${itemCode}'`, 'item_not_found');
+    }
+    return item.priceMinor;
   }
 
   async purchase(request: PurchaseRequest): Promise<PurchaseResult> {
@@ -358,4 +431,14 @@ export function koboToNaira(minor: bigint): string {
   const negative = minor < 0n;
   const abs = negative ? -minor : minor;
   return `${negative ? '-' : ''}${abs / 100n}.${(abs % 100n).toString().padStart(2, '0')}`;
+}
+
+/**
+ * A variation priced at ZERO is one whose amount the customer names — an
+ * electricity variation (`prepaid`, `postpaid`) carries `variation_amount`
+ * "0", and the meter is topped up by whatever is paid. Reported as null, the
+ * port's "you decide", so it can never be read as a fixed price of nothing.
+ */
+function fixedPrice(minor: bigint): bigint | null {
+  return minor === 0n ? null : minor;
 }

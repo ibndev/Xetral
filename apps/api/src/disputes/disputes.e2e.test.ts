@@ -13,6 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../app.module.js';
 import { systemClock } from '../tokens.js';
 import { testApiConfig } from '../test-support/api-config.js';
+import { pinListener } from '../test-support/listener.js';
 import { enrolAndElevate } from '../test-support/staff-totp.js';
 
 /**
@@ -378,6 +379,74 @@ describe('resolving one', () => {
 
     await resolve('rejected').expect(200);
     await resolve('accepted').expect(404);
+  });
+
+  it('pays ONCE when two reviewers uphold it at the same moment', async () => {
+    // Each review form mints its own key, and the refund was posted under it
+    // before the dispute closed: two reviewers accepting together each paid
+    // the customer, and the second was then told it was no longer open.
+    await pinListener(app);
+    const sender = await onboard();
+    const recipient = await onboard();
+    const reviewer = await makeReviewer();
+    await fund(sender.userId, 20_000_00);
+    const entryId = await transfer(sender, recipient);
+    const afterTransfer = await spendable(sender);
+
+    const raised = await raise(sender, {
+      entry_id: entryId,
+      reason: 'not_authorised',
+      detail: 'somebody else did this',
+    }).expect(200);
+
+    const accept = () =>
+      request(app.getHttpServer())
+        .post(`/v1/admin/disputes/${raised.body.id}/resolve`)
+        .set('Authorization', `Bearer ${reviewer.token}`)
+        .send({
+          outcome: 'accepted',
+          resolution: 'upheld by two reviewers at once',
+          refund_amount: '5000.00',
+          idempotency_key: randomUUID(),
+          transaction_pin: PIN,
+        });
+    const answers = await Promise.all([accept(), accept()]);
+    expect(answers.filter((r) => r.status === 200)).toHaveLength(1);
+
+    const after = await spendable(sender);
+    expect(Number(after.replace(/,/g, ''))).toBeCloseTo(
+      Number(afterTransfer.replace(/,/g, '')) + 5000,
+      2,
+    );
+  });
+
+  it('refuses a refund larger than what the entry took', async () => {
+    const sender = await onboard();
+    const recipient = await onboard();
+    const reviewer = await makeReviewer();
+    await fund(sender.userId, 20_000_00);
+    const entryId = await transfer(sender, recipient);
+    const before = await spendable(sender);
+
+    const raised = await raise(sender, {
+      entry_id: entryId,
+      reason: 'not_authorised',
+      detail: 'somebody else did this',
+    }).expect(200);
+
+    const res = await request(app.getHttpServer())
+      .post(`/v1/admin/disputes/${raised.body.id}/resolve`)
+      .set('Authorization', `Bearer ${reviewer.token}`)
+      .send({
+        outcome: 'accepted',
+        resolution: 'a zero too many',
+        refund_amount: '50000.00',
+        idempotency_key: randomUUID(),
+        transaction_pin: PIN,
+      });
+    expect(res.status).toBe(422);
+    expect(res.body.error).toBe('invalid_amount');
+    expect(await spendable(sender)).toBe(before);
   });
 
   it('is refused to a customer who is not a dispute reviewer', async () => {

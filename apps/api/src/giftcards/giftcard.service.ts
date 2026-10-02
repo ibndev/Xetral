@@ -9,7 +9,7 @@ import {
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { LedgerService, posting } from '@xetral/ledger';
 import type { AccountRef } from '@xetral/ledger';
 import { open, seal } from '@xetral/identity';
@@ -362,6 +362,17 @@ export class GiftCardService {
       idempotencyKey: `giftcard-approve:${row.reference}`,
     });
 
+    const holdDays = await this.settings.giftCardHoldDays();
+    const holdUntil = new Date(Date.now() + holdDays * 86_400_000);
+
+    /*
+     * THE STATUS MOVES ON THE ENTRY'S OWN TRANSACTION, under a lock on the
+     * submission. It moved afterwards, so a reject (or a second reviewer)
+     * landing between the two left money posted into `customer_pending` for
+     * a submission whose status could no longer become `approved` — held for
+     * ever, released by nothing. Now a submission that is no longer
+     * `pending_review` is refused before anything is posted.
+     */
     const posted = await this.ledger.post(
       {
         idempotencyKey: `giftcard-approve:${row.reference}`,
@@ -375,19 +386,22 @@ export class GiftCardService {
           posting({ kind: 'asset_giftcard_inventory', currency }, negate(payout)),
         ],
       },
-      precondition === undefined ? {} : { precondition },
+      {
+        precondition: async (client) => {
+          const status = await lockSubmission(client, row.id);
+          if (status !== 'pending_review') {
+            throw new ConflictException({ error: 'already_reviewed', status });
+          }
+          await precondition?.(client);
+        },
+        onEntry: async (client, entry) => {
+          await markApproved(client, row.id, reviewerId, holdUntil, entry.entryId);
+        },
+      },
     );
-
-    const holdDays = await this.settings.giftCardHoldDays();
-    const holdUntil = new Date(Date.now() + holdDays * 86_400_000);
-
-    await this.pool.query(
-      `UPDATE giftcard_submissions
-          SET status = 'approved', reviewed_by = $2::bigint, reviewed_at = now(),
-              hold_until = $3, approval_entry_id = $4::bigint
-        WHERE id = $1::bigint`,
-      [row.id, reviewerId, holdUntil.toISOString(), posted.entryId],
-    );
+    // A replay skips `onEntry` — only possible for an approval posted before
+    // the two shared a transaction. Guarded on `pending_review`.
+    if (posted.replayed) await markApproved(this.pool, row.id, reviewerId, holdUntil, posted.entryId);
 
     return this.#toView(await this.#reload(row.id));
   }
@@ -410,13 +424,19 @@ export class GiftCardService {
 
     // No ledger entry, because none was ever written. A rejected card costs
     // the customer nothing and leaves no trace in their balance.
-    await this.pool.query(
+    // Guarded on the status it was read in: an approval landing first wins,
+    // and this reports that rather than claiming a rejection that never took.
+    const rejected = await this.pool.query(
       `UPDATE giftcard_submissions
           SET status = 'rejected', reviewed_by = $2::bigint, reviewed_at = now(),
               rejection_reason = $3
-        WHERE id = $1::bigint`,
+        WHERE id = $1::bigint AND status = 'pending_review'`,
       [row.id, reviewerId, reason],
     );
+    if ((rejected.rowCount ?? 0) === 0) {
+      const now = await this.#reload(row.id);
+      throw new ConflictException({ error: 'already_reviewed', status: now.status });
+    }
 
     return this.#toView(await this.#reload(row.id));
   }
@@ -447,7 +467,11 @@ export class GiftCardService {
     const currency = this.#currency(row.payout_currency);
     const payout: Money<Currency> = { amount: BigInt(row.payout_amount_minor), currency };
 
-    await this.ledger.post({
+    /* Under a lock, with the status moved on the entry's transaction: a
+       clawback racing the hold's release could otherwise post both — the
+       customer paid AND the card returned to inventory, out of whatever else
+       was held in their `customer_pending`. */
+    const posted = await this.ledger.post({
       idempotencyKey: `giftcard-clawback:${row.reference}`,
       kind: 'reversal',
       reversesEntryId: row.approval_entry_id,
@@ -458,13 +482,16 @@ export class GiftCardService {
         posting(pendingAccount(row.user_id, currency), negate(payout)),
         posting({ kind: 'asset_giftcard_inventory', currency }, payout),
       ],
+    }, {
+      precondition: async (client) => {
+        const status = await lockSubmission(client, row.id);
+        if (status !== 'approved') throw new ConflictException({ error: 'not_clawable', status });
+      },
+      onEntry: async (client) => {
+        await markClawedBack(client, row.id, reason);
+      },
     });
-
-    await this.pool.query(
-      `UPDATE giftcard_submissions
-          SET status = 'clawed_back', clawback_reason = $2 WHERE id = $1::bigint`,
-      [row.id, reason],
-    );
+    if (posted.replayed) await markClawedBack(this.pool, row.id, reason);
 
     return this.#toView(await this.#reload(row.id));
   }
@@ -628,4 +655,38 @@ const pendingAccount = (userId: string, currency: Currency): AccountRef => ({
 
 function negate<C extends Currency>(amount: Money<C>): Money<C> {
   return subtract({ amount: 0n, currency: amount.currency }, amount);
+}
+
+/** Locks a submission on the entry's own connection and reads its status. */
+export async function lockSubmission(client: PoolClient, submissionId: string): Promise<string> {
+  const found = await client.query<{ status: string }>(
+    `SELECT status::text AS status FROM giftcard_submissions WHERE id = $1::bigint FOR UPDATE`,
+    [submissionId],
+  );
+  return found.rows[0]?.status ?? 'missing';
+}
+
+async function markApproved(
+  db: Pool | PoolClient,
+  submissionId: string,
+  reviewerId: string,
+  holdUntil: Date,
+  entryId: string,
+): Promise<void> {
+  await db.query(
+    `UPDATE giftcard_submissions
+        SET status = 'approved', reviewed_by = $2::bigint, reviewed_at = now(),
+            hold_until = $3, approval_entry_id = $4::bigint
+      WHERE id = $1::bigint AND status = 'pending_review'`,
+    [submissionId, reviewerId, holdUntil.toISOString(), entryId],
+  );
+}
+
+async function markClawedBack(db: Pool | PoolClient, submissionId: string, reason: string): Promise<void> {
+  await db.query(
+    `UPDATE giftcard_submissions
+        SET status = 'clawed_back', clawback_reason = $2
+      WHERE id = $1::bigint AND status = 'approved'`,
+    [submissionId, reason],
+  );
 }

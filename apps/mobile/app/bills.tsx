@@ -166,20 +166,45 @@ function Buy({
   // data is a new attempt rather than a replay of the last one.
   const attempt = useIdempotencyKey();
 
+  /*
+   * WHO WITHIN THE SERVICE — the network, the electricity company. VTpass
+   * sells per `serviceID` and the catalogue was asked for with none, so data
+   * and electricity offered no plans and airtime had no item at all. For
+   * airtime the network IS what is bought. The web's bills screen does the
+   * same.
+   */
+  const groupLabel = (service as PurchaseService).group;
+  const groups = useLoad(
+    () => (groupLabel === undefined ? Promise.resolve([]) : client.purchaseGroups(service.code)),
+    [client, service.code, groupLabel],
+  );
+  const [group, setGroup] = useState('');
+  const effectiveGroup = group !== '' ? group : (groups.data?.[0]?.code ?? '');
+
   const catalogue = useLoad(
     // Not swallowed into an empty list: `service_not_configured` and an
     // outage both read as "there are no plans", which the web never said.
-    () => client.catalogue(service.code),
-    [client, service.code],
+    () =>
+      service.code === 'airtime'
+        ? Promise.resolve([])
+        : groupLabel === undefined
+          ? client.catalogue(service.code)
+          : effectiveGroup === ''
+            ? Promise.resolve([])
+            : client.catalogue(service.code, effectiveGroup),
+    [client, service.code, groupLabel, effectiveGroup],
   );
 
-  const [item, setItem] = useState('');
+  const [chosenItem, setItem] = useState('');
   const [target, setTarget] = useState('');
   const [amount, setAmount] = useState('');
   const [pin, setPin] = useState('');
 
   const items = catalogue.data ?? [];
-  const selected = items.find((i) => i.code === item);
+  // An item from another network's catalogue is not this one's.
+  const pickedItem = items.some((i) => i.code === chosenItem) ? chosenItem : '';
+  const item = service.code === 'airtime' ? effectiveGroup : pickedItem;
+  const selected = items.find((i) => i.code === pickedItem);
   // A fixed-price item has nothing for the customer to type; a variable one
   // (airtime, electricity) does. Showing an amount box for a ₦500 data bundle
   // invites somebody to type a different number and be confused when it is
@@ -188,13 +213,24 @@ function Buy({
 
   return (
     <Panel title={`Buy ${service.label.toLowerCase()}`}>
-      {catalogue.loading && <Loading />}
+      {(catalogue.loading || groups.loading) && <Loading />}
+      {!groups.loading && <FormError error={groups.error} code={groups.code} />}
       {!catalogue.loading && <FormError error={catalogue.error} code={catalogue.code} />}
+
+      {groupLabel !== undefined && (groups.data?.length ?? 0) > 0 && (
+        <Select
+          label={groupLabel}
+          value={effectiveGroup}
+          onChange={setGroup}
+          placeholder="Choose one"
+          options={(groups.data ?? []).map((g) => ({ value: g.code, label: g.name }))}
+        />
+      )}
 
       {items.length > 0 && (
         <Select
           label="Choose"
-          value={item}
+          value={pickedItem}
           onChange={setItem}
           placeholder="Choose one"
           options={items.map((option) => ({

@@ -7,7 +7,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { LedgerService, posting } from '@xetral/ledger';
 import { money, toMajor } from '@xetral/shared';
 import type { Currency } from '@xetral/shared';
@@ -940,9 +940,10 @@ export class AdminService {
       status: string;
       amount_minor: string;
       currency: string;
+      provider: string;
       provider_reference: string;
     }>(
-      `SELECT id, status::text, amount_minor::text, currency, provider_reference
+      `SELECT id, status::text, amount_minor::text, currency, provider, provider_reference
          FROM deposits WHERE uuid = $1`,
       [depositUuid],
     );
@@ -955,28 +956,107 @@ export class AdminService {
     const currency = deposit.currency as Currency;
     const amount = money(BigInt(deposit.amount_minor), currency);
 
-    await this.ledger.post({
-      // Derived from the deposit, so a retry after a timeout is a replay
-      // rather than a second credit.
-      idempotencyKey: `suspense-attribute:${deposit.provider_reference}`,
-      kind: 'adjustment',
-      occurredAt: new Date(),
-      description: 'suspense deposit attributed to a customer',
-      metadata: { deposit: depositUuid, reason },
-      postings: [
-        posting({ kind: 'suspense', currency }, money(-amount.amount, currency)),
-        posting({ kind: 'customer_wallet', ownerId: targetId, currency }, amount),
-      ],
-    });
-
-    await this.pool.query(
-      `UPDATE deposits SET status = 'credited', user_id = $2::bigint,
-              virtual_account_id = (SELECT id FROM virtual_accounts
-                                     WHERE user_id = $2::bigint AND currency = $3
-                                       AND status <> 'closed' LIMIT 1)
-        WHERE id = $1::bigint`,
-      [deposit.id, targetId, deposit.currency],
+    /*
+     * THE KEY NAMES THE PROVIDER, and the row moves on the entry's own
+     * transaction under a lock.
+     *
+     * It was `suspense-attribute:<reference>` — and references are only unique
+     * per provider (`deposits_provider_key`), so a second rail's deposit
+     * carrying the same reference string got the FIRST one's entry back as a
+     * replay: nothing moved, and the row was then marked credited to a
+     * customer who received nothing. And the row moved in a separate UPDATE,
+     * so two operators attributing one deposit to two different customers
+     * moved the money to the first and recorded the second. Now a deposit no
+     * longer in suspense is refused before anything is posted.
+     *
+     * An attribution already posted under the OLD key, for THIS deposit, is
+     * honoured rather than posted again.
+     */
+    const legacy = await this.pool.query<{ id: string }>(
+      `SELECT id::text FROM journal_entries
+        WHERE idempotency_key = $1 AND metadata->>'deposit' = $2`,
+      [`suspense-attribute:${deposit.provider_reference}`, depositUuid],
     );
+    /*
+     * A CREDITED DEPOSIT NAMES AN ACCOUNT, by CHECK (006). The row used to be
+     * pointed at the customer's LIVE account only, so attributing to somebody
+     * whose account had been closed — or who never had one in this currency —
+     * credited their wallet and then failed the CHECK: money moved, the row
+     * stayed in suspense, and the operator was shown a server error. Their
+     * newest account is named, closed or not, and a customer with none in
+     * this currency is refused before anything moves.
+     */
+    const accountOf = async (db: Pool | PoolClient, ownerId: string): Promise<string | undefined> => {
+      const found = await db.query<{ id: string }>(
+        `SELECT id::text FROM virtual_accounts
+          WHERE user_id = $1::bigint AND currency = $2
+          ORDER BY (status <> 'closed') DESC, id DESC
+          LIMIT 1`,
+        [ownerId, deposit.currency],
+      );
+      return found.rows[0]?.id;
+    };
+    if ((await accountOf(this.pool, targetId)) === undefined) {
+      throw new ConflictException({ error: 'customer_has_no_account' });
+    }
+    const markCredited = async (db: Pool | PoolClient, ownerId: string): Promise<void> => {
+      const account = await accountOf(db, ownerId);
+      if (account === undefined) return;
+      await db.query(
+        `UPDATE deposits SET status = 'credited', user_id = $2::bigint, virtual_account_id = $3::bigint
+          WHERE id = $1::bigint AND status = 'suspense'`,
+        [deposit.id, ownerId, account],
+      );
+    };
+
+    let entryId = legacy.rows[0]?.id;
+    let replayed = entryId !== undefined;
+    if (entryId === undefined) {
+      const posted = await this.ledger.post(
+        {
+          idempotencyKey: `suspense-attribute:${deposit.provider}:${deposit.provider_reference}`,
+          kind: 'adjustment',
+          occurredAt: new Date(),
+          description: 'suspense deposit attributed to a customer',
+          metadata: { deposit: depositUuid, reason },
+          postings: [
+            posting({ kind: 'suspense', currency }, money(-amount.amount, currency)),
+            posting({ kind: 'customer_wallet', ownerId: targetId, currency }, amount),
+          ],
+        },
+        {
+          precondition: async (client) => {
+            const locked = await client.query<{ status: string }>(
+              `SELECT status::text AS status FROM deposits WHERE id = $1::bigint FOR UPDATE`,
+              [deposit.id],
+            );
+            const status = locked.rows[0]?.status;
+            if (status !== 'suspense') throw new ConflictException({ error: 'not_in_suspense', status });
+          },
+          onEntry: async (client) => {
+            await markCredited(client, targetId);
+          },
+        },
+      );
+      entryId = posted.entryId;
+      replayed = posted.replayed;
+    }
+
+    if (replayed) {
+      /* Posted by an attempt that died before its row moved. The money went
+         to whoever THAT entry names; the row follows the money. */
+      const owner = await this.pool.query<{ owner_id: string }>(
+        `SELECT a.owner_id::text AS owner_id
+           FROM postings p JOIN accounts a ON a.id = p.account_id
+          WHERE p.journal_entry_id = $1::bigint AND a.kind = 'customer_wallet'`,
+        [entryId],
+      );
+      const paidTo = owner.rows[0]?.owner_id;
+      if (paidTo !== undefined) await markCredited(this.pool, paidTo);
+      if (paidTo !== targetId) {
+        throw new ConflictException({ error: 'not_in_suspense', status: 'credited' });
+      }
+    }
 
     await this.audit.record({
       actorId: actorUuid,
