@@ -7470,6 +7470,15 @@ html:not([data-theme='dark']) .tabbar {
 .req-amount .req-fixed { overflow-wrap: anywhere; }
 .req-currency { display: flex; justify-content: center; }
 .req-currency .xselect-trigger { min-height: 36px; padding: 6px 12px; border-radius: 999px; }
+/* What the request was, under a figure converted into the payer's currency —
+   so "₵420" is visibly the same request as the ₦5,000 they were sent. */
+.req-converted {
+  margin: 8px 0 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
 .req-for,
 .req-for:focus {
   width: 100%; margin-top: 8px;
@@ -7641,3 +7650,57 @@ html:not([data-theme='dark']) .tabbar {
   .admin-frame .announce-table td .cell-sub { display: inline; margin-left: 6px; }
   .admin-frame .announce-table td:first-child .cell-sub { display: block; margin-left: 0; white-space: normal; }
 }
+
+/* ---------------------------------------------------------------------------
+   THE TIER LADDER on the identity screen. Three rungs, the customer's own
+   marked, each with what it takes and what it allows a day — the ladder
+   replaced a row per currency reading "Limited", which said nothing about
+   what the next step was worth.
+   --------------------------------------------------------------------------- */
+.tier-card .tier-head h2 { margin: 0; }
+.tier-ladder { list-style: none; margin: var(--s-3) 0 0; padding: 0; }
+.tier-step {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 0;
+}
+.tier-step + .tier-step { border-top: 1px solid var(--line); }
+.tier-dot {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font: 600 13px var(--font-num);
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
+.tier-step.done .tier-dot { background: var(--ok-bg); color: var(--ok); }
+.tier-step.current .tier-dot { background: var(--iris); color: var(--on-iris); }
+.tier-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tier-name { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-weight: 600; color: var(--text); }
+.tier-now {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--iris-text);
+  background: var(--iris-tint);
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+}
+.tier-req { font-size: 13px; color: var(--text-muted); }
+.tier-limit {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  white-space: nowrap;
+}
+.tier-per { font-size: 12px; font-weight: 400; color: var(--text-muted); }
+.tier-step.locked .tier-name,
+.tier-step.locked .tier-limit { color: var(--text-2); }
+.tier-card > .hint { margin-top: var(--s-2); }

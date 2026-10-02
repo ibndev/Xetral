@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { limitCurrenciesFor } from '@xetral/client';
+import { ACCOUNT_TIERS, formatAmount, tierLabel, wholeFigure } from '@xetral/client';
 import type { KycLimits, KycStatus } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { FormError } from '@/ui/form-error';
@@ -222,78 +222,80 @@ function Submitted({ status }: { status: KycStatus }) {
 }
 
 /**
- * What this customer's verification currently allows.
+ * THE ACCOUNT'S TIER, AS A LADDER.
  *
  * Rendered on both states of this screen — before submitting and after — for
  * the same reason: a ceiling somebody cannot see is one they can only discover
  * by hitting it, and a refusal with no explanation of what would change is
  * what turns a control into a support ticket.
  *
- * SHOWN AS A STATE, NOT AS A FIGURE, and that is a deliberate reversal.
+ * THREE RUNGS, AS THE OWNER COUNTS THEM: Tier 1 on signing up, Tier 2 once a
+ * BVN is verified, Tier 3 once an address is. It replaced a row per currency
+ * reading "Limited" or "Raised" — two words that answered whether verifying
+ * would help and nothing else, so the customer could not tell what the next
+ * step was worth or how far they were from the top.
  *
- * It used to print each ceiling — "₦50,000.00 a day", "0.00000000 a day" —
- * which reads as a price list on a screen whose subject is identity, and
- * invites the customer to compare four numbers when the only thing they can
- * DO about any of them is the one button already on the page. Worse, the
- * crypto row rendered a real zero as "not available yet", so an unverified
- * customer met a list in which some rows were amounts and one was a sentence.
- *
- * The figures have not gone anywhere: `GET /v1/kyc/limits` still answers them
- * and the ledger precondition still enforces them, so nothing about what is
- * ALLOWED changed here. This is the wording on one screen.
- *
- * AND ONE OF THE TWO WORDS WAS FALSE. A verified customer read "Unlimited"
- * against every currency — and 029's rule is that the ceiling in force is the
- * LOWER of the tier's and the FLOW's, so a verified customer still has a
- * daily limit and meets it on the first transfer past
- * `transfer_daily_limit_kobo`. "Unlimited" is the one claim on this screen a
- * customer can disprove by using the product, and a screen that says it is
- * worse than one that says nothing. "Raised" is the same two-state framing
- * and is true: verifying lifts the ceiling, it does not remove it.
+ * ONE FIGURE PER RUNG, IN THEIR OWN CURRENCY. The API answers every
+ * currency's ceiling at every tier; drawn whole that is a price list on a
+ * screen whose subject is identity, and the crypto rows' real zeros read as
+ * "not available yet". The figure is the customer's home currency, falling
+ * back to naira — the currency every account can hold.
  */
 function Limits() {
   const client = useXetral();
   const { data } = useLoad<KycLimits>(() => client.kycLimits(), [client]);
-  // Their own country's money, so the list can leave out everybody else's.
   const session = useLoad(() => client.currentSession(), [client]);
   const home = session.data?.home_currency ?? null;
   if (data === undefined) return null;
 
-  const TIERS = ['Registered', 'Verified', 'Enhanced'];
-
-  // TIER 0 IS THE ONLY UNVERIFIED STATE. Everything above it was granted by a
-  // person reading a document, so the two words divide exactly where the
-  // Verify button does — which is what makes them answerable by pressing it.
-  const verified = data.tier > 0;
+  const ladder = data.ladder ?? [{ tier: data.tier, limits: data.limits }];
+  const currency =
+    home !== null && ladder.some((r) => r.limits.some((l) => l.currency === home)) ? home : 'NGN';
 
   return (
-    <div className="card">
-      <h2>
-        Daily transaction limit{' '}
-        <span className="badge">{TIERS[data.tier] ?? `tier ${data.tier}`}</span>
-      </h2>
-      {/*
-        THEIR OWN CURRENCY AND THE FOUR THAT BELONG TO NOBODY. The API answers
-        every ceiling the platform has, which is right for an API and wrong
-        for this panel — a Nigerian was shown GHS and KES rows about money
-        they do not hold. `limitCurrenciesFor` is shared with the phone so the
-        two cannot show different lists.
-      */}
-      {data.limits
-        .filter((limit) =>
-          limitCurrenciesFor(
-            home,
-            data.limits.map((l) => l.currency),
-          ).includes(limit.currency),
-        )
-        .map((limit) => (
-          <div className="row" key={limit.currency}>
-            <span className="muted">{limit.currency}</span>
-            <span>{verified ? 'Raised' : 'Limited'}</span>
-          </div>
-        ))}
-      {data.next_tier === 1 && (
-        <p className="hint">Verifying lifts these, and unlocks a dollar card.</p>
+    <div className="card tier-card">
+      <div className="row-between tier-head">
+        <h2>Your account tier</h2>
+        <span className="badge ok">{tierLabel(data.tier)}</span>
+      </div>
+      <ol className="tier-ladder">
+        {ACCOUNT_TIERS.map((rung) => {
+          const state =
+            rung.tier < data.tier ? 'done' : rung.tier === data.tier ? 'current' : 'locked';
+          const limit = ladder
+            .find((r) => r.tier === rung.tier)
+            ?.limits.find((l) => l.currency === currency);
+          return (
+            <li key={rung.tier} className={`tier-step ${state}`}>
+              <span className="tier-dot" aria-hidden>
+                {state === 'done' ? <Icon name="check" size={14} /> : rung.tier + 1}
+              </span>
+              <span className="tier-body">
+                <span className="tier-name">
+                  {rung.label}
+                  {state === 'current' && <span className="tier-now">You are here</span>}
+                </span>
+                <span className="tier-req">{rung.requirement}</span>
+              </span>
+              <span className="tier-limit">
+                {limit === undefined ? (
+                  '—'
+                ) : (
+                  <>
+                    {formatAmount(wholeFigure(limit.daily_limit), currency)}
+                    <span className="tier-per">a day</span>
+                  </>
+                )}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+      {data.tier === 0 && (
+        <p className="hint">Verify your BVN to move to Tier 2 and unlock a dollar card.</p>
+      )}
+      {data.tier === 1 && (
+        <p className="hint">Tier 3 needs your address verified. Contact support to request it.</p>
       )}
     </div>
   );

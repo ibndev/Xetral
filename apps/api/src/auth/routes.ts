@@ -66,6 +66,13 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
           'reach them',
       )
       .public(
+        'GET',
+        '/v1/pay/:slug/equivalent',
+        'the payer choosing a currency on the checkout has no account; this ' +
+          'answers what the requested amount is in it, from published rates ' +
+          'only, and moves nothing',
+      )
+      .public(
         'POST',
         '/v1/pay/:slug/charge',
         'a payment link is paid by people with no Xetral account; this writes ' +

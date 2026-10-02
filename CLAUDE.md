@@ -2275,12 +2275,65 @@ Schema: `packages/ledger/sql/091_test_account_reset.sql`. Service in
   `visualViewport`, and the sheet's backdrop is sized from them. The phone
   wraps its picker Modal in a `KeyboardAvoidingView`, because a Modal is its
   own window and the Shell's handling never reached it.
-- **PAYSTACK'S BVN QUESTION IS NOT OURS TO REMOVE.** The reference plugin made
-  exactly the calls this adapter makes — `POST /customer` (name, email,
-  phone) then `POST /dedicated_account` — and its own docs record the same
-  refusal on a live Financial Services business and the same BVN form as the
-  fix. With a TEST key both work without a BVN, which is what made it look as
-  though the plugin needed none. Only Paystack can lift it.
+- **PAYSTACK'S BVN QUESTION — SUPERSEDED, see the next section.** This said
+  the refusal was Paystack's to lift. The owner has since confirmed accounts
+  opened in production WITHOUT a BVN, through the plugin's flow, and the
+  plugin's code (not its docs) shows two things this adapter did not do.
+
+### An account number without a BVN, tiers, and a request in another currency — non-obvious rules
+
+`packages/providers/src/paystack/funding-adapter.ts`, `FundingService.#notYetIdentified`,
+`packages/client/src/tiers.ts`, `GET /v1/pay/:slug/equivalent`,
+`packages/ledger/sql/092_test_reset_clears_name.sql`.
+
+- **THE PLUGIN'S CODE, NOT ITS DOCS, IS THE EVIDENCE.** Its docs describe the
+  "not identified" refusal and a BVN form. Its code does three things: it
+  creates the customer with `first_name`, `last_name` and `phone`; it names
+  `preferred_bank` (`wema-bank` unless set) on every live request; and on ANY
+  refusal it schedules a poll that asks `POST /dedicated_account` again for
+  about fifteen minutes. The owner has watched accounts open that way.
+- **`POST /customer` FOR A KNOWN EMAIL ANSWERS THE OLD RECORD UNCHANGED**, so a
+  customer a payment link made from an email alone stayed nameless and
+  phoneless. The adapter reads what the record holds and `PUT /customer/:code`
+  fills it in before asking for an account; a code we already hold is always
+  completed. Best effort — a validated customer refuses a rename, correctly.
+- **A BANK IS ALWAYS NAMED.** The setting wins; empty, Paystack's own
+  `available_providers` answers, Wema first where listed.
+- **"NOT IDENTIFIED" IS ASKED AGAIN, NOT HANDED TO THE CUSTOMER.** The first
+  answer is `account_issue_pending` and the service retries on
+  `accountRetryDelaysMs` (the plugin's schedule, in memory — a restart loses
+  it and the next Add Money visit starts it again). Only when the WHOLE
+  schedule is refused is the customer offered the BVN form, and the refusal is
+  then written to `account_refusals`; an empty schedule (the e2e fixture)
+  records nothing. Add Money's waiting panel says "Setting up your account
+  number" unless the customer actually submitted details.
+- **`profile_incomplete` SENT `field` AND THE CLIENT READ `fields`**, so a
+  customer with no phone on an old account read "Some details are missing"
+  and nothing more. Both are sent; the message names the field.
+- **TIERS ARE COUNTED FROM ONE ON EVERY SCREEN.** `users.kyc_tier` stays 0/1/2
+  — 029's meaning, enforced by the ledger — and `tierLabel()` shows Tier 1
+  (signed up), Tier 2 (BVN verified), Tier 3 (address verified). The identity
+  screen draws all three rungs with each one's daily ceiling in the
+  customer's own currency, from `GET /v1/kyc/limits`'s new `ladder` — the same
+  table the precondition reads, so the figures cannot describe a ceiling
+  nobody applies.
+- **A REQUEST PAID IN ANOTHER CURRENCY IS CONVERTED, NOT RELABELLED.** ₦5,000
+  paid in cedis asked for ₵5,000 and the rail refused it, which the page
+  called "check the amount". The figure follows the currency through a public,
+  published-rates-only endpoint (either direction of the pair), always from
+  the amount as asked so switching back and forth cannot compound rounding,
+  and ROUNDED UP (`equivalentOf`) so the person asking is never short. No
+  spread: nothing is converted, the payee is credited what was paid.
+- **EVERY CHARGE REFUSAL IS NAMED.** Codes the page did not know fell through
+  to "check the amount" — a refusing rail, a currency with no key behind it
+  and a mistyped email all blamed the amount.
+- **THE PAY PAGE HAS NO FOOTER PARAGRAPH**, at the owner's request. The PCI
+  statement lives in the privacy notice and stays true because of how the page
+  is built.
+- **A RESET TEST ACCOUNT KEEPS NO NAME (092).** The email and phone were
+  released and the dashboard still opened on the person's name. The reset log
+  keeps the name it removed; accounts already reset are cleared too. A closed
+  account number's `account_name` is untouched — it is what the bank was given.
 
 ### The assignment, the refusal nobody could read, and a paused service — non-obvious rules
 
@@ -5166,6 +5219,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/088_hollow_payouts.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/089_paystack_identity.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/090_sign_in_country_relayed.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/091_test_account_reset.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/092_test_reset_clears_name.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -5255,6 +5309,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/088_hollow_payouts.test
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/089_paystack_identity.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/090_sign_in_country_relayed.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/091_test_account_reset.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/092_test_reset_clears_name.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

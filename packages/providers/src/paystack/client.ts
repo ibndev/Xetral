@@ -60,6 +60,14 @@ export interface PaystackClientOptions {
 export const PAYSTACK_ENDPOINTS = {
   createCustomer: '/customer',
   getCustomer: (code: string) => `/customer/${code}`,
+  /*
+   * UPDATE — `PUT /customer/:code` with `first_name`, `last_name` and `phone`
+   * (Customer API, "Update Customer"). `POST /customer` against an email
+   * Paystack already holds answers the EXISTING record unchanged, so a
+   * customer a checkout created from an email alone keeps no name and no
+   * phone however often we send them; this is the call that adds them.
+   */
+  updateCustomer: (code: string) => `/customer/${encodeURIComponent(code)}`,
   /** BVN or NIN, for lifting a customer past tier 1. */
   validateCustomer: (code: string) => `/customer/${code}/identification`,
 
@@ -155,7 +163,7 @@ export class PaystackClient {
   }
 
   async request(
-    method: 'GET' | 'POST' | 'DELETE',
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
     path: string,
     body?: unknown,
   ): Promise<unknown> {

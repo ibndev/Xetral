@@ -100,6 +100,17 @@ export class KycService {
     readonly tier: number;
     readonly limits: readonly { readonly currency: string; readonly daily_limit: string }[];
     readonly next_tier: number | null;
+    /**
+     * EVERY TIER'S CEILINGS, not only the customer's own — the screen draws
+     * the whole ladder, so somebody on the first rung can read what the next
+     * one is worth before deciding whether to climb it. The same table the
+     * ledger precondition enforces, so the figures cannot describe a ceiling
+     * the platform does not apply.
+     */
+    readonly ladder: readonly {
+      readonly tier: number;
+      readonly limits: readonly { readonly currency: string; readonly daily_limit: string }[];
+    }[];
   }> {
     const userId = await this.#userId(userUuid);
     const result = await this.pool.query<{
@@ -116,7 +127,28 @@ export class KycService {
     );
 
     const tier = result.rows[0]?.kyc_tier ?? 0;
+
+    const all = await this.pool.query<{ tier: number; currency: string; daily_limit_minor: string }>(
+      `SELECT tier, currency, daily_limit_minor::text FROM kyc_tier_limits ORDER BY tier, currency`,
+    );
+    const ladder: { tier: number; limits: { currency: string; daily_limit: string }[] }[] = [];
+    for (const row of all.rows) {
+      let rung = ladder.find((r) => r.tier === row.tier);
+      if (rung === undefined) {
+        rung = { tier: row.tier, limits: [] };
+        ladder.push(rung);
+      }
+      rung.limits.push({
+        currency: row.currency,
+        daily_limit: toMajor({
+          amount: BigInt(row.daily_limit_minor),
+          currency: row.currency as Currency,
+        }),
+      });
+    }
+
     return {
+      ladder,
       tier,
       limits: result.rows.map((row) => ({
         currency: row.currency,

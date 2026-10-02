@@ -475,6 +475,7 @@ export class FundingDiagnosticsService {
       ['account_identity_checks', '089_paystack_identity.sql'],
       ['sign_in_events.country_relayed', '090_sign_in_country_relayed.sql'],
       ['test_account_resets', '091_test_account_reset.sql'],
+      ['test_account_resets.full_name', '092_test_reset_clears_name.sql'],
     ];
 
     const missing: string[] = [];

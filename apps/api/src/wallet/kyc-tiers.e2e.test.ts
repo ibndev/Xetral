@@ -216,6 +216,23 @@ describe('what an unverified account may move', () => {
     // — the kobo figure — while the page formatted it as naira, so the screen
     // telling a customer their ceiling said N5,000,000 for a N50,000 limit.
     expect(ngnLimit?.daily_limit).toBe('50000.00');
+
+    /*
+     * AND THE WHOLE LADDER, read from the same table the ledger enforces, so
+     * the screen can show what the next tier is worth before anybody climbs
+     * to it. Every tier, lowest first, each with its own figures.
+     */
+    const ladder = res.body.ladder as { tier: number; limits: { currency: string; daily_limit: string }[] }[];
+    expect(ladder.map((r) => r.tier)).toEqual([0, 1, 2]);
+    const configured = await pool.query<{ tier: number; daily_limit_minor: string }>(
+      `SELECT tier, daily_limit_minor::text FROM kyc_tier_limits WHERE currency = 'NGN' ORDER BY tier`,
+    );
+    for (const row of configured.rows) {
+      const shown = ladder.find((r) => r.tier === row.tier)?.limits.find((l) => l.currency === 'NGN');
+      expect(shown?.daily_limit).toBe(
+        `${BigInt(row.daily_limit_minor) / 100n}.${String(BigInt(row.daily_limit_minor) % 100n).padStart(2, '0')}`,
+      );
+    }
   });
 });
 

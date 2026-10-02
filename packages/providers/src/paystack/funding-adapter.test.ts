@@ -33,18 +33,36 @@ function adapterWith(
   options: {
     preferredBank?: string | (() => Promise<string | undefined>);
     secretKey?: string;
+    /** What `GET /dedicated_account/available_providers` answers. */
+    providers?: unknown;
   } = {},
 ): { adapter: PaystackFundingAdapter; calls: Call[] } {
   const calls: Call[] = [];
   let i = 0;
   const fetch: PaystackFetch = async (url, init) => {
+    const path = url.replace('https://api.paystack.test', '');
+    const method = String(init.method);
     calls.push({
-      path: url.replace('https://api.paystack.test', ''),
-      method: String(init.method),
+      path,
+      method,
       body: init.body === undefined ? undefined : JSON.parse(String(init.body)),
       auth: (init.headers as Record<string, string>)['authorization'],
     });
-    const next = (responses[i++] ?? { status: true, data: {} }) as { __http?: number };
+    /*
+     * TWO CALLS ARE ANSWERED BY PATH, NOT FROM THE SCRIPT: completing the
+     * customer record and asking which banks may be named. Both may or may
+     * not happen depending on what the setting and the customer record say,
+     * and a positional script handing the account's body to one of them is
+     * the fault `v4Stub` records one client over — position is the wrong key
+     * the moment the code under test may make an extra call.
+     */
+    const routed =
+      method === 'PUT' && path.startsWith('/customer/')
+        ? { status: true, data: {} }
+        : method === 'GET' && path === '/dedicated_account/available_providers'
+          ? (options.providers ?? { status: true, data: [] })
+          : undefined;
+    const next = (routed ?? responses[i++] ?? { status: true, data: {} }) as { __http?: number };
     // `__http` scripts a non-200 answer — Paystack's 400 for an unidentified
     // customer arrives that way, not as `status: false` on a 200.
     const { __http, ...body } = next;
@@ -83,7 +101,15 @@ const NEW_CUSTOMER: CreateVirtualAccountRequest = {
 /** What the account call carries, so a customer a checkout created can be identified. */
 const IDENTITY = { first_name: 'Ada', last_name: 'Obi', phone: '+2348031234567' };
 
-const CUSTOMER_CREATED = { status: true, data: { customer_code: 'CUS_abc' } };
+const CUSTOMER_CREATED = {
+  status: true,
+  data: { customer_code: 'CUS_abc', first_name: 'Ada', last_name: 'Obi', phone: '+2348031234567' },
+};
+/** An email Paystack already held — a checkout made it — answered unchanged. */
+const CUSTOMER_ALREADY_BARE = {
+  status: true,
+  data: { customer_code: 'CUS_abc', first_name: null, last_name: null, phone: null },
+};
 const NO_ACCOUNTS = { status: true, data: [] };
 const ACCOUNT_CREATED = {
   status: true,
@@ -137,15 +163,20 @@ describe('opening an account for somebody who has not been verified', () => {
       ...NEW_CUSTOMER,
       customer: { ...NEW_CUSTOMER.customer, providerCustomerId: 'CUS_existing' },
     });
-    expect(calls.map((c) => c.path)).toEqual([
+    expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual([
+      // A code we hold says nothing about what that record carries, so it is
+      // completed before an account is asked for against it.
+      'PUT /customer/CUS_existing',
       // `active` AND `currency` are REQUIRED on this endpoint — Paystack's own
       // SDK marks both with a `*` — and omitting them made the list refuse.
       // The refusal is swallowed by the caller, so the cost was quiet: the
       // look-before-create guard never found an existing account, and every
       // retry after a timeout went on to CREATE a second live account number
       // against a row nobody is watching.
-      '/dedicated_account?active=true&currency=NGN&customer=CUS_existing',
-      '/dedicated_account',
+      'GET /dedicated_account?active=true&currency=NGN&customer=CUS_existing',
+      // No bank configured: Paystack's own list is asked which may be named.
+      'GET /dedicated_account/available_providers',
+      'POST /dedicated_account',
     ]);
   });
 
@@ -188,11 +219,86 @@ describe('opening an account for somebody who has not been verified', () => {
       preferredBank: 'wema-bank',
     });
     await withBank.adapter.createVirtualAccount(NEW_CUSTOMER);
-    expect(withBank.calls[2]?.body).toEqual({ customer: 'CUS_abc', preferred_bank: 'wema-bank', ...IDENTITY });
+    const create = (calls: Call[]) =>
+      calls.find((c) => c.path === '/dedicated_account' && c.method === 'POST')?.body;
+    expect(create(withBank.calls)).toEqual({ customer: 'CUS_abc', preferred_bank: 'wema-bank', ...IDENTITY });
+    // The setting is not consulted against Paystack's list: it wins outright.
+    expect(withBank.calls.map((c) => c.path)).not.toContain('/dedicated_account/available_providers');
 
+    // Empty, and Paystack lists nothing this business may name: none is sent.
     const without = adapterWith([CUSTOMER_CREATED, NO_ACCOUNTS, ACCOUNT_CREATED]);
     await without.adapter.createVirtualAccount(NEW_CUSTOMER);
-    expect(without.calls[2]?.body).toEqual({ customer: 'CUS_abc', ...IDENTITY });
+    expect(create(without.calls)).toEqual({ customer: 'CUS_abc', ...IDENTITY });
+  });
+
+  it('NAMES WEMA WHEN THE SETTING IS EMPTY AND PAYSTACK LISTS IT, as the reference plugin does', async () => {
+    /*
+     * The plugin whose accounts the owner watched Paystack open without a
+     * BVN sends `preferred_bank: wema-bank` on every live request; this sent
+     * nothing when the box was empty. Wema is preferred where Paystack lists
+     * it, and otherwise the first provider it does list.
+     */
+    const listed = adapterWith([CUSTOMER_CREATED, NO_ACCOUNTS, ACCOUNT_CREATED], {
+      providers: { status: true, data: [{ provider_slug: 'titan-paystack' }, { provider_slug: 'wema-bank' }] },
+    });
+    await listed.adapter.createVirtualAccount(NEW_CUSTOMER);
+    const sent = listed.calls.find((c) => c.path === '/dedicated_account' && c.method === 'POST');
+    expect((sent?.body as { preferred_bank?: string }).preferred_bank).toBe('wema-bank');
+
+    const titanOnly = adapterWith([CUSTOMER_CREATED, NO_ACCOUNTS, ACCOUNT_CREATED], {
+      providers: { status: true, data: [{ provider_slug: 'titan-paystack' }] },
+    });
+    await titanOnly.adapter.createVirtualAccount(NEW_CUSTOMER);
+    const other = titanOnly.calls.find((c) => c.path === '/dedicated_account' && c.method === 'POST');
+    expect((other?.body as { preferred_bank?: string }).preferred_bank).toBe('titan-paystack');
+  });
+
+  it('PUTS THE NAME AND PHONE ON A CUSTOMER PAYSTACK ALREADY HELD BARE', async () => {
+    /*
+     * `POST /customer` for an email Paystack already knows answers the
+     * existing record unchanged — and one a payment link created from an
+     * email alone has no name and no phone. The plugin's accounts carried
+     * both; ours asked for an account against a record carrying neither.
+     */
+    const { adapter, calls } = adapterWith([CUSTOMER_ALREADY_BARE, NO_ACCOUNTS, ACCOUNT_CREATED]);
+    await adapter.createVirtualAccount(NEW_CUSTOMER);
+    const update = calls.find((c) => c.method === 'PUT');
+    expect(update?.path).toBe('/customer/CUS_abc');
+    expect(update?.body).toEqual(IDENTITY);
+    // Before the account is asked for, never after.
+    const order = calls.map((c) => `${c.method} ${c.path}`);
+    expect(order.indexOf('PUT /customer/CUS_abc')).toBeLessThan(order.indexOf('POST /dedicated_account'));
+  });
+
+  it('does not update a record Paystack answered complete', async () => {
+    const { adapter, calls } = adapterWith([CUSTOMER_CREATED, NO_ACCOUNTS, ACCOUNT_CREATED]);
+    await adapter.createVirtualAccount(NEW_CUSTOMER);
+    expect(calls.some((c) => c.method === 'PUT')).toBe(false);
+  });
+
+  it('carries on when Paystack will not update a customer it already validated', async () => {
+    // "can only be updated by a revalidation" — a correct refusal, and no
+    // reason not to ask for the account against the record as it stands.
+    const calls: Call[] = [];
+    const script = [CUSTOMER_ALREADY_BARE, NO_ACCOUNTS, ACCOUNT_CREATED];
+    let i = 0;
+    const fetch: PaystackFetch = async (url, init) => {
+      const path = url.replace('https://api.paystack.test', '');
+      calls.push({ path, method: String(init.method), body: undefined, auth: undefined });
+      const body =
+        init.method === 'PUT'
+          ? { status: false, message: "This customer's name can only be updated by a revalidation" }
+          : path === '/dedicated_account/available_providers'
+            ? { status: true, data: [] }
+            : script[i++];
+      return new Response(JSON.stringify(body), { status: init.method === 'PUT' ? 400 : 200 });
+    };
+    const adapter = new PaystackFundingAdapter({
+      client: new PaystackClient({ baseUrl: 'https://api.paystack.test', secretKey: LIVE_KEY, fetch }),
+      preferredBank: undefined,
+    });
+    const account = await adapter.createVirtualAccount(NEW_CUSTOMER);
+    expect(account.accountNumber).toBe('9911223344');
   });
 
   it('SENDS THE NAME AND PHONE WITH THE ACCOUNT, not only with the customer', async () => {
@@ -323,7 +429,7 @@ describe('not issuing a second account number', () => {
     const account = await adapter.createVirtualAccount(NEW_CUSTOMER);
 
     expect(account.accountNumber).toBe('0099887766');
-    // Three calls would mean it created one anyway.
+    // A third call would mean it created one anyway.
     expect(calls).toHaveLength(2);
     expect(calls.some((c) => c.method === 'POST' && c.path === '/dedicated_account')).toBe(false);
   });
@@ -522,10 +628,10 @@ describe('a business Paystack requires to identify its customers', () => {
   });
 
   it('asks Paystack which bank to name when the setting is empty — the call requires one', async () => {
-    const { adapter, calls } = adapterWith([
-      { status: true, data: [{ provider_slug: 'titan-paystack' }, { provider_slug: 'wema-bank' }] },
-      { status: true, message: 'Assign dedicated account in progress' },
-    ]);
+    const { adapter, calls } = adapterWith(
+      [{ status: true, message: 'Assign dedicated account in progress' }],
+      { providers: { status: true, data: [{ provider_slug: 'titan-paystack' }, { provider_slug: 'access-bank' }] } },
+    );
     await expect(adapter.createVirtualAccount(WITH_IDENTITY)).rejects.toBeInstanceOf(
       ProviderPendingError,
     );

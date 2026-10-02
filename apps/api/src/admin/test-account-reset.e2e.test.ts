@@ -227,11 +227,15 @@ describe('resetting it', () => {
     expect(String(done.body.removed)).toContain('account number');
     expect(funding.deactivated).toContainEqual({ provider: 'paystack', id: accountId });
 
-    const retired = await pool.query<{ email: string; phone: string | null; status: string }>(
-      `SELECT email, phone, status FROM users WHERE id = $1::bigint`,
-      [old],
-    );
-    expect(retired.rows[0]).toMatchObject({ phone: null, status: 'closed' });
+    const retired = await pool.query<{
+      email: string;
+      phone: string | null;
+      full_name: string | null;
+      status: string;
+    }>(`SELECT email, phone, full_name, status FROM users WHERE id = $1::bigint`, [old]);
+    // The name goes too (092): a "deleted" account still opening on a person's
+    // name in the dashboard reads as one that was not deleted at all.
+    expect(retired.rows[0]).toMatchObject({ phone: null, full_name: null, status: 'closed' });
     expect(retired.rows[0]?.email).toMatch(/^reset\+.+@invalid$/);
 
     const logged = await pool.query(

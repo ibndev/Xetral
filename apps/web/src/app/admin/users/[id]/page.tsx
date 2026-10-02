@@ -1,7 +1,7 @@
 'use client';
 
 import { use, useState } from 'react';
-import { formatMinor } from '@xetral/client';
+import { formatMinor, tierLabel } from '@xetral/client';
 import Link from 'next/link';
 import { useAdmin, useLoad } from '@/lib/hooks';
 import { messageFor } from '@/lib/errors';
@@ -253,7 +253,7 @@ export default function UserDetail({ params }: { params: Promise<{ id: string }>
       */}
       <div className="panel">
         <h2>
-          Cards <span className="badge">tier {tier}</span>
+          Cards <span className="badge">{tierLabel(Number(tier))}</span>
         </h2>
         {cards.length === 0 && <p className="empty">None issued.</p>}
         {cards.map((card, index) => {

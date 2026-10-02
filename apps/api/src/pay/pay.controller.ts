@@ -8,6 +8,7 @@ import {
   NotFoundException,
   Param,
   Post,
+  Query,
 } from '@nestjs/common';
 import { z } from 'zod';
 import { PaymentLinkService } from './payment-link.service.js';
@@ -73,6 +74,14 @@ const beginSchema = z
   })
   .strict();
 
+const equivalentSchema = z
+  .object({
+    amount: z.string().trim().regex(/^[0-9]{1,15}(\.[0-9]{1,8})?$/),
+    from: z.string().trim().regex(/^[A-Za-z]{3,5}$/),
+    to: z.string().trim().regex(/^[A-Za-z]{3,5}$/),
+  })
+  .strict();
+
 const settleSchema = z.object({ reference: z.string().trim().min(8).max(64) }).strict();
 
 @Controller('v1/pay')
@@ -85,6 +94,21 @@ export class PayController {
     @Param('slug') slug: string,
   ): Promise<{ name: string; currency: string; currencies: readonly string[] }> {
     return this.links.payee(parseSlug(slug));
+  }
+
+  /**
+   * What an amount is in another currency this link collects — so a request
+   * asked in naira and paid in cedis shows cedis, not the naira figure under a
+   * cedi sign. Published rates only; see the service.
+   */
+  @Get(':slug/equivalent')
+  async equivalent(
+    @Param('slug') slug: string,
+    @Query() query: unknown,
+  ): Promise<{ amount: string; currency: string }> {
+    const parsed = equivalentSchema.safeParse(query);
+    if (!parsed.success) throw new BadRequestException({ error: 'invalid_request' });
+    return this.links.equivalent(parseSlug(slug), parsed.data);
   }
 
   /** Start a payment, and hand back where to send the payer. */

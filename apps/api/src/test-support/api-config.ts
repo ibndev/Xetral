@@ -167,6 +167,10 @@ export function testApiConfig(databaseUrl: string, overrides: Partial<ApiConfig>
     // Off in the fixture: every suite registers somebody, and only the
     // funding suite is about what that does to a rail.
     openAccountOnRegistration: false,
+    // None in the fixture: a timer from one suite asking a fake rail about a
+    // customer in the middle of another suite's count is noise. The funding
+    // suite sets a short schedule where retrying is its subject.
+    accountRetryDelaysMs: [],
     // Off for the same reason: every suite registers somebody, and only the
     // signup suite is about proving the address.
     signupEmailVerification: false,

@@ -91,6 +91,30 @@ export function convertWithSpread<B extends Currency>(
   };
 }
 
+/**
+ * WHAT AN AMOUNT IS WORTH IN ANOTHER CURRENCY, FOR A PAYER — a display figure,
+ * not a conversion. No spread, because nothing is being converted: a payer
+ * paying a request in cedis that was asked in naira pays cedis, and the payee
+ * is credited the cedis paid.
+ *
+ * ROUNDED UP, and that direction is the point. The payer covers the fraction
+ * of a minor unit, so the person who asked for ₦5,000 is never handed a few
+ * kobo less than they asked for because a rate did not divide evenly. The
+ * opposite choice from `convertWithSpread`, which rounds down because there
+ * the fraction is OURS to give.
+ *
+ * Generic for `convertWithSpread`'s reason: `Money` is invariant.
+ */
+export function equivalentOf<B extends Currency>(amount: Money<B>, rate: FxRate): bigint {
+  if (amount.currency !== rate.base) {
+    throw new RangeError(`a ${amount.currency} amount cannot be converted by a ${rate.base} rate`);
+  }
+  if (amount.amount <= 0n) {
+    throw new RangeError('an equivalent needs a positive amount');
+  }
+  return divideRounded(amount.amount * rate.numerator, rate.denominator, 'up');
+}
+
 /** Inverts a rate, for quoting the other direction of a pair. */
 export function invert(rate: FxRate): FxRate {
   return {

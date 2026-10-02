@@ -5,9 +5,8 @@ import { Logo } from '@/ui/logo';
 import { Icon } from '@/ui/icon';
 import { Select } from '@/ui/select';
 import { CurrencyMark } from '@/ui/currency-mark';
-import { PAY_METHOD_LABEL, payMethodsFor, readRequest, REQUEST_NOTE_MAX, symbolFor } from '@xetral/client';
+import { formatAmount, PAY_METHOD_LABEL, payMethodsFor, readRequest, REQUEST_NOTE_MAX, symbolFor } from '@xetral/client';
 import type { PayMethod } from '@xetral/client';
-import { LEGAL_ENTITY } from '@/lib/company';
 import { LegalLine } from '@/ui/legal-line';
 
 /**
@@ -90,10 +89,27 @@ function Checkout({ slug }: { readonly slug: string }) {
    * PAID, never what a link claimed.
    */
   const [asked, setAsked] = useState<{ amount?: string; currency?: string; note?: string }>({});
+  /*
+   * THE AMOUNT AS IT WAS ASKED OR TYPED, AND IN WHICH CURRENCY.
+   *
+   * Changing the currency used to change only the symbol: a request for
+   * ₦5,000 paid in cedis asked the payer for ₵5,000 — about a hundred times
+   * the request — and the rail then refused it, which read as "check the
+   * amount". The box now shows what the base amount is in the chosen
+   * currency, always converted FROM this base rather than from whatever the
+   * box held last, so switching back and forth cannot compound rounding.
+   * Typing in the box makes what was typed the new base.
+   */
+  const [base, setBase] = useState<{ amount: string; currency: string } | undefined>();
+  const [converting, setConverting] = useState(false);
+  const [noRate, setNoRate] = useState(false);
   useEffect(() => {
     const request = readRequest(new URLSearchParams(window.location.search));
     setAsked(request);
-    if (request.amount !== undefined) setAmount(request.amount);
+    if (request.amount !== undefined) {
+      setAmount(request.amount);
+      if (request.currency !== undefined) setBase({ amount: request.amount, currency: request.currency });
+    }
     if (request.currency !== undefined) setCurrency(request.currency);
     if (request.note !== undefined) setNote(request.note);
   }, []);
@@ -161,6 +177,52 @@ function Checkout({ slug }: { readonly slug: string }) {
     currency !== '' && (options.length === 0 || options.includes(currency))
       ? currency
       : (payee?.currency ?? '');
+  /* A request link without a currency was asked in the payee's own. */
+  const from = base ?? (asked.amount !== undefined && payee !== undefined
+    ? { amount: asked.amount, currency: payee.currency }
+    : undefined);
+
+  useEffect(() => {
+    if (from === undefined || chosen === '' || from.amount === '') return;
+    if (from.currency === chosen) {
+      setAmount(from.amount);
+      setNoRate(false);
+      return;
+    }
+    let live = true;
+    setConverting(true);
+    void (async () => {
+      try {
+        const query = new URLSearchParams({ amount: from.amount, from: from.currency, to: chosen });
+        const response = await fetch(
+          `/api/x/v1/pay/${encodeURIComponent(slug)}/equivalent?${query.toString()}`,
+        );
+        const body = (await response.json()) as { amount?: string };
+        if (!live) return;
+        if (response.ok && body.amount !== undefined) {
+          setAmount(body.amount.replace(/\.0+$/, ''));
+          setNoRate(false);
+        } else {
+          // No published rate between the two: an empty box and a sentence,
+          // never the old figure under the new symbol.
+          setAmount('');
+          setNoRate(true);
+        }
+      } catch {
+        if (live) {
+          setAmount('');
+          setNoRate(true);
+        }
+      } finally {
+        if (live) setConverting(false);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+    // `from` is rebuilt every render; its two fields are what matter.
+  }, [chosen, from?.amount, from?.currency, slug]);
+
   /*
    * HOW THEY PAY, chosen HERE. A payer who chose cedis was sent straight to
    * the provider's page, which opens on a card form — mobile money sat behind
@@ -200,17 +262,7 @@ function Checkout({ slug }: { readonly slug: string }) {
         error?: string;
       };
       if (!response.ok || body.authorization_url === undefined) {
-        setError(
-          body.error === 'invalid_amount'
-            ? 'Enter an amount to pay.'
-            : body.error === 'currency_not_supported'
-              ? `${chosen} cannot be paid to this link. Choose another currency.`
-              : body.error === 'payment_method_not_supported'
-                ? `${chosen} cannot be paid that way. Choose another way to pay.`
-              : body.error === 'checkout_unavailable'
-                ? 'Payments are unavailable right now. Try again shortly.'
-                : 'That did not work. Check the amount and try again.',
-        );
+        setError(chargeRefusal(body.error, chosen));
         return;
       }
       // Paystack's own page. It renders the methods this payer has, which is
@@ -278,7 +330,12 @@ function Checkout({ slug }: { readonly slug: string }) {
                     aria-label={`Amount (${chosen})`}
                     value={amount}
                     style={{ width: `${Math.max(1, amount.length || 1) + 0.4}ch` }}
-                    onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
+                    onChange={(e) => {
+                      const typed = e.target.value.replace(/[^0-9.]/g, '');
+                      setAmount(typed);
+                      setNoRate(false);
+                      setBase(typed === '' ? undefined : { amount: typed, currency: chosen });
+                    }}
                     required
                   />
                 </label>
@@ -294,6 +351,16 @@ function Checkout({ slug }: { readonly slug: string }) {
                     />
                     <span id="pay-currency-label" hidden>Currency</span>
                   </div>
+                )}
+
+                {from !== undefined && from.currency !== chosen && chosen !== '' && (
+                  <p className="req-converted" aria-live="polite">
+                    {converting
+                      ? 'Converting…'
+                      : noRate
+                        ? `We cannot convert ${from.currency} to ${chosen} here. Enter the amount in ${chosen}.`
+                        : `${formatAmount(from.amount, from.currency)} requested, at today's rate`}
+                  </p>
                 )}
 
                 {asked.note !== undefined ? (
@@ -378,25 +445,15 @@ function Checkout({ slug }: { readonly slug: string }) {
                   </p>
                 )}
 
-                {/* NO PROVIDER IS NAMED HERE. It used to say "Paystack's
-                    secure page", which is wrong the moment a cedi payment
-                    goes to Flutterwave — and a payer does not need to know
-                    which processor we route to, only that we never see their
-                    card. */}
                 {/*
-                  AND THE CARDHOLDER-DATA STATEMENT, as the acquirer asked for
-                  it, in the same sentence rather than a second paragraph
-                  repeating the first. True because of how this page is built:
-                  the card is typed on the processor's hosted page, so no card
-                  number, security code or expiration date ever reaches this
-                  page, the API or a database here.
+                  NO FOOTER PARAGRAPH. It said the money reaches their Xetral
+                  wallet and carried the cardholder-data statement; the owner
+                  asked for it off this page. The statement stays where it is
+                  a commitment — the privacy notice — and stays TRUE because
+                  of how this page is built: the card is typed on the
+                  processor's hosted page and never reaches this page, the
+                  API or a database here.
                 */}
-                <p className="req-foot">
-                  They receive it in their Xetral wallet. You pay on a secure
-                  page run by our PCI DSS Level 1 certified payment partners —{' '}
-                  {LEGAL_ENTITY} never stores, processes or transmits your card
-                  number, security code (CVV) or expiration date.
-                </p>
               </form>
             </>
           )}
@@ -406,4 +463,38 @@ function Checkout({ slug }: { readonly slug: string }) {
       </div>
     </main>
   );
+}
+
+/**
+ * WHAT A REFUSED CHARGE SAYS, code by code.
+ *
+ * Every code this page did not name fell through to "That did not work.
+ * Check the amount and try again." — so a rail that refused, a currency with
+ * no key behind it and a mistyped email address all told the payer the
+ * AMOUNT was wrong, which for most of them it was not. The API's codes are
+ * specific; this keeps them specific.
+ */
+function chargeRefusal(code: string | undefined, currency: string): string {
+  switch (code) {
+    case 'invalid_amount':
+      return 'Enter an amount to pay.';
+    case 'invalid_request':
+      return 'Check your email address and the amount, then try again.';
+    case 'currency_not_supported':
+      return `${currency} cannot be paid to this link. Choose another currency.`;
+    case 'payment_method_not_supported':
+      return `${currency} cannot be paid that way. Choose another way to pay.`;
+    case 'checkout_refused':
+      return `Our payment partner declined this ${currency} payment. Try another way to pay, a smaller amount, or another currency.`;
+    case 'checkout_not_configured':
+      return `${currency} payments are not available right now. Choose another currency.`;
+    case 'checkout_unavailable':
+      return 'Payments are unavailable right now. Try again shortly.';
+    case 'link_not_found':
+      return 'This link is not active. Ask whoever sent it for a new one.';
+    case 'too_many_requests':
+      return 'Too many attempts. Wait a minute and try again.';
+    default:
+      return 'We could not start this payment. Try again in a moment.';
+  }
 }

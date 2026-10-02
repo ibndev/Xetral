@@ -406,6 +406,14 @@ function IdentifyForAccount({
     start === 'account_issue_pending' ? 'pending' : 'form',
   );
   const [failed, setFailed] = useState(start === 'account_identity_failed');
+  /*
+   * WHETHER THE CUSTOMER GAVE ANYTHING. "Pending" also means the account is
+   * still being asked for in the background with nothing from them — the
+   * server tries the bank partner again for about fifteen minutes before it
+   * offers this form — and "confirming your details" would be a sentence
+   * about details they never gave.
+   */
+  const [submitted, setSubmitted] = useState(false);
   const [bvn, setBvn] = useState('');
   const [bank, setBank] = useState('');
   const [number, setNumber] = useState('');
@@ -462,12 +470,20 @@ function IdentifyForAccount({
         </span>
         <div>
           <p className="activate-lead">
-            {mode === 'slow' ? 'Still confirming your details' : 'Confirming your details with the bank'}
+            {submitted
+              ? mode === 'slow'
+                ? 'Still confirming your details'
+                : 'Confirming your details with the bank'
+              : mode === 'slow'
+                ? 'Still setting up your account number'
+                : 'Setting up your account number'}
           </p>
           <p className="hint">
             {mode === 'slow'
               ? 'This is taking longer than usual. Your account number will be here the next time you open this screen.'
-              : 'Your account number usually arrives within a minute. It will appear here — you can stay or come back.'}
+              : submitted
+                ? 'Your account number usually arrives within a minute. It will appear here — you can stay or come back.'
+                : 'Our bank partner is opening it now. It usually takes a minute or two and will appear here — you can stay or come back.'}
           </p>
         </div>
       </div>
@@ -491,6 +507,7 @@ function IdentifyForAccount({
           } catch (cause) {
             if (codeOf(cause) === 'account_issue_pending') {
               setBvn('');
+              setSubmitted(true);
               setMode('pending');
               return undefined;
             }

@@ -177,6 +177,64 @@ describe('a customer asking to be paid', () => {
     expect(body).not.toContain(payee.phone.slice(1));
   });
 
+  it('a payer choosing another currency is shown the request IN it, not the same figure', async () => {
+    /*
+     * A request for ₦5,000 paid in cedis asked the payer for ₵5,000 — the
+     * figure stayed and only the symbol changed — and the rail refused it.
+     * The equivalent comes from the PUBLISHED rate, either direction, and is
+     * rounded UP so the person asking is never a fraction short.
+     */
+    const payee = await register();
+    const slug = (await mine(payee).expect(200)).body.slug as string;
+    await pool.query(
+      `INSERT INTO fx_published_rates (base_currency, quote_currency, numerator, denominator, quote_per_base)
+       VALUES ('GHS', 'NGN', 15000, 100, '150.000000')
+       ON CONFLICT DO NOTHING`,
+    );
+    const live = await pool.query<{ base_currency: string; numerator: string; denominator: string }>(
+      `SELECT base_currency, numerator::text, denominator::text FROM fx_published_rates
+        WHERE retired_at IS NULL
+          AND ((base_currency = 'NGN' AND quote_currency = 'GHS')
+            OR (base_currency = 'GHS' AND quote_currency = 'NGN'))
+        ORDER BY (base_currency = 'NGN') DESC LIMIT 1`,
+    );
+    const rate = live.rows[0];
+    if (rate === undefined) throw new Error('no NGN/GHS rate to convert at');
+    // ₦5,000 is 500,000 kobo; NGN->GHS is num/den, or den/num off a GHS->NGN rate.
+    const [n, d] =
+      rate.base_currency === 'NGN'
+        ? [BigInt(rate.numerator), BigInt(rate.denominator)]
+        : [BigInt(rate.denominator), BigInt(rate.numerator)];
+    const pesewas = (500_000n * n + d - 1n) / d;
+
+    const res = await request(app.getHttpServer())
+      .get(`/v1/pay/${slug}/equivalent`)
+      .query({ amount: '5000', from: 'NGN', to: 'GHS' })
+      .expect(200);
+    expect(res.body.currency).toBe('GHS');
+    expect(res.body.amount).toBe(`${pesewas / 100n}.${String(pesewas % 100n).padStart(2, '0')}`);
+
+    // The same currency is the same figure, and asks nothing of a rate.
+    const same = await request(app.getHttpServer())
+      .get(`/v1/pay/${slug}/equivalent`)
+      .query({ amount: '5000', from: 'NGN', to: 'NGN' })
+      .expect(200);
+    expect(same.body.amount).toBe('5000.00');
+
+    // A currency this link does not collect is refused rather than priced.
+    const refused = await request(app.getHttpServer())
+      .get(`/v1/pay/${slug}/equivalent`)
+      .query({ amount: '5000', from: 'NGN', to: 'JPY' })
+      .expect(400);
+    expect(refused.body.error).toBe('currency_not_supported');
+
+    // An unknown link answers as it does everywhere else on this page.
+    await request(app.getHttpServer())
+      .get('/v1/pay/zzzzzzzzzzzz/equivalent')
+      .query({ amount: '5000', from: 'NGN', to: 'GHS' })
+      .expect(404);
+  });
+
   it('an unknown link answers exactly as a malformed one does', async () => {
     // Distinguishing them would say which slugs exist, one request at a time,
     // to a caller who needs no account to ask. Same rule as an unknown bank

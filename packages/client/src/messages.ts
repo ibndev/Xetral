@@ -366,8 +366,14 @@ function sentenceFor(error: ApiError): string {
     case 'too_many_transfers':
       return 'Too many transfers in a short time. Wait an hour and try again.';
     case 'profile_incomplete':
+      /*
+       * THE FIELD BY NAME. The API said `field: 'phone'` and this read
+       * `fields`, so a customer whose account predates the phone being
+       * required was told "Some details are missing from your profile" —
+       * true, and no use to anybody looking for which.
+       */
       return error.fields.length > 0
-        ? `Add your ${error.fields.join(', ')} before continuing.`
+        ? `Add your ${error.fields.map(fieldWords).join(' and ')} in Settings, then try again.`
         : 'Some details are missing from your profile.';
     case 'account_not_found':
     case 'not_found':
@@ -593,4 +599,12 @@ function sentenceFor(error: ApiError): string {
  */
 export function codeOf(error: unknown): ApiErrorCode | undefined {
   return error instanceof ApiError ? error.code : undefined;
+}
+
+/** How a profile field is named to the customer it belongs to. */
+function fieldWords(field: string): string {
+  if (field === 'phone') return 'phone number';
+  if (field === 'email') return 'email address';
+  if (field === 'full_name') return 'name';
+  return field.replace(/_/g, ' ');
 }

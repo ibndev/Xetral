@@ -6,6 +6,7 @@ import {
   Logger,
   NotFoundException,
   ServiceUnavailableException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import type { Pool } from 'pg';
 import {
@@ -14,13 +15,13 @@ import {
   PaystackCheckoutAdapter,
   PaystackClient,
 } from '@xetral/providers';
-import { checkoutMethodAllowed } from '@xetral/providers';
+import { checkoutMethodAllowed, equivalentOf, invert } from '@xetral/providers';
 import type { CheckoutMethod, CheckoutPort } from '@xetral/providers';
 import { ProviderRejectedError, ProviderUnavailableError } from '@xetral/providers';
 import { assertBalanced, posting } from '@xetral/ledger';
 import type { LedgerIntent } from '@xetral/ledger';
 import { LedgerService } from '@xetral/ledger';
-import { fromMajor, money } from '@xetral/shared';
+import { fromMajor, money, toMajor } from '@xetral/shared';
 import type { Currency } from '@xetral/shared';
 import { CURRENCIES } from '@xetral/shared';
 import { API_CONFIG, DATABASE, LEDGER } from '../tokens.js';
@@ -28,6 +29,7 @@ import type { ApiConfig } from '../config.js';
 import { ProviderCredentialService } from '../settings/provider-credentials.service.js';
 import { flutterwaveSecretKey, paystackSecretKey } from '../app.module.js';
 import { ProviderRouterService } from '../routing/provider-router.service.js';
+import { PublishedRateService } from '../fx/published-rate.service.js';
 import { flutterwaveTrace } from '../funding/flutterwave-trace.js';
 
 /**
@@ -65,6 +67,8 @@ export class PaymentLinkService {
     private readonly credentials: ProviderCredentialService,
     @Inject(ProviderRouterService)
     private readonly router: ProviderRouterService,
+    @Inject(PublishedRateService)
+    private readonly published: PublishedRateService,
   ) {}
 
   /**
@@ -160,6 +164,64 @@ export class PaymentLinkService {
    * refusal names the reason. `provider_route_coverage` is where an operator
    * sees the gap.
    */
+  /**
+   * WHAT A REQUEST IS IN THE CURRENCY THE PAYER CHOSE.
+   *
+   * A customer in Lagos asks for ₦5,000; the person paying is in Accra and
+   * picks cedis. The page used to keep the figure and change the symbol, so
+   * it asked for ₵5,000 — about a hundred times the request, which the rail
+   * then refused and the payer read as "check the amount". The figure now
+   * follows the currency.
+   *
+   * PUBLISHED RATES ONLY, NEVER A PROVIDER. This answers a page anybody can
+   * open, and a provider round trip per keystroke from a stranger is a rate
+   * limit somebody else gets to spend. A pair with no published rate in
+   * either direction is refused by name, and the page asks the payer to type
+   * the amount themselves rather than showing a guess.
+   *
+   * NOTHING IS CONVERTED. The payer pays what this says, in the currency they
+   * chose, and the payee is credited what was paid — exactly as a payer who
+   * typed the figure themselves. So no spread: there is no trade to price.
+   */
+  async equivalent(
+    slug: string,
+    input: { readonly amount: string; readonly from: string; readonly to: string },
+  ): Promise<{ amount: string; currency: string }> {
+    const found = await this.pool.query<{ currency: string }>(
+      `SELECT currency FROM payable_links WHERE slug = $1`,
+      [slug],
+    );
+    const payee = found.rows[0];
+    if (payee === undefined) throw new NotFoundException({ error: 'link_not_found' });
+
+    const from = input.from.toUpperCase() as Currency;
+    const to = input.to.toUpperCase() as Currency;
+    if (CURRENCIES[from] === undefined || CURRENCIES[to] === undefined) {
+      throw new BadRequestException({ error: 'currency_not_supported' });
+    }
+    // Only a currency this link can actually be paid in is worth pricing.
+    if (!(await this.collectableCurrencies(payee.currency)).includes(to)) {
+      throw new BadRequestException({ error: 'currency_not_supported' });
+    }
+
+    let amount;
+    try {
+      amount = fromMajor(input.amount, from);
+    } catch {
+      throw new BadRequestException({ error: 'invalid_amount' });
+    }
+    if (amount.amount <= 0n) throw new BadRequestException({ error: 'invalid_amount' });
+    if (from === to) return { amount: toMajor(amount), currency: to };
+
+    const direct = await this.published.rateFor(from, to);
+    const reverse = direct === undefined ? await this.published.rateFor(to, from) : undefined;
+    const rate = direct ?? (reverse === undefined ? undefined : invert(reverse));
+    if (rate === undefined) {
+      throw new UnprocessableEntityException({ error: 'pair_not_supported' });
+    }
+    return { amount: toMajor(money(equivalentOf(amount, rate), to)), currency: to };
+  }
+
   async collectableCurrencies(payeeCurrency: string): Promise<readonly string[]> {
     let routed: readonly string[] = [];
     try {

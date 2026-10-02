@@ -64,6 +64,14 @@ const customerResponse = z.object({
   data: z.object({
     customer_code: z.string().min(1),
     id: z.union([z.string(), z.number()]).optional(),
+    /*
+     * WHAT THE RECORD ACTUALLY HOLDS, read rather than assumed. For an email
+     * Paystack already knows, `POST /customer` answers the EXISTING record —
+     * and one a checkout created from an email alone has none of these.
+     */
+    first_name: z.string().nullish(),
+    last_name: z.string().nullish(),
+    phone: z.string().nullish(),
   }),
 });
 
@@ -115,6 +123,9 @@ const dedicatedAccountListResponse = z.object({
  * somebody to keep two settings in step.
  */
 const TEST_PREFERRED_BANK = 'test-bank';
+
+/** The live provider asked for when the setting is empty and Paystack lists it. */
+const DEFAULT_LIVE_BANK = 'wema-bank';
 
 const bankListResponse = z.object({
   data: z.array(
@@ -206,7 +217,9 @@ export class PaystackFundingAdapter
     }
 
     if (request.identity !== undefined) return this.#assign(request, request.identity);
-    return this.#issue(request, await this.#customerCode(request), true);
+    const customer = await this.#customerCode(request);
+    if (customer.incomplete) await this.#completeCustomer(request, customer.code);
+    return this.#issue(request, customer.code, true);
   }
 
   /**
@@ -325,6 +338,10 @@ export class PaystackFundingAdapter
    * for, and any of them is a valid answer. The setting still wins wherever
    * it is filled in — this only stops an empty box from refusing every
    * customer on the one call where the bank is required.
+   *
+   * WEMA FIRST WHERE IT IS ON THE LIST, because it is what the reference
+   * plugin names by default on a live key and the bank its accounts were
+   * opened at; otherwise the first Paystack lists.
    */
   async #firstApprovedBank(): Promise<string | undefined> {
     try {
@@ -333,11 +350,10 @@ export class PaystackFundingAdapter
         PAYSTACK_ENDPOINTS.dedicatedAccountProviders,
       )) as { data?: unknown };
       if (!Array.isArray(payload.data)) return undefined;
-      for (const row of payload.data) {
-        const slug = (row as { provider_slug?: unknown } | null)?.provider_slug;
-        if (typeof slug === 'string' && slug !== '') return slug;
-      }
-      return undefined;
+      const slugs = payload.data
+        .map((row) => (row as { provider_slug?: unknown } | null)?.provider_slug)
+        .filter((slug): slug is string => typeof slug === 'string' && slug !== '');
+      return slugs.includes(DEFAULT_LIVE_BANK) ? DEFAULT_LIVE_BANK : slugs[0];
     } catch {
       return undefined;
     }
@@ -368,7 +384,16 @@ export class PaystackFundingAdapter
     const existing = await this.#existingAccount(customerCode);
     if (existing !== undefined) return existing;
 
-    const preferredBank = await this.#bankToAskFor();
+    /*
+     * A BANK IS ALWAYS NAMED WHERE ONE CAN BE. The reference plugin — whose
+     * accounts the owner has watched Paystack open without a BVN — sends
+     * `preferred_bank` on every live request, `wema-bank` unless told
+     * otherwise; this sent none when the setting was empty, and a live
+     * integration approved for more than one provider then decides for
+     * itself or refuses. The setting still wins; empty, Paystack's own list
+     * of the providers this business may name answers (`#firstApprovedBank`).
+     */
+    const preferredBank = (await this.#bankToAskFor()) ?? (await this.#firstApprovedBank());
 
     let payload: unknown;
     try {
@@ -410,7 +435,9 @@ export class PaystackFundingAdapter
         error instanceof ProviderRejectedError &&
         isStaleCustomerRefusal(error.message)
       ) {
-        return this.#issue(request, await this.#createCustomer(request), false);
+        const fresh = await this.#createCustomer(request);
+        if (fresh.incomplete) await this.#completeCustomer(request, fresh.code);
+        return this.#issue(request, fresh.code, false);
       }
       /*
        * "CUSTOMER HAS NOT BEEN IDENTIFIED" IS A QUESTION FOR THE CUSTOMER, not
@@ -578,15 +605,51 @@ export class PaystackFundingAdapter
    * Otherwise a customer record is created, and that is NOT a regulatory step:
    * it is a name and an email address, and Paystack asks for nothing more.
    */
-  async #customerCode(request: CreateVirtualAccountRequest): Promise<string> {
+  async #customerCode(
+    request: CreateVirtualAccountRequest,
+  ): Promise<{ code: string; incomplete: boolean }> {
     const known = request.customer.providerCustomerId;
-    if (known !== undefined && known !== '') return known;
+    // A code we hold was made by some earlier path — a checkout, a KYC
+    // mapping — and what that record carries is not known here, so it is
+    // completed rather than trusted.
+    if (known !== undefined && known !== '') return { code: known, incomplete: true };
     return this.#createCustomer(request);
+  }
+
+  /**
+   * THE NAME AND PHONE, ON THE CUSTOMER RECORD ITSELF, before an account is
+   * asked for against it.
+   *
+   * The reference plugin creates the customer with `first_name`, `last_name`
+   * and `phone` on every account it opens, and the owner has watched those
+   * open without a BVN. Ours sent the same three — but `POST /customer`
+   * against an email Paystack already holds answers the existing record
+   * UNCHANGED, so a customer a payment link created from an email alone
+   * stayed nameless and phoneless however often we asked, and the account
+   * request against it was refused as "not identified".
+   *
+   * BEST EFFORT, and safe to repeat: an update moves no money and two of
+   * them say the same thing. Paystack refuses to rename a customer it has
+   * already validated ("can only be updated by a revalidation") — correct,
+   * and a reason to carry on with the record as it is, not to fail.
+   */
+  async #completeCustomer(request: CreateVirtualAccountRequest, code: string): Promise<void> {
+    try {
+      await this.#client.request('PUT', PAYSTACK_ENDPOINTS.updateCustomer(code), {
+        first_name: request.customer.firstName,
+        last_name: request.customer.lastName,
+        ...(request.customer.phone === undefined ? {} : { phone: request.customer.phone }),
+      });
+    } catch {
+      // The account request that follows answers for the record either way.
+    }
   }
 
   /** Creates one unconditionally. Separate so the stale-code path can remake
    *  a customer whose stored code belongs to the other Paystack domain. */
-  async #createCustomer(request: CreateVirtualAccountRequest): Promise<string> {
+  async #createCustomer(
+    request: CreateVirtualAccountRequest,
+  ): Promise<{ code: string; incomplete: boolean }> {
     const payload = await this.#client.request('POST', PAYSTACK_ENDPOINTS.createCustomer, {
       email: request.customer.email,
       first_name: request.customer.firstName,
@@ -604,7 +667,17 @@ export class PaystackFundingAdapter
         parsed.error,
       );
     }
-    return parsed.data.data.customer_code;
+    const record = parsed.data.data;
+    const blank = (v: string | null | undefined): boolean => v === undefined || v === null || v.trim() === '';
+    return {
+      code: record.customer_code,
+      // Paystack answered with a record missing what we just sent: it already
+      // had this email, and kept what it had.
+      incomplete:
+        blank(record.first_name) ||
+        blank(record.last_name) ||
+        (request.customer.phone !== undefined && blank(record.phone)),
+    };
   }
 
   async #existingAccount(customerCode: string): Promise<VirtualAccount | undefined> {

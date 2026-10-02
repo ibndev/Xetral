@@ -112,6 +112,9 @@ describe('the public surface is small and justified', () => {
       // anybody has an account. It carries no customer data.
       'GET /v1/countries',
       'GET /v1/pay/:slug',
+      // What a request is in the currency the payer chose. Published rates
+      // only, and it moves nothing.
+      'GET /v1/pay/:slug/equivalent',
       'POST /v1/auth/login',
       // Account recovery. Public because a customer who has lost their
       // password has no session to present; both answer 204 and neither

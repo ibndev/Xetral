@@ -10,6 +10,7 @@ import {
   ServiceUnavailableException,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import type { OnModuleDestroy } from '@nestjs/common';
 import type { Pool } from 'pg';
 import { LedgerService } from '@xetral/ledger';
 import {
@@ -106,9 +107,25 @@ function isOneBvnOneCustomer(error: unknown): boolean {
   return e?.code === '23505' && e.constraint === 'account_identity_one_bvn_one_customer';
 }
 
+/**
+ * A customer whose account the rail has said "not identified" about, being
+ * asked again in the background. In memory, deliberately: a restart loses
+ * the schedule, and the customer's next visit to Add Money starts it again.
+ */
+interface RetryState {
+  attempt: number;
+  timer: ReturnType<typeof setTimeout> | undefined;
+  /** When the last schedule ran out; a visit long after starts another. */
+  exhaustedAt: number | undefined;
+}
+
+/** How long an exhausted schedule stands before a visit starts a fresh one. */
+const RETRY_AGAIN_AFTER_MS = 6 * 60 * 60 * 1000;
+
 @Injectable()
-export class FundingService {
+export class FundingService implements OnModuleDestroy {
   readonly #logger = new Logger(FundingService.name);
+  readonly #retrying = new Map<string, RetryState>();
 
   constructor(
     @Inject(DATABASE) private readonly pool: Pool,
@@ -272,7 +289,7 @@ export class FundingService {
     if (customer.phone === undefined || customer.phone === '') {
       // The assign call requires one; asked for by name before anything is
       // stored or sent, so the customer can add it on Settings and come back.
-      throw new ConflictException({ error: 'profile_incomplete', field: 'phone' });
+      throw new ConflictException({ error: 'profile_incomplete', field: 'phone', fields: ['phone'] });
     }
 
     const key = this.config.kycBlindIndexKey;
@@ -349,7 +366,7 @@ export class FundingService {
       if (error instanceof ProviderRejectedError) {
         if (error.providerCode === 'phone_required') {
           await this.#resolveCheck(checkId, 'failed', 'no phone number on the account');
-          throw new ConflictException({ error: 'profile_incomplete', field: 'phone' });
+          throw new ConflictException({ error: 'profile_incomplete', field: 'phone', fields: ['phone'] });
         }
         const aboutUs =
           error.providerCode === 'preferred_bank_unset' ||
@@ -483,6 +500,101 @@ export class FundingService {
     return new UnprocessableEntityException({ error: 'account_identity_required' });
   }
 
+  /**
+   * "CUSTOMER HAS NOT BEEN IDENTIFIED" IS ASKED AGAIN, NOT HANDED TO THE
+   * CUSTOMER AS A BVN FORM.
+   *
+   * The owner's report is that Paystack opens naira accounts without a BVN —
+   * accounts exist in production that were opened that way — and the
+   * reference plugin's flow is what did it: on any refusal it scheduled a
+   * poll that asked `POST /dedicated_account` again for about fifteen
+   * minutes. This used to answer the first refusal with the BVN and bank
+   * form, which the owner does not want customers to see and which was the
+   * only thing between a new customer and the account they signed up for.
+   *
+   * So the first answer is "being opened" and the asking carries on in the
+   * background, on the plugin's schedule (`accountRetryDelaysMs`); the screen
+   * already asks again every few seconds while it says that. ONLY WHEN THE
+   * WHOLE SCHEDULE HAS BEEN REFUSED does the customer get the form, and the
+   * refusal is then written to `account_refusals` — a rail that refuses for
+   * fifteen minutes is something an operator has to see, which a first
+   * refusal is not.
+   *
+   * A customer who has already given their details is told the answer to
+   * that, as before, and no schedule is started on top of it.
+   */
+  async #notYetIdentified(
+    userUuid: string,
+    userId: string,
+    rail: string,
+    currency: Currency,
+    error: unknown,
+  ): Promise<HttpException> {
+    const given = await this.#identityAnswer(userId, rail);
+    if (given.getStatus() !== HttpStatus.UNPROCESSABLE_ENTITY || this.#identityGiven(given)) {
+      return given;
+    }
+
+    const delays = this.config.accountRetryDelaysMs;
+    let state = this.#retrying.get(userId);
+    if (state?.exhaustedAt !== undefined && Date.now() - state.exhaustedAt > RETRY_AGAIN_AFTER_MS) {
+      state = undefined;
+    }
+    if (state === undefined) {
+      state = { attempt: 0, timer: undefined, exhaustedAt: undefined };
+      this.#retrying.set(userId, state);
+    }
+
+    if (state.exhaustedAt !== undefined) return given;
+    if (state.attempt >= delays.length) {
+      state.exhaustedAt = Date.now();
+      // An empty schedule asked nothing again, so there is nothing to report.
+      if (delays.length === 0) return given;
+      this.#recordRefusal(rail, currency, error);
+      this.#logger.warn(
+        `${rail} refused to open a ${currency} account for user ${userId} on every one of ` +
+          `${delays.length} attempts (${error instanceof Error ? error.message : String(error)}); ` +
+          `the customer is now offered the identity form`,
+      );
+      return given;
+    }
+
+    if (state.timer === undefined) {
+      const delay = delays[state.attempt] as number;
+      const current = state;
+      current.timer = setTimeout(() => {
+        current.timer = undefined;
+        current.attempt += 1;
+        this.#openAccount(userUuid)
+          .then(() => {
+            this.#retrying.delete(userId);
+            this.#logger.log(
+              `opened a ${currency} account for user ${userId} on ${rail} at attempt ${current.attempt + 1}`,
+            );
+          })
+          .catch(() => {
+            // Another refusal schedules the next attempt itself; anything
+            // else is the customer's next visit to find out.
+          });
+      }, delay);
+      current.timer.unref?.();
+    }
+    return new ServiceUnavailableException({ error: 'account_issue_pending' });
+  }
+
+  /** The form refused before ("did not match") is an answer about details given. */
+  #identityGiven(answer: HttpException): boolean {
+    const body = answer.getResponse() as { error?: unknown };
+    return body.error === 'account_identity_failed';
+  }
+
+  onModuleDestroy(): void {
+    for (const state of this.#retrying.values()) {
+      if (state.timer !== undefined) clearTimeout(state.timer);
+    }
+    this.#retrying.clear();
+  }
+
   async #openAccount(userUuid: string): Promise<VirtualAccountView> {
     const userId = await this.#activeUserId(userUuid);
 
@@ -583,7 +695,9 @@ export class FundingService {
          * fix, and recording it put every new customer on the diagnostics
          * screen as though something had broken.
          */
-        if (isIdentityRequired(error)) throw await this.#identityAnswer(userId, rail);
+        if (isIdentityRequired(error)) {
+          throw await this.#notYetIdentified(userUuid, userId, rail, currency, error);
+        }
         this.#recordRefusal(rail, currency, error);
         // Anything but a certain "no" stops here: that rail may have opened
         // an account, and asking another is a second live number.
@@ -1122,7 +1236,7 @@ export class FundingService {
       // Every rail keys a customer on an email address, and this one cannot
       // be null for a registered account. Refusing here names the reason
       // rather than letting a provider answer with its own wording.
-      throw new ConflictException({ error: 'profile_incomplete', field: 'email' });
+      throw new ConflictException({ error: 'profile_incomplete', field: 'email', fields: ['email'] });
     }
 
     const { firstName, lastName } = splitName(row.full_name);

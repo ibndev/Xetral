@@ -50,6 +50,7 @@ shipped, that is called out explicitly.
 | 39 — A sign-in from Germany that was our own server | ✅ | migration 090; `WEB_PROXY_SECRET` on the api and web services |
 | 40 — Resetting a test account | ✅ | migration 091 and 099 re-applied; `TEST_ACCOUNT_EMAILS`, `TEST_ACCOUNT_PHONES`, `TEST_OTP` |
 | 41 — No line in a text field, a bank list above the keyboard, Delete that resets | ✅ | `TEST_ACCOUNT_EMAILS` on the api service; Paystack lifting BVN validation |
+| 42 — An account number without a BVN, tiers counted from one, a request in another currency | ✅ | migration 092 |
 
 All eleven phases are built, a **pre-deployment audit** (Phase 12) closed what
 building them phase by phase had left between the phases, and **Phase 13** is
@@ -2943,3 +2944,29 @@ customer.
 `TEST_ACCOUNT_PHONES`) on the api service in Coolify and redeploy, then open
 the closed test account on `/admin/users` and press **Delete permanently**.
 
+---
+
+## Phase 42 — An account number without a BVN, tiers counted from one, a request in another currency ✅
+
+| File | What it is |
+|---|---|
+| `packages/providers/src/paystack/funding-adapter.ts` | customer completed with name and phone; a bank always named |
+| `apps/api/src/funding/funding.service.ts` | "not identified" asked again on the plugin's schedule |
+| `packages/client/src/tiers.ts` | Tier 1, 2, 3 for stored 0, 1, 2 |
+| `apps/web/src/app/kyc/page.tsx`, `apps/mobile/app/kyc.tsx` | the tier ladder with each rung's daily limit |
+| `apps/api/src/pay/payment-link.service.ts` | `equivalent()`: a request in the payer's currency |
+| `packages/ledger/sql/092_test_reset_clears_name.sql` | a reset test account keeps no name |
+
+1. **New customers were handed a BVN form** on Paystack's first refusal. The
+   plugin's flow — which the owner watched open accounts without one — fills
+   in the customer's name and phone, names a bank, and asks again for about
+   fifteen minutes; this now does the same, and offers the form only after.
+2. **The BVN form answered "Some details are missing"**, because the API's
+   `field` never reached the client's `fields`.
+3. **"Limited" per currency** became a three-rung tier ladder.
+4. **A request paid in cedis asked for the naira figure**, and every
+   unrecognised refusal blamed the amount. The figure converts; refusals say
+   what happened; the footer paragraph is gone.
+5. **A deleted test account kept its name.**
+
+**Before this goes live, an operator must:** apply **092**.

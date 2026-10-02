@@ -802,6 +802,11 @@ export interface KycLimits {
    *  Enhanced is an administrator's judgement about source of funds, so it is
    *  never offered as something to apply for. */
   readonly next_tier: number | null;
+  /** Every tier's ceilings, lowest first. Absent on an API that predates it. */
+  readonly ladder?: readonly {
+    readonly tier: number;
+    readonly limits: readonly { readonly currency: string; readonly daily_limit: string }[];
+  }[];
 }
 
 export interface XetralClientOptions {

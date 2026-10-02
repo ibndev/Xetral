@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { convertWithSpread, displayRate, invert } from './rate-math.js';
+import { convertWithSpread, displayRate, equivalentOf, invert } from './rate-math.js';
 import type { FxRate } from '../ports/fx.js';
 import { money } from '@xetral/shared';
 
@@ -184,5 +184,23 @@ describe('displayRate', () => {
       denominator: 1n,
     };
     expect(displayRate(huge, 2, 2)).toBe('9007199254740993.00');
+  });
+});
+
+describe('what a request is worth in the currency a payer chose', () => {
+  it('converts at the rate with no spread', () => {
+    // ₦165,025.00 is exactly $100.00 at this rate.
+    expect(equivalentOf(money(16_502_500n, 'NGN'), NGN_USD)).toBe(10_000n);
+  });
+
+  it('ROUNDS UP, so the person who asked is never short a fraction', () => {
+    // ₦5,000.00 is 3.0298... dollars; the payer pays $3.03, not $3.02.
+    // `convertWithSpread` would round this DOWN — there the fraction is ours.
+    expect(equivalentOf(money(500_000n, 'NGN'), NGN_USD)).toBe(303n);
+    expect(convertWithSpread(money(500_000n, 'NGN'), NGN_USD, 0).quoteMinor).toBe(302n);
+  });
+
+  it('refuses an amount in the wrong currency for the rate', () => {
+    expect(() => equivalentOf(money(100n, 'USD'), NGN_USD)).toThrow(RangeError);
   });
 });

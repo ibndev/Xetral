@@ -788,21 +788,119 @@ describe('a rail that will not open an account until it has identified the custo
       .send(body);
   }
 
-  it('ASKS FOR IDENTITY rather than reporting a refusal, and records no fault', async () => {
+  it('with no schedule to retry on, ASKS FOR IDENTITY rather than reporting a refusal, and records no fault', async () => {
     port.provider = 'paystack';
     port.identityRequired = true;
     const customer = await onboard(false);
     await withPhone(customer);
+    const count = async () =>
+      Number(
+        (
+          await pool.query<{ n: string }>(
+            `SELECT coalesce(sum(occurrences), 0)::text AS n FROM account_refusals
+              WHERE provider_code = 'identity_required'`,
+          )
+        ).rows[0]?.n ?? '0',
+      );
+    const before = await count();
 
     const res = await getAccount(customer).expect(422);
     expect(res.body.error).toBe('account_identity_required');
 
     // Not a fault an operator can fix, so not on the diagnostics screen.
     await new Promise((r) => setTimeout(r, 100));
-    const recorded = await pool.query(
-      `SELECT 1 FROM account_refusals WHERE provider_code = 'identity_required'`,
-    );
-    expect(recorded.rowCount).toBe(0);
+    expect(await count()).toBe(before);
+  });
+
+  it('ASKS PAYSTACK AGAIN BEFORE ASKING THE CUSTOMER, and opens the account when it agrees', async () => {
+    /*
+     * The owner's report: Paystack opens naira accounts without a BVN, and
+     * the reference plugin's accounts were opened by asking again on a
+     * schedule after a first refusal. So the first answer is "being opened",
+     * not the BVN form, and the account arrives without the customer giving
+     * anything.
+     */
+    const retrying = await boot(makeConfig({ accountRetryDelaysMs: [40, 40, 40] }));
+    try {
+      port.provider = 'paystack';
+      port.identityRequired = true;
+      const customer = await onboard(false);
+      const email = await withPhone(customer);
+      // Signed in on THIS app: each boot has its own access-token keyring.
+      const login = await request(retrying.getHttpServer())
+        .post('/v1/auth/login')
+        .send({
+          identifier: email,
+          password: PASSWORD,
+          device: { fingerprint: `fp-${randomUUID()}`, platform: 'android' },
+        })
+        .expect(200);
+      const token = login.body.access_token as string;
+      const ask = () =>
+        request(retrying.getHttpServer())
+          .post('/v1/funding/account')
+          .set('Authorization', `Bearer ${token}`)
+          .send({});
+
+      const first = await ask().expect(503);
+      expect(first.body.error).toBe('account_issue_pending');
+
+      // Paystack agrees on a later attempt — nothing from the customer.
+      port.identified.add(email);
+      await new Promise((r) => setTimeout(r, 200));
+
+      const opened = await pool.query(
+        `SELECT account_number FROM virtual_accounts WHERE user_id = $1::bigint AND status <> 'closed'`,
+        [customer.userId],
+      );
+      expect(opened.rowCount).toBe(1);
+      expect(port.created.filter((r) => r.customer.email === email).every((r) => r.identity === undefined)).toBe(
+        true,
+      );
+    } finally {
+      await retrying.close();
+    }
+  });
+
+  it('OFFERS THE FORM ONLY WHEN EVERY ATTEMPT WAS REFUSED, and then shows the operator', async () => {
+    const retrying = await boot(makeConfig({ accountRetryDelaysMs: [30, 30] }));
+    try {
+      port.provider = 'paystack';
+      port.identityRequired = true;
+      const customer = await onboard(false);
+      const email = await withPhone(customer);
+      // Signed in on THIS app: each boot has its own access-token keyring.
+      const login = await request(retrying.getHttpServer())
+        .post('/v1/auth/login')
+        .send({
+          identifier: email,
+          password: PASSWORD,
+          device: { fingerprint: `fp-${randomUUID()}`, platform: 'android' },
+        })
+        .expect(200);
+      const token = login.body.access_token as string;
+      const ask = () =>
+        request(retrying.getHttpServer())
+          .post('/v1/funding/account')
+          .set('Authorization', `Bearer ${token}`)
+          .send({});
+
+      expect((await ask().expect(503)).body.error).toBe('account_issue_pending');
+      const before = port.created.filter((r) => r.customer.email === email).length;
+      await new Promise((r) => setTimeout(r, 250));
+      // Asked again on the schedule, in the background.
+      expect(port.created.filter((r) => r.customer.email === email).length).toBe(before + 2);
+
+      const last = await ask().expect(422);
+      expect(last.body.error).toBe('account_identity_required');
+      await new Promise((r) => setTimeout(r, 100));
+      const recorded = await pool.query(
+        `SELECT 1 FROM account_refusals WHERE provider_code = 'identity_required'`,
+      );
+      expect(recorded.rowCount).toBeGreaterThan(0);
+    } finally {
+      await retrying.close();
+    }
   });
 
   it('refuses a malformed BVN, and any field the account already holds', async () => {
@@ -872,6 +970,8 @@ describe('a rail that will not open an account until it has identified the custo
     const res = await identify(customer, details(bvn())).expect(409);
     expect(res.body.error).toBe('profile_incomplete');
     expect(res.body.field).toBe('phone');
+    // The list the client reads, so the screen can say WHICH detail.
+    expect(res.body.fields).toEqual(['phone']);
   });
 
   it("OPENS THE ACCOUNT ON PAYSTACK'S assign.success, by reading it rather than believing the event", async () => {

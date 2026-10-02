@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Text, View } from 'react-native';
-import { limitCurrenciesFor } from '@xetral/client';
+import { ACCOUNT_TIERS, formatAmount, tierLabel, wholeFigure } from '@xetral/client';
 import type { KycLimits, KycStatus } from '@xetral/client';
 import { Shell } from '@/shell';
 import { Button, Done, Field, FormError, Loading, Panel } from '@/ui';
 import { useLoad, useSubmit, useXetral } from '@/hooks';
+import { Icon } from '@/icon';
 import { font, space, useStyles, useTheme } from '@/theme';
 
 /**
@@ -179,57 +180,117 @@ function Submitted({ status }: { readonly status: KycStatus }) {
 }
 
 /**
- * What this customer's verification currently allows.
+ * THE ACCOUNT'S TIER, AS A LADDER — the web screen's, rung for rung.
  *
- * SHOWN AS A STATE, NOT AS A FIGURE — the same wording as the web screen, and
- * the same reasoning. Four ceilings printed on a page about identity read as a
- * price list, and the only thing a customer can do about any of them is the
- * button already there. `GET /v1/kyc/limits` still answers the figures and the
- * ledger precondition still enforces them; this is the wording on one screen.
+ * Tier 1 on signing up, Tier 2 once a BVN is verified, Tier 3 once an address
+ * is: the owner's three words, from `ACCOUNT_TIERS` in `@xetral/client` so the
+ * two apps cannot count them differently. It replaced a row per currency
+ * reading "Limited" or "Raised", which said whether verifying would help and
+ * nothing about what the next step was worth. One figure per rung, in the
+ * customer's own currency — the API answers every currency at every tier, and
+ * drawn whole that is a price list on a screen about identity.
  */
 function Limits() {
   const client = useXetral();
   const styles = useStyles();
   const colors = useTheme();
   const { data } = useLoad<KycLimits>(() => client.kycLimits(), [client]);
-  // Their own country's money, so the list can leave out everybody else's.
   const session = useLoad(() => client.currentSession(), [client]);
   if (data === undefined) return null;
 
-  const shown = limitCurrenciesFor(
-    session.data?.home_currency,
-    data.limits.map((l) => l.currency),
-  );
-
-  const TIERS = ['Registered', 'Verified', 'Enhanced'];
-
-  // Tier 0 is the only unverified state; everything above it was granted by a
-  // person reading a document. So the two words divide exactly where the
-  // Verify button does.
-  const verified = data.tier > 0;
+  const home = session.data?.home_currency ?? null;
+  const ladder = data.ladder ?? [{ tier: data.tier, limits: data.limits }];
+  const currency =
+    home !== null && ladder.some((r) => r.limits.some((l) => l.currency === home)) ? home : 'NGN';
 
   return (
-    <Panel title="Daily transaction limit" subtitle={TIERS[data.tier] ?? `Tier ${data.tier}`}>
-      {/* Their own currency and the four that belong to nobody. The API
-          answers every ceiling the platform has, which is right for an API
-          and wrong for this panel. `limitCurrenciesFor` is shared with the
-          web app so the two cannot show different lists. */}
-      {data.limits
-        .filter((limit) => shown.includes(limit.currency))
-        .map((limit) => (
-          <View key={limit.currency} style={styles.row}>
-            <Text style={[styles.muted, { flex: 1 }]}>{limit.currency}</Text>
-            {/* "Raised", not "Unlimited" — the web's own correction. 029's rule
-                is that the ceiling in force is the LOWER of the tier's and the
-                FLOW's, so a verified customer still has a daily limit and meets
-                it on the first transfer past `transfer_daily_limit_kobo`.
-                Verifying lifts the ceiling; it does not remove it. */}
-            <Text style={{ color: colors.text }}>{verified ? 'Raised' : 'Limited'}</Text>
+    <Panel title="Your account tier" subtitle={tierLabel(data.tier)}>
+      {ACCOUNT_TIERS.map((rung, index) => {
+        const state = rung.tier < data.tier ? 'done' : rung.tier === data.tier ? 'current' : 'locked';
+        const limit = ladder.find((r) => r.tier === rung.tier)?.limits.find((l) => l.currency === currency);
+        const dim = state === 'locked' ? colors.text2 : colors.text;
+        return (
+          <View
+            key={rung.tier}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 12,
+              paddingVertical: 12,
+              borderTopWidth: index === 0 ? 0 : 1,
+              borderTopColor: colors.line,
+            }}
+          >
+            <View
+              style={{
+                width: 28,
+                height: 28,
+                borderRadius: 14,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor:
+                  state === 'done' ? colors.okBg : state === 'current' ? colors.iris : colors.surface2,
+              }}
+            >
+              {state === 'done' ? (
+                <Icon name="check" size={14} color={colors.ok} />
+              ) : (
+                <Text
+                  style={{
+                    fontFamily: font.numSemi,
+                    fontSize: 13,
+                    color: state === 'current' ? colors.onIris : colors.text3,
+                  }}
+                >
+                  {rung.tier + 1}
+                </Text>
+              )}
+            </View>
+            <View style={{ flex: 1, gap: 2 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <Text style={{ fontFamily: font.sansSemi, fontSize: 15, color: dim }}>{rung.label}</Text>
+                {state === 'current' && (
+                  <Text
+                    style={{
+                      fontFamily: font.sansSemi,
+                      fontSize: 11,
+                      color: colors.irisText,
+                      backgroundColor: colors.irisTint,
+                      paddingHorizontal: 8,
+                      paddingVertical: 2,
+                      borderRadius: 999,
+                      overflow: 'hidden',
+                    }}
+                  >
+                    You are here
+                  </Text>
+                )}
+              </View>
+              <Text style={{ fontFamily: font.sans, fontSize: 13, color: colors.text3 }}>
+                {rung.requirement}
+              </Text>
+            </View>
+            <View style={{ alignItems: 'flex-end' }}>
+              <Text style={{ fontFamily: font.numSemi, fontSize: 15, color: dim, fontVariant: ['tabular-nums'] }}>
+                {limit === undefined ? '—' : formatAmount(wholeFigure(limit.daily_limit), currency)}
+              </Text>
+              {limit !== undefined && (
+                <Text style={{ fontFamily: font.sans, fontSize: 12, color: colors.text3 }}>a day</Text>
+              )}
+            </View>
           </View>
-        ))}
-      <Text style={[styles.hint, { color: colors.text3 }]}>
-        Verifying your identity lifts these.
-      </Text>
+        );
+      })}
+      {data.tier === 0 && (
+        <Text style={[styles.hint, { color: colors.text3 }]}>
+          Verify your BVN to move to Tier 2 and unlock a dollar card.
+        </Text>
+      )}
+      {data.tier === 1 && (
+        <Text style={[styles.hint, { color: colors.text3 }]}>
+          Tier 3 needs your address verified. Contact support to request it.
+        </Text>
+      )}
     </Panel>
   );
 }

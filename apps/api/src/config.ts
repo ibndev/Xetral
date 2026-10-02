@@ -584,6 +584,14 @@ export interface ApiConfig {
    */
   readonly openAccountOnRegistration: boolean;
   /**
+   * When a rail answers "Customer has not been identified", how long to wait
+   * before asking it again, attempt by attempt — the reference plugin's poll,
+   * which the owner has watched Paystack open accounts through without a
+   * BVN. Not an environment variable, for `openAccountOnRegistration`'s
+   * reason; the e2e fixture shortens it so a suite can watch it finish.
+   */
+  readonly accountRetryDelaysMs: readonly number[];
+  /**
    * Require a mailed code to prove the signup address. Not an environment
    * variable, for `openAccountOnRegistration`'s reason: it is how the product
    * works, and the operator's switch for an email outage is the
@@ -1035,9 +1043,19 @@ export function loadConfig(env: Env): ApiConfig {
     errorAlertIntervalSeconds: optionalInteger(env, 'ERROR_ALERT_INTERVAL_SECONDS'),
     notificationAllowlist: parseAllowlist(env),
     openAccountOnRegistration: true,
+    accountRetryDelaysMs: ACCOUNT_RETRY_DELAYS_MS,
     signupEmailVerification: true,
   };
 }
+
+/**
+ * The reference plugin's schedule: four tries twenty seconds apart, four a
+ * minute apart, four three minutes apart — about fifteen minutes in all, and
+ * tight at first because most accounts land inside a minute.
+ */
+export const ACCOUNT_RETRY_DELAYS_MS: readonly number[] = [
+  20_000, 20_000, 20_000, 20_000, 60_000, 60_000, 60_000, 60_000, 180_000, 180_000, 180_000, 180_000,
+];
 
 /**
  * Which deployment this is, and what that FORBIDS.
