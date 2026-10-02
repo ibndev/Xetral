@@ -754,7 +754,15 @@ describe('when the provider does not answer', () => {
       .get('/v1/payouts')
       .set('Authorization', `Bearer ${customer.token}`)
       .expect(200);
-    expect(listed.body.payouts[0].failure_reason).toContain('beneficiary bank unreachable');
+    // NOR ON THE CUSTOMER'S OWN LIST. It asserted the provider's sentence WAS
+    // there, which is the leak the refusal above exists to prevent.
+    expect(JSON.stringify(listed.body)).not.toContain('beneficiary bank unreachable');
+    expect(listed.body.payouts[0].failure_reason).toBe('It did not go through, and your money was returned.');
+    const onRow = await pool.query<{ failure_reason: string | null }>(
+      `SELECT failure_reason FROM bank_payouts WHERE uuid = $1::uuid`,
+      [listed.body.payouts[0].id],
+    );
+    expect(onRow.rows[0]?.failure_reason).toContain('beneficiary bank unreachable');
 
     const balance = await nairaBalance(customer);
     expect(balance.spendable).toBe('10000.00');

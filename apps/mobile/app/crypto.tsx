@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Text, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { CRYPTO_PAIRS, cryptoPortfolio, currencyName, formatAmount, formatMinor, formatQuantity } from '@xetral/client';
+import { CRYPTO_PAIRS, cryptoPortfolio, currencyName, exponentFor, formatAmount, formatMinor, formatQuantity, typedAmount } from '@xetral/client';
 import type { CryptoAddress, CryptoQuote, Withdrawal } from '@xetral/client';
 import { Shell } from '@/shell';
 import { Eyebrow } from '@/acct-card';
@@ -88,7 +88,11 @@ function Portfolio({ home }: { readonly home: string }) {
 
       <Eyebrow>Holdings</Eyebrow>
       {balances.loading && <Loading />}
-      {p.rows.map((row, index) => (
+      {/* A FAILED READ IS NOT A ZERO HOLDING. `cryptoPortfolio` draws every
+          asset it is not told about as 0, so a balance read that failed
+          showed "0 USDT" against money the customer holds. */}
+      <FormError error={balances.error} code={balances.code} />
+      {!balances.loading && balances.error === undefined && p.rows.map((row, index) => (
         <View
           key={row.asset}
           style={{
@@ -196,7 +200,7 @@ export default function Crypto() {
 
       <Panel title="Recent withdrawals">
         {withdrawals.loading && <Loading />}
-        {!withdrawals.loading && (withdrawals.data?.length ?? 0) === 0 && (
+        {!withdrawals.loading && withdrawals.error === undefined && (withdrawals.data?.length ?? 0) === 0 && (
           <Empty icon="bitcoin" title="Nothing sent yet" />
         )}
         {withdrawals.data?.slice(0, 10).map((w: Withdrawal) => (
@@ -275,6 +279,10 @@ function Send({
   const [amount, setAmount] = useState('');
   const [pin, setPin] = useState('');
   const [quote, setQuote] = useState<CryptoQuote | undefined>();
+  /* A quote is for ONE asset on ONE network; picking another made the old fee
+     the "agreed" ceiling for a different coin. */
+  const agreed =
+    quote !== undefined && quote.asset === pair.asset && quote.network === pair.network ? quote : undefined;
 
   return (
     <Panel title="Send">
@@ -300,7 +308,7 @@ function Send({
           <TextInput
             value={amount}
             onChangeText={(next) => {
-              setAmount(next);
+              setAmount(typedAmount(next, exponentFor(pair.asset)));
               setQuote(undefined);
             }}
             keyboardType="decimal-pad"
@@ -318,18 +326,18 @@ function Send({
             }}
           />
         </View>
-        {quote !== undefined && (
+        {agreed !== undefined && (
           <Text style={styles.muted}>
-            Network fee {formatAmount(quote.fee, quote.asset)} · total{' '}
-            {formatAmount(quote.total, quote.asset)}
+            Network fee {formatAmount(agreed.fee, agreed.asset)} · total{' '}
+            {formatAmount(agreed.total, agreed.asset)}
           </Text>
         )}
       </AmountCard>
 
       <Button
-        label={quote === undefined ? 'Check the fee' : 'Refresh fee'}
+        label={agreed === undefined ? 'Check the fee' : 'Refresh fee'}
         accent
-        busy={busy && quote === undefined}
+        busy={busy && agreed === undefined}
         disabled={amount === ''}
         onPress={() =>
           void run(async () => {
@@ -362,12 +370,16 @@ function Send({
       </View>
 
       <Button
-        label="Send"
+        label={agreed === undefined ? 'Check the fee first' : 'Send'}
         busy={busy}
-        disabled={destination === '' || amount === '' || pin === ''}
+        /* NOT WITHOUT A FEE THE CUSTOMER HAS SEEN. Sending with no quote
+           omitted `maxFee`, so whatever the network charged was taken — and
+           CLAUDE.md's rule is that the fee ceiling is part of consent. */
+        disabled={destination === '' || amount === '' || pin === '' || agreed === undefined}
         onPress={() =>
           void run(async () => {
-            await client.withdrawCrypto({
+            if (agreed === undefined) return undefined;
+            const sent = await client.withdrawCrypto({
               asset: pair.asset,
               network: pair.network,
               destination,
@@ -375,7 +387,7 @@ function Send({
               // THE FEE CEILING IS PART OF CONSENT. Network fees move between
               // the quote and the request, and without this a customer can be
               // charged materially more than the number they approved.
-              ...(quote === undefined ? {} : { maxFee: quote.fee }),
+              maxFee: agreed.fee,
               pin,
               idempotencyKey: attempt.key,
             });
@@ -383,7 +395,13 @@ function Send({
             setPin('');
             setQuote(undefined);
             onSent();
-            return 'Sent. It is on the chain now and cannot be recalled.';
+            /* WHAT ACTUALLY HAPPENED. A refusal is a refusal now
+               (`withdrawal_failed`); a `reserved` withdrawal has not reached
+               the chain — the provider has not answered — so calling it "on
+               the chain" would be a claim nobody has made. */
+            return sent.status === 'reserved'
+              ? 'Submitted. Your money is held until the network confirms it.'
+              : 'Sent. It is on the chain now and cannot be recalled.';
           })
         }
       />

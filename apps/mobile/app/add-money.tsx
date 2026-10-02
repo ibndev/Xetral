@@ -13,7 +13,7 @@ import { MOMO_NETWORKS } from '@xetral/client';
 import { Select } from '@/select';
 import { Shell } from '@/shell';
 import { AcctCard } from '@/acct-card';
-import { AmountCard, Button, CurrencyPill, FormError, Loading, Panel, Segmented } from '@/ui';
+import { AmountCard, Button, CurrencyPill, Done, FormError, Loading, Panel, Segmented } from '@/ui';
 import { Icon } from '@/icon';
 import { useLoad, useSubmit, useXetral } from '@/hooks';
 import { font, radius, space, useStyles, useTheme } from '@/theme';
@@ -51,7 +51,7 @@ export default function AddMoney() {
   const client = useXetral();
   const styles = useStyles();
   const colors = useTheme();
-  const { busy, error: issueError, code: issueCode, run } = useSubmit();
+  const { busy, error: issueError, code: issueCode, done: linked, run } = useSubmit();
   // Its own, as on the web: the account's refusal and the wallet form's are
   // different sentences about different things.
   const opener = useSubmit();
@@ -180,8 +180,22 @@ export default function AddMoney() {
             <IdentifyForAccount client={client} start={opener.code} onOpened={() => account.reload()} />
           )}
 
+        {/* A READ THAT FAILED IS NOT AN ACCOUNT BEING OPENED — the web's
+            panel. It said "Setting up your account number…" over the very
+            error that meant nothing was being set up. */}
+        {!account.loading && !has && account.error !== undefined && (
+          <View style={{ gap: space.sm, marginTop: space.md }}>
+            <Text style={[styles.lead, { marginBottom: 0, fontFamily: font.sansSemi, color: colors.text }]}>
+              We could not check your account number.
+            </Text>
+            <FormError error={account.error} code={account.code} />
+            <Button label="Try again" quiet onPress={account.reload} />
+          </View>
+        )}
+
         {!account.loading &&
           !has &&
+          account.error === undefined &&
           usesVirtualAccount &&
           !(
             opening === 'done' &&
@@ -231,8 +245,8 @@ export default function AddMoney() {
           />
         )}
         {!account.loading && usesMobileMoney && <FormError error={issueError} code={issueCode} />}
-
-        <FormError error={account.error} code={account.code} />
+        {/* What linking or removing did. It was returned and never drawn. */}
+        {!account.loading && usesMobileMoney && linked !== undefined && <Done message={linked} />}
       </Panel>
 
       {!account.loading && (

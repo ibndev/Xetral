@@ -226,6 +226,7 @@ export default function Request() {
           <AccountDetails
             account={account.data ?? null}
             loading={account.loading}
+            error={account.error}
           />
         </>
       )}
@@ -237,10 +238,12 @@ export default function Request() {
 
 /** The bank account a stranger pays into: a name, a bank and a number. */
 function AccountDetails({
-  account, loading,
+  account, loading, error,
 }: {
   readonly account: VirtualAccount | null;
   readonly loading: boolean;
+  /** A failed read — which said "still being opened" before. */
+  readonly error: string | undefined;
 }) {
   const colors = useTheme();
   const styles = useStyles();
@@ -259,7 +262,9 @@ function AccountDetails({
         <Text style={styles.muted}>
           {loading
             ? 'Loading your account details…'
-            : 'Your account number is still being opened. It appears here, and on Add money, as soon as it is ready.'}
+            : error !== undefined
+              ? `We could not load your account details. ${error}`
+              : 'Your account number is still being opened. It appears here, and on Add money, as soon as it is ready.'}
         </Text>
       </View>
     );

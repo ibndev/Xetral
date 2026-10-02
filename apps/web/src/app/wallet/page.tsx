@@ -427,7 +427,13 @@ export default function Wallet() {
           an unfiltered list with nothing open, on the screen a customer taps
           when somebody has asked them whether they paid.
         */}
-        <TxList entries={history.data?.entries.slice(0, 6) ?? []} onOpen={setOpenTx} />
+        {/* ONLY THE ANSWER FOR THIS CURRENCY. `useLoad` keeps the last result
+            while the next is in flight and after one fails, so tapping a
+            currency card drew the PREVIOUS currency's rows under the skeleton,
+            and beside an error, as if they were this one's. */}
+        {!history.loading && history.error === undefined && (
+          <TxList entries={history.data?.entries.slice(0, 6) ?? []} onOpen={setOpenTx} />
+        )}
 
         {openTx !== undefined && (
           <TransactionSheet id={openTx} onClose={() => setOpenTx(undefined)} />

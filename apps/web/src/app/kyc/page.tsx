@@ -11,9 +11,10 @@ import { useLoad, useSubmit, useXetral } from '@/lib/hooks';
 /**
  * Identity verification.
  *
- * The screen that unblocks everything else: no bank account number and no card
- * exists for a customer until this has been approved, because `provider_customers`
- * is created by the approval and both of those refuse without it.
+ * What it unblocks is the dollar card, crypto and the higher tiers' limits —
+ * `provider_customers` is created by the approval and the card refuses without
+ * it. NOT the naira account number: since round 26 a tier 1 account opens
+ * without identity, and this file said otherwise until round 44.
  *
  * The BVN is typed here and never comes back. The server seals it and returns
  * four digits, which is enough for support to confirm they are talking about
@@ -21,7 +22,10 @@ import { useLoad, useSubmit, useXetral } from '@/lib/hooks';
  */
 export default function Kyc() {
   const client = useXetral();
-  const { data, loading, reload } = useLoad<KycStatus | null>(() => client.kyc(), [client]);
+  const { data, loading, reload, error: readError, code: readCode } = useLoad<KycStatus | null>(
+    () => client.kyc(),
+    [client],
+  );
   const { busy, error, code, run } = useSubmit();
 
   /*
@@ -83,6 +87,26 @@ export default function Kyc() {
   }
 
   if (data !== null && data !== undefined) return <Submitted status={data} />;
+
+  /*
+   * A READ THAT FAILED IS NOT "NEVER SUBMITTED". The error was not read at
+   * all, so a pending or verified customer whose status could not be fetched
+   * was shown the blank form and invited to submit their BVN again.
+   */
+  if (readError !== undefined) {
+    return (
+      <Shell back="/more" title="Identity">
+        <div className="card">
+          <FormError error={readError} code={readCode} />
+          <div className="actions" style={{ marginTop: 'var(--s-3)' }}>
+            <button type="button" className="quiet" onClick={reload}>
+              Try again
+            </button>
+          </div>
+        </div>
+      </Shell>
+    );
+  }
 
   return (
     /* A BACK ARROW AND A TITLE, because this screen is reached from More and

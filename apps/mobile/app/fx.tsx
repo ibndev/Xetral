@@ -280,7 +280,12 @@ export default function Fx() {
               ? quoteError
               : amount === ''
                 ? 'Enter an amount to see today’s rate'
-                : 'Getting today’s rate…'}
+                : /* Nothing is asked for an amount that does not parse. */
+                  !isValidAmount(amount, exponentFor(from))
+                  ? exponentFor(from) === 0
+                    ? `${from} has no decimal places`
+                    : `Enter an amount in ${from}, with at most ${exponentFor(from)} decimal places`
+                  : 'Getting today’s rate…'}
         </Text>
       </View>
       {quote !== undefined && (
@@ -353,7 +358,9 @@ export default function Fx() {
 
       <Panel title="Recent conversions">
         {trades.loading && <Loading />}
-        {!trades.loading && (trades.data?.length ?? 0) === 0 && (
+        <FormError error={trades.error} code={trades.code} />
+        {/* A failed read is not "no conversions". */}
+        {!trades.loading && trades.error === undefined && (trades.data?.length ?? 0) === 0 && (
           <Empty icon="swap" title="No conversions yet" />
         )}
         {trades.data?.slice(0, 10).map((trade: FxTrade) => (

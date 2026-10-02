@@ -77,13 +77,15 @@ export default function More() {
 
       {/* Verification is the gate on cards and account numbers, so it is the
           first thing here rather than buried under Account. */}
-      {!kyc.loading && !verified && (
+      {/* Only when the answer SAYS unverified — a failed read put this
+          banner in front of verified customers. */}
+      {!kyc.loading && kyc.error === undefined && !verified && (
         <Link href="/kyc" className="notice warn animate-in d1">
           <span className="notice-icon"><Icon name="shield" size={19} /></span>
           <span>
             <strong>Verify your identity</strong>
             <p className="hint" style={{ margin: '2px 0 0' }}>
-              Required before you can be issued an account number or a card.
+              Required for a dollar card and higher daily limits.
             </p>
           </span>
           <Icon name="chevronRight" size={18} />

@@ -1788,7 +1788,11 @@ function toView(row: PayoutRow): PayoutView {
     account_number: row.account_number,
     account_name: row.account_name,
     narration: row.narration,
-    failure_reason: row.failure_reason,
+    /* NEVER THE ROW'S OWN SENTENCE. `bank_payouts.failure_reason` is the
+       provider's words or a reviewer's note — 006's rule says the row an
+       operator reads, and the refusal already carried no detail. The
+       customer's own list printed it anyway. */
+    failure_reason: row.status === 'failed' ? 'It did not go through, and your money was returned.' : null,
     created_at: row.created_at.toISOString(),
   };
 }

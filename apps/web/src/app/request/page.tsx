@@ -218,7 +218,13 @@ export default function Request() {
       <div className="acct-card">
         <span className="eyebrow" style={{ padding: 0 }}>Share your Xetral number</span>
         <div className="acct-card-row">
-          <span className="acct-number">{local === '' ? 'Not set' : local}</span>
+          {/* "NOT SET" ONLY WHEN THE PROFILE SAYS SO. While it loads, or when
+              the read failed, there is no number to report on — and "add
+              your phone number in Settings" told a customer who has one to
+              go and add it. */}
+          <span className="acct-number">
+            {profile.data === undefined ? '—' : local === '' ? 'Not set' : local}
+          </span>
           <button
             type="button"
             className="copy-chip"
@@ -229,9 +235,13 @@ export default function Request() {
           </button>
         </div>
         <p className="acct-sub">
-          {local === ''
-            ? 'Add your phone number in Settings so other customers can find you.'
-            : 'Another Xetral customer sends to this number. It arrives instantly and free.'}
+          {profile.data === undefined
+            ? profile.loading
+              ? 'Loading your number…'
+              : 'We could not load your number just now.'
+            : local === ''
+              ? 'Add your phone number in Settings so other customers can find you.'
+              : 'Another Xetral customer sends to this number. It arrives instantly and free.'}
         </p>
       </div>
 
@@ -290,7 +300,10 @@ export default function Request() {
           <p className="acct-sub-quiet" style={{ margin: 0 }}>
             {account.loading
               ? 'Loading your account details…'
-              : 'Your account number is still being opened. It appears here, and on Add money, as soon as it is ready.'}
+              : account.error !== undefined
+                ? /* A failed read is not an account being opened. */
+                  `We could not load your account details. ${account.error}`
+                : 'Your account number is still being opened. It appears here, and on Add money, as soon as it is ready.'}
           </p>
         </div>
       )}

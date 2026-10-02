@@ -39,7 +39,7 @@ export const PAD = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', '<'] 
  * naira keypad — and it is refused on an empty box, because `000` alone is
  * not an amount.
  */
-export function pressKey(was: string, key: string): string {
+export function pressKey(was: string, key: string, exponent?: number): string {
   if (key === '<') return was.slice(0, -1);
   if (key === '000' && was === '') return was;
   // A SECOND POINT IS REFUSED, and a leading one becomes `0.` rather than
@@ -47,13 +47,73 @@ export function pressKey(was: string, key: string): string {
   // validator downstream would reject it after the customer had typed it.
   if (key === '.') {
     if (was.includes('.')) return was;
+    // A currency with no minor unit has no decimal point to type.
+    if (exponent === 0) return was;
     return was === '' ? '0.' : `${was}.`;
   }
   const next = was + key;
   // Twelve digits is a trillion naira. The cap is on DIGITS rather than on
   // length so a decimal point does not eat one.
   if (next.replace(/[^0-9]/g, '').length > 12) return was;
+  /*
+   * NO MORE DECIMALS THAN THE CURRENCY HAS. "5.123" naira is not an amount,
+   * and the keypad accepted it — after which the screen said "Exceeds your
+   * balance" about a figure smaller than the balance, because the only check
+   * downstream was whether the string was well-formed.
+   */
+  const dot = next.indexOf('.');
+  if (exponent !== undefined && dot !== -1 && next.length - dot - 1 > exponent) return was;
   return next.replace(/^0+(?=\d)/, '');
+}
+
+/**
+ * A free-typed amount, cleaned the way the keypad would have built it.
+ *
+ * A laptop has a keyboard, so the amount boxes are real inputs — and an input
+ * hands back whatever was typed or pasted: `1,000`, `₦5000`, `1.2.3`. Every
+ * one of those reached `feeOn`, whose `BigInt` threw during render and took
+ * the Send screen down. Digits and one point survive; anything past the
+ * currency's own decimals is dropped, as the keypad refuses it.
+ */
+export function typedAmount(raw: string, exponent: number): string {
+  const digits = raw.replace(/[^0-9.]/g, '');
+  const [whole = '', ...rest] = digits.split('.');
+  const intPart = whole.replace(/^0+(?=\d)/, '');
+  if (rest.length === 0 || exponent === 0) return intPart;
+  return `${intPart === '' ? '0' : intPart}.${rest.join('').slice(0, exponent)}`;
+}
+
+/** A well-formed decimal string in this currency's minor units, or undefined. */
+function minorOf(amount: string, scale: number): bigint | undefined {
+  const trimmed = amount.trim();
+  if (!/^[0-9]+(\.[0-9]*)?$/.test(trimmed)) return undefined;
+  const [whole = '0', frac = ''] = trimmed.split('.');
+  if (frac.length > scale) return undefined;
+  return BigInt((whole === '' ? '0' : whole) + frac.padEnd(scale, '0'));
+}
+
+/**
+ * Whether a typed amount is more than a balance — compared in minor units,
+ * never as a float.
+ *
+ * FOR WHAT THE SCREEN SAYS, NOT FOR WHAT THE SERVER DECIDES. The overdraft
+ * guard is the control; this is so "Exceeds your ₦4,300 balance" appears when
+ * it is true and only then. It used to appear for every MALFORMED amount —
+ * "5." mid-keystroke, three decimals of naira — and never for an amount that
+ * really was larger than the balance. A balance not yet loaded, or an amount
+ * that does not parse, is not a claim either way: undefined.
+ */
+export function exceedsBalance(
+  amount: string,
+  spendable: string | undefined,
+  currency: string,
+): boolean | undefined {
+  if (spendable === undefined) return undefined;
+  const scale = exponentFor(currency);
+  const asked = minorOf(amount, scale);
+  const held = minorOf(spendable.replace(/^-/, ''), scale);
+  if (asked === undefined || held === undefined) return undefined;
+  return spendable.trim().startsWith('-') ? asked > 0n : asked > held;
 }
 
 /**
@@ -107,8 +167,14 @@ export function feeOn(amount: string, basisPoints: number, currency: string): st
    * mistake the money primitives exist to prevent.
    */
   const scale = exponentFor(currency);
-  const [whole = '0', frac = ''] = amount.split('.');
-  const typed = BigInt((whole === '' ? '0' : whole) + frac.padEnd(scale, '0').slice(0, scale));
+  /*
+   * AN AMOUNT THAT DOES NOT PARSE COSTS NOTHING, IT DOES NOT THROW. `BigInt`
+   * throws a SyntaxError on "1,000", and this runs during render — so a comma
+   * typed into the Send box took the whole screen down to the error page.
+   */
+  const [whole = '0', frac = ''] = amount.trim().split('.');
+  const digits = (whole === '' ? '0' : whole) + frac.padEnd(scale, '0').slice(0, scale);
+  const typed = /^[0-9]+$/.test(digits) ? BigInt(digits) : 0n;
   if (amount === '' || basisPoints <= 0 || typed === 0n) {
     return scale === 0 ? '0' : `0.${'0'.repeat(scale)}`;
   }
@@ -119,3 +185,17 @@ export function feeOn(amount: string, basisPoints: number, currency: string): st
   return scale === 0 ? text : `${text.slice(0, -scale)}.${text.slice(-scale)}`;
 }
 
+
+/**
+ * A HALF-TYPED AMOUNT, AS A FIGURE `formatAmount` WILL ACCEPT.
+ *
+ * `formatAmount` refuses "5." — a point with nothing after it is not a
+ * decimal — and the Send screen passed it the box's contents mid-keystroke to
+ * draw "Olawale receives ₦5.". So tapping "." on any same-currency send threw
+ * during render and replaced the whole screen with the error page. The
+ * trailing point is dropped for DISPLAY only; what is sent is still validated.
+ */
+export function figureOf(typed: string): string {
+  const trimmed = typed.trim().replace(/\.$/, '');
+  return /^[0-9]+(\.[0-9]+)?$/.test(trimmed) ? trimmed : '0';
+}

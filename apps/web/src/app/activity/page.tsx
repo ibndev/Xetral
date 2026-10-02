@@ -1,11 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { activityFiltersFor } from '@xetral/client';
 import type { Transaction } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { Icon } from '@/ui/icon';
 import { useLoad, useXetral } from '@/lib/hooks';
+import { messageFor } from '@/lib/errors';
 import { TxList } from '@/ui/tx-list';
 import { TransactionSheet } from '@/ui/transaction-sheet';
 
@@ -65,26 +66,51 @@ export default function Activity() {
   const [extra, setExtra] = useState<readonly Transaction[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [moreError, setMoreError] = useState<string | undefined>(undefined);
+  /*
+   * WHICH FILTER A PAGE BELONGS TO. A page is only ever applied to the filter
+   * that asked for it: a "Load more" still in flight when the customer tapped
+   * another chip appended the OLD currency's rows — and its cursor — to the
+   * new list, and a first page that lost the race to a newer one set the
+   * cursor from the wrong currency.
+   */
+  const filterKey = `${currency}|${(kinds ?? []).join(',')}`;
+  const current = useRef(filterKey);
+  current.current = filterKey;
   // Which row is open, by id rather than by index: the list grows as pages
   // load, so an index would point at a different transaction after a Load more.
   const [open, setOpen] = useState<string | undefined>(undefined);
 
   const first = useLoad(async () => {
+    const asked = filterKey;
     const page = await client.transactions(currency, undefined, kinds);
-    setExtra([]);
-    setCursor(page.nextCursor);
+    if (current.current === asked) {
+      setExtra([]);
+      setCursor(page.nextCursor);
+      setMoreError(undefined);
+    }
     return page;
   }, [client, currency, kinds]);
 
-  const rows = [...(first.data?.entries ?? []), ...extra];
+  /* Only this filter's answer — `useLoad` keeps the previous one while the
+     next loads and after a failure. */
+  const settled = !first.loading && first.error === undefined;
+  const rows = settled ? [...(first.data?.entries ?? []), ...extra] : [];
 
   async function more() {
     if (cursor === null) return;
+    const asked = filterKey;
     setLoadingMore(true);
+    setMoreError(undefined);
     try {
       const page = await client.transactions(currency, cursor, kinds);
+      if (current.current !== asked) return;
       setExtra((e) => [...e, ...page.entries]);
       setCursor(page.nextCursor);
+    } catch (cause) {
+      // A failed page was an unhandled rejection: the button came back and
+      // nothing said the older rows had not loaded.
+      if (current.current === asked) setMoreError(messageFor(cause));
     } finally {
       setLoadingMore(false);
     }
@@ -152,7 +178,10 @@ export default function Activity() {
       */}
       <TxList entries={rows} onOpen={setOpen} />
 
-      {cursor !== null && (
+      {moreError !== undefined && (
+        <p className="error"><Icon name="alert" size={16} /> {moreError}</p>
+      )}
+      {settled && cursor !== null && (
         <div className="actions" style={{ marginTop: 16, justifyContent: 'center' }}>
           <button type="button" className="ghost small" onClick={more} disabled={loadingMore}>
             {loadingMore ? 'Loading…' : 'Load more'}

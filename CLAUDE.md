@@ -2405,6 +2405,49 @@ Schema: `packages/ledger/sql/091_test_account_reset.sql`. Service in
   failing after the reserve stranded money in pending with no payout row —
   invisible to the sweep and to recovery.
 
+### What the screens claim — non-obvious rules
+
+`packages/client/src/amount-entry.ts`, `recipient-search.ts`, guarded by
+`apps/web/src/ui/honest-screens.test.ts`; every customer screen on both apps.
+
+- **A FAILED READ IS NOT AN EMPTY ANSWER, ANYWHERE.** `useLoad` returns
+  `data: undefined` on failure, and screen after screen read that as the
+  answer: the drift check said "every balance matches its postings", the
+  crypto portfolio drew "0 USDT", KYC drew the blank form for a customer
+  under review, cards and More told verified customers to verify, Request
+  said the account was "still being opened". `client.kyc().catch(() => null)`
+  is the sharpest form — `null` also means "never submitted" — and the guard
+  fails the build on it returning.
+- **`useLoad` KEEPS THE LAST ANSWER while the next loads and after a failure**,
+  so a list keyed on a filter must not draw `data` unless it is settled: the
+  home screen showed the previous currency's rows under the skeleton. A page
+  appended by "Load more" is applied only to the filter that asked for it.
+- **A PROVIDER REFUSAL IS A REFUSAL ON EVERY MONEY-OUT FLOW**, not a 200
+  carrying a failed status: `payout_failed`, `purchase_failed` and now
+  `withdrawal_failed`. Both apps said "Sent. It is on the chain now" and
+  "Submitted" about money that never left. A replay of a failed attempt is
+  the same refusal.
+- **NO CUSTOMER VIEW CARRIES THE ROW'S `failure_reason`.** It holds the
+  provider's sentence or a reviewer's note ("refunded by staff: …"). The
+  refusal was already detail-free and the LIST printed it; customer views now
+  say only that it did not go through and the money was returned.
+- **A WITHDRAWAL IS NOT SENT WITHOUT A FEE THE CUSTOMER SAW.** The server keeps
+  `max_fee` optional (documented); both apps now refuse to send until a quote
+  for that asset and network exists, and always send it.
+- **A TYPED AMOUNT IS A STRING THAT MAY BE HALF-TYPED.** `formatAmount` throws
+  on "5." and `BigInt` on "1,000"; both ran during render and replaced the Send
+  screen with the error page. `typedAmount` cleans free typing, `pressKey`
+  takes the currency's exponent, `figureOf` draws a half-typed figure, and
+  `feeOn` costs nothing on input it cannot parse.
+- **"EXCEEDS YOUR BALANCE" ONLY WHEN IT DOES** — `exceedsBalance`, in minor
+  units, undefined until balances load. It fired on every malformed amount and
+  never on a real one. The overdraft guard still decides.
+- **NOTHING EMAILS AN eSIM OR A PAYER'S RECEIPT**, so no screen says so. The
+  eSIM's activation details are on its list, and the phone now shows them.
+- **A PAYER BACK FROM THE PROVIDER IS NEVER SHOWN THE EMPTY CHECKOUT.** Pending
+  says "you do not need to pay again"; failed says so above the form; only a
+  404 means the link is not active.
+
 ### The assignment, the refusal nobody could read, and a paused service — non-obvious rules
 
 Schema: `packages/ledger/sql/082_refusals_and_details.sql`,

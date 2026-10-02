@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ApiError, entryKindLabel, entryTitle, exponentFor, formatAmount, isValidAmount } from '@xetral/client';
-import type { Card, CardActivity, CardFundingPlan, CardSecrets } from '@xetral/client';
+import { ApiError, entryKindLabel, entryTitle, exponentFor, formatAmount, isValidAmount, typedAmount } from '@xetral/client';
+import type { ApiErrorCode, Card, CardActivity, CardFundingPlan, CardSecrets } from '@xetral/client';
+import { codeOf, messageFor } from '@/lib/errors';
 import { Shell } from '@/ui/shell';
 import { FormError } from '@/ui/form-error';
 import { Icon } from '@/ui/icon';
@@ -42,8 +43,17 @@ export default function Cards() {
   // The name to print on the card face. A card cannot be issued without an
   // approved identity, so this is present whenever a card is — and it is the
   // customer's own verified name rather than anything the card carries.
-  const identity = useLoad(() => client.kyc().catch(() => null), [client]);
+  const identity = useLoad(() => client.kyc(), [client]);
   const holder = identity.data?.full_name;
+  /*
+   * UNVERIFIED ONLY WHEN THE ANSWER SAYS SO. The read was `.catch(() => null)`
+   * and `null` is also "never submitted", so a verified customer whose
+   * identity read failed — or who tapped Create before it arrived — was sent
+   * to "As required by CBN, please complete your KYC". Not knowing is not a
+   * refusal: the server's `kyc_required` is still the control.
+   */
+  const knownUnverified =
+    !identity.loading && identity.error === undefined && identity.data?.status !== 'approved';
 
   /*
    * GETTING A FIRST CARD IS AN ONBOARDING STEP, not a form at the bottom of a
@@ -129,7 +139,7 @@ export default function Cards() {
            * price is charged. Taking the money first would be charging for a
            * card we already know cannot be created.
            */
-          verified={identity.data?.status === 'approved'}
+          verified={!knownUnverified}
           onNeedsVerification={() => setAskingToVerify(true)}
           onIssued={() => {
             setAdding(false);
@@ -361,18 +371,32 @@ function CardRow({
    * customer already replaced.
    */
   const [plan, setPlan] = useState<{ forAmount: string; plan: CardFundingPlan }>();
+  /*
+   * A PLAN THE SERVER REFUSED IS SAID, NOT SWALLOWED. It was
+   * `.catch(() => setPlan(undefined))`, so a frozen card, a limit or a
+   * dropped connection left the Add button disabled with nothing on screen
+   * saying why. Stamped with its amount, like the plan.
+   */
+  const [planError, setPlanError] = useState<{ forAmount: string; message: string; code: ApiErrorCode | undefined }>();
   useEffect(() => {
     if (!isValidAmount(amount, exponentFor(card.currency)) || isZero(amount)) return;
     const asked = amount;
     const timer = setTimeout(() => {
       client
         .cardFundingPlan(card.id, asked)
-        .then((p) => setPlan({ forAmount: asked, plan: p }))
-        .catch(() => setPlan(undefined));
+        .then((p) => {
+          setPlan({ forAmount: asked, plan: p });
+          setPlanError(undefined);
+        })
+        .catch((cause: unknown) => {
+          setPlan(undefined);
+          setPlanError({ forAmount: asked, message: messageFor(cause), code: codeOf(cause) });
+        });
     }, 300);
     return () => clearTimeout(timer);
   }, [client, amount, card.id, card.currency]);
   const planned = plan !== undefined && plan.forAmount === amount ? plan.plan : undefined;
+  const planRefusal = planError !== undefined && planError.forAmount === amount ? planError : undefined;
   const converting = planned?.legs.some((leg) => leg.converted) ?? false;
   /*
    * WHICH ACTION THE PIN IS FOR — and the reason this is one state rather than
@@ -703,7 +727,7 @@ function CardRow({
                 <input
                   inputMode="decimal"
                   value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
+                  onChange={(e) => setAmount(typedAmount(e.target.value, exponentFor(card.currency)))}
                   placeholder="25.00"
                   autoFocus
                 />
@@ -734,6 +758,9 @@ function CardRow({
                 <p className="form-error" role="alert">
                   Your balances together don&rsquo;t cover {formatAmount(planned.amount, card.currency)}.
                 </p>
+              )}
+              {planRefusal !== undefined && (
+                <FormError error={planRefusal.message} code={planRefusal.code} />
               )}
             </>
           )}

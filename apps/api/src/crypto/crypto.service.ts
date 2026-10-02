@@ -222,7 +222,7 @@ export class CryptoService {
     const asset = body.asset as Currency;
 
     const existing = await this.#byKey(userId, body.idempotency_key);
-    if (existing !== undefined) return toView(existing);
+    if (existing !== undefined) return refuseIfFailed(toView(existing));
 
     // Before anything else. A wrong address cannot be undone, and the
     // checksum is what turns a transposed character into a rejected request
@@ -277,7 +277,7 @@ export class CryptoService {
        attempt reserves as a replay and loses the row insert, and sending again
        is how one withdrawal reaches the chain twice or a duplicate refusal
        reverses the one that went. */
-    if (!created) return toView(await this.#reload(reserved.id));
+    if (!created) return refuseIfFailed(toView(await this.#reload(reserved.id)));
 
     let receipt: WithdrawalReceipt;
     try {
@@ -305,11 +305,12 @@ export class CryptoService {
       }
       // A definite refusal, or a request that never left — nothing was broadcast.
       await this.#fail(reserved, describe(error));
-      return toView(await this.#reload(reserved.id));
+      this.#logger.warn(`withdrawal ${reference} refused: ${describe(error)}`);
+      return refuseIfFailed(toView(await this.#reload(reserved.id)));
     }
 
     await this.applyReceipt(await this.#reload(reserved.id), receipt);
-    return toView(await this.#reload(reserved.id));
+    return refuseIfFailed(toView(await this.#reload(reserved.id)));
   }
 
   /**
@@ -622,8 +623,21 @@ function toView(row: WithdrawalRow): WithdrawalView {
     fee: toMajor(money(BigInt(row.fee_minor), asset)),
     status: row.status,
     tx_hash: row.tx_hash,
-    failure_reason: row.failure_reason,
+    /* NEVER THE ROW'S OWN SENTENCE — the provider's words, or a reviewer's
+       note, are an operator's (006). The list printed them to the customer. */
+    failure_reason: row.status === 'failed' ? 'It did not go through, and your money was returned.' : null,
   };
+}
+
+/**
+ * A withdrawal that failed is a REFUSAL on the request that made it, not a 200
+ * carrying `status: "failed"`. Both apps read the 200 as a success and said
+ * "Sent. It is on the chain now and cannot be recalled." about money that never
+ * left — the bug `payout_failed` fixed for bank payouts.
+ */
+function refuseIfFailed(view: WithdrawalView): WithdrawalView {
+  if (view.status !== 'failed') return view;
+  throw new UnprocessableEntityException({ error: 'withdrawal_failed' });
 }
 
 /** Derived, never generated — the same rule as everywhere else money moves. */

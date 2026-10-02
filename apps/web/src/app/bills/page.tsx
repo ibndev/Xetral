@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { formatAmount, PURCHASE_SERVICES } from '@xetral/client';
+import { exponentFor, formatAmount, PURCHASE_SERVICES, typedAmount } from '@xetral/client';
 import type { CatalogueGroup, CatalogueItem, Purchase, PurchaseService } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { Select } from '@/ui/select';
@@ -70,6 +70,8 @@ export default function Bills() {
       <div className="card">
         <h2>Recent purchases</h2>
         {history.loading && <p className="spinner">Loading…</p>}
+        {/* A failed read drew an empty card with nothing in it. */}
+        {history.error !== undefined && <p className="error">{history.error}</p>}
         {history.data !== undefined && history.data.length === 0 && (
           <p className="empty">Nothing yet.</p>
         )}
@@ -229,7 +231,12 @@ function Buy({ service, onBought }: { service: ServiceCode; onBought: () => void
           value={item}
           placeholder={items.length === 0 ? 'Nothing available' : 'Choose one'}
           disabled={items.length === 0}
-          onChange={setItem}
+          /* A meter checked as prepaid is not checked as postpaid: the name
+             came back for the OLD item and stayed beside the new one. */
+          onChange={(next) => {
+            setItem(next);
+            setVerified(undefined);
+          }}
           options={items.map((item) => ({
             value: item.code,
             label: item.name,
@@ -288,7 +295,7 @@ function Buy({ service, onBought }: { service: ServiceCode; onBought: () => void
             <input
               inputMode="decimal"
               value={amount}
-              onChange={(e) => setAmount(e.target.value)}
+              onChange={(e) => setAmount(typedAmount(e.target.value, exponentFor(selected?.currency ?? 'NGN')))}
               placeholder="0"
               aria-label="Amount"
               required

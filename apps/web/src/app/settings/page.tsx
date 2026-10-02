@@ -33,6 +33,9 @@ export default function Settings() {
           <span>
             {kyc.loading ? (
               '—'
+            ) : kyc.error !== undefined ? (
+              /* A failed read is not "Not started". */
+              <span className="muted">Could not check right now</span>
             ) : kyc.data === null || kyc.data === undefined ? (
               <Link href="/kyc">Not started — verify now</Link>
             ) : (
@@ -163,6 +166,8 @@ function YourDetails() {
       }}
     >
       <h2>Your details</h2>
+      {/* A failed read drew every field as "—" with no Save and no reason. */}
+      <FormError error={details.error} code={details.code} />
       {/*
         THE SENTENCE FOLLOWS WHAT IS ACTUALLY EDITABLE, not whether the account
         is verified.
@@ -547,8 +552,18 @@ function YourData() {
             const link = document.createElement('a');
             link.href = url;
             link.download = 'xetral-my-data.json';
+            /*
+             * IN THE DOCUMENT, AND REVOKED A MOMENT LATER. Revoking in the same
+             * tick as `click()` on a detached anchor lets a browser that starts
+             * the download asynchronously (Safari, Firefox) find the URL gone —
+             * nothing is saved while the screen says "downloaded". A minute is
+             * long enough to start and short enough that the URL does not
+             * outlive the page.
+             */
+            document.body.appendChild(link);
             link.click();
-            URL.revokeObjectURL(url);
+            link.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 60_000);
             return 'Your data has been downloaded.';
           });
         }}

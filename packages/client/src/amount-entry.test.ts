@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { feeOn, groupTyped, PAD, pressKey } from './amount-entry.js';
+import { exceedsBalance, feeOn, figureOf, groupTyped, PAD, pressKey, typedAmount } from './amount-entry.js';
+import { formatAmount } from './money.js';
+import { recipientMatches } from './recipient-search.js';
 
 /**
  * THE KEYPAD TOUCHES MONEY, so it is tested like money.
@@ -101,5 +103,65 @@ describe('the pad', () => {
      */
     expect(PAD.length).toBe(12);
     expect(PAD.slice(9)).toEqual(['.', '0', '<']);
+  });
+});
+
+describe('the UI audit (round 44)', () => {
+  it('a typed comma costs nothing rather than throwing during render', () => {
+    // BigInt("1,00000") threw a SyntaxError inside the Send screen's render.
+    expect(() => feeOn('1,000', 150, 'NGN')).not.toThrow();
+    expect(feeOn('1,000', 150, 'NGN')).toBe('0.00');
+    expect(feeOn('abc', 150, 'NGN')).toBe('0.00');
+  });
+
+  it('the keypad refuses more decimals than the currency has', () => {
+    expect(pressKey('5.12', '3', 2)).toBe('5.12');
+    expect(pressKey('5.1', '2', 2)).toBe('5.12');
+    expect(pressKey('0.12345', '6', 6)).toBe('0.123456');
+    expect(pressKey('7', '.', 0)).toBe('7');
+    // Without an exponent the old behaviour stands.
+    expect(pressKey('5.12', '3')).toBe('5.123');
+  });
+
+  it('cleans a free-typed amount the way the keypad would have built it', () => {
+    expect(typedAmount('1,000', 2)).toBe('1000');
+    expect(typedAmount('₦5000.567', 2)).toBe('5000.56');
+    expect(typedAmount('1.2.3', 2)).toBe('1.23');
+    expect(typedAmount('.5', 2)).toBe('0.5');
+    expect(typedAmount('12.5', 0)).toBe('12');
+    expect(typedAmount('007', 2)).toBe('7');
+  });
+
+  it('says an amount exceeds the balance only when it does', () => {
+    expect(exceedsBalance('5000.01', '5000.00', 'NGN')).toBe(true);
+    expect(exceedsBalance('5000', '5000.00', 'NGN')).toBe(false);
+    // Malformed or mid-keystroke amounts are not a claim either way.
+    expect(exceedsBalance('5.', '10.00', 'NGN')).toBe(false);
+    expect(exceedsBalance('5.123', '1000.00', 'NGN')).toBeUndefined();
+    expect(exceedsBalance('5', undefined, 'NGN')).toBeUndefined();
+    // Per-currency exponents: 1.0000001 USDT has seven decimals, not a claim.
+    expect(exceedsBalance('2.5', '2.500000', 'USDT')).toBe(false);
+    expect(exceedsBalance('2.500001', '2.500000', 'USDT')).toBe(true);
+  });
+
+  it('a name search matches by name, not every recipient', () => {
+    const ola = { display_name: 'Olawale Adeyemi', destination: '08031234567', rail_name: 'MTN' };
+    const kofi = { display_name: 'Kofi Mensah', destination: '233244123456', rail_name: 'Telecel' };
+    // "zzz" stripped to digits was "", and every destination contains "".
+    expect(recipientMatches(ola, 'zzz')).toBe(false);
+    expect(recipientMatches(kofi, 'ola')).toBe(false);
+    expect(recipientMatches(ola, 'ola')).toBe(true);
+    expect(recipientMatches(kofi, '2441')).toBe(true);
+    expect(recipientMatches(kofi, 'telecel')).toBe(true);
+    expect(recipientMatches(ola, '')).toBe(true);
+  });
+
+  it('a half-typed amount can be drawn — "." on the keypad crashed the Send screen', () => {
+    // The receives line called formatAmount on the box: "5." threw in render.
+    expect(() => formatAmount('5.', 'NGN')).toThrow();
+    expect(formatAmount(figureOf('5.'), 'NGN')).toBe('₦5');
+    expect(figureOf('0.')).toBe('0');
+    expect(figureOf('')).toBe('0');
+    expect(figureOf('12.50')).toBe('12.50');
   });
 });

@@ -397,8 +397,29 @@ describe('buying', () => {
     });
 
     const res = await buy(customer, airtimeBody());
-    expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ status: 'reversed', failure_reason: 'invalid phone number' });
+    /*
+     * A REFUSAL, NOT A 200 CARRYING `status: "reversed"` — both apps read the
+     * 200 as success and told the customer "Submitted". And it carries no
+     * detail: the provider's sentence is an operator's.
+     */
+    expect(res.status).toBe(422);
+    expect(res.body.error).toBe('purchase_failed');
+    expect(JSON.stringify(res.body)).not.toContain('invalid phone number');
+
+    const listed = await request(app.getHttpServer())
+      .get('/v1/purchases')
+      .set('Authorization', `Bearer ${customer.token}`)
+      .expect(200);
+    expect(JSON.stringify(listed.body)).not.toContain('invalid phone number');
+    expect(listed.body.purchases[0]).toMatchObject({
+      status: 'reversed',
+      failure_reason: 'It did not go through, and your money was returned.',
+    });
+
+    // A retry of the same attempt is the same refusal, not a 200 replay.
+    const again = await buy(customer, airtimeBody());
+    expect(again.status).toBe(422);
+    expect(again.body.error).toBe('purchase_failed');
 
     // Whole balance back, nothing held.
     expect((await balances(customer))[0]).toMatchObject({

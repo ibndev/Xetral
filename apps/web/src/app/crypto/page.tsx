@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { CRYPTO_PAIRS, cryptoPortfolio, formatAmount, formatMinor, formatQuantity, currencyName } from '@xetral/client';
+import { CRYPTO_PAIRS, cryptoPortfolio, exponentFor, formatAmount, formatMinor, formatQuantity, currencyName, typedAmount } from '@xetral/client';
 import type { CryptoAddress, CryptoQuote } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { Select } from '@/ui/select';
@@ -73,8 +73,12 @@ function Portfolio({ home }: { readonly home: string }) {
 
       <span className="eyebrow">Holdings</span>
       {balances.loading && <p className="spinner">Loading…</p>}
+      {/* A FAILED READ IS NOT A ZERO HOLDING. `cryptoPortfolio` draws every
+          asset it is not told about as 0, so a balance read that failed
+          showed "0 USDT" against money the customer holds. */}
+      {balances.error !== undefined && <FormError error={balances.error} code={balances.code} />}
       <div>
-        {p.rows.map((row) => (
+        {!balances.loading && balances.error === undefined && p.rows.map((row) => (
           <div className="tx-row" key={row.asset} style={{ cursor: 'default' }}>
             <span className="tx-mark">
               <span className="avatar">
@@ -155,6 +159,7 @@ export default function Crypto() {
       <div className="card">
         <h2>Withdrawals</h2>
         {withdrawals.loading && <p className="spinner">Loading…</p>}
+        <FormError error={withdrawals.error} code={withdrawals.code} />
         {withdrawals.data !== undefined && withdrawals.data.length === 0 && (
           <p className="empty">Nothing yet.</p>
         )}
@@ -272,6 +277,11 @@ function Send({ onSent }: { onSent: () => void }) {
   const attempt = useIdempotencyKey();
   const { busy, error, code, done, run, clear } = useSubmit();
   const selected = ASSETS[choice];
+  /* A quote is for ONE asset on ONE network, and is what the customer agreed to. */
+  const agreed =
+    quote !== undefined && selected !== undefined && quote.asset === selected.asset && quote.network === selected.network
+      ? quote
+      : undefined;
 
   return (
     /* EDGE TO EDGE, LIKE SEND. A withdrawal is money leaving to somewhere we
@@ -283,8 +293,8 @@ function Send({ onSent }: { onSent: () => void }) {
       onSubmit={(event) => {
         event.preventDefault();
         void run(async () => {
-          if (selected === undefined) return undefined;
-          await client.withdrawCrypto({
+          if (selected === undefined || agreed === undefined) return undefined;
+          const sent = await client.withdrawCrypto({
             asset: selected.asset,
             network: selected.network,
             destination,
@@ -292,7 +302,7 @@ function Send({ onSent }: { onSent: () => void }) {
             // The fee the customer saw and accepted. If the network has moved
             // since, the server refuses rather than charging the new one —
             // which is what makes the quote a promise rather than an estimate.
-            ...(quote === undefined ? {} : { maxFee: quote.fee }),
+            maxFee: agreed.fee,
             pin,
             idempotencyKey: attempt.key,
           });
@@ -300,7 +310,11 @@ function Send({ onSent }: { onSent: () => void }) {
           setPin('');
           setQuote(undefined);
           onSent();
-          return 'Sent. On-chain transfers cannot be recalled.';
+          /* What actually happened: a `reserved` withdrawal has not reached
+             the chain, and a refusal is now `withdrawal_failed`. */
+          return sent.status === 'reserved'
+            ? 'Submitted. Your money is held until the network confirms it.'
+            : 'Sent. On-chain transfers cannot be recalled.';
         });
       }}
     >
@@ -344,7 +358,7 @@ function Send({ onSent }: { onSent: () => void }) {
             inputMode="decimal"
             value={amount}
             onChange={(e) => {
-              setAmount(e.target.value);
+              setAmount(typedAmount(e.target.value, exponentFor(selected?.asset ?? 'USDT')));
               setQuote(undefined);
             }}
             placeholder="0"
@@ -352,10 +366,10 @@ function Send({ onSent }: { onSent: () => void }) {
             required
           />
         </div>
-        {quote !== undefined && (
+        {agreed !== undefined && (
           <span className="hint">
-            Network fee {formatAmount(quote.fee, quote.asset)} · total{' '}
-            {formatAmount(quote.total, quote.asset)}
+            Network fee {formatAmount(agreed.fee, agreed.asset)} · total{' '}
+            {formatAmount(agreed.total, agreed.asset)}
           </span>
         )}
       </div>
@@ -378,7 +392,7 @@ function Send({ onSent }: { onSent: () => void }) {
           })
         }
       >
-        {quote === undefined ? 'Check the fee' : 'Refresh fee'}
+        {agreed === undefined ? 'Check the fee' : 'Refresh fee'}
       </button>
 
       <label className="field">
@@ -397,8 +411,10 @@ function Send({ onSent }: { onSent: () => void }) {
         <Icon name="alert" size={15} /> On-chain transfers cannot be recalled.
       </p>
 
-      <button type="submit" disabled={busy}>
-        {busy ? 'Sending…' : 'Send'}
+      {/* NOT WITHOUT A FEE THE CUSTOMER HAS SEEN: sending unquoted omitted
+          `maxFee`, so any fee was taken. The fee ceiling is part of consent. */}
+      <button type="submit" disabled={busy || agreed === undefined}>
+        {busy ? 'Sending…' : agreed === undefined ? 'Check the fee first' : 'Send'}
       </button>
 
       <FormError error={error} code={code} />

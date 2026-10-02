@@ -52,6 +52,7 @@ shipped, that is called out explicitly.
 | 41 — No line in a text field, a bank list above the keyboard, Delete that resets | ✅ | `TEST_ACCOUNT_EMAILS` on the api service; Paystack lifting BVN validation |
 | 42 — An account number without a BVN, tiers counted from one, a request in another currency | ✅ | migration 092 |
 | 43 — A whole-code money audit: one outcome per thing | ✅ | |
+| 44 — What the screens claim: a UI audit of both apps | ✅ | |
 
 All eleven phases are built, a **pre-deployment audit** (Phase 12) closed what
 building them phase by phase had left between the phases, and **Phase 13** is
@@ -2997,3 +2998,27 @@ the closed test account on `/admin/users` and press **Delete permanently**.
 5. **Bills could not be bought at all** — electricity's code, and no network.
 
 **An operator need do nothing for this one.** No schema or setting changes.
+
+---
+
+## Phase 44 — What the screens claim: a UI audit of both apps ✅
+
+| File | What it is |
+|---|---|
+| `packages/client/src/amount-entry.ts` | `typedAmount`, `exceedsBalance`, `figureOf`; `pressKey` by exponent; `feeOn` total |
+| `packages/client/src/recipient-search.ts` | one recipient search for both apps |
+| `apps/api/src/purchases/purchase.service.ts`, `crypto/crypto.service.ts`, `payouts/payout.service.ts` | refusals, and no provider sentence on a customer list |
+| `apps/web/src/ui/honest-screens.test.ts` | the false claims, kept out by the build |
+
+1. **Tapping "." on the Send keypad crashed the screen**, and a typed comma
+   did too.
+2. **A refused withdrawal or purchase read as sent**; their lists printed the
+   provider's sentence and staff notes.
+3. **Failed reads read as answers** — a drift check reporting all clear, zero
+   holdings, a blank KYC form, "verify" to verified customers.
+4. **Recipient search matched everybody**, "Exceeds your balance" lied both
+   ways, a withdrawal could skip its fee quote, and the eSIM and pay page
+   promised emails nothing sends.
+
+**An operator need do nothing for this one.** No schema or setting changes.
+

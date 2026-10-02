@@ -200,6 +200,10 @@ const API_ERROR_CODES = [
    * sentence names our integration and belongs on the row an operator reads.
    */
   'payout_failed',
+  /* The same refusal for an on-chain withdrawal the provider would not send.
+     It was a 200 carrying `status: "failed"`, and both apps said "Sent. It is
+     on the chain now" about money that never left. */
+  'withdrawal_failed',
   /*
    * `payout_provider_unavailable` — the rail could not be ASKED.
    *

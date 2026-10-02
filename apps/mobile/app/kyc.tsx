@@ -11,9 +11,10 @@ import { font, space, useStyles, useTheme } from '@/theme';
 /**
  * Identity verification, on the phone.
  *
- * The screen that unblocks everything else: no bank account number and no card
- * exists for a customer until this is approved, because `provider_customers`
- * is created by the approval and both refuse without it.
+ * What it unblocks is the dollar card, crypto and the higher tiers' limits —
+ * `provider_customers` is created by the approval and the card refuses without
+ * it. NOT the naira account number: since round 26 a tier 1 account opens
+ * without identity, and this file said otherwise until round 44.
  *
  * The BVN is typed here and never comes back. The server seals it and returns
  * four digits — enough for support to confirm they are talking about the right
@@ -72,6 +73,17 @@ export default function Kyc() {
     );
   }
 
+  /* A READ THAT FAILED IS NOT "NEVER SUBMITTED" — see the web's Identity
+     screen. It showed the blank form to a customer already under review. */
+  if (status.error !== undefined) {
+    return (
+      <Shell back="/more" title="Identity">
+        <FormError error={status.error} code={status.code} />
+        <Button label="Try again" quiet onPress={status.reload} />
+      </Shell>
+    );
+  }
+
   return (
     <Shell back="/more" title="Identity">
       {/* What they can move TODAY, before the form rather than after it. A
@@ -81,7 +93,7 @@ export default function Kyc() {
 
       <Panel
         title="Verify your identity"
-        subtitle="Required before you can be issued an account number or a card"
+        subtitle="Required for a dollar card and higher daily limits"
       >
         <Field
           label="Full name, as it appears on your BVN"

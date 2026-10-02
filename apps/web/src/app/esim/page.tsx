@@ -170,8 +170,12 @@ function Buy(props: {
           setPin('');
           props.onBought();
           return purchase.status === 'delivered'
-            ? 'Done. The QR code is on its way to your email.'
-            : 'Submitted. We will email the QR code shortly.';
+            /* NOTHING EMAILS IT. There is no notification template for an
+               eSIM and Airalo is never sent the address, so "on its way to
+               your email" promised a message that could not exist. The
+               activation details are on this screen, under Your eSIMs. */
+            ? 'Done. Your eSIM’s activation details are under Your eSIMs below.'
+            : 'Submitted. Your eSIM appears under Your eSIMs once the provider confirms it.';
         });
       }}
     >
@@ -191,7 +195,7 @@ function Buy(props: {
       </div>
 
       <label className="field">
-        <span className="field-label">Email for the QR code</span>
+        <span className="field-label">Your email</span>
         <input
           type="email"
           inputMode="email"

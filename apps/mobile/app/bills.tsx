@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
-import { formatAmount, PURCHASE_SERVICES } from '@xetral/client';
+import { exponentFor, formatAmount, PURCHASE_SERVICES, typedAmount } from '@xetral/client';
 import type { CatalogueItem, Purchase, PurchaseService } from '@xetral/client';
 import { Icon } from '@/icon';
 import { Shell } from '@/shell';
@@ -125,7 +125,8 @@ export default function Bills() {
 
       <Panel title="Recent purchases">
         {history.loading && <Loading />}
-        {!history.loading && (history.data?.length ?? 0) === 0 && (
+        {/* A failed read is not "nothing bought" — the error below says what it is. */}
+        {!history.loading && history.error === undefined && (history.data?.length ?? 0) === 0 && (
           <Empty icon="receipt" title="Nothing bought yet" />
         )}
         {history.data?.slice(0, 10).map((purchase: Purchase) => (
@@ -264,7 +265,7 @@ function Buy({
             </CurrencyPill>
             <TextInput
               value={amount}
-              onChangeText={setAmount}
+              onChangeText={(t) => setAmount(typedAmount(t, exponentFor(selected?.currency ?? 'NGN')))}
               keyboardType="decimal-pad"
               placeholder="0"
               placeholderTextColor={colors.text3}

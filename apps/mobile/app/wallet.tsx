@@ -406,7 +406,10 @@ export default function Home() {
           different products, and "See all" led from the better one to the
           worse one — the web's own split, fixed the same way.
         */}
-        <TxList entries={history.data?.entries.slice(0, 6) ?? []} onOpen={setOpenTx} />
+        {/* Only the answer for THIS currency — see the web's home screen. */}
+        {!history.loading && history.error === undefined && (
+          <TxList entries={history.data?.entries.slice(0, 6) ?? []} onOpen={setOpenTx} />
+        )}
 
         {openTx !== undefined && (
           <TransactionSheet id={openTx} onClose={() => setOpenTx(undefined)} />

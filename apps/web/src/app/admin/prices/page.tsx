@@ -380,7 +380,9 @@ export default function Prices() {
           <Link href="/admin/credentials">Credentials</Link> — and one you
           publish by hand is never overwritten.
         </p>
-        {(rates.data?.length ?? 0) === 0 && (
+        {/* A failed read is not "no rate is published". */}
+        {rates.error !== undefined && <p className="error">{rates.error}</p>}
+        {rates.error === undefined && !rates.loading && (rates.data?.length ?? 0) === 0 && (
           <p className="empty">
             No rate is published. Every pair is quoted by the provider, which
             refuses any corridor it does not cover.

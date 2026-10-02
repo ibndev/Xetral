@@ -80,6 +80,17 @@ function Checkout({ slug }: { readonly slug: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
   const [paid, setPaid] = useState(false);
+  /*
+   * WHAT THE PAYER SEES ON COMING BACK FROM THE PROVIDER. It was only `paid`,
+   * so a return whose settle said "pending" — the webhook not yet landed, the
+   * ordinary case — or "failed" showed the EMPTY CHECKOUT again with no word
+   * at all: a payer who had just paid was looking at a form inviting them to
+   * pay again.
+   */
+  const [returned, setReturned] = useState<'checking' | 'pending' | 'failed' | undefined>();
+  /* A lookup that could not be ANSWERED is not a link that does not exist. */
+  const [lookupFailed, setLookupFailed] = useState(false);
+  const [lookupNonce, setLookupNonce] = useState(0);
 
   /*
    * A REQUEST'S PREFILL, off the query string — the amount, currency and
@@ -116,23 +127,34 @@ function Checkout({ slug }: { readonly slug: string }) {
 
   useEffect(() => {
     let live = true;
+    setLookupFailed(false);
     void (async () => {
       try {
         const response = await fetch(`/api/x/v1/pay/${encodeURIComponent(slug)}`);
-        if (!response.ok) {
+        /*
+         * ONLY A 404 MEANS "NOT ACTIVE". A dropped connection, a 5xx or a 429
+         * all read "This link is not active" — a working link reported dead
+         * to the stranger it was sent to, who then tells the sender it is
+         * broken.
+         */
+        if (response.status === 404) {
           if (live) setMissing(true);
+          return;
+        }
+        if (!response.ok) {
+          if (live) setLookupFailed(true);
           return;
         }
         const body = (await response.json()) as Payee;
         if (live) setPayee(body);
       } catch {
-        if (live) setMissing(true);
+        if (live) setLookupFailed(true);
       }
     })();
     return () => {
       live = false;
     };
-  }, [slug]);
+  }, [slug, lookupNonce]);
 
   /*
    * THE PAYER COMING BACK FROM PAYSTACK.
@@ -147,6 +169,7 @@ function Checkout({ slug }: { readonly slug: string }) {
   useEffect(() => {
     const reference = new URLSearchParams(window.location.search).get('paid');
     if (reference === null) return;
+    setReturned('checking');
     void (async () => {
       try {
         const response = await fetch('/api/x/v1/pay/settle', {
@@ -155,11 +178,19 @@ function Checkout({ slug }: { readonly slug: string }) {
           body: JSON.stringify({ reference }),
         });
         const body = (await response.json()) as { status?: string };
-        if (body.status === 'credited' || body.status === 'replayed') setPaid(true);
+        if (body.status === 'credited' || body.status === 'replayed') {
+          setPaid(true);
+          setReturned(undefined);
+        } else if (body.status === 'failed') {
+          setReturned('failed');
+        } else {
+          setReturned('pending');
+        }
       } catch {
-        // Silent. The webhook is the path that must work; this one only makes
-        // it quicker, and a failure here must not tell the payer their money
-        // went nowhere when it did.
+        // NOT KNOWING IS "PENDING", never "failed". The webhook is the path
+        // that must work; a failure here must not tell the payer their money
+        // went nowhere when it may have arrived.
+        setReturned('pending');
       }
     })();
   }, []);
@@ -286,10 +317,27 @@ function Checkout({ slug }: { readonly slug: string }) {
           {paid ? (
             <div className="auth-card animate-in d2">
               <h1>Payment received</h1>
+              {/* NO RECEIPT IS PROMISED. Nothing here sends the payer one —
+                  there is no template for it — so promising one was a claim
+                  about somebody else's inbox. */}
+              <p className="lead">Thank you. {payee?.name ?? 'They'} have been paid.</p>
+            </div>
+          ) : returned === 'checking' || returned === 'pending' ? (
+            <div className="auth-card animate-in d2" aria-live="polite">
+              <h1>{returned === 'checking' ? 'Confirming your payment…' : 'Payment being confirmed'}</h1>
               <p className="lead">
-                Thank you. {payee?.name ?? 'They'} have been paid, and a receipt is on its way to
-                your email address.
+                {returned === 'checking'
+                  ? 'This takes a moment.'
+                  : `We are waiting for the bank to confirm it. You do not need to pay again — ${payee?.name ?? 'they'} will be credited as soon as it is confirmed.`}
               </p>
+            </div>
+          ) : lookupFailed ? (
+            <div className="auth-card animate-in d2">
+              <h1>We could not load this payment page</h1>
+              <p className="lead">Check your connection and try again.</p>
+              <button type="button" className="block" onClick={() => setLookupNonce((n) => n + 1)}>
+                Try again
+              </button>
             </div>
           ) : missing ? (
             /* The same words for a link that never existed and one whose owner
@@ -309,6 +357,13 @@ function Checkout({ slug }: { readonly slug: string }) {
                 The figure is the whole of what is being asked, so it leads,
                 centred and large; everything a payer must type sits under it.
               */}
+              {/* A DECLINED OR CANCELLED PAYMENT IS SAID — it came back to the
+                  same empty form with nothing on it. */}
+              {returned === 'failed' && (
+                <p className="error animate-in" role="alert">
+                  That payment did not go through, and nothing was taken. You can try again.
+                </p>
+              )}
               <form className="req-card animate-in d1" onSubmit={pay}>
                 <div className="req-payee">
                   <span className="req-avatar" aria-hidden>{initials === '' ? '·' : initials}</span>

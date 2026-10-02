@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
-import { ApiError, entryKindLabel, entryTitle, exponentFor, formatAmount, isValidAmount } from '@xetral/client';
-import type { Card, CardActivity, CardFundingPlan, CardSecrets } from '@xetral/client';
+import { ApiError, codeOf, entryKindLabel, entryTitle, exponentFor, formatAmount, isValidAmount, messageFor, typedAmount } from '@xetral/client';
+import type { ApiErrorCode, Card, CardActivity, CardFundingPlan, CardSecrets } from '@xetral/client';
 
 /** Refusals that mean the stored plan can no longer run — start a new one. */
 const REPLAN: ReadonlySet<string> = new Set(['rate_moved', 'insufficient_funds', 'below_minimum', 'pair_not_supported']);
@@ -32,8 +32,12 @@ export default function Cards() {
      operator changed the setting. */
   const cards = useLoad(() => client.cardList(), [client]);
   const list = cards.data?.cards;
-  const identity = useLoad(() => client.kyc().catch(() => null), [client]);
+  const identity = useLoad(() => client.kyc(), [client]);
   const holder = identity.data?.full_name;
+  /* UNVERIFIED ONLY WHEN THE ANSWER SAYS SO — see the web's Cards screen. A
+     failed or unfinished read was `null`, which is also "never submitted". */
+  const knownUnverified =
+    !identity.loading && identity.error === undefined && identity.data?.status !== 'approved';
 
   if (cards.code === 'kyc_required') {
     return (
@@ -131,7 +135,7 @@ export default function Cards() {
         <View style={{ marginTop: space.lg }}>
         <Issue
           price={cards.data?.issuance_fee}
-          verified={identity.data?.status === 'approved'}
+          verified={!knownUnverified}
           onNeedsVerification={() => setAskingToVerify(true)}
           onIssued={() => {
             setAdding(false);
@@ -403,18 +407,27 @@ function CardRow({
    * Stamped with the amount it is for, and shown only on a match.
    */
   const [plan, setPlan] = useState<{ forAmount: string; plan: CardFundingPlan }>();
+  /* A REFUSED PLAN IS SAID, NOT SWALLOWED — the web's rule. */
+  const [planError, setPlanError] = useState<{ forAmount: string; message: string; code: ApiErrorCode | undefined }>();
   useEffect(() => {
     if (!isValidAmount(amount, exponentFor(card.currency)) || /^0*(\.0*)?$/.test(amount)) return;
     const asked = amount;
     const timer = setTimeout(() => {
       client
         .cardFundingPlan(card.id, asked)
-        .then((p) => setPlan({ forAmount: asked, plan: p }))
-        .catch(() => setPlan(undefined));
+        .then((p) => {
+          setPlan({ forAmount: asked, plan: p });
+          setPlanError(undefined);
+        })
+        .catch((cause: unknown) => {
+          setPlan(undefined);
+          setPlanError({ forAmount: asked, message: messageFor(cause), code: codeOf(cause) });
+        });
     }, 300);
     return () => clearTimeout(timer);
   }, [client, amount, card.id, card.currency]);
   const planned = plan !== undefined && plan.forAmount === amount ? plan.plan : undefined;
+  const planRefusal = planError !== undefined && planError.forAmount === amount ? planError : undefined;
   const converting = planned?.legs.some((leg) => leg.converted) ?? false;
   /* The card's base currency, set once — the web's options exactly. */
   const [choosingBase, setChoosingBase] = useState(false);
@@ -650,7 +663,7 @@ function CardRow({
               inputMode="decimal"
               placeholder="25.00"
               value={amount}
-              onChangeText={setAmount}
+              onChangeText={(t) => setAmount(typedAmount(t, exponentFor(card.currency)))}
             />
           )}
 
@@ -679,6 +692,9 @@ function CardRow({
             <Text style={[styles.hint, { color: colors.danger }]}>
               Your balances together don’t cover {formatAmount(planned.amount, card.currency)}.
             </Text>
+          )}
+          {pending === 'fund' && planRefusal !== undefined && (
+            <FormError error={planRefusal.message} code={planRefusal.code} />
           )}
 
           <Field

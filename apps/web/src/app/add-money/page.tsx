@@ -43,7 +43,7 @@ import { useLoad, useSubmit, useXetral } from '@/lib/hooks';
  */
 export default function AddMoney() {
   const client = useXetral();
-  const { busy, error: issueError, code: issueCode, run } = useSubmit();
+  const { busy, error: issueError, code: issueCode, done: linked, run } = useSubmit();
   // Its own, so an account that could not be opened never lends its error to
   // the wallet form below, and a wallet refusal never reads as the account's.
   const opener = useSubmit();
@@ -280,7 +280,26 @@ export default function AddMoney() {
           show is that it is happening, or — if every rail refused — the
           reason, in words, and that the next visit asks again.
         */}
-        {!account.loading && !has && usesVirtualAccount && (
+        {/*
+          A READ THAT FAILED IS NOT AN ACCOUNT BEING OPENED. The effect above
+          deliberately opens nothing while the read has an error — and this
+          panel then said "Setting up your account number…" for ever, with the
+          real reason at the bottom of the page. It says what happened and
+          offers to ask again.
+        */}
+        {!account.loading && !has && account.error !== undefined && (
+          <div className="activate" aria-live="polite">
+            <p className="activate-lead">We could not check your account number.</p>
+            <FormError error={account.error} code={account.code} />
+            <div>
+              <button type="button" className="quiet" onClick={account.reload}>
+                Try again
+              </button>
+            </div>
+          </div>
+        )}
+
+        {!account.loading && !has && account.error === undefined && usesVirtualAccount && (
           <div className="activate" aria-live="polite">
             {opening !== 'done' ? (
               <p className="activate-lead">Setting up your account number…</p>
@@ -347,13 +366,13 @@ export default function AddMoney() {
             no-account panel, so a customer WITH an account number who could
             not link a wallet pressed the button and saw nothing at all. */}
         {!account.loading && usesMobileMoney && <FormError error={issueError} code={issueCode} />}
+        {/* What linking or removing did. It was returned and never drawn. */}
+        {!account.loading && usesMobileMoney && linked !== undefined && <p className="ok">{linked}</p>}
 
       {!account.loading && <PayIn currency={home} client={client} />}
 
       {/* Anything that is NOT the verification gate. A provider outage or a
           signed-out session is a different problem and needs its own words. */}
-      <FormError error={account.error} code={account.code} />
-
       {/*
         AND ASKING TO BE PAID IS A DIFFERENT SCREEN — `/request`.
 

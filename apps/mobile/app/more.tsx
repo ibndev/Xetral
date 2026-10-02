@@ -49,7 +49,9 @@ export default function More() {
   const client = useXetral();
   const styles = useStyles();
   const colors = useTheme();
-  const kyc = useLoad(() => client.kyc().catch(() => null), [client]);
+  /* A failed read is NOT "never submitted" — it was `.catch(() => null)`,
+     and the banner then asked a verified customer to verify. */
+  const kyc = useLoad(() => client.kyc(), [client]);
   const verified = kyc.data?.status === 'approved';
   const services = useLoad(() => client.services(), [client]);
 
@@ -61,7 +63,7 @@ export default function More() {
       {/* Put FIRST when it is outstanding, rather than buried under Account.
           It is what unblocks the account number and the card, and a customer
           refused by either arrives here looking for it. */}
-      {!kyc.loading && !verified && (
+      {!kyc.loading && kyc.error === undefined && !verified && (
         <Link href={'/kyc' as never} asChild>
           <Pressable
             accessibilityRole="link"
@@ -81,7 +83,7 @@ export default function More() {
                 Verify your identity
               </Text>
               <Text style={styles.hint}>
-                Required before an account number or a card can be issued.
+                Required for a dollar card and higher daily limits.
               </Text>
             </View>
             <Icon name="chevronRight" size={18} color={colors.text3} />

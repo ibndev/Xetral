@@ -129,6 +129,19 @@ export default function Esim() {
                 <Text style={styles.muted}>
                   {p.status === 'reserved' ? 'Waiting on the provider. Your money is held, not spent.' : p.status}
                 </Text>
+                {/*
+                  THE ACTIVATION DETAILS, which the phone never showed. Nothing
+                  emails them — the screen said it did — so this list is the
+                  ONLY place a customer on the phone can read what they paid
+                  for. Selectable, because the LPA string is what "enter
+                  details manually" in a phone's eSIM settings asks for.
+                */}
+                {p.delivery !== null &&
+                  Object.entries(p.delivery).map(([k, v]) => (
+                    <Text key={k} selectable style={[styles.muted, { fontFamily: font.mono }]}>
+                      {k}: {v}
+                    </Text>
+                  ))}
               </View>
               <Text style={styles.amount}>{formatAmount(p.amount, p.currency)}</Text>
             </View>
@@ -174,7 +187,7 @@ function Buy(props: {
       </View>
 
       <Field
-        label="Email for the QR code"
+        label="Your email"
         inputMode="email"
         autoCapitalize="none"
         value={email}
@@ -206,8 +219,8 @@ function Buy(props: {
               setPin('');
               props.onBought();
               return purchase.status === 'delivered'
-                ? 'Done. The QR code is on its way to your email.'
-                : 'Submitted. We will email the QR code shortly.';
+                ? 'Done. Your eSIM’s activation details are under Your eSIMs below.'
+                : 'Submitted. Your eSIM appears under Your eSIMs once the provider confirms it.';
             })
           }
         />

@@ -180,6 +180,8 @@ function YourDetails() {
             : 'What we hold about your account'
       }
     >
+      {/* A failed read drew every field as "—" with no reason. */}
+      <FormError error={details.error} code={details.code} />
       {/*
         THE MISSING NUMBER IS SAID IN ITS OWN WORDS. Without one nobody can pay
         this customer at all — the Request payment panel says only "Not set",

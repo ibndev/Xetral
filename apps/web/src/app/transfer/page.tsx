@@ -2,17 +2,20 @@
 
 import { Suspense, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   currencyName,
+  exceedsBalance,
   exponentFor,
   feeOn,
+  figureOf,
   formatAmount,
   groupTyped,
   PAD,
   pressKey,
   isValidAmount,
+  recipientMatches,
+  typedAmount,
   nationalDigits,
   networkLabel,
   phoneHint,
@@ -34,6 +37,7 @@ import { Icon } from '@/ui/icon';
 import { Select } from '@/ui/select';
 import { CurrencyMark } from '@/ui/currency-mark';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/lib/hooks';
+import { messageFor } from '@/lib/errors';
 
 /**
  * SENDING MONEY, AS ONE FLOW.
@@ -187,8 +191,18 @@ function Transfer() {
             setStep('amount');
           }}
           onRemove={async (id) => {
-            await client.removeRecipient(id);
-            saved.reload();
+            /* A REMOVAL THAT FAILED WAS SILENT — `void onRemove(...)` dropped
+               the rejection, and the row simply stayed with nothing saying
+               why. The list reloads either way; the refusal is returned for
+               the row to show. */
+            try {
+              await client.removeRecipient(id);
+              return undefined;
+            } catch (cause) {
+              return messageFor(cause);
+            } finally {
+              saved.reload();
+            }
           }}
           onNew={() => {
             setChosen(undefined);
@@ -268,6 +282,14 @@ function Transfer() {
             saved.reload();
             wallets.reload();
             setStep('success');
+          }}
+          /* THE WAY BACK TO THE LIST. It was a `<Link href="/transfer">` —
+             the page it was already on, so Next kept every piece of state
+             and the link did nothing at all. */
+          onChangeRecipient={() => {
+            setChosen(undefined);
+            setDraft(undefined);
+            setStep('who');
           }}
         />
       )}
@@ -404,21 +426,18 @@ function ChooseRecipient({
   recipients: readonly Recipient[];
   home: string;
   onPick: (recipient: Recipient) => void;
-  onRemove: (id: string) => Promise<void>;
+  /** Resolves to the refusal's words, or undefined when it was removed. */
+  onRemove: (id: string) => Promise<string | undefined>;
   onNew: () => void;
 }) {
   const [query, setQuery] = useState('');
   const [menu, setMenu] = useState<string | undefined>(undefined);
+  const [removeError, setRemoveError] = useState<string | undefined>(undefined);
 
-  const shown = recipients.filter((r) => {
-    if (query.trim() === '') return true;
-    const needle = query.trim().toLowerCase();
-    return (
-      r.display_name.toLowerCase().includes(needle) ||
-      r.destination.includes(needle.replace(/[^0-9]/g, '')) ||
-      (r.rail_name ?? '').toLowerCase().includes(needle)
-    );
-  });
+  /* `recipientMatches`, shared with the phone: the inline copy stripped the
+     query to its digits, so ANY name typed became "" — which every number
+     contains — and the search box filtered nothing. */
+  const shown = recipients.filter((r) => recipientMatches(r, query));
 
   return (
     <section className="sf">
@@ -501,7 +520,8 @@ function ChooseRecipient({
                   className="btn small danger"
                   onClick={() => {
                     setMenu(undefined);
-                    void onRemove(r.id);
+                    setRemoveError(undefined);
+                    void onRemove(r.id).then(setRemoveError);
                   }}
                 >
                   Remove
@@ -521,6 +541,7 @@ function ChooseRecipient({
             </div>
           ))}
           {shown.length === 0 && <p className="sf-empty">Nobody on this list matches that.</p>}
+          {removeError !== undefined && <p className="error">{removeError}</p>}
         </>
       )}
     </section>
@@ -1304,6 +1325,7 @@ function SendAmount({
   balances,
   home,
   onSent,
+  onChangeRecipient,
 }: {
   to: Recipient;
   /** What the recipient RECEIVES, as the flow decided it — not as the row
@@ -1324,6 +1346,7 @@ function SendAmount({
     reference?: string;
     instant: boolean;
   }) => void;
+  onChangeRecipient: () => void;
 }) {
   const client = useXetral();
   const { busy, error, code, done, run } = useSubmit();
@@ -1381,7 +1404,9 @@ function SendAmount({
    * friend quote in cedis.
    */
   const lands_in = receiveCurrency;
-  const balance = balances.find((b) => b.currency === sendCurrency)?.spendable ?? '0';
+  /* UNDEFINED UNTIL THE BALANCES ARRIVE — never '0', which made the screen
+     claim "Exceeds your 0 balance" while they were loading. */
+  const balance = balances.find((b) => b.currency === sendCurrency)?.spendable;
   const sameCurrency = sendCurrency === lands_in;
 
   /*
@@ -1427,6 +1452,16 @@ function SendAmount({
    * quote itself is stamped with `forAmount`.
    */
   const belowMinimum = amount !== '' && enough && quote.code === 'below_minimum';
+  /*
+   * "EXCEEDS YOUR BALANCE" WHEN IT DOES, AND ONLY THEN. The chip fired on
+   * `!enough` — a malformed amount, "5." mid-keystroke, three decimals of
+   * naira — and never on an amount that really was larger than the balance.
+   * Compared in minor units; the overdraft guard is still what decides.
+   */
+  const over = exceedsBalance(amount, balance, sendCurrency) === true;
+  const exponent = exponentFor(sendCurrency);
+  const point = amount.indexOf('.');
+  const tooPrecise = point !== -1 && amount.length - point - 1 > exponent;
 
   return (
     <form
@@ -1569,7 +1604,9 @@ function SendAmount({
           </span>
           <input
             value={amount}
-            onChange={(e) => setAmount(e.target.value)}
+            /* CLEANED AS IT IS TYPED. A comma here reached `feeOn`'s BigInt
+               and took the whole screen down during render. */
+            onChange={(e) => setAmount(typedAmount(e.target.value, exponent))}
             inputMode="decimal"
             aria-label={`Amount to send in ${sendCurrency}`}
           />
@@ -1608,7 +1645,7 @@ function SendAmount({
             {converting
               ? '…'
               : sameCurrency
-                ? formatAmount(amount === '' ? '0' : amount, lands_in)
+                ? formatAmount(figureOf(amount), lands_in)
                 : formatAmount(lands?.receives ?? '0', lands_in)}
           </strong>
         </p>
@@ -1624,9 +1661,15 @@ function SendAmount({
           fell back to a generic hint, and the customer was left to guess
           upward.
         */}
-        {amount !== '' && !enough ? (
+        {over && balance !== undefined ? (
           <span className="sf-enter-chip bad">
             Exceeds your {formatAmount(balance, sendCurrency)} balance
+          </span>
+        ) : tooPrecise ? (
+          <span className="sf-enter-chip bad">
+            {exponent === 0
+              ? `${sendCurrency} has no decimal places`
+              : `${sendCurrency} takes at most ${exponent} decimal places`}
           </span>
         ) : belowMinimum ? (
           <span className="sf-enter-chip bad">{quote.error}</span>
@@ -1674,7 +1717,7 @@ function SendAmount({
             key={key}
             type="button"
             className="sf-key"
-            onClick={() => setAmount((was) => pressKey(was, key))}
+            onClick={() => setAmount((was) => pressKey(was, key, exponent))}
             aria-label={key === '<' ? 'Delete' : key}
           >
             {/*
@@ -1715,12 +1758,16 @@ function SendAmount({
       {/* AND THE BUTTON IS REFUSED WHILE THE AMOUNT IS BELOW THE FLOOR. The
           note above says what the minimum is; letting Continue through anyway
           would spend a PIN attempt to be told the same thing by the server. */}
-      <button type="submit" disabled={busy || !enough || belowMinimum || pin === ''}>
+      <button type="submit" disabled={busy || !enough || over || belowMinimum || pin === ''}>
         {busy ? 'Sending…' : 'Continue'}
       </button>
 
       <p className="hint">
-        Wrong person? <Link href="/transfer">Choose somebody else</Link>.
+        Wrong person?{' '}
+        <button type="button" className="link" onClick={onChangeRecipient}>
+          Choose somebody else
+        </button>
+        .
       </p>
     </form>
   );

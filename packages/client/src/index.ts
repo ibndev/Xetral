@@ -11,6 +11,7 @@ export * from './momo-networks.js';
 export * from './receipt.js';
 export * from './entry-kind.js';
 export * from './amount-entry.js';
+export * from './recipient-search.js';
 export * from './portfolio.js';
 export * from './request-link.js';
 export * from './retry.js';

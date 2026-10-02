@@ -189,7 +189,7 @@ export class PurchaseService {
 
     // A retried request finds the first attempt rather than starting a second.
     const existing = await this.#byKey(userId, body.idempotency_key);
-    if (existing !== undefined) return this.#toView(existing);
+    if (existing !== undefined) return refuseIfReversed(this.#toView(existing));
 
     /*
      * THE PRICE IS THE PROVIDER'S, NOT THE REQUEST'S.
@@ -217,7 +217,7 @@ export class PurchaseService {
      * refusal that `providerDidNothing` read as "nothing happened" and
      * reversed while the first was being delivered.
      */
-    if (!reserve.created) return this.#toView(await this.#reload(reserve.purchaseId));
+    if (!reserve.created) return refuseIfReversed(this.#toView(await this.#reload(reserve.purchaseId)));
 
     let result: PurchaseResult;
     try {
@@ -263,7 +263,14 @@ export class PurchaseService {
         await this.#reserved(reserve.purchaseId),
         result.failureReason ?? 'provider declined',
       );
-      return this.#toView(await this.#reload(reserve.purchaseId));
+      this.#logger.warn(`purchase ${reference} declined by ${port.provider}: ${result.failureReason ?? 'no reason'}`);
+      /*
+       * A REFUSAL, NOT A 200 CARRYING `status: "reversed"`. Both apps read a
+       * 200 as a purchase that went through and said "Submitted. We will
+       * confirm shortly." about airtime the provider had just declined — the
+       * payout bug `payout_failed` fixed, one flow over.
+       */
+      throw new UnprocessableEntityException({ error: 'purchase_failed' });
     }
 
     await this.outcomes.settle(await this.#reserved(reserve.purchaseId), result);
@@ -405,7 +412,14 @@ export class PurchaseService {
         row.delivery_sealed === null
           ? null
           : (JSON.parse(open(row.delivery_sealed, this.outcomes.keyring())) as Record<string, string>),
-      failure_reason: row.failure_reason,
+      /*
+       * NEVER THE ROW'S OWN SENTENCE. `purchases.failure_reason` holds the
+       * provider's words ("[vtpass] HTTP 401 …") or a reviewer's note
+       * ("refunded by staff: …") — 006's rule keeps the first from the
+       * customer, and the second is an operator talking to operators. The
+       * refusal already carried no detail; this list printed it anyway.
+       */
+      failure_reason: row.status === 'reversed' ? CUSTOMER_REVERSED : null,
     };
   }
 
@@ -501,4 +515,13 @@ function currencyFor(service: ServiceKind): Currency {
 
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : 'the provider refused the purchase';
+}
+
+/** What a customer reads about a purchase that was given back. */
+const CUSTOMER_REVERSED = 'It did not go through, and your money was returned.';
+
+/** A purchase that was given back is a refusal on the request that made it. */
+function refuseIfReversed(view: PurchaseView): PurchaseView {
+  if (view.status !== 'reversed') return view;
+  throw new UnprocessableEntityException({ error: 'purchase_failed' });
 }

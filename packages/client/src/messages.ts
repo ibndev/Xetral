@@ -461,6 +461,8 @@ function sentenceFor(error: ApiError): string {
       // it refuses — so this says so rather than leaving somebody watching a
       // balance and wondering.
       return 'That transfer did not go through. Your money has been returned.';
+    case 'withdrawal_failed':
+      return 'That withdrawal did not go through. Nothing left your account.';
     case 'purchase_not_found':
       return 'We could not find that purchase.';
     case 'verification_not_supported':

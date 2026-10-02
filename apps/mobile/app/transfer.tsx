@@ -4,13 +4,16 @@ import { useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   currencyName,
+  exceedsBalance,
   exponentFor,
   feeOn,
+  figureOf,
   formatAmount,
   groupTyped,
   isValidAmount,
   PAD,
   pressKey,
+  recipientMatches,
   nationalDigits,
   networkLabel,
   phoneHint,
@@ -31,6 +34,7 @@ import { Select } from '@/select';
 import { Icon } from '@/icon';
 import { CurrencyMark } from '@/currency-mark';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/hooks';
+import { messageFor } from '@/errors';
 import { font, radius, space, useStyles, useTheme } from '@/theme';
 import type { Palette } from '@/theme';
 
@@ -188,8 +192,16 @@ export default function Transfer() {
             setStep('amount');
           }}
           onRemove={async (id) => {
-            await client.removeRecipient(id);
-            saved.reload();
+            /* A failed removal was silent — `void onRemove(...)` dropped the
+               rejection and the row simply stayed. See the web screen. */
+            try {
+              await client.removeRecipient(id);
+              return undefined;
+            } catch (cause) {
+              return messageFor(cause);
+            } finally {
+              saved.reload();
+            }
           }}
           onNew={startNew}
         />
@@ -294,13 +306,15 @@ function ChooseRecipient({
   readonly home: string;
   readonly loading: boolean;
   readonly onPick: (recipient: Recipient) => void;
-  readonly onRemove: (id: string) => Promise<void>;
+  /** Resolves to the refusal's words, or undefined when it was removed. */
+  readonly onRemove: (id: string) => Promise<string | undefined>;
   readonly onNew: () => void;
 }) {
   const styles = useStyles();
   const sf = useSf();
   const [query, setQuery] = useState('');
   const [menu, setMenu] = useState<string | undefined>(undefined);
+  const [removeError, setRemoveError] = useState<string | undefined>(undefined);
   
   /*
    * THE CHIPS ARE THE CURRENCIES THIS CUSTOMER ACTUALLY PAYS, not every
@@ -320,15 +334,10 @@ function ChooseRecipient({
     });
   }, [recipients, home]);
 
-  const shown = recipients.filter((r) => {
-    if (query.trim() === '') return true;
-    const needle = query.trim().toLowerCase();
-    return (
-      r.display_name.toLowerCase().includes(needle) ||
-      r.destination.includes(needle.replace(/[^0-9]/g, '')) ||
-      (r.rail_name ?? '').toLowerCase().includes(needle)
-    );
-  });
+  /* `recipientMatches`, shared with the web: the inline copy stripped the
+     query to its digits, so any NAME typed became "" — which every number
+     contains — and the search filtered nothing. */
+  const shown = recipients.filter((r) => recipientMatches(r, query));
 
   return (
     <Panel bare title="Who do you want to send money to?">
@@ -490,10 +499,12 @@ function ChooseRecipient({
               onPress={() => {
                 const id = menu;
                 setMenu(undefined);
-                void onRemove(id);
+                setRemoveError(undefined);
+                void onRemove(id).then(setRemoveError);
               }}
             />
           )}
+          <FormError error={removeError} code={undefined} />
         </View>
       )}
 
@@ -1370,7 +1381,8 @@ function SendAmount({
    * friend quote in cedis.
    */
   const lands_in = receiveCurrency;
-  const balance = balances.find((b) => b.currency === sendCurrency)?.spendable ?? '0';
+  /* UNDEFINED UNTIL THE BALANCES ARRIVE, never '0' — see `exceedsBalance`. */
+  const balance = balances.find((b) => b.currency === sendCurrency)?.spendable;
   const sameCurrency = sendCurrency === lands_in;
 
   /*
@@ -1417,6 +1429,11 @@ function SendAmount({
    * quote itself is stamped with `forAmount`.
    */
   const belowMinimum = amount !== '' && enough && quote.code === 'below_minimum';
+  /* "EXCEEDS YOUR BALANCE" WHEN IT DOES, AND ONLY THEN — it fired on a
+     malformed amount ("5." mid-keystroke) and never on a real one. */
+  const over = exceedsBalance(amount, balance, sendCurrency) === true;
+  const exponent = exponentFor(sendCurrency);
+  const bad = over || belowMinimum || quote.code === 'pair_not_supported';
 
   /* A text-field-sized box, not a card: 56px, flat, one line. */
   const amountBox = {
@@ -1525,7 +1542,7 @@ function SendAmount({
             {converting
               ? '…'
               : sameCurrency
-                ? formatAmount(amount === '' ? '0' : amount, lands_in)
+                ? formatAmount(figureOf(amount), lands_in)
                 : formatAmount(lands?.receives ?? '0', lands_in)}
           </Text>
         </Text>
@@ -1544,22 +1561,16 @@ function SendAmount({
           style={{
             marginTop: 10, paddingVertical: 6, paddingHorizontal: 12,
             borderRadius: radius.pill,
-            backgroundColor:
-              (amount !== '' && !enough) || belowMinimum || quote.code === 'pair_not_supported'
-                ? colors.dangerBg
-                : colors.surface,
+            backgroundColor: bad ? colors.dangerBg : colors.surface,
           }}
         >
           <Text
             style={{
               fontSize: 12, fontFamily: font.sansSemi,
-              color:
-                (amount !== '' && !enough) || belowMinimum || quote.code === 'pair_not_supported'
-                  ? colors.danger
-                  : sf.section,
+              color: bad ? colors.danger : sf.section,
             }}
           >
-            {amount !== '' && !enough
+            {over && balance !== undefined
               ? `Exceeds your ${formatAmount(balance, sendCurrency)} balance`
               : belowMinimum
                 ? (quote.error ?? '')
@@ -1609,7 +1620,7 @@ function SendAmount({
         {PAD.map((k) => (
           <Pressable
             key={k}
-            onPress={() => setAmount((was) => pressKey(was, k))}
+            onPress={() => setAmount((was) => pressKey(was, k, exponent))}
             android_ripple={null}
             accessibilityRole="button"
             accessibilityLabel={k === '<' ? 'Delete' : k}
@@ -1646,7 +1657,7 @@ function SendAmount({
         /* Refused while the amount is below the floor: the note above says
            what the minimum is, and letting this through would spend a PIN
            attempt to be told the same thing by the server. */
-        disabled={!enough || belowMinimum || pin === ''}
+        disabled={!enough || over || belowMinimum || pin === ''}
         onPress={() => {
           void run(async () => {
             /*
@@ -1659,25 +1670,29 @@ function SendAmount({
              * screen made this a tab; here it follows from the recipient and
              * the currency, which is the whole of the unification.
              */
+            /* THE AMOUNT THE CONFIRMATION SHOWS IS THE SERVER'S — the figure
+               the ledger posted, correctly scaled — not the one typed. The web
+               screen has done this since its success screen landed. */
+            let recorded = amount;
             if (to.kind === 'xetral' && sameCurrency) {
-              await client.transfer({
+              recorded = (await client.transfer({
                 recipient: to.destination,
                 amount,
                 currency: sendCurrency,
                 pin,
                 idempotencyKey: key,
-              });
+              })).amount;
             } else if (to.kind === 'xetral') {
-              await client.remit({
+              recorded = (await client.remit({
                 from: sendCurrency,
                 to: lands_in,
                 amount,
                 recipient: to.destination,
                 pin,
                 idempotencyKey: key,
-              });
+              })).amount;
             } else {
-              await client.payToBank({
+              recorded = (await client.payToBank({
                 country: to.country,
                 bankCode: to.rail_code ?? '',
                 accountNumber: to.destination,
@@ -1697,12 +1712,12 @@ function SendAmount({
                 currency: sendCurrency,
                 pin,
                 idempotencyKey: key,
-              });
+              })).amount;
             }
             next();
             setAmount('');
             setPin('');
-            onSent({ amount, currency: sendCurrency, name: to.display_name });
+            onSent({ amount: recorded, currency: sendCurrency, name: to.display_name });
             return undefined;
           });
         }}

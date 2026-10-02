@@ -274,7 +274,14 @@ function Convert() {
                 ? quoteError
                 : amount === ''
                   ? 'Enter an amount to see today’s rate'
-                  : 'Getting today’s rate…'}
+                  : /* NOTHING IS ASKED FOR AN AMOUNT THAT DOES NOT PARSE —
+                       the effect returns early — so "Getting today's rate…"
+                       here was a sentence about a request never made. */
+                    !isValidAmount(amount, exponentFor(from))
+                    ? exponentFor(from) === 0
+                      ? `${from} has no decimal places`
+                      : `Enter an amount in ${from}, with at most ${exponentFor(from)} decimal places`
+                    : 'Getting today’s rate…'}
           </span>
         </div>
         {quote !== undefined && (
@@ -323,6 +330,7 @@ function Convert() {
       <div className="card">
         <h2>Past conversions</h2>
         {trades.loading && <p className="spinner">Loading…</p>}
+        {trades.error !== undefined && <p className="error">{trades.error}</p>}
         {trades.data !== undefined && trades.data.length === 0 && (
           <p className="empty">Nothing yet.</p>
         )}

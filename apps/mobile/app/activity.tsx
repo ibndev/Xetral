@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Pressable, ScrollView, Text } from 'react-native';
-import { activityFiltersFor } from '@xetral/client';
+import { activityFiltersFor, messageFor } from '@xetral/client';
 import type { Transaction } from '@xetral/client';
 import { Shell } from '@/shell';
 import { Empty, FormError, Loading } from '@/ui';
@@ -58,10 +58,24 @@ export default function Activity() {
   // load, so an index would point at a different transaction after a Load more.
   const [open, setOpen] = useState<string | undefined>(undefined);
 
+  /*
+   * WHICH FILTER A PAGE BELONGS TO — see the web's Activity screen. A page
+   * still in flight when another chip was tapped appended the OLD currency's
+   * rows and cursor to the new list.
+   */
+  const filterKey = `${currency}|${(kinds ?? []).join(',')}`;
+  const current = useRef(filterKey);
+  current.current = filterKey;
+  const [moreError, setMoreError] = useState<string | undefined>(undefined);
+
   const first = useLoad(async () => {
+    const asked = filterKey;
     const page = await client.transactions(currency, undefined, kinds);
-    setPages(page.entries);
-    setCursor(page.nextCursor);
+    if (current.current === asked) {
+      setPages(page.entries);
+      setCursor(page.nextCursor);
+      setMoreError(undefined);
+    }
     return page;
   }, [client, currency, kinds]);
 
@@ -69,18 +83,28 @@ export default function Activity() {
 
   async function loadMore() {
     if (cursor === null || paging) return;
+    const asked = filterKey;
     setPaging(true);
+    setMoreError(undefined);
     try {
       const page = await client.transactions(currency, cursor, kinds);
+      if (current.current !== asked) return;
       // Appended, never replaced. The cursor is the previous page's last
       // POSTING id, so a new entry arriving mid-scroll cannot shift what has
       // already been read past.
       setPages((was) => [...was, ...page.entries]);
       setCursor(page.nextCursor);
+    } catch (cause) {
+      // It was an unhandled rejection: nothing said the older rows had not loaded.
+      if (current.current === asked) setMoreError(messageFor(cause));
     } finally {
       setPaging(false);
     }
   }
+
+  /* Only this filter's answer — the previous filter's rows stayed on screen
+     while the next loaded and beside its error. */
+  const settled = !first.loading && first.error === undefined;
 
   return (
     <Shell>
@@ -148,9 +172,10 @@ export default function Activity() {
         headings, and the panel round them was what made this read as a
         settings list rather than as the home screen's own list continued.
       */}
-      <TxList entries={pages} onOpen={setOpen} />
+      {settled && <TxList entries={pages} onOpen={setOpen} />}
 
-      {cursor !== null && (
+      <FormError error={moreError} code={undefined} />
+      {settled && cursor !== null && (
         <Pressable
           onPress={() => void loadMore()}
           accessibilityRole="button"

@@ -503,12 +503,24 @@ describe('withdrawing', () => {
     await fundUsdt(customer.userId, 100_000_000n);
     port.sendAnswer = new ProviderRejectedError('bitnob', 'destination is blacklisted', 'BLACKLISTED');
 
-    const res = await withdraw(customer).expect(200);
-    expect(res.body.status).toBe('failed');
+    /*
+     * A REFUSAL, NOT A 200 CARRYING `status: "failed"`. Both apps read the 200
+     * as a success and said "Sent. It is on the chain now" about money that
+     * never left. And no detail: the provider's sentence is an operator's.
+     */
+    const res = await withdraw(customer).expect(422);
+    expect(res.body.error).toBe('withdrawal_failed');
+    expect(JSON.stringify(res.body)).not.toContain('blacklisted');
     expect(await usdtBalance(customer)).toMatchObject({
       spendable: '100.000000',
       pending: '0.000000',
     });
+
+    const listed = await request(app.getHttpServer())
+      .get('/v1/crypto/withdrawals')
+      .set('Authorization', `Bearer ${customer.token}`)
+      .expect(200);
+    expect(JSON.stringify(listed.body)).not.toContain('blacklisted');
   });
 
   it('holds the money on a TIMEOUT, sending nothing back', async () => {

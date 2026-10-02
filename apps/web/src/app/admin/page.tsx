@@ -41,7 +41,9 @@ export default function Overview() {
   return (
     <>
       <AdminStatus>
-        {drifted === undefined ? null : drifted === 0 ? (
+        {drift.error !== undefined ? (
+          <span className="badge danger dotted">Drift check unavailable</span>
+        ) : drifted === undefined ? null : drifted === 0 ? (
           <span className="badge ok dotted">All ledgers balanced</span>
         ) : (
           <span className="badge danger dotted">
@@ -51,6 +53,20 @@ export default function Overview() {
       </AdminStatus>
 
       {/* A drift check that cannot alarm is not a check: first, and loud. */}
+      {/*
+        AND ONE THAT COULD NOT RUN IS NOT ONE THAT PASSED. A failed read left
+        `drifted` undefined, and the panel below read "Every materialised
+        balance matches its postings" — all clear, from a check that never
+        answered.
+      */}
+      {drift.error !== undefined && (
+        <div className="notice danger">
+          <p>
+            <strong>The drift check could not be read.</strong> Nothing here can
+            say whether the books agree with themselves until it can. {drift.error}
+          </p>
+        </div>
+      )}
       {drifted !== undefined && drifted > 0 && (
         <div className="notice danger">
           <p>
@@ -109,9 +125,13 @@ export default function Overview() {
                   <span className="ov-cap">accounts drifted</span>
                 </span>
                 <p>
-                  {drifted === undefined || drifted === 0
-                    ? 'Every materialised balance matches its postings.'
-                    : 'A balance disagrees with its own postings.'}
+                  {drift.error !== undefined
+                    ? 'The check could not be read.'
+                    : drifted === undefined
+                      ? 'Checking…'
+                      : drifted === 0
+                        ? 'Every materialised balance matches its postings.'
+                        : 'A balance disagrees with its own postings.'}
                 </p>
               </div>
               <LastHour pulse={pulse} />
@@ -123,7 +143,7 @@ export default function Overview() {
             <OwedByCurrency liability={overview.data?.liability} />
           </div>
 
-          <ProviderStrip health={health.data} />
+          <ProviderStrip health={health.data} failed={health.error !== undefined} />
         </>
       )}
     </>
@@ -413,7 +433,14 @@ const PROVIDER_NAMES: Readonly<Record<string, string>> = {
 };
 
 /** The comp's strip: one dot per company and how the recent window went. */
-function ProviderStrip({ health }: { readonly health: AdminProviderHealth | undefined }) {
+function ProviderStrip({
+  health,
+  failed,
+}: {
+  readonly health: AdminProviderHealth | undefined;
+  /** The health read failed — every provider read "idle" before. */
+  readonly failed: boolean;
+}) {
   const byProvider = new Map<string, { calls: number; failures: number }>();
   for (const row of health?.recent ?? []) {
     const had = byProvider.get(row.provider) ?? { calls: 0, failures: 0 };
@@ -427,10 +454,16 @@ function ProviderStrip({ health }: { readonly health: AdminProviderHealth | unde
         const degraded = health?.degraded.some((d) => d.provider === provider) ?? false;
         return (
           <span className="prov" key={provider}>
-            <span className={`dot ${degraded ? 'warn' : calls > 0 ? 'ok' : ''}`} />
+            <span className={`dot ${failed ? 'warn' : degraded ? 'warn' : calls > 0 ? 'ok' : ''}`} />
             {PROVIDER_NAMES[provider] ?? provider}
             <span className="mono">
-              {degraded ? 'degraded' : calls === 0 ? 'idle' : `${Math.floor(((calls - failures) / calls) * 100)}%`}
+              {failed
+                ? 'unknown'
+                : degraded
+                  ? 'degraded'
+                  : calls === 0
+                    ? 'idle'
+                    : `${Math.floor(((calls - failures) / calls) * 100)}%`}
             </span>
           </span>
         );
