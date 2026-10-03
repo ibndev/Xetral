@@ -1,12 +1,13 @@
 import { useRef, useState } from 'react';
 import { Pressable, ScrollView, Text } from 'react-native';
-import { activityFiltersFor, messageFor } from '@xetral/client';
+import { activityFiltersFor, hiddenCurrencies, messageFor } from '@xetral/client';
 import type { Transaction } from '@xetral/client';
 import { Shell } from '@/shell';
 import { Empty, FormError, Loading } from '@/ui';
 import { TxList } from '@/tx-list';
 import { TransactionSheet } from '@/transaction-sheet';
 import { useLoad, useXetral } from '@/hooks';
+import { useServiceStates } from '@/services';
 import { font, radius, space, useStyles, useTheme } from '@/theme';
 
 /**
@@ -45,7 +46,9 @@ export default function Activity() {
   const session = useLoad(() => client.currentSession(), [client]);
   const balances = useLoad(() => client.balances(), [client]);
   const held = (balances.data ?? []).map((b) => b.currency);
-  const FILTERS = activityFiltersFor(session.data?.home_currency ?? 'NGN', held);
+  // No tab for a currency a HIDDEN service took (093), even one held.
+  const { states: services } = useServiceStates();
+  const FILTERS = activityFiltersFor(session.data?.home_currency ?? 'NGN', held, hiddenCurrencies(services));
 
   const [filterId, setFilterId] = useState<string | undefined>();
   const filter = FILTERS.find((f) => f.id === filterId) ?? FILTERS[0];

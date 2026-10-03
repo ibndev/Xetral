@@ -476,6 +476,8 @@ export class FundingDiagnosticsService {
       ['sign_in_events.country_relayed', '090_sign_in_country_relayed.sql'],
       ['test_account_resets', '091_test_account_reset.sql'],
       ['test_account_resets.full_name', '092_test_reset_clears_name.sql'],
+      // A migration that only adds settings rows is named as `set:<key>`.
+      ['set:crypto_when_off', '093_feature_visibility.sql'],
     ];
 
     const missing: string[] = [];
@@ -485,6 +487,13 @@ export class FundingDiagnosticsService {
           name.slice(3),
         ]);
         if ((fn.rowCount ?? 0) === 0) missing.push(`function ${name.slice(3)} (${file})`);
+        continue;
+      }
+      if (name.startsWith('set:')) {
+        const row = await this.pool.query(`SELECT true AS present FROM platform_settings WHERE key = $1`, [
+          name.slice(4),
+        ]);
+        if ((row.rowCount ?? 0) === 0) missing.push(`setting ${name.slice(4)} (${file})`);
         continue;
       }
       const [table, column] = name.split('.');

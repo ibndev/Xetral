@@ -13,6 +13,7 @@ import { DATABASE } from '../tokens.js';
 import { internationalDigits } from '../phone.js';
 import { CountriesService } from '../countries/countries.service.js';
 import { PayoutService } from '../payouts/payout.service.js';
+import { SettingsService } from '../settings/settings.service.js';
 import type { CreateRecipientBody, RecipientKind, ResolveRecipientBody } from './dto.js';
 
 /**
@@ -129,6 +130,7 @@ export class RecipientBookService {
     @Inject(DATABASE) private readonly pool: Pool,
     @Inject(CountriesService) private readonly countries: CountriesService,
     @Inject(PayoutService) private readonly payouts: PayoutService,
+    @Inject(SettingsService) private readonly settings: SettingsService,
   ) {}
 
   async list(userUuid: string): Promise<readonly RecipientView[]> {
@@ -144,7 +146,14 @@ export class RecipientBookService {
         LIMIT 200`,
       [userUuid],
     );
-    return rows.rows.map(toView);
+    // A saved recipient in a currency a hidden service took (093) is not
+    // offered — tapping it could only be refused. The row is untouched.
+    // Nor a bank or wallet recipient while payouts are hidden.
+    const hidden = await this.settings.hiddenCurrencies();
+    const payoutsHidden = (await this.settings.serviceState('payouts')) === 'hidden';
+    return rows.rows
+      .filter((r) => !hidden.has(r.currency) && !(payoutsHidden && r.kind !== 'xetral'))
+      .map(toView);
   }
 
   /**

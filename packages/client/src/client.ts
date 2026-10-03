@@ -1,6 +1,7 @@
 import type { PayMethod } from './pay-methods.js';
 import { ApiError, toApiError } from './errors.js';
 import { Session } from './session.js';
+import { readServiceStates } from './services.js';
 import type { ServiceStates } from './services.js';
 
 /**
@@ -1079,8 +1080,8 @@ export class XetralClient {
   }
 
   /**
-   * Which services are switched on — so a paused one reads "Coming soon"
-   * where it is offered. Held for ten seconds: every screen's Shell asks, and
+   * Which services are on, Coming soon or hidden — so a paused one reads
+   * "Coming soon" where it is offered and a hidden one is not offered. Held for ten seconds: every screen's Shell asks, and
    * a switch flipped during an incident is seen within one screen change.
    */
   async services(): Promise<ServiceStates> {
@@ -1088,9 +1089,13 @@ export class XetralClient {
     if (this.#services !== undefined && now - this.#services.at < 10_000) {
       return this.#services.value;
     }
-    const body = await this.#get<{ services: ServiceStates }>('/v1/services');
-    this.#services = { at: now, value: body.services };
-    return body.services;
+    const body = await this.#get<{
+      services?: Partial<Record<string, boolean>>;
+      states?: Partial<Record<string, string>>;
+    }>('/v1/services');
+    const value = readServiceStates(body);
+    this.#services = { at: now, value };
+    return value;
   }
 
   #services: { readonly at: number; readonly value: ServiceStates } | undefined;

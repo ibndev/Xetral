@@ -21,8 +21,10 @@ INSERT INTO consent_documents (kind, version, body_sha256, summary) VALUES
   -- 086's names the registration number with the legal name, as the payment
   -- partner asked, points at the refund policy, and is the first terms hash
   -- taken over `company.ts` as well as the page.
-  ('terms', '2026-09-28',
-   '02f53bb837abb9146dd33a1ba90022fd9ce33169e83e2aea82e92693a65a94d0',
+  -- 094's takes crypto out of what cannot be undone and out of the outages
+  -- we are not responsible for, while crypto is hidden.
+  ('terms', '2026-10-03',
+   '4900d74dcbf601e1872b53a830aee1774f76ae638794210a8ab9504ef61f9c71',
    'The terms on which Xetral Ltd holds and moves your money, including who '
    'may open an account, what cannot be undone, and how to complain.'),
 
@@ -53,8 +55,9 @@ INSERT INTO consent_documents (kind, version, body_sha256, summary) VALUES
   -- the registration number and how a card number is and is not handled.
   -- 089's names Paystack as a BVN recipient: it may ask to match a BVN to a
   -- bank account on it before it opens a naira account number.
-  ('privacy', '2026-09-30',
-   'dad4861991204196f7fb61e050c87233197fbc7e83d70e7dc193e964d6d451d1',
+  -- 094's no longer says Bitnob receives instructions for crypto.
+  ('privacy', '2026-10-03',
+   '10385b116c49514bbfc88c54c85c23aa82184cb781586a22dc53a2c126c8eb3e',
    'What personal data Xetral Ltd holds, why, exactly which companies receive '
    'it and what reaches them — including Paystack, which is given your BVN and '
    'a bank account on it when it needs them to open your naira account number '

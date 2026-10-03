@@ -1,6 +1,6 @@
 import { Controller, Get, Inject } from '@nestjs/common';
 import { KILL_SWITCHES, SettingsService } from './settings.service.js';
-import type { KillSwitch } from './settings.service.js';
+import type { KillSwitch, ServiceState } from './settings.service.js';
 
 /**
  * WHICH SERVICES ARE SWITCHED ON, for the apps to draw themselves from.
@@ -16,20 +16,30 @@ import type { KillSwitch } from './settings.service.js';
  *
  * Read from `KILL_SWITCHES` itself rather than a second list here, so a
  * switch added there is reported here without anybody remembering to.
+ *
+ * `services` STAYS A BOOLEAN PER SERVICE, and `states` carries the three
+ * (093). An app already installed reads `services` and nothing else, so for
+ * it a hidden service is an off one and reads "Coming soon" — the safe
+ * direction, and its endpoints refuse either way. A build that knows about
+ * `states` hides it.
  */
 @Controller('v1')
 export class ServicesController {
   constructor(@Inject(SettingsService) private readonly settings: SettingsService) {}
 
   @Get('services')
-  async services(): Promise<{ readonly services: Readonly<Record<KillSwitch, boolean>> }> {
+  async services(): Promise<{
+    readonly services: Readonly<Record<KillSwitch, boolean>>;
+    readonly states: Readonly<Record<KillSwitch, ServiceState>>;
+  }> {
+    const states = await this.settings.serviceStates();
     const names = Object.keys(KILL_SWITCHES) as KillSwitch[];
-    const states = await Promise.all(names.map((name) => KILL_SWITCHES[name](this.settings)));
     return {
-      services: Object.fromEntries(names.map((name, i) => [name, states[i] === true])) as Record<
+      services: Object.fromEntries(names.map((name) => [name, states[name] === 'enabled'])) as Record<
         KillSwitch,
         boolean
       >,
+      states,
     };
   }
 }

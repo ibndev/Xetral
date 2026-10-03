@@ -388,6 +388,7 @@ export class CardService {
     if (currency !== null && !isCurrency(currency)) {
       throw new BadRequestException({ error: 'invalid_request', fields: ['currency'] });
     }
+    if (currency !== null) await this.settings.assertCurrencyVisible(currency);
     if (row.status === 'terminated') {
       throw new UnprocessableEntityException({ error: 'card_terminated' });
     }
@@ -416,7 +417,11 @@ export class CardService {
       (await this.ledger.walletBalances(userId)).map((b) => [b.currency, b.spendableMinor] as const),
     );
     const sources: CoverSource[] = [];
+    // A hidden service's wallet is not drawn on, and so never appears in the
+    // plan a customer reads (093).
+    const hidden = await this.settings.hiddenCurrencies();
     for (const currency of cascadeOrder(target, base?.effective)) {
+      if (hidden.has(currency)) continue;
       const spendable = held.get(currency) ?? 0n;
       if (spendable <= 0n) continue;
       if (currency === target) {
@@ -1470,7 +1475,11 @@ export class CardService {
       );
       const r = found.rows[0];
       if (r === undefined) return undefined;
-      if (r.base_currency !== null && isCurrency(r.base_currency)) {
+      // A base currency a hidden service took (093) is set aside while it is
+      // hidden — the card reads, and tops up, as if none were chosen — and is
+      // back the moment the service is, because the row is not touched.
+      const hidden = await this.settings.hiddenCurrencies();
+      if (r.base_currency !== null && isCurrency(r.base_currency) && !hidden.has(r.base_currency)) {
         return { effective: r.base_currency, chosen: true };
       }
       // NGN for an account with no country: 050's claim about history — such

@@ -177,6 +177,8 @@ jobs:
             -f packages/ledger/sql/090_sign_in_country_relayed.sql \
             -f packages/ledger/sql/091_test_account_reset.sql \
             -f packages/ledger/sql/092_test_reset_clears_name.sql \
+            -f packages/ledger/sql/093_feature_visibility.sql \
+            -f packages/ledger/sql/094_crypto_out_of_legal.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       - name: Ledger and identity invariants
@@ -276,6 +278,8 @@ jobs:
                    packages/ledger/sql/090_sign_in_country_relayed.test.sql \
                    packages/ledger/sql/091_test_account_reset.test.sql \
                    packages/ledger/sql/092_test_reset_clears_name.test.sql \
+                   packages/ledger/sql/093_feature_visibility.test.sql \
+                   packages/ledger/sql/094_crypto_out_of_legal.test.sql \
                    packages/ledger/sql/099_least_privilege.test.sql; do
             echo "== $f"
             psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
@@ -407,6 +411,8 @@ jobs:
             -f packages/ledger/sql/090_sign_in_country_relayed.sql \
             -f packages/ledger/sql/091_test_account_reset.sql \
             -f packages/ledger/sql/092_test_reset_clears_name.sql \
+            -f packages/ledger/sql/093_feature_visibility.sql \
+            -f packages/ledger/sql/094_crypto_out_of_legal.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       # ------------------------------------------------------------------

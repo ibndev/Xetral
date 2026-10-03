@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { Link } from 'expo-router';
-import { formatAmount, symbolFor } from '@xetral/client';
+import { formatAmount, isHidden, symbolFor } from '@xetral/client';
 import type { Balance, Transaction } from '@xetral/client';
 import { Icon } from '@/icon';
 import type { IconName } from '@/icon';
@@ -11,6 +11,7 @@ import { CurrencyMark } from '@/currency-mark';
 import { TxList } from '@/tx-list';
 import { TransactionSheet } from '@/transaction-sheet';
 import { useLoad, useRemembered, useXetral } from '@/hooks';
+import { useServiceStates } from '@/services';
 import { cardShadow, font, gutter, space, useTheme } from '@/theme';
 import { BALANCE_VISIBILITY } from '@/preferences';
 
@@ -96,6 +97,11 @@ export default function Home() {
 
   const session = useLoad(() => client.currentSession(), [client]);
   const balances = useLoad(() => client.balances(), [client]);
+  // A HIDDEN service has no tile and no action here (093). Its wallets are
+  // already gone from `balances` — the API drops them — so the currency rail
+  // re-lays itself out with no empty slot.
+  const { states: services } = useServiceStates();
+  const products = PRODUCTS.filter((p) => !isHidden(services, p.href));
   // Every currency the platform OFFERS, not only the ones this customer has
   // received — the API returns a zero row for each, so this list is the
   // platform's answer rather than an accident of transaction history.
@@ -222,7 +228,7 @@ export default function Home() {
         >
           <Action href="/transfer"  icon="send"     label="Send" primary />
           <Action href="/add-money" icon="plus"     label="Add" />
-          <Action href="/fx"        icon="swap"     label="Convert" />
+          {!isHidden(services, '/fx') && <Action href="/fx" icon="swap" label="Convert" />}
           {/* ITS OWN SCREEN. Request and Add both pointed at `/add-money`, so
               two of the four actions led to one screen — and the one headed Add
               Money, which is not what somebody asking to be paid came for. */}
@@ -320,7 +326,7 @@ export default function Home() {
       <View style={{ marginTop: space.lg }}>
         <SectionHead title="Explore" moreLabel="All services" moreHref="/more" />
         <View style={{ flexDirection: 'row', gap: 9 }}>
-          {PRODUCTS.map((product) => (
+          {products.map((product) => (
             <Link key={product.label} href={product.href as never} asChild>
               <Pressable
                 accessibilityRole="link"

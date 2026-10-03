@@ -1,6 +1,6 @@
 import { Pressable, Text, View } from 'react-native';
 import { Link } from 'expo-router';
-import { isPaused } from '@xetral/client';
+import { isHidden, isPaused } from '@xetral/client';
 import { Icon } from '@/icon';
 import type { IconName } from '@/icon';
 import { Shell } from '@/shell';
@@ -94,7 +94,9 @@ export default function More() {
       {GROUPS.map((group) => (
         <View key={group.title} style={[styles.card, { marginTop: space.lg }]}>
           <Text style={styles.h2}>{group.title}</Text>
-          {group.items.map((item) => (
+          {/* A HIDDEN service is not listed at all (093); a Coming soon one
+              is, and says so. */}
+          {group.items.filter((item) => !isHidden(services.data, item.href)).map((item) => (
             <Link key={item.href} href={item.href as never} asChild>
               <Pressable accessibilityRole="link" style={styles.row}>
                 <View style={styles.rowIcon}>

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { isPaused } from '@xetral/client';
+import { isHidden, isPaused } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { Icon } from '@/ui/icon';
 import type { IconName } from '@/ui/icon';
@@ -96,7 +96,9 @@ export default function More() {
         <section className={`card animate-in d${Math.min(i + 1, 4)}`} key={g.title}>
           <div className="card-head"><h2>{g.title}</h2></div>
           <div className="list">
-            {g.items.map((item) => (
+            {/* A HIDDEN service is not listed at all (093); a Coming soon one
+                is, and says so. */}
+            {g.items.filter((item) => !isHidden(services.data, item.href)).map((item) => (
               <Link className="list-row" key={item.label} href={item.href}>
                 <span className="row-icon"><Icon name={item.icon} size={19} /></span>
                 <span className="row-main">

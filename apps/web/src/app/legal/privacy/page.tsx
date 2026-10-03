@@ -31,7 +31,7 @@ export const metadata: Metadata = {
  */
 export default function Privacy() {
   return (
-    <LegalPage title="Privacy notice" updated="30 September 2026">
+    <LegalPage title="Privacy notice" updated="3 October 2026">
       <p className="legal-lede">
         This notice explains what {COMPANY.tradingName} collects about you, why,
         who else sees it, how long it is kept and what you can ask us to do with

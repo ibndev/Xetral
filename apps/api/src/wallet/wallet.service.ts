@@ -155,6 +155,17 @@ export class WalletService {
     // the dollars on every home screen; the order now is the card cascade's —
     // dollars, dollar stablecoins, fiat, Bitcoin last — so the rail reads in
     // the order a top-up would draw on it.
+    /*
+     * A HIDDEN SERVICE'S WALLETS ARE NOT LISTED, even ones holding money
+     * (093). The rule above that a held currency is always returned is about
+     * an operator RETIRING a currency; hiding is the operator saying the
+     * product is not offered here, and a Bitcoin card on the home screen is
+     * the product. The money stays owed and stays in the ledger — staff
+     * routes still show it — and reappears the moment the service does.
+     */
+    const hidden = await this.settings.hiddenCurrencies();
+    for (const currency of hidden) views.delete(currency);
+
     const rank = (c: string): number => {
       const at = (CASCADE_ORDER as readonly string[]).indexOf(c);
       return at === -1 ? CASCADE_ORDER.length : at;
@@ -406,6 +417,8 @@ export class WalletService {
     readonly entries: readonly Record<string, unknown>[];
     readonly next_cursor: string | null;
   }> {
+    // A hidden service's currency has no history to read here (093).
+    await this.settings.assertCurrencyVisible(currency);
     const userId = await this.#userIdOf(userUuid);
     const rows = await this.ledger.history(userId, currency, options);
 
@@ -562,7 +575,10 @@ export class WalletService {
     );
 
     const first = legs.rows[0];
-    if (first === undefined) {
+    // A receipt in a hidden service's currency answers as one that does not
+    // exist, the same answer as somebody else's entry (093).
+    const hidden = await this.settings.hiddenCurrencies();
+    if (first === undefined || legs.rows.some((leg) => hidden.has(leg.currency))) {
       throw new NotFoundException({ error: 'transaction_not_found' });
     }
 
@@ -668,6 +684,7 @@ export class WalletService {
    */
   async transfer(senderUuid: string, request: TransferRequest): Promise<TransferResult> {
     const currency = request.currency;
+    await this.settings.assertCurrencyVisible(currency);
     const amount = this.#parseAmount(request.amount, currency);
 
     const sender = await this.#activeUser(senderUuid);

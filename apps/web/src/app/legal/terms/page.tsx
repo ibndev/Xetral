@@ -28,7 +28,7 @@ export const metadata: Metadata = {
  */
 export default function Terms() {
   return (
-    <LegalPage title="Terms of service" updated="28 September 2026">
+    <LegalPage title="Terms of service" updated="3 October 2026">
       <p className="legal-lede">
         These are the terms on which <strong>{COMPANY.legalName}</strong>, a
         company registered in Nigeria under registration number{' '}
@@ -140,10 +140,6 @@ export default function Terms() {
       <p>Some things are final once they happen, and it is worth knowing which:</p>
       <ul>
         <li>
-          <strong>A crypto withdrawal.</strong> Once it is on the chain it
-          cannot be recalled, by us or by anybody. Check the address.
-        </li>
-        <li>
           <strong>A transfer to the wrong {COMPANY.tradingName} account.</strong>{' '}
           We cannot take money back out of somebody else&rsquo;s wallet on our
           own authority. We will help you contact them.
@@ -193,7 +189,7 @@ export default function Terms() {
         We are responsible for holding your money accurately and for moving it
         as you instructed. We are not responsible for losses caused by you
         giving us the wrong details, by somebody you gave your PIN to, or by an
-        outage at a bank, a mobile money network or a blockchain. Nothing in
+        outage at a bank or a mobile money network. Nothing in
         these terms limits our liability for fraud, or for anything the law does
         not allow us to limit.
       </p>

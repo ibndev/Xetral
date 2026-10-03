@@ -90,7 +90,10 @@ export default function Settings() {
                 style={{ textTransform: 'capitalize' }}
                 onClick={() => setChosen(category)}
               >
-                {category} <span className="muted">{byCategory.get(category)?.length}</span>
+                {category}{' '}
+                <span className="muted">
+                  {byCategory.get(category)?.filter((x) => !WHEN_OFF_KEYS.has(x.key)).length}
+                </span>
               </button>
             ))}
           </div>
@@ -99,12 +102,182 @@ export default function Settings() {
 
       {active !== undefined && (
         <div className="panel set-list">
-          {items.map((setting) => (
-            <Setting key={setting.key} setting={setting} onSaved={settings.reload} />
-          ))}
+          {items
+            // A service's `_when_off` row is drawn INSIDE its three-state
+            // control below, never as a second row of its own (093).
+            .filter((setting) => !WHEN_OFF_KEYS.has(setting.key))
+            .map((setting) =>
+              FEATURE_KEYS.has(setting.key) ? (
+                <FeatureSetting
+                  key={setting.key}
+                  enabled={setting}
+                  whenOff={(settings.data ?? []).find((s) => s.key === whenOffKeyOf(setting.key))}
+                  onSaved={settings.reload}
+                />
+              ) : (
+                <Setting key={setting.key} setting={setting} onSaved={settings.reload} />
+              ),
+            )}
         </div>
       )}
     </>
+  );
+}
+
+/**
+ * THE FIVE SERVICES WITH THREE STATES (093): Enabled, Coming soon, Hidden.
+ *
+ * Each is two rows — `<service>_enabled` and `<service>_when_off` — and an
+ * operator should not have to know that, so they are one control here. The
+ * writes are ORDERED so every state passed through on the way is itself one
+ * of the three: `_when_off` is written first, then `_enabled`. A second write
+ * that fails leaves the service exactly where it was, never half-hidden.
+ */
+const FEATURE_KEYS: ReadonlySet<string> = new Set([
+  'crypto_enabled',
+  'fx_enabled',
+  'cards_enabled',
+  'bills_enabled',
+  'payouts_enabled',
+]);
+const whenOffKeyOf = (enabledKey: string) => enabledKey.replace(/_enabled$/, '_when_off');
+const WHEN_OFF_KEYS: ReadonlySet<string> = new Set([...FEATURE_KEYS].map(whenOffKeyOf));
+
+type FeatureState = 'enabled' | 'coming_soon' | 'hidden';
+const STATE_LABEL: Readonly<Record<FeatureState, string>> = {
+  enabled: 'Enabled',
+  coming_soon: 'Coming soon',
+  hidden: 'Hidden',
+};
+const STATE_MEANS: Readonly<Record<FeatureState, string>> = {
+  enabled: 'Customers can use it.',
+  coming_soon: 'Shown everywhere it is offered, marked Coming soon. New activity is refused.',
+  hidden:
+    'Removed from both apps — lists, home screen, navigation, links and pickers — and every customer endpoint it owns answers as if it did not exist.',
+};
+
+function stateOf(enabled: AdminSetting, whenOff: AdminSetting | undefined): FeatureState {
+  if (enabled.value === 'true') return 'enabled';
+  return whenOff?.value === 'hidden' ? 'hidden' : 'coming_soon';
+}
+
+function FeatureSetting({
+  enabled,
+  whenOff,
+  onSaved,
+}: {
+  enabled: AdminSetting;
+  whenOff: AdminSetting | undefined;
+  onSaved: () => void;
+}) {
+  const admin = useAdmin();
+  const current = stateOf(enabled, whenOff);
+  const [target, setTarget] = useState<FeatureState>(current);
+  const [pin, setPin] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | undefined>();
+  const [done, setDone] = useState(false);
+  const open = target !== current;
+
+  async function save() {
+    setBusy(true);
+    setError(undefined);
+    setDone(false);
+    try {
+      if (target === 'enabled') {
+        await admin.setSetting(enabled.key, 'true', pin);
+      } else {
+        if (whenOff === undefined) throw new Error('missing');
+        if (whenOff.value !== target) await admin.setSetting(whenOff.key, target, pin);
+        if (enabled.value !== 'false') await admin.setSetting(enabled.key, 'false', pin);
+      }
+      setPin('');
+      setDone(true);
+      onSaved();
+    } catch (cause) {
+      setError(
+        whenOff === undefined && target !== 'enabled'
+          ? 'This database is behind migration 093, so a service can only be switched on or off.'
+          : messageFor(cause),
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className={open ? 'set-row open' : 'set-row'}>
+      <div className="set-head">
+        <span className="set-name">
+          <strong>{enabled.label}</strong>
+          <small>{STATE_MEANS[current]}</small>
+        </span>
+        {done && !open && <span className="badge ok" role="status">saved</span>}
+        <div className="segmented" role="radiogroup" aria-label={`${enabled.label}: state`}>
+          {(['enabled', 'coming_soon', 'hidden'] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              role="radio"
+              aria-checked={target === option}
+              className={target === option ? 'active' : ''}
+              // Hidden needs 093's row. Without it the choice could not be
+              // written, so it is not offered rather than refused on Save.
+              disabled={option === 'hidden' && whenOff === undefined}
+              onClick={() => {
+                setTarget(option);
+                setDone(false);
+                setError(undefined);
+              }}
+            >
+              {STATE_LABEL[option]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {open && (
+        <div className="set-edit">
+          <div className="field-row two">
+            <p className="hint">
+              Set <strong>{enabled.label}</strong> to <strong>{STATE_LABEL[target]}</strong>?{' '}
+              {STATE_MEANS[target]}
+            </p>
+            <label>
+              <span>Transaction PIN</span>
+              <input
+                type="password"
+                inputMode="numeric"
+                autoComplete="off"
+                value={pin}
+                onChange={(e) => setPin(e.target.value)}
+              />
+            </label>
+          </div>
+          <div className="actions">
+            <button type="button" className="small" disabled={busy || pin === ''} onClick={() => void save()}>
+              {busy ? 'Saving…' : 'Save'}
+            </button>
+            <button
+              type="button"
+              className="ghost small"
+              onClick={() => {
+                setTarget(current);
+                setPin('');
+                setError(undefined);
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+          {error !== undefined && <p className="error">{error}</p>}
+          <p className="hint mono">
+            {enabled.key}
+            {whenOff !== undefined && ` · ${whenOff.key}`}
+          </p>
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -17,6 +17,8 @@ import {
   nationalDigits,
   networkLabel,
   phoneHint,
+  hiddenCurrencies,
+  serviceHidden,
   sendableFor,
   symbolFor,
   SENT_TITLE,
@@ -34,6 +36,7 @@ import { Select } from '@/select';
 import { Icon } from '@/icon';
 import { CurrencyMark } from '@/currency-mark';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/hooks';
+import { useServiceStates } from '@/services';
 import { messageFor } from '@/errors';
 import { font, radius, space, useStyles, useTheme } from '@/theme';
 import type { Palette } from '@/theme';
@@ -315,6 +318,8 @@ function ChooseRecipient({
   const [query, setQuery] = useState('');
   const [menu, setMenu] = useState<string | undefined>(undefined);
   const [removeError, setRemoveError] = useState<string | undefined>(undefined);
+  // No chip for a currency a HIDDEN service took (093).
+  const { states: services } = useServiceStates();
   
   /*
    * THE CHIPS ARE THE CURRENCIES THIS CUSTOMER ACTUALLY PAYS, not every
@@ -327,12 +332,12 @@ function ChooseRecipient({
      customer with one payee and none to a customer with none. */
   const currencies = useMemo(() => {
     const used = new Set(recipients.map((r) => r.currency));
-    const offered = sendableFor(home);
+    const offered = sendableFor(home, [], hiddenCurrencies(services));
     return [...offered].sort((a, b) => {
       const byUse = Number(used.has(b)) - Number(used.has(a));
       return byUse !== 0 ? byUse : offered.indexOf(a) - offered.indexOf(b);
     });
-  }, [recipients, home]);
+  }, [recipients, home, services]);
 
   /* `recipientMatches`, shared with the web: the inline copy stripped the
      query to its digits, so any NAME typed became "" — which every number
@@ -644,6 +649,8 @@ function ChooseCurrency({
 }) {
   const sfEmpty = useSf();
   const [query, setQuery] = useState('');
+  // Not a currency a HIDDEN service took (093).
+  const { states: services } = useServiceStates();
 
   /*
    * WHAT THIS PLATFORM CAN ACTUALLY DELIVER, from `sendableFor` — the same
@@ -651,7 +658,7 @@ function ChooseCurrency({
    * is a choice that fails three screens later, which 046 records as the
    * failure that reads to a customer as their own details being wrong.
    */
-  const all = sendableFor(home);
+  const all = sendableFor(home, [], hiddenCurrencies(services));
   const needle = query.trim().toLowerCase();
   const matches = (code: string): boolean =>
     needle === '' ||
@@ -826,7 +833,10 @@ function ChooseMethod({
 }) {
   const sf = useSf();
   const country = countries.find((c) => c.currency === receive);
-  const methods = methodsFor(country);
+  // A HIDDEN payouts service offers no bank or wallet rail at all (093); a
+  // transfer between two Xetral balances is not a payout and stays.
+  const { states: services } = useServiceStates();
+  const methods = serviceHidden(services, 'payouts') ? (['xetral'] as const) : methodsFor(country);
 
   useEffect(() => {
     if (methods.length === 1 && methods[0] !== undefined) onPick(methods[0]);

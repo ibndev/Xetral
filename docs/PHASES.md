@@ -53,6 +53,7 @@ shipped, that is called out explicitly.
 | 42 — An account number without a BVN, tiers counted from one, a request in another currency | ✅ | migration 092 |
 | 43 — A whole-code money audit: one outcome per thing | ✅ | |
 | 44 — What the screens claim: a UI audit of both apps | ✅ | |
+| 45 — Enabled, Coming soon, Hidden; crypto out of the legal pages | ✅ | migrations 093 and 094; Kora's docs, for replacing Flutterwave |
 
 All eleven phases are built, a **pre-deployment audit** (Phase 12) closed what
 building them phase by phase had left between the phases, and **Phase 13** is
@@ -3022,3 +3023,26 @@ the closed test account on `/admin/users` and press **Delete permanently**.
 
 **An operator need do nothing for this one.** No schema or setting changes.
 
+
+---
+
+## Phase 45 — Enabled, Coming soon, Hidden; crypto out of the legal pages ✅
+
+| File | What it is |
+|---|---|
+| `packages/ledger/sql/093_feature_visibility.sql` | `<service>_when_off`: coming_soon or hidden |
+| `apps/api/src/settings/feature.guard.ts` | a hidden service's customer routes answer 404 |
+| `packages/client/src/services.ts` | three states, hidden currencies, the screen gate |
+| `apps/web/src/app/admin/settings/page.tsx` | one three-state control per service |
+| `packages/ledger/sql/094_crypto_out_of_legal.sql` | terms and privacy republished without crypto |
+
+1. **A switch had two states and the product needed three.** Off kept a
+   service on every screen as Coming soon; Hidden removes it from both apps
+   and refuses its customer endpoints, and Coming soon is unchanged.
+2. **Hidden crypto takes its wallets with it** — the home rail, the dollar
+   total, activity tabs, Send, Convert, saved recipients and the card cascade.
+3. **The terms and privacy notice no longer describe crypto.**
+
+**Before this goes live, an operator must:** apply **093** and **094** (094
+asks every customer to accept the terms and privacy notice again), then set
+crypto to Hidden on `/admin/settings`.

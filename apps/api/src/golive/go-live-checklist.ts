@@ -1255,6 +1255,51 @@ export const SETTINGS: readonly Item[] = [
       'at any of them can be stopped in one action.',
   },
   {
+    name: 'crypto_when_off',
+    kind: 'setting',
+    failure: 'default-is-deliberate',
+    ifMissed:
+      'what OFF means for crypto (093): coming_soon, the behaviour every switch ' +
+      'has always had, or hidden — removed from both apps with its customer ' +
+      'endpoints refused. Read only while crypto_enabled is off.',
+  },
+  {
+    name: 'fx_when_off',
+    kind: 'setting',
+    failure: 'default-is-deliberate',
+    ifMissed:
+      'what OFF means for currency conversion (093): coming_soon, the behaviour every switch ' +
+      'has always had, or hidden — removed from both apps with its customer ' +
+      'endpoints refused. Read only while fx_enabled is off.',
+  },
+  {
+    name: 'cards_when_off',
+    kind: 'setting',
+    failure: 'default-is-deliberate',
+    ifMissed:
+      'what OFF means for USD cards (093): coming_soon, the behaviour every switch ' +
+      'has always had, or hidden — removed from both apps with its customer ' +
+      'endpoints refused. Read only while cards_enabled is off.',
+  },
+  {
+    name: 'bills_when_off',
+    kind: 'setting',
+    failure: 'default-is-deliberate',
+    ifMissed:
+      'what OFF means for bills and eSIM (093): coming_soon, the behaviour every switch ' +
+      'has always had, or hidden — removed from both apps with its customer ' +
+      'endpoints refused. Read only while bills_enabled is off.',
+  },
+  {
+    name: 'payouts_when_off',
+    kind: 'setting',
+    failure: 'default-is-deliberate',
+    ifMissed:
+      'what OFF means for bank and mobile money payouts (093): coming_soon, the behaviour every switch ' +
+      'has always had, or hidden — removed from both apps with its customer ' +
+      'endpoints refused. Read only while payouts_enabled is off.',
+  },
+  {
     name: 'gift_cards_enabled',
     kind: 'setting',
     failure: 'default-is-deliberate',

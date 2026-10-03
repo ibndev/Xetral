@@ -185,8 +185,16 @@ export class FxService {
       });
     };
 
+    /*
+     * A HIDDEN SERVICE'S CURRENCIES ARE LEFT OUT, AND NOT NAMED (093). Naming
+     * them in `excluded` would print "not counted: BTC" under the headline of
+     * a home screen that no longer offers Bitcoin at all.
+     */
+    const hidden = await this.settings.hiddenCurrencies();
+
     for (const balance of held) {
       if (balance.spendableMinor <= 0n) continue;
+      if (hidden.has(balance.currency)) continue;
       if (balance.currency === 'USD') {
         cents += balance.spendableMinor;
         included.push('USD');
@@ -269,6 +277,8 @@ export class FxService {
     if (from === to) return undefined;
     try {
       await this.settings.assertServiceEnabled('fx');
+      // A hidden service's wallet is not drawn on to fund a card (093).
+      await this.settings.assertCurrencyVisible(from, to);
       const policy = await this.#policy(from, to);
       const { rate } = await this.#rateFor(from, to);
       return {
@@ -289,6 +299,7 @@ export class FxService {
     const from = body.from as Currency;
     const to = body.to as Currency;
     if (from === to) throw new BadRequestException({ error: 'same_currency' });
+    await this.settings.assertCurrencyVisible(from, to);
 
     const amount = this.#parseAmount(body.amount, from);
     const policy = await this.#policy(from, to);
@@ -342,7 +353,10 @@ export class FxService {
         ORDER BY t.id DESC LIMIT 100`,
       [userId],
     );
-    return rows.rows.map(toView);
+    const hidden = await this.settings.hiddenCurrencies();
+    return rows.rows
+      .filter((r) => !hidden.has(r.base_currency) && !hidden.has(r.quote_currency))
+      .map(toView);
   }
 
   /**
@@ -374,6 +388,7 @@ export class FxService {
     const from = body.from as Currency;
     const to = body.to as Currency;
     if (from === to) throw new BadRequestException({ error: 'same_currency' });
+    await this.settings.assertCurrencyVisible(from, to);
 
     const existing = await this.#byKey(userId, body.idempotency_key);
     if (existing !== undefined) return toView(existing);

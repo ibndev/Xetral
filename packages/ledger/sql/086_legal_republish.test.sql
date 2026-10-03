@@ -83,14 +83,20 @@ DECLARE
 BEGIN
     SELECT count(*) INTO rows_before FROM consent_documents;
 
+    -- THE PRIVACY HALF, NOT THE TERMS. `033_consent.test.sql` runs first and
+    -- leaves its own '2026-09-01' terms live, so re-applying the terms half
+    -- here measured that suite's fixture rather than 086 — it passed only
+    -- while the seed happened to carry exactly 086's terms, and went red the
+    -- day 094 legitimately moved them on. No other suite moves the privacy
+    -- notice, so it is the half that tests 086's own guards.
     UPDATE consent_documents SET retired_at = now()
-     WHERE kind IN ('terms', 'privacy') AND retired_at IS NULL AND version < '2026-09-28';
+     WHERE kind = 'privacy' AND retired_at IS NULL AND version < '2026-09-28';
 
     INSERT INTO consent_documents (kind, version, body_sha256, summary)
-    SELECT 'terms', '2026-09-28',
-           '02f53bb837abb9146dd33a1ba90022fd9ce33169e83e2aea82e92693a65a94d0', 'x'
+    SELECT 'privacy', '2026-09-28',
+           '77d0bf612f99ee4ba3f84416ec58492716e726aa4dd640d031debdf7489aec59', 'x'
      WHERE NOT EXISTS (SELECT 1 FROM consent_documents
-                        WHERE kind = 'terms' AND retired_at IS NULL
+                        WHERE kind = 'privacy' AND retired_at IS NULL
                           AND version > '2026-09-28')
     ON CONFLICT (kind, version) DO NOTHING;
 

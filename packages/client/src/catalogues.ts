@@ -200,6 +200,8 @@ const LOCAL_CURRENCIES: readonly string[] = ['NGN', 'GHS', 'KES'];
 export function sendableFor(
   home: string | null | undefined,
   held: readonly string[] = [],
+  /** Currencies a hidden service took (093) — not offered at all. */
+  hidden: ReadonlySet<string> = new Set(),
 ): readonly TransferCurrency[] {
   const holds = new Set(held);
   // Lower sorts first. Their own country's money is what they will pick most
@@ -211,7 +213,7 @@ export function sendableFor(
     if (holds.has(code)) return 1;
     return LOCAL_CURRENCIES.includes(code) ? 3 : 2;
   };
-  return [...TRANSFER_CURRENCIES].sort(
+  return TRANSFER_CURRENCIES.filter((c) => !hidden.has(c)).sort(
     (a, b) => rank(a) - rank(b) || TRANSFER_CURRENCIES.indexOf(a) - TRANSFER_CURRENCIES.indexOf(b),
   );
 }
@@ -259,8 +261,11 @@ export function limitCurrenciesFor(
 export function activityFiltersFor(
   home: string | null | undefined,
   held: readonly string[] = [],
+  /** Currencies a hidden service took (093) — no tab, held or not. */
+  hidden: ReadonlySet<string> = new Set(),
 ): readonly [ActivityFilter, ...ActivityFilter[]] {
   const kept = ACTIVITY_FILTERS.filter((filter) => {
+    if (filter.id !== 'gift' && hidden.has(filter.currency)) return false;
     if (filter.id === 'gift') return home === 'NGN' || held.includes('NGN');
     /*
      * ANOTHER COUNTRY'S MONEY IS NOT ON THIS RAIL, unless they hold some.
@@ -354,8 +359,10 @@ export const ACTIVITY_FILTERS = [
 export function convertPreset(
   from: string | null | undefined,
   to: string | null | undefined,
+  /** Currencies a hidden service took (093) — a link naming one is ignored. */
+  hidden: ReadonlySet<string> = new Set(),
 ): { readonly from: string; readonly to: string } {
-  const allowed: readonly string[] = TRANSFER_CURRENCIES;
+  const allowed: readonly string[] = TRANSFER_CURRENCIES.filter((c) => !hidden.has(c));
   const f = from !== null && from !== undefined && allowed.includes(from) ? from : 'NGN';
   const t = to !== null && to !== undefined && allowed.includes(to) && to !== f ? to : f === 'USD' ? 'NGN' : 'USD';
   return { from: f, to: t };

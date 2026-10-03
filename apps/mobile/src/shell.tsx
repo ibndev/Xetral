@@ -5,14 +5,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Link, router, usePathname } from 'expo-router';
 import { Icon } from '@/icon';
 import type { IconName } from '@/icon';
-import { useXetral } from '@/hooks';
 import { useUnreadAnnouncements } from '@/announcements-seen';
-import { screenGate, serviceForPath } from '@xetral/client';
-import type { ServiceStates } from '@xetral/client';
+import { isHidden, screenGate } from '@xetral/client';
+import { useServiceStates } from '@/services';
 import { font, gutter, space, useStyles, useTheme, useThemeChoice, useResolvedScheme } from '@/theme';
-
-/** The last answer about which services are paused, shared by every screen of this visit. */
-let rememberedServices: ServiceStates | undefined;
 
 /**
  * ONE NAVIGATION, THE SAME AS THE WEB'S.
@@ -236,40 +232,26 @@ export function Shell({
   const pathname = usePathname();
   // The red dot on the home header's bell. Asked only where the bell is drawn.
   const unread = useUnreadAnnouncements(greeting !== undefined);
-  const client = useXetral();
 
   /*
    * A PAUSED SERVICE SAYS SO HERE, ONCE — the web Shell's own gate, keyed off
    * the path so no gated screen can forget it. The refusal on the request is
    * still the control; unknown (loading, or the read failed) is not paused.
    */
-  const [services, setServices] = useState<ServiceStates | undefined>(rememberedServices);
-  // Whether the read has come back — answered OR failed. Until then a screen
-  // a pause would replace draws nothing, rather than its form and then
-  // "Coming soon" over it. Remembered across screens, so only the first
-  // gated screen of a visit waits at all.
-  const [settled, setSettled] = useState(rememberedServices !== undefined);
-  useEffect(() => {
-    if (serviceForPath(pathname) === undefined) return undefined;
-    let live = true;
-    client
-      .services()
-      .then((states) => {
-        rememberedServices = states;
-        if (live) {
-          setServices(states);
-          setSettled(true);
-        }
-      })
-      // A failed courtesy read hides nothing: unknown is "not paused".
-      .catch(() => {
-        if (live) setSettled(true);
-      });
-    return () => {
-      live = false;
-    };
-  }, [client, pathname]);
+  // Asked on EVERY screen now: the tabs, the home screen's tiles and rail and
+  // every currency picker drop a HIDDEN service (093). See `useServiceStates`.
+  const { states: services, settled } = useServiceStates();
   const paused = screenGate(services, settled, pathname);
+
+  /*
+   * A HIDDEN SERVICE'S SCREEN IS NOT A SCREEN. A deep link or a notification
+   * that names one lands on the home screen instead, by `replace` so back does
+   * not return to it. The server refuses its routes either way.
+   */
+  useEffect(() => {
+    if (paused === 'hidden') router.replace('/wallet');
+  }, [paused]);
+  const tabs = TABS.filter((tab) => !isHidden(services, tab.href));
 
   const isActive = (href: string) =>
     href === '/wallet' ? pathname === href : pathname.startsWith(href);
@@ -445,7 +427,7 @@ export function Shell({
           )}
         </View>
       )}
-      {paused === 'wait' ? (
+      {paused === 'wait' || paused === 'hidden' ? (
         // Nothing, briefly: neither the form nor "Coming soon" is known to
         // be true yet, and drawing either would be taken back.
         <View accessibilityState={{ busy: true }} />
@@ -515,7 +497,7 @@ export function Shell({
           paddingBottom: insets.bottom,
         }}
       >
-        {TABS.map((tab) => {
+        {tabs.map((tab) => {
           const active = isActive(tab.href);
           return (
             /*

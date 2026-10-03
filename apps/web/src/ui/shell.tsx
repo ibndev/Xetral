@@ -4,17 +4,14 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
-import { screenGate, serviceForPath } from '@xetral/client';
-import type { ServiceStates } from '@xetral/client';
+import { isHidden, screenGate } from '@xetral/client';
 import { resetXetral, xetral } from '@/lib/session';
 import { Logo } from './logo';
 import { Icon } from './icon';
 import type { IconName } from './icon';
 import { ThemeToggle } from './theme-toggle';
 import { useUnreadAnnouncements } from '@/lib/announcements-seen';
-
-/** The last answer about which services are paused, shared by every screen of this visit. */
-let rememberedServices: ServiceStates | undefined;
+import { useServiceStates } from '@/lib/services';
 
 /**
  * One navigation, two shapes.
@@ -122,34 +119,22 @@ export function Shell({
    * refusal on the request is still the control; this only spares a customer
    * filling in a form that was never going to go through.
    */
-  const [services, setServices] = useState<ServiceStates | undefined>(rememberedServices);
-  // Whether the read has come back — answered OR failed. Until then a screen
-  // a pause would replace draws nothing, rather than its form and then
-  // "Coming soon" over it. Remembered across screens, so only the first
-  // gated screen of a visit waits at all.
-  const [settled, setSettled] = useState(rememberedServices !== undefined);
-  useEffect(() => {
-    // Only a screen a switch covers asks: the home screen and Send never do.
-    if (serviceForPath(pathname) === undefined) return undefined;
-    let live = true;
-    xetral()
-      .client.services()
-      .then((states) => {
-        rememberedServices = states;
-        if (live) {
-          setServices(states);
-          setSettled(true);
-        }
-      })
-      // A failed courtesy read hides nothing: unknown is "not paused".
-      .catch(() => {
-        if (live) setSettled(true);
-      });
-    return () => {
-      live = false;
-    };
-  }, [pathname]);
+  // Asked on EVERY screen now, not only the gated ones: the navigation, the
+  // home screen's tiles and rail and every currency picker drop a HIDDEN
+  // service (093), and each of them needs the answer. See `useServiceStates`.
+  const { states: services, settled } = useServiceStates();
   const paused = screenGate(services, settled, pathname);
+
+  /*
+   * A HIDDEN SERVICE'S SCREEN IS NOT A SCREEN. A bookmark, a shared link or a
+   * typed URL lands on the home screen instead, by `replace` so the back
+   * button does not return to it. The server refuses its routes either way.
+   */
+  useEffect(() => {
+    if (paused === 'hidden') router.replace('/wallet');
+  }, [paused, router]);
+  const destinations = DESTINATIONS.filter((d) => !isHidden(services, d.href));
+  const tabs = TABS.filter((d) => !isHidden(services, d.href));
 
   /*
    * NOBODY SEES THE DASHBOARD BEFORE THEY ARE SIGNED IN, not even for a frame.
@@ -229,7 +214,7 @@ export function Shell({
           </Link>
         </div>
 
-        {DESTINATIONS.map((d) => (
+        {destinations.map((d) => (
           <Link
             key={d.href}
             href={d.href}
@@ -330,7 +315,7 @@ export function Shell({
               {title !== undefined && <h1>{title}</h1>}
             </div>
           )}
-          {paused === 'wait' ? (
+          {paused === 'wait' || paused === 'hidden' ? (
             // Nothing, briefly: neither the form nor "Coming soon" is known
             // to be true yet, and drawing either would be taken back.
             <div aria-busy="true" />
@@ -373,7 +358,7 @@ export function Shell({
       */}
       {bare !== true && (
       <nav className="tabbar" aria-label="Primary">
-        {TABS.map((d) => (
+        {tabs.map((d) => (
           <Link
             key={d.href}
             href={d.href}

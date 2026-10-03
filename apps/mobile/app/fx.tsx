@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
-import { convertPreset, exponentFor, formatAmount, groupTyped, isValidAmount, messageFor, TRANSFER_CURRENCIES } from '@xetral/client';
+import { convertPreset, exponentFor, formatAmount, groupTyped, hiddenCurrencies, isValidAmount, messageFor, TRANSFER_CURRENCIES } from '@xetral/client';
 import type { FxQuote, FxTrade } from '@xetral/client';
 import { Shell } from '@/shell';
 import {
@@ -17,6 +17,7 @@ import { Select } from '@/select';
 import { CurrencyMark } from '@/currency-mark';
 import { Icon } from '@/icon';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/hooks';
+import { useServiceStates } from '@/services';
 import { font, space, useStyles, useTheme } from '@/theme';
 
 /**
@@ -43,7 +44,9 @@ export default function Fx() {
    * API's answer, from published spread policies: an unpublished pair is
    * refused rather than quoted from a default. So this is what may be ASKED.
    */
-  const codes = TRANSFER_CURRENCIES;
+  // Not a currency a HIDDEN service took (093).
+  const { states: services } = useServiceStates();
+  const codes = TRANSFER_CURRENCIES.filter((c) => !hiddenCurrencies(services).has(c));
   const held = new Map((balances.data ?? []).map((b) => [b.currency, b.spendable]));
   const option = (c: string) => ({
     value: c,
@@ -104,8 +107,21 @@ export default function Fx() {
 
   // Buy and Sell on the crypto screen open this on a pair.
   const params = useLocalSearchParams<{ from?: string; to?: string }>();
-  const [from, setFrom] = useState(() => convertPreset(params.from, params.to).from);
-  const [to, setTo] = useState(() => convertPreset(params.from, params.to).to);
+  const [from, setFrom] = useState(() => convertPreset(params.from, params.to, hiddenCurrencies(services)).from);
+  const [to, setTo] = useState(() => convertPreset(params.from, params.to, hiddenCurrencies(services)).to);
+  /* The answer about what is hidden can arrive AFTER the pair was read off
+     the link. A side that turns out to be hidden goes back to the default
+     pair rather than sitting on a currency the pickers no longer offer. */
+  const hiddenKey = [...hiddenCurrencies(services)].join(',');
+  useEffect(() => {
+    const hidden = hiddenCurrencies(services);
+    if (hidden.has(from) || hidden.has(to)) {
+      const pair = convertPreset(from, to, hidden);
+      setFrom(pair.from);
+      setTo(pair.to);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-run only when what is hidden changes
+  }, [hiddenKey]);
   const [amount, setAmount] = useState('');
   const [fetched, setFetched] = useState<{ readonly key: string; readonly quote: FxQuote } | undefined>();
   const [quoteError, setQuoteError] = useState<string | undefined>();

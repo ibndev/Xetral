@@ -1,11 +1,12 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { activityFiltersFor } from '@xetral/client';
+import { activityFiltersFor, hiddenCurrencies } from '@xetral/client';
 import type { Transaction } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { Icon } from '@/ui/icon';
 import { useLoad, useXetral } from '@/lib/hooks';
+import { useServiceStates } from '@/lib/services';
 import { messageFor } from '@/lib/errors';
 import { TxList } from '@/ui/tx-list';
 import { TransactionSheet } from '@/ui/transaction-sheet';
@@ -53,7 +54,9 @@ export default function Activity() {
   const balances = useLoad(() => client.balances(), [client]);
   const held = (balances.data ?? []).map((b) => b.currency);
   const home = session.data?.home_currency ?? 'NGN';
-  const FILTERS = activityFiltersFor(home, held);
+  // No tab for a currency a HIDDEN service took (093), even one held.
+  const { states: services } = useServiceStates();
+  const FILTERS = activityFiltersFor(home, held, hiddenCurrencies(services));
 
   const [filterId, setFilterId] = useState<string | undefined>();
   // Their own currency until they pick something, and it follows the session

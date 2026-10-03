@@ -19,6 +19,8 @@ import {
   nationalDigits,
   networkLabel,
   phoneHint,
+  hiddenCurrencies,
+  serviceHidden,
   sendableFor,
   symbolFor,
   SENT_TITLE,
@@ -37,6 +39,7 @@ import { Icon } from '@/ui/icon';
 import { Select } from '@/ui/select';
 import { CurrencyMark } from '@/ui/currency-mark';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/lib/hooks';
+import { useServiceStates } from '@/lib/services';
 import { messageFor } from '@/lib/errors';
 
 /**
@@ -574,7 +577,9 @@ function ChooseCurrency({
    * is a choice that fails three screens later, which 046 records as the
    * failure that reads to a customer as their own details being wrong.
    */
-  const all = sendableFor(home);
+  // Not a currency a HIDDEN service took (093).
+  const { states: services } = useServiceStates();
+  const all = sendableFor(home, [], hiddenCurrencies(services));
   const needle = query.trim().toLowerCase();
   const matches = (code: string): boolean =>
     needle === '' ||
@@ -770,7 +775,10 @@ function ChooseMethod({
   onPick: (method: Method) => void;
 }) {
   const country = countries.find((c) => c.currency === receive);
-  const methods = methodsFor(country);
+  // A HIDDEN payouts service offers no bank or wallet rail at all (093); a
+  // transfer between two Xetral balances is not a payout and stays.
+  const { states: services } = useServiceStates();
+  const methods = serviceHidden(services, 'payouts') ? (['xetral'] as const) : methodsFor(country);
 
   /* ONE ANSWER IS NOT A QUESTION. `useEffect` rather than picking during the
      render, because setting a parent's state while rendering a child is what

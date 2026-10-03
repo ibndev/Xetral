@@ -143,6 +143,7 @@ import { PushService } from './push/push.service.js';
 import { PushBroadcastService } from './push/push-broadcast.service.js';
 import { PushController } from './push/push.controller.js';
 import { ServicesController } from './settings/services.controller.js';
+import { FeatureGuard } from './settings/feature.guard.js';
 import { PayController } from './pay/pay.controller.js';
 import { PaymentLinkService } from './pay/payment-link.service.js';
 import { ProviderRouterService } from './routing/provider-router.service.js';
@@ -1570,6 +1571,10 @@ export class AppModule {
         // author never thought about authorisation. That is the whole point of
         // deny by default: the guard cannot be forgotten, only satisfied.
         { provide: APP_GUARD, useClass: AuthGuard },
+        // AFTER the auth guard, which Nest runs first because it is registered
+        // first: a hidden service answers 404 only to a caller already allowed
+        // to ask (093).
+        { provide: APP_GUARD, useClass: FeatureGuard },
 
         // Registered globally, so no unhandled failure anywhere in the app can
         // avoid being recorded. Same reasoning as the guard: a filter that has

@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { convertPreset, exponentFor, formatAmount, groupTyped, isValidAmount, TRANSFER_CURRENCIES } from '@xetral/client';
+import { convertPreset, exponentFor, formatAmount, groupTyped, hiddenCurrencies, isValidAmount, TRANSFER_CURRENCIES } from '@xetral/client';
 import type { FxQuote } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { Select } from '@/ui/select';
@@ -10,6 +10,7 @@ import { CurrencyMark } from '@/ui/currency-mark';
 import { FormError } from '@/ui/form-error';
 import { Icon } from '@/ui/icon';
 import { useIdempotencyKey, useLoad, useSubmit, useXetral } from '@/lib/hooks';
+import { useServiceStates } from '@/lib/services';
 import { Toast } from '@/ui/toast';
 import { messageFor } from '@/lib/errors';
 
@@ -46,8 +47,26 @@ export default function Fx() {
 function Convert() {
   const client = useXetral();
   const params = useSearchParams();
-  const [from, setFrom] = useState<string>(() => convertPreset(params?.get('from'), params?.get('to')).from);
-  const [to, setTo] = useState<string>(() => convertPreset(params?.get('from'), params?.get('to')).to);
+  // Not a currency a HIDDEN service took (093) — in either picker, or opened
+  // on by a link.
+  const { states: services } = useServiceStates();
+  const hidden = hiddenCurrencies(services);
+  const currencies = CURRENCIES.filter((c) => !hidden.has(c));
+  const [from, setFrom] = useState<string>(() => convertPreset(params?.get('from'), params?.get('to'), hidden).from);
+  const [to, setTo] = useState<string>(() => convertPreset(params?.get('from'), params?.get('to'), hidden).to);
+  /* The answer about what is hidden can arrive AFTER the pair was read off
+     the link — this screen draws the Shell, so it mounts first. A side that
+     turns out to be hidden goes back to the default pair rather than sitting
+     on a currency the pickers no longer offer. */
+  const hiddenKey = [...hidden].join(',');
+  useEffect(() => {
+    if (hidden.has(from) || hidden.has(to)) {
+      const pair = convertPreset(from, to, hidden);
+      setFrom(pair.from);
+      setTo(pair.to);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-run only when what is hidden changes
+  }, [hiddenKey]);
   const [amount, setAmount] = useState('');
   const [fetched, setFetched] = useState<{ readonly key: string; readonly quote: FxQuote } | undefined>();
   const [quoteError, setQuoteError] = useState<string | undefined>();
@@ -168,7 +187,7 @@ function Convert() {
                   setFrom(value);
                   setQuote(undefined);
                 }}
-                options={CURRENCIES.map((c) => ({ value: c, label: c }))}
+                options={currencies.map((c) => ({ value: c, label: c }))}
                 renderMark={(value) => <CurrencyMark currency={value} size={20} />}
                 compact
               />
@@ -240,7 +259,7 @@ function Convert() {
                   setTo(value);
                   setQuote(undefined);
                 }}
-                options={CURRENCIES.map((c) => ({ value: c, label: c }))}
+                options={currencies.map((c) => ({ value: c, label: c }))}
                 renderMark={(value) => <CurrencyMark currency={value} size={20} />}
                 compact
               />

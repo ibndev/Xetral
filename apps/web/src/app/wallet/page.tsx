@@ -2,13 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { entryKindLabel, formatAmount, symbolFor } from '@xetral/client';
+import { entryKindLabel, formatAmount, isHidden, symbolFor } from '@xetral/client';
 import type { Balance, Transaction } from '@xetral/client';
 import { Shell } from '@/ui/shell';
 import { Icon } from '@/ui/icon';
 import { CurrencyMark } from '@/ui/currency-mark';
 import type { IconName } from '@/ui/icon';
 import { useLoad, useRemembered, useXetral } from '@/lib/hooks';
+import { useServiceStates } from '@/lib/services';
 import { TxList } from '@/ui/tx-list';
 import { TransactionSheet } from '@/ui/transaction-sheet';
 
@@ -139,6 +140,11 @@ export default function Wallet() {
 
   const session = useLoad(() => client.currentSession(), [client]);
   const balances = useLoad(() => client.balances(), [client]);
+  // A HIDDEN service has no tile and no action here (093). Its wallets are
+  // already gone from `balances` — the API drops them — so the currency rail
+  // re-lays itself out with no empty slot.
+  const { states: services } = useServiceStates();
+  const products = PRODUCTS.filter((p) => !isHidden(services, p.href));
   /*
    * THE HEADLINE IS IN DOLLARS, because the card spends in dollars and a
    * customer paid in naira or cedis should read one figure for "what can I
@@ -277,10 +283,12 @@ export default function Wallet() {
             <span className="act-ico"><Icon name="plus" size={22} /></span>
             Add
           </Link>
-          <Link href="/fx" className="act">
-            <span className="act-ico"><Icon name="swap" size={22} /></span>
-            Convert
-          </Link>
+          {!isHidden(services, '/fx') && (
+            <Link href="/fx" className="act">
+              <span className="act-ico"><Icon name="swap" size={22} /></span>
+              Convert
+            </Link>
+          )}
           {/* ITS OWN SCREEN. Request and Add both pointed here at
               `/add-money`, so two of the four actions led to one page — and
               the one headed "Add money", which is not what somebody asking to
@@ -355,8 +363,10 @@ export default function Wallet() {
           <h2>Explore</h2>
           <Link href="/more" className="more">All services</Link>
         </div>
-        <div className="tiles">
-          {PRODUCTS.map((p) => (
+        {/* As many columns as there are tiles, so a hidden product leaves no
+            empty slot — the grid is four across only while there are four. */}
+        <div className="tiles" style={{ gridTemplateColumns: `repeat(${Math.max(products.length, 1)}, 1fr)` }}>
+          {products.map((p) => (
             <Link key={p.label} href={p.href} className={`tile ${p.tone}`}>
               <span className="tile-icon"><Icon name={p.icon} size={20} /></span>
               {p.label}

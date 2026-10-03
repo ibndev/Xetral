@@ -2448,6 +2448,41 @@ Schema: `packages/ledger/sql/091_test_account_reset.sql`. Service in
   says "you do not need to pay again"; failed says so above the form; only a
   404 means the link is not active.
 
+### Enabled, Coming soon, Hidden — non-obvious rules
+
+Schema: `packages/ledger/sql/093_feature_visibility.sql`. Reader in
+`apps/api/src/settings/settings.service.ts` (`serviceState`), guard in
+`apps/api/src/settings/feature.guard.ts`, control on `/admin/settings`,
+client rules in `packages/client/src/services.ts`, guarded by
+`apps/web/src/ui/hidden-services.test.ts`.
+
+- **`<service>_enabled` STILL DECIDES ON OR OFF; `<service>_when_off` DECIDES
+  WHAT OFF MEANS.** Two rows rather than one three-valued row, so no
+  combination is incoherent, and the admin control writes `_when_off` FIRST —
+  every state it passes through on the way is one of the three. Every
+  deployment ships `coming_soon`, which is the behaviour every switch had.
+- **HIDDEN IS NOT A STRONGER "PAUSED".** Coming soon keeps the reads (a paused
+  card can still be frozen, paused crypto still shows holdings). Hidden means
+  the product is not offered here: `FeatureGuard` answers EVERY customer route
+  the service owns with 404 `not_found` — a named refusal would say what is
+  hidden. Staff routes and provider webhooks are outside its prefixes,
+  deliberately: money a provider reports is recorded whatever a screen shows.
+- **CRYPTO IS ALSO A SET OF WALLETS.** Hidden crypto takes BTC, USDT and USDC
+  off `/v1/wallets` (even held), out of the dollar total WITHOUT naming them,
+  out of history, receipts, Convert, saved recipients, the card cascade and a
+  card's base currency. The money stays owed and in the ledger, and returns
+  the moment the service does — no row is touched.
+- **`/v1/services` KEEPS ITS BOOLEANS and adds `states`.** An installed app
+  reads only the booleans, so for it hidden is off and reads Coming soon — the
+  safe direction, and its endpoints refuse either way.
+- **EVERY GATED SCREEN WAITS FOR THE ANSWER NOW**, the notice screens too: a
+  crypto screen drawn and then taken away is the flash of a product we do not
+  offer. A hidden screen redirects home with `replace`. The states are asked on
+  every screen and on returning to the foreground — the client caches ten
+  seconds and the server thirty, and that is the whole of the stale window.
+- **THE TILE GRID HAS AS MANY COLUMNS AS TILES**, so a hidden product leaves no
+  empty slot.
+
 ### The assignment, the refusal nobody could read, and a paused service — non-obvious rules
 
 Schema: `packages/ledger/sql/082_refusals_and_details.sql`,
@@ -5333,6 +5368,8 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/089_paystack_identity.s
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/090_sign_in_country_relayed.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/091_test_account_reset.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/092_test_reset_clears_name.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/093_feature_visibility.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/094_crypto_out_of_legal.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -5423,6 +5460,8 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/089_paystack_identity.t
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/090_sign_in_country_relayed.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/091_test_account_reset.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/092_test_reset_clears_name.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/093_feature_visibility.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/094_crypto_out_of_legal.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

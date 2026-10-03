@@ -76,6 +76,42 @@ export const KILL_SWITCHES = {
 export type KillSwitch = keyof typeof KILL_SWITCHES;
 
 /**
+ * WHAT A SERVICE LOOKS LIKE TO A CUSTOMER, in three states (093).
+ *
+ * `<service>_enabled` still decides on or off and is still what every refusal
+ * reads. `<service>_when_off` decides what OFF means: `coming_soon` is the
+ * behaviour every switch has always had, and `hidden` removes the service
+ * from the apps and refuses its customer endpoints outright.
+ */
+export type ServiceState = 'enabled' | 'coming_soon' | 'hidden';
+
+/**
+ * What OFF means for each service, as accessors with the key written out —
+ * for the reason `DISABLED_ERROR` is, and so `setting-readers.test.ts` can see
+ * that every `_when_off` row has a reader.
+ */
+const WHEN_OFF: Record<KillSwitch, (s: SettingsService) => Promise<string>> = {
+  crypto: (s) => s.text('crypto_when_off', 'coming_soon'),
+  fx: (s) => s.text('fx_when_off', 'coming_soon'),
+  cards: (s) => s.text('cards_when_off', 'coming_soon'),
+  bills: (s) => s.text('bills_when_off', 'coming_soon'),
+  payouts: (s) => s.text('payouts_when_off', 'coming_soon'),
+};
+
+/**
+ * The currencies a hidden service takes with it.
+ *
+ * CRYPTO IS ALSO A SET OF WALLETS. Hiding the crypto screen while the home
+ * screen still drew a Bitcoin card, the activity rail a USDT tab and Convert a
+ * USDC option would be hiding the door and leaving the room. These are the
+ * assets the crypto service handles (`crypto/dto.ts`), the same three
+ * `@xetral/client`'s `CRYPTO_ASSETS` names.
+ */
+export const HIDDEN_WITH: Readonly<Partial<Record<KillSwitch, readonly string[]>>> = {
+  crypto: ['BTC', 'USDT', 'USDC'],
+};
+
+/**
  * The refusal each switch produces, written out as literals.
  *
  * Built with a template — `${service}_disabled` — these codes would be
@@ -485,6 +521,47 @@ export class SettingsService implements OnApplicationBootstrap {
    * The error code names the SERVICE, so a screen can say which part of the
    * product is paused rather than showing one generic message everywhere.
    */
+  /**
+   * Enabled, Coming soon or Hidden.
+   *
+   * A row that is missing — a database behind 093 — or holds anything but
+   * `hidden` reads as Coming soon: the state every switch had before there
+   * were three, so code ahead of its migration changes nothing.
+   */
+  async serviceState(service: KillSwitch): Promise<ServiceState> {
+    // nosemgrep: unsafe-dynamic-method
+    if (await KILL_SWITCHES[service](this)) return 'enabled';
+    // nosemgrep: unsafe-dynamic-method
+    return (await WHEN_OFF[service](this)) === 'hidden' ? 'hidden' : 'coming_soon';
+  }
+
+  /** Every service's state, for `GET /v1/services`. */
+  async serviceStates(): Promise<Readonly<Record<KillSwitch, ServiceState>>> {
+    const names = Object.keys(KILL_SWITCHES) as KillSwitch[];
+    const states = await Promise.all(names.map((name) => this.serviceState(name)));
+    return Object.fromEntries(names.map((name, i) => [name, states[i]])) as Record<KillSwitch, ServiceState>;
+  }
+
+  /** The currencies no customer surface may show or accept right now. */
+  async hiddenCurrencies(): Promise<ReadonlySet<string>> {
+    const out = new Set<string>();
+    for (const [service, codes] of Object.entries(HIDDEN_WITH) as [KillSwitch, readonly string[]][]) {
+      if ((await this.serviceState(service)) === 'hidden') for (const c of codes) out.add(c);
+    }
+    return out;
+  }
+
+  /**
+   * Refuses a request naming a currency a hidden service took with it.
+   *
+   * 404 `not_found`, the answer for something that does not exist here — a
+   * distinct "hidden" refusal would be a way to learn what is hidden.
+   */
+  async assertCurrencyVisible(...currencies: readonly string[]): Promise<void> {
+    const hidden = await this.hiddenCurrencies();
+    if (currencies.some((c) => hidden.has(c))) throw new NotFoundException({ error: 'not_found' });
+  }
+
   async assertServiceEnabled(service: KillSwitch): Promise<void> {
     // `service` is the `KillSwitch` union, so the lookup can only name one of
     // the functions declared in KILL_SWITCHES — never a caller's string.

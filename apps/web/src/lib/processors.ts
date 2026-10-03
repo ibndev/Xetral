@@ -166,10 +166,10 @@ export const PROCESSORS: readonly Processor[] = [
     name: 'Bitnob',
     adapter: 'bitnob',
     purpose:
-      'Virtual dollar cards, crypto, stablecoins, currency conversion and, where it ' +
+      'Virtual dollar cards, currency conversion and, where it ' +
       'is the rail chosen, naira account numbers',
     receives:
-      'For cards, crypto and conversion: a reference that identifies you to them ' +
+      'For cards and conversion: a reference that identifies you to them ' +
       'and means nothing outside their system, plus the amount and currency of ' +
       'each instruction. To open your naira account number with them: your name, ' +
       'email address, phone number, date of birth and Bank Verification Number — ' +
