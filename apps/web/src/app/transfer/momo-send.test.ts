@@ -84,7 +84,7 @@ describe('a mobile money send can actually be submitted', () => {
      * changed from "is there a name?" to "could there ever have been one?".
      *
      * Round four made momo ungated in both directions, which unblocked Kenya
-     * and also let a Ghanaian wallet through that Flutterwave had declined to
+     * and also let a Ghanaian wallet through that the previous cedi rail had declined to
      * name. Ghana's numbers DO resolve — `/v3/accounts/resolve` takes them —
      * so silence there means the number is wrong or the wallet is inactive,
      * and money sent to a mobile money wallet does not come back.

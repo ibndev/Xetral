@@ -34,7 +34,7 @@ const NEVER_A_NAME = new Set([
   'name', 'names', 'firstname', 'lastname', 'surname', 'first', 'last', 'middle', 'full',
   'hello', 'hi', 'hey', 'ok', 'okay', 'yes', 'no', 'none', 'null', 'undefined', 'nil', 'na', 'n/a',
   'the', 'and', 'or', 'for', 'with', 'you', 'your', 'my', 'me', 'mine', 'our', 'this', 'that',
-  'xetral', 'paystack', 'flutterwave', 'bank', 'money', 'wallet', 'payment', 'pay', 'send',
+  'xetral', 'paystack', 'kora', 'bank', 'money', 'wallet', 'payment', 'pay', 'send',
   'asdf', 'asdfgh', 'qwerty', 'qwertyuiop', 'zxcv', 'abc', 'abcd', 'xyz', 'lol', 'nil',
   'unknown', 'anonymous', 'someone', 'somebody', 'anybody', 'nobody', 'whatever',
 ]);

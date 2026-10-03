@@ -10,7 +10,7 @@ paths:
 
 # Working on a provider adapter
 
-Live set: Paystack, Bitnob, VTpass, Airalo, Twilio. Do not add Reloadly,
+Live set: Paystack, Kora, Bitnob, VTpass, Airalo, Twilio. Do not add Reloadly,
 Maplerad, Anchor or ALAT — they exist in the reference plugin and are out of
 scope.
 

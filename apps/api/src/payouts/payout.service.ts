@@ -257,7 +257,7 @@ export class PayoutService {
      * step uses the normalised one — the reservation, the row, and the rail.
      *
      * A Ghanaian types `0501234567` because that is how a number is written in
-     * Accra. Flutterwave's transfers API takes `233501234567` and has no idea
+     * Accra. The previous cedi rail's transfers API takes `233501234567` and has no idea
      * what a trunk zero is, so the payout was refused at the rail with a
      * sentence about an invalid account. Doing this here rather than in the
      * adapter means the ROW records the number the money was actually sent
@@ -326,7 +326,7 @@ export class PayoutService {
      * The row's `provider` was never written — the INSERT did not name the
      * column, so every payout since 046 read `bitnob`, whoever sent it. The
      * status sweep and the `transfer.*` webhook both ask `row.provider`, so a
-     * Flutterwave or Paystack payout was being asked about at Bitnob: on a
+     * The previous cedi rail or Paystack payout was being asked about at Bitnob: on a
      * deployment without Bitnob that is a thrown error and a webhook retried
      * for ever, and with it, "no such payout". Choosing here and sending on
      * exactly this rail means what the row says and what happened cannot
@@ -367,7 +367,7 @@ export class PayoutService {
       accountNumber: destination.account_number,
       /*
        * THE BRANCH, WHERE THE CORRIDOR REQUIRES ONE — Ghana, today.
-       * Flutterwave refuses a Ghanaian transfer without it, which would
+       * The previous cedi rail refuses a Ghanaian transfer without it, which would
        * have made 070's new bank rail fail on every send.
        */
       ...(destination.branch_code === undefined
@@ -377,7 +377,7 @@ export class PayoutService {
        * WHO SENT IT, because one corridor is refused without it.
        *
        * Kenya's M-PESA payout is treated as a cross-border remittance and
-       * Flutterwave refuses it unless the originator is named — we sent no
+       * The previous cedi rail refuses it unless the originator is named — we sent no
        * `meta` at all, so every shilling transfer was rejected for a missing
        * required field before anything else about it was considered.
        *
@@ -452,7 +452,7 @@ export class PayoutService {
   /**
    * The sending customer, as a remittance corridor requires them named.
    *
-   * NOT THE PLATFORM. Flutterwave's Kenya payout asks for `sender`,
+   * NOT THE PLATFORM. The previous cedi rail's Kenya payout asks for `sender`,
    * `sender_country` and `mobile_number` because the transfer is a
    * cross-border remittance and the originator has to be identifiable; naming
    * ourselves there would be a false statement on a regulatory field.
@@ -492,7 +492,7 @@ export class PayoutService {
    *
    * A MOBILE MONEY DESTINATION IS A PHONE NUMBER, and a phone number is
    * written differently by the person holding it and by the API that reaches
-   * it. `0501234567` in Accra is `233501234567` on Flutterwave's wire;
+   * it. `0501234567` in Accra is `233501234567` on the previous cedi rail's wire;
    * `0712345678` in Nairobi is `254712345678`. Sending the national spelling
    * is not a near miss — it is a number their transfers API cannot route, and
    * it comes back as a refusal about the account rather than about the format.
@@ -649,7 +649,7 @@ export class PayoutService {
   /**
    * The branches of one bank, where the corridor requires one.
    *
-   * `bankId` IS NOT `bank_code`. Flutterwave's bank list answers
+   * `bankId` IS NOT `bank_code`. The previous cedi rail's bank list answers
    * `{ id, code, name }` and the branches path takes the ID — two different
    * values for one bank, and passing the code answers nothing. So this reads
    * the bank OUT of the list rather than trusting a caller to know the
@@ -717,7 +717,7 @@ export class PayoutService {
          *
          * A rejection landed here, became `account_not_found`, and NOTHING
          * WAS WRITTEN DOWN — `#relay` is the only thing on this method that
-         * logs and this branch never reaches it. So Flutterwave's own sentence
+         * logs and this branch never reaches it. So the previous cedi rail's own sentence
          * about a Ghanaian mobile money number, the single fact that would
          * have ended "it says it cannot find the momo details", existed in no
          * log line, no table and no screen. Every round after that was
@@ -816,7 +816,7 @@ export class PayoutService {
       /*
        * THE RAIL'S OWN SENTENCE, IN THE LOG, FOR EVERY FAILED PAYOUT.
        *
-       * Flutterwave's is `complete_message` and it is the only thing that
+       * The previous cedi rail's is `complete_message` and it is the only thing that
        * distinguishes "the wallet number does not exist" from "your balance
        * with us will not cover this" from "this network is down" — three
        * failures with three different remedies, one of which is ours and two
@@ -855,7 +855,7 @@ export class PayoutService {
    * WHAT A `transfer.*` WEBHOOK ACTUALLY DOES, and why it does so little.
    *
    * THE FAILURE THIS EXISTS FOR. `/v3/transfers` answers `NEW` or `PENDING`
-   * on almost every real transfer — Flutterwave settles a mobile money payout
+   * on almost every real transfer — the previous cedi rail settles a mobile money payout
    * asynchronously — and this platform correctly records that as `sent`
    * rather than guessing. The outcome arrives later, on `transfer.completed`.
    * That event was parsed, its reference was read, and it was then handed to
@@ -866,14 +866,14 @@ export class PayoutService {
    * and nothing but `PAYOUT_RECONCILE_INTERVAL_SECONDS` — which is off by
    * default — would ever ask.
    *
-   * THE EVENT IS A DOORBELL, NOT A STATEMENT. Flutterwave does not sign the
+   * THE EVENT IS A DOORBELL, NOT A STATEMENT. The previous cedi rail does not sign the
    * body: `verif-hash` returns verbatim a string an operator typed into their
    * dashboard, so a valid header proves WHO rang and nothing about what they
    * said. Reading `status` and `complete_message` off the payload and acting
    * on them would let anybody holding that one shared secret mark a real
    * payout failed and have the money credited back to a wallet. So the
    * reference is the whole of what this trusts, and the outcome is re-read
-   * from Flutterwave by `status()` — which returns `complete_message` anyway,
+   * from the previous cedi rail by `status()` — which returns `complete_message` anyway,
    * because it parses the same field from the same API.
    *
    * IT IS THE SAME `applyReceipt` THE SWEEP AND THE REQUEST PATH USE. Two
@@ -900,7 +900,7 @@ export class PayoutService {
     if (row.status !== 'reserved' && row.status !== 'sent') return 'resolved';
 
     /*
-     * THE EVENT'S TRANSFER ID IS A CLAIM — the body of a Flutterwave event is
+     * THE EVENT'S TRANSFER ID IS A CLAIM — the body of one previous-rail event is
      * unsigned — so it is only ever used to ASK, and an answer counts only if
      * the transfer the rail describes carries OUR reference. That rule lives
      * in `confirmWithRail`, the one place every caller decides from.
@@ -1113,7 +1113,7 @@ export class PayoutService {
    *
    * AN UNKNOWN RAIL — every row written before 080, whose `provider` is the
    * column default — is the dangerous case. Asking the recorded `bitnob` about
-   * a Flutterwave transfer answers "no such payout", and reading THAT as a
+   * one previous-rail transfer answers "no such payout", and reading THAT as a
    * refusal reverses money that has left. So every rail is asked, a refusal
    * from any of them decides nothing, and the only answer accepted is one that
    * carries OUR reference, read off the provider's own response. Nothing that
@@ -1336,7 +1336,7 @@ export class PayoutService {
      * AND THIS PATH IS NOT HYPOTHETICAL. 043 permits `sent -> failed`
      * deliberately, because a bank transfer really can be returned days
      * later; the reconciliation sweep claims `status IN ('reserved','sent')`
-     * and calls this method on either; and a Flutterwave transfer is ASYNC —
+     * and calls this method on either; and one previous-rail transfer is ASYNC —
      * their first answer is `NEW`, which this platform records as `sent`, and
      * the real outcome arrives later on `transfer.completed`. So the
      * commonest failure on the newest rail lands exactly here.
@@ -1597,7 +1597,7 @@ export class PayoutService {
        * pot of money, asked in the same place and for the same reason.
        *
        * The daily ceiling protects the CUSTOMER's balance and this protects
-       * OURS: Flutterwave is a prefunded wallet, so a cedi payout out of a
+       * OURS: Kora is a prefunded wallet, so a cedi payout out of a
        * deployment holding no cedis is refused by them — with a message about
        * funds that reaches the app as a failure on a transfer whose customer,
        * amount and wallet number were all correct.

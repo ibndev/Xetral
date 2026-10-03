@@ -27,7 +27,7 @@ DO $$
 DECLARE
     v_rows INT;
 BEGIN
-    PERFORM record_account_refusal('flutterwave', 'NGN', 'p82', 'test:082 customer validation required');
+    PERFORM record_account_refusal('kora', 'NGN', 'p82', 'test:082 customer validation required');
     PERFORM record_account_refusal('paystack', 'NGN', NULL, 'test:082 customer validation required');
     PERFORM record_account_refusal('paystack', 'NGN', NULL, 'test:082 customer validation required');
 

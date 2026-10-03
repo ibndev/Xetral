@@ -831,7 +831,7 @@ function ChooseMethod({
  * THE ACCOUNT NAME IS FETCHED, NEVER TYPED — where the rail can answer. That
  * is the whole of what "the momo details cannot be found" was: the adapter
  * matched a network code and refused before making the call, so a Ghanaian
- * number whose owner Flutterwave will name was reported as unfindable.
+ * number whose owner the previous cedi rail will name was reported as unfindable.
  *
  * AND WHERE THE RAIL *CAN* ANSWER, SILENCE IS A REFUSAL. `name_status` tells
  * the two apart: `unavailable` means no name enquiry EXISTS on this rail —
@@ -925,7 +925,7 @@ function RecipientDetails({
   /*
    * THE BRANCHES OF THE CHOSEN BANK, and an empty list is the common answer.
    *
-   * Flutterwave refuses a Ghanaian transfer without a `destination_branch_code`
+   * The previous cedi rail refuses a Ghanaian transfer without a `destination_branch_code`
    * — 070 gave Ghana a bank rail and every send on it would have failed. The
    * SERVER decides whether a corridor needs one, so this screen draws a picker
    * when something comes back and nothing when it does not, rather than
@@ -1811,7 +1811,7 @@ function toRecipient(found: RecipientResolution): Recipient {
 /**
  * The name a customer picks a network by.
  *
- * Flutterwave's catalogue says "MTN Mobile Money", "Vodafone Cash Ghana",
+ * The previous cedi rail's catalogue says "MTN Mobile Money", "Vodafone Cash Ghana",
  * "AirtelTigo Money" — provider strings, not names. A picker is read at a
  * glance, so it reads MTN, VODAFONE, AIRTELTIGO, and XETRAL sits among them.
  */

@@ -17,7 +17,7 @@
  *     provider almost every Nigerian customer's name, email and phone number
  *     actually goes to. The recipient most customers had was the one the
  *     notice did not mention.
- *   - `Flutterwave` and `Expo` were absent too.
+ *   - `Expo` was absent too.
  *
  * SO THIS IS DERIVED FROM THE SEND PATH, NOT FROM THE PROVIDER LIST. A
  * provider this platform integrates with is not automatically a recipient of
@@ -45,9 +45,9 @@
  * which is the moment the notice would otherwise quietly stop describing how
  * the data gets there.
  *
- * AND THEN A BVN STARTED LEAVING THROUGH THE CODE, deliberately. Naira
- * account numbers moved to Flutterwave in 076, and Flutterwave will not open a
- * PERMANENT account without the customer's BVN. `FundingCustomer.bvn` is a
+ * AND THEN A BVN STARTED LEAVING THROUGH THE CODE, deliberately. Kora can be
+ * chosen for naira account numbers, and Kora will not open a virtual account
+ * without the customer's BVN. `FundingCustomer.bvn` is a
  * function so it is unsealed only when that adapter asks, and only from an
  * APPROVED submission. The page says so in the same sentence that names Dojah,
  * because a bold claim that one company receives it is the absolute-denial
@@ -60,7 +60,7 @@
  * unverified one, whose account opens on a rail that needs neither.
  *
  * WHAT NOBODY ELSE RECEIVES IS STILL THE PART WORTH READING. Outside
- * verification and account opening at Flutterwave or Bitnob, no date of
+ * verification and account opening at Kora or Bitnob, no date of
  * birth, address or BVN reaches any provider.
  * `kyc.service.ts` mints `provider_customers.provider_customer_id` as
  * `xetral-<uuid>` — a string we invent — and makes no provider call at all;
@@ -148,18 +148,19 @@ export const PROCESSORS: readonly Processor[] = [
   },
   {
     via: 'adapter',
-    name: 'Flutterwave',
-    adapter: 'flutterwave',
+    name: 'Kora',
+    adapter: 'kora',
     purpose:
-      'Naira account numbers, and mobile money in Ghana and Kenya — money in and money out',
+      'Mobile money and bank payments in Ghana and Kenya — money in and money ' +
+      'out — and, where it is the rail chosen, naira account numbers',
     receives:
-      'To open your naira account number: your name, email address, phone number ' +
-      'and Bank Verification Number — a bank will not open a permanent account ' +
-      'without one, so it is sent only once you are verified. ' +
-      'For mobile money, the wallet number money is going to, and a label naming the network. ' +
-      'For a payment to Kenya, cross-border rules require the sender to be ' +
-      'named, so your name, country and phone number are sent with it. When ' +
-      'somebody pays you through a payment link, their own email address.',
+      'To open your naira account number with them: your name, email address ' +
+      'and Bank Verification Number — they will not open one without it, so it ' +
+      'is sent only once you are verified. For money sent out: the wallet or ' +
+      'account number it is going to, the name the network or bank returns for ' +
+      'it, and our own operations email address — never yours. When somebody ' +
+      'pays you through a payment link, their own email address and, if they ' +
+      'give it, their name.',
   },
   {
     via: 'adapter',

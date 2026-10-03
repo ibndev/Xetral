@@ -26,17 +26,19 @@ BEGIN
     IF ngn IS DISTINCT FROM 'paystack' THEN
         RAISE EXCEPTION 'TEST FAILED 1: naira collection is routed to %, not paystack', ngn;
     END IF;
-    IF ghs IS DISTINCT FROM 'flutterwave' THEN
-        RAISE EXCEPTION 'TEST FAILED 1: cedi collection is routed to %, not flutterwave', ghs;
+    -- ROUTED, not to a named rail: 095 moved cedi collection to Kora, and
+    -- 095's suite asserts WHICH. What 059 guarantees is that it has one.
+    IF ghs IS NULL THEN
+        RAISE EXCEPTION 'TEST FAILED 1: cedi collection has no rail';
     END IF;
-    -- ROUTED, not "routed to Flutterwave": 083 moved shilling payouts to
+    -- ROUTED, not to a named rail either: 083 moved shilling payouts to
     -- Bitnob by the owner's assignment, and 083's suite asserts WHICH rail.
     -- What 059 guarantees is that the corridor has one.
     IF kes IS NULL THEN
         RAISE EXCEPTION 'TEST FAILED 1: shilling payouts have no rail';
     END IF;
 
-    RAISE NOTICE 'PASS 1: naira stays on Paystack; cedis route to Flutterwave; shillings are routed (to %)', kes;
+    RAISE NOTICE 'PASS 1: naira stays on Paystack; cedis (to %) and shillings (to %) are routed', ghs, kes;
 END $$;
 
 -- ---------------------------------------------------------------------------
@@ -71,7 +73,7 @@ BEGIN
     INSERT INTO provider_routes (operation, currency, provider)
     VALUES ('collect', 'ZAR', 'paystack');
 
-    UPDATE provider_routes SET provider = 'flutterwave'
+    UPDATE provider_routes SET provider = 'kora'
      WHERE operation = 'collect' AND currency = 'ZAR';
 
     SELECT count(*) INTO seen FROM provider_route_history
@@ -81,7 +83,7 @@ BEGIN
     END IF;
 
     SELECT was INTO before_provider FROM provider_route_history
-     WHERE operation = 'collect' AND currency = 'ZAR' AND now_is = 'flutterwave';
+     WHERE operation = 'collect' AND currency = 'ZAR' AND now_is = 'kora';
     IF before_provider IS DISTINCT FROM 'paystack' THEN
         RAISE EXCEPTION 'TEST FAILED 3: the history does not say what it was, it says %',
             COALESCE(before_provider, 'null');
@@ -101,7 +103,7 @@ DO $$
 DECLARE
     seen INT;
 BEGIN
-    UPDATE provider_routes SET provider = 'flutterwave'
+    UPDATE provider_routes SET provider = 'kora'
      WHERE operation = 'collect' AND currency = 'ZAR';
 
     SELECT count(*) INTO seen FROM provider_route_history
@@ -204,7 +206,7 @@ BEGIN
 
     INSERT INTO link_payments
       (reference, link_id, user_id, amount_minor, currency, payer_email, provider)
-    VALUES ('xetpay-routing-1', lid, uid, 500000, 'GHS', 'payer@example.com', 'flutterwave')
+    VALUES ('xetpay-routing-1', lid, uid, 500000, 'GHS', 'payer@example.com', 'kora')
     RETURNING id INTO pid;
 
     BEGIN
@@ -218,23 +220,21 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
--- 8. THE CREDENTIAL SLOTS EXIST, AND THE HASH IS NOT THE KEY
+-- 8. THE CEDI RAIL HAS A CREDENTIAL SLOT IN USE
 --
--- Flutterwave verifies a webhook with a value an operator sets on ITS OWN
--- dashboard, not with the secret key — one slot would send them to paste the
--- wrong string and wonder why every event was refused.
+-- 059 added the slots for the rail it routed cedis to; 095 replaced that rail
+-- with Kora, whose one key both authorises calls and signs its webhooks.
 -- ---------------------------------------------------------------------------
 DO $$
 DECLARE
     slots INT;
 BEGIN
     SELECT count(*) INTO slots FROM provider_credential_slots
-     WHERE provider = 'flutterwave' AND name IN ('secret_key', 'webhook_hash') AND in_use;
+     WHERE provider = 'kora' AND name = 'secret_key' AND in_use;
 
-    IF slots <> 2 THEN
-        RAISE EXCEPTION
-            'TEST FAILED 8: expected both Flutterwave slots in use, found %', slots;
+    IF slots <> 1 THEN
+        RAISE EXCEPTION 'TEST FAILED 8: expected the Kora secret key slot in use, found %', slots;
     END IF;
 
-    RAISE NOTICE 'PASS 8: the key and the webhook hash are separate slots';
+    RAISE NOTICE 'PASS 8: the cedi rail has its credential slot';
 END $$;

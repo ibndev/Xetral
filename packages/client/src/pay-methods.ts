@@ -11,8 +11,8 @@ export type PayMethod = 'card' | 'ussd' | 'mobile_money' | 'bank';
 
 export const PAY_METHODS: Readonly<Record<string, readonly PayMethod[]>> = {
   NGN: ['bank', 'card', 'ussd'],
-  GHS: ['mobile_money', 'bank', 'card'],
-  KES: ['mobile_money', 'card'],
+  GHS: ['mobile_money'],
+  KES: ['mobile_money'],
   USD: ['card'],
 };
 

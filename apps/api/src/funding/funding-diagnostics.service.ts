@@ -140,7 +140,7 @@ export class FundingDiagnosticsService {
      * 059 routes a currency to a rail; this asks whether that rail HOLDS A
      * CREDENTIAL. The two together are what decide whether a payment link
      * works, and with them apart a deployment holding a Paystack key and no
-     * Flutterwave one collected naira perfectly and answered every cedi,
+     * key for the cedi rail collected naira perfectly and answered every cedi,
      * shilling and dollar checkout with `checkout_unavailable` — one opaque
      * code for a missing key, a refusal and an outage alike. The reason was in
      * a log line written at the moment a payer pressed the button, and nowhere
@@ -248,8 +248,8 @@ export class FundingDiagnosticsService {
     const fallback =
       provider === 'paystack'
         ? this.config.paystackSecretKey
-        : provider === 'flutterwave'
-          ? this.config.flutterwaveSecretKey
+        : provider === 'kora'
+          ? this.config.koraSecretKey
           : undefined;
     try {
       const value = await this.credentials.secretFor(provider, 'secret_key', fallback);
@@ -279,7 +279,7 @@ export class FundingDiagnosticsService {
    * This line used to quote `funding_provider`, which stopped deciding
    * account numbers when 076 gave `account` a route of its own and 079 a
    * fallback. So the screen could say "paystack" while every account was
-   * being asked of Flutterwave first — the diagnostics page describing a
+   * being asked of the previous cedi rail first — the diagnostics page describing a
    * system other than the one refusing customers.
    */
   async #accountRailCheck(fallback: string): Promise<DiagnosticCheck> {
@@ -478,6 +478,9 @@ export class FundingDiagnosticsService {
       ['test_account_resets.full_name', '092_test_reset_clears_name.sql'],
       // A migration that only adds settings rows is named as `set:<key>`.
       ['set:crypto_when_off', '093_feature_visibility.sql'],
+      // A migration that moves configuration is named by a credential slot
+      // it adds, as `slot:<provider>.<name>`.
+      ['slot:kora.secret_key', '095_kora.sql'],
     ];
 
     const missing: string[] = [];
@@ -487,6 +490,15 @@ export class FundingDiagnosticsService {
           name.slice(3),
         ]);
         if ((fn.rowCount ?? 0) === 0) missing.push(`function ${name.slice(3)} (${file})`);
+        continue;
+      }
+      if (name.startsWith('slot:')) {
+        const [provider, slot] = name.slice(5).split('.');
+        const row = await this.pool.query(
+          `SELECT true AS present FROM provider_credential_slots WHERE provider = $1 AND name = $2`,
+          [provider, slot],
+        );
+        if ((row.rowCount ?? 0) === 0) missing.push(`credential slot ${name.slice(5)} (${file})`);
         continue;
       }
       if (name.startsWith('set:')) {

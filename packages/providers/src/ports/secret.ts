@@ -11,7 +11,7 @@ import { ProviderNotSentError } from './errors.js';
  * hint, and were read by nothing: 026's "a credential nothing reads is one an
  * operator believes is live", in the three adapters that predate the rule.
  *
- * Bitnob, Paystack and Flutterwave each declare the same shape under their own
+ * Bitnob, Paystack and Kora each declare the same shape under their own
  * name; this is the one the fulfilment adapters share.
  */
 export type SecretSource = string | (() => Promise<string | undefined>);

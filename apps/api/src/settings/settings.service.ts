@@ -254,7 +254,7 @@ export class SettingsService implements OnApplicationBootstrap {
   /**
    * WHICH OF OUR PROVIDER BALANCES FUNDS A PAYOUT IN THIS CURRENCY.
    *
-   * FLUTTERWAVE IS A PREFUNDED WALLET AND NOTHING IN THIS PLATFORM SAID SO.
+   * KORA IS A PREFUNDED WALLET AND NOTHING IN THIS PLATFORM SAID SO.
    * It debits the balance matching the payout currency, so a cedi payout needs
    * a cedi float — and a deployment that has never collected a cedi has none,
    * which refuses every Ghanaian transfer with a message about funds rather
@@ -264,7 +264,7 @@ export class SettingsService implements OnApplicationBootstrap {
    *
    *   hold a float      leave this empty; cedis pay cedis, and somebody tops
    *                     the balance up ahead of demand.
-   *   name another      set `GHS=NGN`; Flutterwave debits naira and converts
+   *   name another      set `GHS=NGN`; the previous cedi rail debits naira and converts
    *                     at THEIR rate, which is a price we do not set.
    *
    * EMPTY IS THE DEFAULT because the second answer silently overrides a

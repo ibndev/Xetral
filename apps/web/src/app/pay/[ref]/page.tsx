@@ -25,7 +25,7 @@ import { LegalLine } from '@/ui/legal-line';
  * out of scope for everything a form that took a card number would drag in.
  *
  * WHICH PROVIDER IS DECIDED BY THE CURRENCY AND NOT BY THIS PAGE. Naira goes
- * to Paystack; cedis and shillings go to Flutterwave, because a Paystack
+ * to Paystack; cedis and shillings go to the previous cedi rail, because a Paystack
  * account registered in Nigeria settles in naira and asked for cedis will
  * either refuse or convert at a rate nobody chose. The page never names a
  * provider for that reason — the routing is data, in `provider_routes`, and

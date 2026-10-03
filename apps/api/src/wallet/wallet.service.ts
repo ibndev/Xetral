@@ -270,7 +270,7 @@ export class WalletService {
     /*
      * EVERY CURRENCY THE PLATFORM CAN ACTUALLY MOVE BOTH WAYS.
      *
-     * 059 routes GHS and KES to Flutterwave for collection AND payout, which
+     * 059 routes GHS and KES to the previous cedi rail for collection AND payout, which
      * is the whole of what makes them wallets rather than labels: a customer
      * in Lagos can be paid in cedis and can pay a cedi wallet. They were on
      * nobody's home screen but a Ghanaian's, so cedis arriving for a Nigerian

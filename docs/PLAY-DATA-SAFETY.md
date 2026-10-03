@@ -65,12 +65,12 @@ source for this column.
 
 | Type | Collected | Shared | Required | Purposes | Why |
 |---|---|---|---|---|---|
-| Name | Yes | **Yes** | Required | Account management, App functionality, Fraud prevention and compliance | Sent to Paystack to open a naira account number; sent to Flutterwave as the named sender on a Kenyan M-PESA payout, which cross-border rules require; sent to Dojah with the identity check |
-| Email address | Yes | **Yes** | Required | Account management, App functionality | Sent to Brevo to deliver receipts, security alerts and reset codes; sent to Paystack when a customer opens an account number |
+| Name | Yes | **Yes** | Required | Account management, App functionality, Fraud prevention and compliance | Sent to Paystack, Kora or Bitnob — whichever opens the customer's naira account number; sent to Dojah with the identity check |
+| Email address | Yes | **Yes** | Required | Account management, App functionality | Sent to Brevo to deliver receipts, security alerts and reset codes; sent to the rail that opens a customer's account number (Paystack, Kora or Bitnob) |
 | User IDs | Yes | **Yes** | Required | Account management, App functionality | Bitnob receives an opaque reference that identifies the customer in their system only |
 | Address | Yes | No | Required | Fraud prevention and compliance | Collected for identity verification and reviewed by our own staff. It is not part of the Dojah check and no company receives it |
-| Phone number | Yes | **Yes** | Required | Account management, App functionality, Fraud prevention and compliance | The Xetral-to-Xetral identifier. Sent to Paystack with the account opening; sent to Flutterwave in M-PESA sender metadata |
-| Other info — date of birth, Bank Verification Number | Yes | **Yes** | Required | Fraud prevention and compliance | Required by Nigerian AML rules. Sent to **Dojah Inc.** to be checked. The BVN is sealed with a key-versioned envelope at rest, and no *payment* provider is ever sent it — Paystack's `/customer/:code/identification`, the endpoint a BVN would go to, is declared in the endpoint table and called from nowhere |
+| Phone number | Yes | **Yes** | Required | Account management, App functionality, Fraud prevention and compliance | The Xetral-to-Xetral identifier. Sent to Paystack with the account opening |
+| Other info — date of birth, Bank Verification Number | Yes | **Yes** | Required | Fraud prevention and compliance | Required by Nigerian AML rules. Sent to **Dojah Inc.** to be checked. The BVN is sealed with a key-versioned envelope at rest. Once verified it is sent to Kora or Bitnob when that rail opens the naira account number (neither will open one without it), and to Paystack when it asks to match a BVN to a bank account before opening one |
 
 Race, ethnicity, political or religious beliefs, sexual orientation: **not
 collected.** Nothing in the schema could hold them.
@@ -79,7 +79,7 @@ collected.** Nothing in the schema could hold them.
 
 | Type | Collected | Shared | Required | Purposes | Why |
 |---|---|---|---|---|---|
-| User payment info | Yes | **Yes** | Required | App functionality | The destination account or wallet number of a payout goes to the rail that sends it — Paystack, Flutterwave or Bitnob. The number being topped up goes to VTpass |
+| User payment info | Yes | **Yes** | Required | App functionality | The destination account or wallet number of a payout goes to the rail that sends it — Paystack, Kora or Bitnob. The number being topped up goes to VTpass |
 | Purchase history | Yes | No | Required | App functionality, Fraud prevention and compliance | The ledger. It is the record of what we owe a customer, and it is not shared as a history — each provider is told only about the one instruction it is carrying out |
 | Other financial info — balances | Yes | No | Required | App functionality | Held in our own ledger |
 | Credit score | No | — | — | — | Nothing here computes or requests one |

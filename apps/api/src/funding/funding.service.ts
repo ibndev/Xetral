@@ -609,7 +609,7 @@ export class FundingService implements OnModuleDestroy {
      * cannot reach, and both arrived on the screen as the same shrug.
      *
      * Naming the currency first is what lets 059 do its job: GHS and KES route
-     * to Flutterwave, NGN stays on Paystack, and a corridor with no route
+     * to the previous cedi rail, NGN stays on Paystack, and a corridor with no route
      * falls back to the global setting rather than becoming an outage.
      */
     const currency = await this.#accountCurrencyOf(userId);
@@ -642,7 +642,7 @@ export class FundingService implements OnModuleDestroy {
      * EACH RAIL IN TURN, AND ONLY AFTER A DEFINITE "NO".
      *
      * Activate Account failed in Nigeria and in Ghana for one reason: naira
-     * account numbers were routed to Flutterwave, which opens a permanent
+     * account numbers were routed to the previous cedi rail, which opens a permanent
      * account only with a verified BVN, and nothing else was ever asked. An
      * unverified Nigerian and every Ghanaian — who has no BVN to give — were
      * refused while another rail that opens a tier 1 account from a name sat
@@ -1046,7 +1046,7 @@ export class FundingService implements OnModuleDestroy {
         if (error.providerCode === 'account_not_supported_here') {
           /*
            * The rail serving this currency does not issue dedicated account
-           * numbers in it AT ALL — the Ghana and Kenya case. Flutterwave's
+           * numbers in it AT ALL — the Ghana and Kenya case. The previous cedi rail's
            * virtual accounts are an NGN product, and
            * `countries.funding_methods` already records that money arrives
            * there by a mobile money charge instead.
@@ -1078,7 +1078,7 @@ export class FundingService implements OnModuleDestroy {
    *
    * The customer's own, WHERE A RAIL OPENS ACCOUNTS IN IT — and naira
    * everywhere else. A Ghanaian pressing Activate Account was asking
-   * Flutterwave for a CEDI account number, which no rail here issues, and
+   * The previous cedi rail for a CEDI account number, which no rail here issues, and
    * never got the naira one every customer is offered: the naira wallet is
    * the funding rail for everybody (040), and money paid to a Ghanaian by a
    * Nigerian lands in it. 079's coverage says where an account number is a
@@ -1187,7 +1187,7 @@ export class FundingService implements OnModuleDestroy {
    *
    * Asking for the default produced a sentence that was actively misleading on
    * the one line an operator reads to diagnose this: "paystack is unreachable
-   * while opening a GHS account: [flutterwave] no Flutterwave secret key is
+   * while opening a GHS account: [kora] no Kora secret key is
    * configured". Two provider names in one sentence, the wrong one first, and
    * an operator sent to check a Paystack credential that had nothing to do
    * with it.

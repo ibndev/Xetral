@@ -56,9 +56,9 @@ DO $$
 DECLARE n INT;
 BEGIN
     UPDATE provider_routing_policy
-       SET mode = 'single', single_provider = 'flutterwave';
+       SET mode = 'single', single_provider = 'kora';
     SELECT count(*) INTO n FROM provider_routing_policy_history
-     WHERE mode = 'single' AND single_provider = 'flutterwave';
+     WHERE mode = 'single' AND single_provider = 'kora';
     IF n < 1 THEN
         RAISE EXCEPTION 'TEST FAILED 4: a policy change left no history';
     END IF;

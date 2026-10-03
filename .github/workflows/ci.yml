@@ -179,6 +179,7 @@ jobs:
             -f packages/ledger/sql/092_test_reset_clears_name.sql \
             -f packages/ledger/sql/093_feature_visibility.sql \
             -f packages/ledger/sql/094_crypto_out_of_legal.sql \
+            -f packages/ledger/sql/095_kora.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       - name: Ledger and identity invariants
@@ -280,6 +281,7 @@ jobs:
                    packages/ledger/sql/092_test_reset_clears_name.test.sql \
                    packages/ledger/sql/093_feature_visibility.test.sql \
                    packages/ledger/sql/094_crypto_out_of_legal.test.sql \
+                   packages/ledger/sql/095_kora.test.sql \
                    packages/ledger/sql/099_least_privilege.test.sql; do
             echo "== $f"
             psql -h localhost -U xetral -d xetral_invariants -v ON_ERROR_STOP=1 \
@@ -413,6 +415,7 @@ jobs:
             -f packages/ledger/sql/092_test_reset_clears_name.sql \
             -f packages/ledger/sql/093_feature_visibility.sql \
             -f packages/ledger/sql/094_crypto_out_of_legal.sql \
+            -f packages/ledger/sql/095_kora.sql \
             -f packages/ledger/sql/099_least_privilege.sql
 
       # ------------------------------------------------------------------
@@ -594,15 +597,15 @@ jobs:
           # above — and that difference is exactly what makes a probe worth
           # having. It is also the rail money ARRIVES on by default: an
           # unmounted deposit webhook is every naira transfer landing nowhere.
-          # FLUTTERWAVE, and this one is worth its own line rather than the
-          # loop above: it is the only webhook here whose verification is an
-          # EQUALITY against a shared secret rather than an HMAC over the
-          # body, and the failure it guards against is an unset secret being
-          # read as "verification off" — which would credit a wallet on
-          # anybody's say-so.
-          check "forged webhook flutterwave/deposits" 401 \
-            http://127.0.0.1:3100/v1/webhooks/flutterwave/deposits \
-            -X POST -H 'content-type: application/json' -d '{}'
+          # KORA, on its own line: it signs only the `data` object, with the
+          # same secret key that authorises calls, and the failure it guards
+          # against is an unset key being read as "verification off" — which
+          # would credit a wallet on anybody's say-so. This instance has no
+          # Kora key, so a forged event must still be a 401.
+          check "forged webhook kora" 401 \
+            http://127.0.0.1:3100/v1/webhooks/kora \
+            -X POST -H 'content-type: application/json' \
+            -H 'x-korapay-signature: deadbeef' -d '{"event":"charge.success","data":{}}'
 
           check "forged webhook paystack/deposits" 401 \
             http://127.0.0.1:3100/v1/webhooks/paystack/deposits \

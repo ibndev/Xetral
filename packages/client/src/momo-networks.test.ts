@@ -13,13 +13,13 @@ import { MOMO_NETWORKS } from './momo-networks.js';
  * compiles perfectly and fails on a customer.
  */
 const ADAPTER = new URL(
-  '../../providers/src/flutterwave/payout-adapter.ts',
+  '../../providers/src/kora/payout-adapter.ts',
   import.meta.url,
 );
 
 function adapterNetworks(): Record<string, string[]> {
   const text = readFileSync(ADAPTER, 'utf8');
-  const start = text.indexOf('FLUTTERWAVE_MOBILE_MONEY_NETWORKS');
+  const start = text.indexOf('KORA_MOBILE_MONEY_NETWORKS');
   expect(start).toBeGreaterThan(-1);
   const block = text.slice(start, text.indexOf('};', start));
 
@@ -62,7 +62,7 @@ describe('the picker offers exactly what the rail accepts', () => {
 
   it('gives every network a name a person would recognise', () => {
     // The code goes on the wire; the name goes on the screen. A picker showing
-    // 'VOD' asks a customer in Accra to know Flutterwave's internal spelling
+    // 'VOD' asks a customer in Accra to know the previous cedi rail's internal spelling
     // of Telecel Cash.
     for (const networks of Object.values(MOMO_NETWORKS)) {
       for (const network of networks) {

@@ -4993,8 +4993,9 @@ Schema: `packages/ledger/sql/015_error_events.sql`.
 ## Providers
 
 Live set: **Paystack** (NGN virtual accounts — the default funding rail, and
-the naira checkout), **Flutterwave** (collecting and paying out GHS and KES —
-mobile money in Accra and Nairobi), **Bitnob** (NGN virtual accounts as the
+the naira checkout), **Kora** (collecting and paying out GHS — mobile money in
+Accra — and, where routed, NGN fixed virtual accounts and NGN/KES payouts),
+**Bitnob** (NGN virtual accounts as the
 fallback, crypto, USDT, stablecoin, virtual USD cards, FX),
 **VTpass** (airtime, data, bills), **Airalo** (eSIM), **Twilio** (virtual
 numbers), **Resend** (email).
@@ -5011,6 +5012,52 @@ the screen a customer opens in order to put money in — CBN tier 1 permits the
 account, and `029_kyc_tiers.seed.sql` has capped tier 0 at ₦50,000 a day since
 it landed. Chosen on its own merits for one rail, not inherited. Nothing else
 from the plugin comes with it.
+
+**FLUTTERWAVE IS GONE (095).** Kora replaced it everywhere: adapters, routes,
+coverage, credential slots, the webhook and the legal pages. Older sections of
+this file that describe Flutterwave are the history of rules learned on it —
+the general lessons stand, the Flutterwave-specific facts do not. Do not
+reintroduce it.
+
+### Kora specifics — from developers.korapay.com (read 3 October 2026)
+
+`packages/providers/src/kora/`, webhook at `POST /v1/webhooks/kora`, migration
+`095_kora.sql`. The API reference at docs.korapay.com was unreachable when the
+adapter was written, so EVERY path comes from a guide page and each says which;
+a path no guide states is not in the adapter.
+
+- **ONE KEY, LIKE PAYSTACK.** `Authorization: Bearer <secret key>` on every
+  call, and the same key verifies every webhook: `x-korapay-signature` is an
+  HMAC-SHA256 of ONLY the `data` object, as `JSON.stringify(data)` — their own
+  samples re-serialise, so the verifier does too. The event name beside `data`
+  is NOT signed, so nothing acts on it: every outcome is re-read from Kora by
+  reference before a posting exists. An unset key refuses.
+- **ONE HOST FOR TEST AND LIVE** (`https://api.korapay.com/merchant`, paths
+  carry `/api/v1`); the key selects the environment, and staging refuses a
+  `sk_live_` key at boot.
+- **MAJOR UNITS EVERYWHERE**, read from their TEXT in `kora/amounts.ts`.
+  Paystack, one directory away, is minor — a factor of a hundred.
+- **THE ENVELOPE IS A BOOLEAN**, tested `=== true`. And three of Kora's own
+  "errors" are not refusals: "Internal Server Error", "Invalid authorization
+  key" and a duplicate reference each mean "requery", per their Errors guide,
+  so the client raises them UNAVAILABLE — a refusal is what gives a payout's
+  money back. A 5xx on a payout is never a failure ("DO NOT treat ... as
+  failed payout").
+- **A PAYOUT HAS NO ID OF THEIRS.** It is asked about by OUR reference
+  (`GET /api/v1/transactions/:reference`), and only "Transaction not found"
+  is `NO_SUCH_TRANSFER`.
+- **A FIXED VIRTUAL ACCOUNT IS NAIRA, PERMANENT, AND NEEDS A BVN** (`kyc.bvn`
+  is mandatory) plus a `bank_code` (`KORA_VBA_BANK_CODE`, `000` in sandbox).
+  It is looked up by our reference before it is created, so a retry finds the
+  first account. Pool accounts and the merchant's reserved account are never a
+  customer's. KES and USD accounts are different products and are not built.
+- **WHAT KORA DOES NOT DO, AND NOTHING INVENTS:** no USSD channel; card and
+  bank-transfer pay-ins in NGN only (so USD collection is UNROUTED); no Ghana
+  BANK payouts documented (wallets only); no field to debit another balance
+  (`payout_debit_currencies` naming one is refused before sending); no
+  wallet name enquiry outside Ghana. `customer.email` is required on every
+  payout, and the platform's `OPERATIONS_EMAIL` is what is sent — never a
+  customer's.
 
 ### Bitnob specifics — verified from their docs (v2, September 2026)
 
@@ -5370,6 +5417,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/091_test_account_reset.
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/092_test_reset_clears_name.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/093_feature_visibility.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/094_crypto_out_of_legal.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/095_kora.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/001_ledger.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/identity/sql/002_identity.test.sql
@@ -5462,6 +5510,7 @@ psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/091_test_account_reset.
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/092_test_reset_clears_name.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/093_feature_visibility.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/094_crypto_out_of_legal.test.sql
+psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/095_kora.test.sql
 psql -d xetral -v ON_ERROR_STOP=1 -f packages/ledger/sql/099_least_privilege.test.sql
 
 # API flows end to end. Needs both services: Postgres for the auth flows,

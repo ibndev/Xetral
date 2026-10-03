@@ -10,8 +10,7 @@ import {
 } from '@nestjs/common';
 import type { Pool } from 'pg';
 import {
-  FlutterwaveCheckoutAdapter,
-  FlutterwaveClient,
+  KoraCheckoutAdapter,
   PaystackCheckoutAdapter,
   PaystackClient,
 } from '@xetral/providers';
@@ -27,10 +26,9 @@ import { CURRENCIES } from '@xetral/shared';
 import { API_CONFIG, DATABASE, LEDGER } from '../tokens.js';
 import type { ApiConfig } from '../config.js';
 import { ProviderCredentialService } from '../settings/provider-credentials.service.js';
-import { flutterwaveSecretKey, paystackSecretKey } from '../app.module.js';
+import { koraClient, paystackSecretKey } from '../app.module.js';
 import { ProviderRouterService } from '../routing/provider-router.service.js';
 import { PublishedRateService } from '../fx/published-rate.service.js';
-import { flutterwaveTrace } from '../funding/flutterwave-trace.js';
 
 /**
  * THE PAYMENT LINK, AND WHY IT IS A CHECKOUT RATHER THAN A SHORTCUT.
@@ -410,8 +408,8 @@ export class PaymentLinkService {
        * A MISSING CREDENTIAL IS TOLD APART FROM AN OUTAGE, and only those two.
        *
        * They need different actions and had one code between them: a
-       * deployment holding a Paystack key and no Flutterwave one collected
-       * naira perfectly and answered every cedi, shilling and dollar checkout
+       * deployment holding a Paystack key and no key for the cedi rail
+       * collected naira perfectly and answered every cedi, shilling and dollar checkout
        * with `checkout_unavailable` — which reads as "try again later" about
        * something that will never work until somebody pastes a key.
        *
@@ -602,7 +600,7 @@ export class PaymentLinkService {
      * MINOR UNITS ON BOTH SIDES OF THIS COMPARISON.
      *
      * The adapter has already converted, which is what makes this line safe
-     * to read: Paystack sends minor units and Flutterwave sends major ones,
+     * to read: Paystack sends minor units and Kora sends major ones,
      * and a comparison that had to know which would be wrong by a factor of a
      * hundred on one of the two rails — in the direction that credits too
      * much. `ports/checkout.ts` states the unit; here it is simply relied on.
@@ -690,16 +688,17 @@ export class PaymentLinkService {
    * nothing about either.
    */
   #checkout(provider: string): CheckoutPort {
-    if (provider === 'flutterwave') {
-      const baseUrl = this.config.flutterwaveBaseUrl;
-      if (baseUrl === undefined) throw this.#noRail(provider);
-      return new FlutterwaveCheckoutAdapter(
-        new FlutterwaveClient({
-          onTrace: flutterwaveTrace,
-          baseUrl,
-          secretKey: flutterwaveSecretKey(this.config, this.credentials),
-        }),
-      );
+    if (provider === 'kora') {
+      const client = koraClient(this.config, this.credentials);
+      if (client === undefined) throw this.#noRail(provider);
+      return new KoraCheckoutAdapter(client, {
+        /* Where Kora posts the outcome. Passed per charge so a stale dashboard
+           setting cannot lose a checkout's event; absent where this deployment
+           has not said where it can be reached. */
+        ...(this.config.webhookBaseUrl === undefined
+          ? {}
+          : { notificationUrl: `${this.config.webhookBaseUrl}/v1/webhooks/kora` }),
+      });
     }
 
     if (provider === 'paystack') {

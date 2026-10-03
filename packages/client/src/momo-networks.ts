@@ -8,8 +8,8 @@
  * with their money already reserved.
  *
  * THE CODES ARE THE PROVIDER'S OWN, not display names: they travel on the wire
- * to Flutterwave. `momo-networks.test.ts` reads this file and
- * `FLUTTERWAVE_MOBILE_MONEY_NETWORKS` as text and fails the build on a
+ * to Kora. `momo-networks.test.ts` reads this file and
+ * `KORA_MOBILE_MONEY_NETWORKS` as text and fails the build on a
  * disagreement in either direction — a network offered here and refused there
  * is a picker entry that cannot be used, and one accepted there and missing
  * here is a wallet nobody can link.

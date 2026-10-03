@@ -223,8 +223,8 @@ describe('the notice names exactly the companies that receive something', () => 
     /*
      * "Only Dojah is given your Bank Verification Number" was the absolute
      * 075 retired, one company wider — and it went false the day naira
-     * account numbers moved to Flutterwave, which will not open a permanent
-     * account without one. The table carries the fact; the sentence a
+     * account numbers could be opened at a rail that will not open a permanent
+     * account without one — Kora today. The table carries the fact; the sentence a
      * customer actually reads is prose in the page, and prose is what drifts.
      * So every processor whose entry says it receives a BVN must be named in
      * the privacy page's own text, not only in the rows rendered from data.

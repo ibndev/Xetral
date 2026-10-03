@@ -11,7 +11,7 @@ import { PAYOUT_PORT } from '../tokens.js';
  * a customer paid in through Paystack reads there as naira held, and so do
  * cedis a platform-priced conversion credited without paying any provider
  * anything. So a customer can hold cedis and naira that the ledger agrees
- * are backed, while Flutterwave — the rail that must pay them out — holds
+ * are backed, while the previous cedi rail — the rail that must pay them out — holds
  * none of either, and refuses. 073's guard read that ledger figure and was
  * satisfied every time.
  *

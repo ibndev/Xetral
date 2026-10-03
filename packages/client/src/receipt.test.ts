@@ -51,7 +51,7 @@ describe('what a shared receipt says', () => {
     // A receipt goes to the person who asked to be paid. What is left in the
     // account is nobody's business but the customer's.
     expect(text).not.toMatch(/balance/i);
-    expect(text).not.toMatch(/paystack|flutterwave|bitnob/i);
+    expect(text).not.toMatch(/paystack|kora|bitnob/i);
   });
 
   it('drops a zero fee rather than printing one', () => {

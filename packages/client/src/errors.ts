@@ -220,10 +220,10 @@ const API_ERROR_CODES = [
   /*
    * `insufficient_platform_liquidity` — OUR float, not the customer's balance.
    *
-   * Flutterwave is a prefunded wallet: a cedi payout spends a cedi balance
+   * Kora is a prefunded wallet: a cedi payout spends a cedi balance
    * this platform has to put there, and a deployment that has never collected
    * a cedi has none. Without its own code that refusal came back from
-   * Flutterwave as a message about funds, reached the app as an ordinary
+   * The previous cedi rail as a message about funds, reached the app as an ordinary
    * failed transfer, and was read by everybody — including us, for three
    * rounds — as the customer's wallet number being wrong.
    *
@@ -273,7 +273,7 @@ const API_ERROR_CODES = [
    *
    * TOLD APART FROM `checkout_unavailable`, and only these two, because they
    * need different actions and had one code between them. A deployment
-   * holding a Paystack key and no Flutterwave one collected naira perfectly
+   * holding a Paystack key and no key for the cedi rail collected naira perfectly
    * and answered every cedi, shilling and dollar checkout with "try again
    * later" — about something that will never work until somebody pastes a
    * key.

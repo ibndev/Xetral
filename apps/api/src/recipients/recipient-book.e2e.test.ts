@@ -30,7 +30,7 @@ import { testApiConfig } from '../test-support/api-config.js';
  *
  *   1. A GHANAIAN WALLET IS RESOLVED, NOT REFUSED. This is the whole of "why
  *      can't the momo details be found": the adapter matched a network code
- *      and threw without ever asking, so a number Flutterwave will name came
+ *      and threw without ever asking, so a number the previous cedi rail will name came
  *      back as unfindable. The rail is asked here.
  *   2. A RAIL WITH NO NAME ENQUIRY ASKS FOR A LABEL rather than failing.
  *      Kenya's M-PESA genuinely has none, so `resolved_name` is null and the
@@ -62,7 +62,7 @@ const NAME_ON_WALLET = 'RABI SIEDU';
  * made, and stayed green while Accra could not send money.
  */
 class FakePayoutPort implements PayoutPort {
-  readonly provider = 'flutterwave';
+  readonly provider = 'kora';
   readonly lookups: { country: string; bankCode: string; accountNumber: string }[] = [];
 
   async banks(country: string): Promise<readonly PayoutBank[]> {
@@ -86,7 +86,7 @@ class FakePayoutPort implements PayoutPort {
       // The true answer for M-PESA, and the one the screen turns into a
       // request for a label rather than into a refusal.
       throw new ProviderRejectedError(
-        'flutterwave',
+        'kora',
         'a KE mobile money wallet has no name enquiry',
         'name_unavailable',
       );

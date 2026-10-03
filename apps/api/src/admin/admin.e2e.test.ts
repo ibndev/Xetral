@@ -1046,7 +1046,7 @@ describe('attributing a suspense deposit', () => {
     // entry, moved nothing, and was marked credited anyway.
     const reference = `shared-${randomUUID()}`;
     const one = await inSuspense('paystack', reference, 5_000_00n);
-    const two = await inSuspense('flutterwave', reference, 7_000_00n);
+    const two = await inSuspense('kora', reference, 7_000_00n);
     const [ada, ben, actor] = [await withAccount(await register()), await withAccount(await register()), await register()];
 
     const admin = app.get(AdminService);

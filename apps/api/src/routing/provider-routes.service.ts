@@ -20,13 +20,25 @@ import type { RoutedOperation, RoutingMode, RoutingPolicy } from './provider-rou
  * back from — loudly in a log, silently on the screen.
  */
 const CAPABLE: Readonly<Record<RoutedOperation, readonly string[]>> = {
-  account: ['flutterwave', 'bitnob', 'paystack'],
-  collect: ['paystack', 'flutterwave'],
-  payout: ['flutterwave', 'bitnob', 'paystack'],
+  account: ['kora', 'bitnob', 'paystack'],
+  collect: ['paystack', 'kora'],
+  payout: ['kora', 'bitnob', 'paystack'],
 };
 
 /** Naira-only rails. Their Nigerian registrations settle nothing else. */
 const NAIRA_ONLY: ReadonlySet<string> = new Set(['paystack']);
+
+/**
+ * Where Kora's adapter can serve, per operation — its guides document a
+ * fixed virtual account in naira only here, mobile money pay-ins in cedis and
+ * shillings, and payouts in the three. A switch offering it elsewhere would be
+ * a toggle whose only outcome is a refusal.
+ */
+const KORA_CURRENCIES: Readonly<Record<RoutedOperation, ReadonlySet<string>>> = {
+  account: new Set(['NGN']),
+  collect: new Set(['NGN', 'GHS', 'KES']),
+  payout: new Set(['NGN', 'GHS', 'KES']),
+};
 
 export interface RouteRow {
   readonly operation: RoutedOperation;
@@ -75,8 +87,8 @@ const MODES: readonly RoutingMode[] = ['per_route', 'by_coverage', 'single'];
  * WHY THERE WAS NO SCREEN. `ProviderRouterService.route()` has existed since
  * 059 and nothing called it, so moving a corridor was an UPDATE at a
  * production psql prompt — the install step 009 exists to abolish. The
- * product owner's request was a toggle: naira account numbers on Flutterwave
- * or Bitnob, cross-border payouts on Flutterwave or Bitnob, flipped by
+ * product owner's request was a toggle: naira account numbers on the previous cedi rail
+ * or Bitnob, cross-border payouts on the previous cedi rail or Bitnob, flipped by
  * whoever is on call rather than released.
  *
  * AN OPTION IS OFFERED ONLY IF THE SWITCH COULD USE IT. The funding and payout
@@ -253,7 +265,8 @@ export class ProviderRoutesService {
     return CAPABLE[operation].filter(
       (provider) =>
         (configured === undefined || configured.includes(provider)) &&
-        (currency === 'NGN' || !NAIRA_ONLY.has(provider)),
+        (currency === 'NGN' || !NAIRA_ONLY.has(provider)) &&
+        (provider !== 'kora' || KORA_CURRENCIES[operation].has(currency)),
     );
   }
 

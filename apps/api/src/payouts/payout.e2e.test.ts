@@ -108,7 +108,7 @@ class FakePayoutPort implements PayoutPort {
   /*
    * WHETHER THIS RAIL SPENDS A BALANCE WE HAVE TO FUND. Mutable here, because
    * the whole point of the flag is that one deployment answers differently
-   * per corridor: Flutterwave is prefunded and Paystack is not, and both are
+   * per corridor: Kora is prefunded and Paystack is not, and both are
    * behind this same port in production.
    */
   prefunded = false;
@@ -546,7 +546,7 @@ describe('paying a mobile money wallet', () => {
      * funding fake echoing `currency: 'NGN'` whatever it was asked for.
      */
     port.lookupAnswer = new ProviderRejectedError(
-      'flutterwave',
+      'kora',
       'a mobile money wallet has no name enquiry',
       'name_unavailable',
     );
@@ -577,7 +577,7 @@ describe('paying a mobile money wallet', () => {
   it('sends the number in the form the rail accepts, not the form it was typed in', async () => {
     /*
      * `0501234567` is how a number is written in Accra and is not a number
-     * Flutterwave's transfers API can route. This is the assertion that would
+     * The previous cedi rail's transfers API can route. This is the assertion that would
      * have caught the payout being refused at the rail with a sentence about
      * an invalid account — which reads to the customer as their own number
      * being wrong.
@@ -1391,7 +1391,7 @@ describe('a payout that failed AFTER it had already been sent', () => {
    * money out of their wallet and recorded as paid to a provider that had
    * refused it.
    *
-   * IT IS THE COMMONEST FAILURE ON THE NEWEST RAIL. Flutterwave's transfers
+   * IT IS THE COMMONEST FAILURE ON THE NEWEST RAIL. The previous cedi rail's transfers
    * are asynchronous: their first answer is `NEW`, which this platform
    * correctly records as `sent`, and the real outcome arrives later on
    * `transfer.completed`. Every failed Ghanaian and Kenyan payout lands here.
@@ -1471,11 +1471,11 @@ describe('a payout the PLATFORM cannot fund', () => {
   /*
    * THE OTHER POT OF MONEY, and the one nothing in this codebase had ever
    * asked about. Every control before now protects the CUSTOMER's balance;
-   * Flutterwave is a prefunded wallet, so a cedi payout spends a cedi balance
+   * Kora is a prefunded wallet, so a cedi payout spends a cedi balance
    * we have to put there, and a deployment that has never collected a cedi
    * has none.
    *
-   * WITHOUT THIS THE REFUSAL COMES FROM FLUTTERWAVE, as a message about funds,
+   * WITHOUT THIS THE REFUSAL COMES FROM KORA, as a message about funds,
    * on a transfer whose customer, amount and wallet number were all correct —
    * which from inside the app is indistinguishable from a bad account number,
    * and is the third distinct way this one corridor has produced "we cannot
@@ -1516,7 +1516,7 @@ describe('a payout the PLATFORM cannot fund', () => {
 
     port.prefunded = true;
     port.lookupAnswer = new ProviderRejectedError(
-      'flutterwave',
+      'kora',
       'a mobile money wallet has no name enquiry',
       'name_unavailable',
     );
@@ -1566,7 +1566,7 @@ describe('a payout the PLATFORM cannot fund', () => {
     port.prefunded = true;
     port.sendAnswer = { providerPayoutId: 'po_funded', state: 'sent' };
     port.lookupAnswer = new ProviderRejectedError(
-      'flutterwave',
+      'kora',
       'a mobile money wallet has no name enquiry',
       'name_unavailable',
     );
@@ -1591,7 +1591,7 @@ describe('a payout the PLATFORM cannot fund', () => {
 
   it('IS A ROW AN OPERATOR CAN TURN OFF, because float can be funded outside the ledger', async () => {
     /*
-     * An operator can wire cedis to Flutterwave directly, and that funding is
+     * An operator can wire cedis to the previous cedi rail directly, and that funding is
      * real and recorded nowhere here — so a platform genuinely able to pay
      * would be refusing every transfer with no remedy but a release. 009's
      * argument is that an operational decision taken under pressure must not
@@ -1619,7 +1619,7 @@ describe('a payout the PLATFORM cannot fund', () => {
     port.prefunded = true;
     port.sendAnswer = { providerPayoutId: 'po_guard_off', state: 'sent' };
     port.lookupAnswer = new ProviderRejectedError(
-      'flutterwave',
+      'kora',
       'a mobile money wallet has no name enquiry',
       'name_unavailable',
     );
@@ -1680,14 +1680,14 @@ describe('which rail pays, and what it really holds', () => {
    * THE LEDGER'S FLOAT IS ONE FIGURE FOR EVERY PROVIDER, so it can say the
    * platform holds naira while the rail that pays naira out holds none —
    * money collected at Paystack, or credited by a conversion the platform
-   * priced itself, is nowhere near Flutterwave. These tests are about the
+   * priced itself, is nowhere near the previous cedi rail. These tests are about the
    * rail being ASKED, and about the row recording which rail it was.
    */
   beforeEach(() => {
     // The service caches each rail's reading for thirty seconds — right for a
     // screen money is sent from, and a reading one test would hand the next.
     const liquidity = app.get(ProviderLiquidityService);
-    for (const rail of ['bitnob', 'paystack', 'flutterwave']) liquidity.forget(rail);
+    for (const rail of ['bitnob', 'paystack', 'kora']) liquidity.forget(rail);
   });
 
   afterEach(() => {
@@ -1733,9 +1733,9 @@ describe('which rail pays, and what it really holds', () => {
     const ghanaian = await onboard();
     await pool.query(`UPDATE users SET country = 'GH' WHERE id = $1::bigint`, [ghanaian.userId]);
     await fundIn(ghanaian.userId, 'GHS', 1_000_00n);
-    port.lookupAnswer = new ProviderRejectedError('flutterwave', 'no name enquiry', 'name_unavailable');
-    port.rails = ['flutterwave', 'bitnob'];
-    port.held = { flutterwave: [], bitnob: [bal('GHS', 1_000_000n)] };
+    port.lookupAnswer = new ProviderRejectedError('kora', 'no name enquiry', 'name_unavailable');
+    port.rails = ['kora', 'bitnob'];
+    port.held = { kora: [], bitnob: [bal('GHS', 1_000_000n)] };
 
     const res = await request(app.getHttpServer())
       .post('/v1/payouts')
@@ -1762,8 +1762,8 @@ describe('which rail pays, and what it really holds', () => {
   it('NEVER MOVES A BANK PAYOUT to another rail — the bank code is the first rail\'s', async () => {
     const customer = await onboard();
     await fund(customer.userId, 1_000_000n);
-    port.rails = ['paystack', 'flutterwave'];
-    port.held = { paystack: [], flutterwave: [bal('NGN', 100_000_000n)] };
+    port.rails = ['paystack', 'kora'];
+    port.held = { paystack: [], kora: [bal('NGN', 100_000_000n)] };
 
     const res = await pay(customer).expect(503);
     expect(res.body.error).toBe('insufficient_platform_liquidity');
@@ -1784,7 +1784,7 @@ describe('which rail pays, and what it really holds', () => {
 describe('a payout written before its rail was recorded', () => {
   /*
    * EVERY ROW BEFORE 080 SAYS `bitnob`, whoever sent it. Asking Bitnob about
-   * a Flutterwave transfer answers "no such payout", and the sweep read that
+   * one previous-rail transfer answers "no such payout", and the sweep read that
    * as a definite refusal and REVERSED — refunding money that had left. For
    * such a row, only an answer carrying OUR reference is believed.
    */
@@ -1845,9 +1845,9 @@ describe('a payout written before its rail was recorded', () => {
 
   it('IGNORES a rail that returns the same id for SOMEBODY ELSE\'S transfer', async () => {
     const { customer } = await legacyPayout();
-    port.rails = ['bitnob', 'flutterwave'];
+    port.rails = ['bitnob', 'kora'];
     port.statusBy = {
-      flutterwave: { providerPayoutId: 'tx_legacy', state: 'failed', reference: 'not-ours' },
+      kora: { providerPayoutId: 'tx_legacy', state: 'failed', reference: 'not-ours' },
     };
 
     await app.get(PayoutReconciliationService).sweep();

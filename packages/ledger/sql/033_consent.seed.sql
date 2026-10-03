@@ -56,8 +56,10 @@ INSERT INTO consent_documents (kind, version, body_sha256, summary) VALUES
   -- 089's names Paystack as a BVN recipient: it may ask to match a BVN to a
   -- bank account on it before it opens a naira account number.
   -- 094's no longer says Bitnob receives instructions for crypto.
-  ('privacy', '2026-10-03',
-   '10385b116c49514bbfc88c54c85c23aa82184cb781586a22dc53a2c126c8eb3e',
+  -- 095's names Kora, which replaced the previous Ghana and Kenya rail, as a
+  -- recipient — including of a BVN when it opens a naira account number.
+  ('privacy', '2026-10-04',
+   '338f1d3783b6bf2b4b064f62562213731f596b1e889ee421c7fb68175a8f8739',
    'What personal data Xetral Ltd holds, why, exactly which companies receive '
    'it and what reaches them — including Paystack, which is given your BVN and '
    'a bank account on it when it needs them to open your naira account number '

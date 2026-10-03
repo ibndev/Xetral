@@ -102,32 +102,22 @@ export interface ApiConfig {
    */
   readonly paystackSecretKey: string | undefined;
   /**
-   * FLUTTERWAVE, and it is TWO values where Paystack is one.
+   * KORA, and it is ONE value, like Paystack.
    *
-   * The secret key authorises calls; the webhook hash verifies inbound
-   * events and is a DIFFERENT string an operator types into Flutterwave's
-   * own dashboard. A deployment holding only the key authorises every
-   * outbound call correctly and rejects every webhook, which from inside
-   * reads as a broken integration rather than as a missing box.
+   * The secret key authorises every call AND verifies every webhook: Kora
+   * signs the `data` object of an inbound event with HMAC-SHA256 under this
+   * same key (developers.korapay.com, Webhooks guide). Test and live keys
+   * differ, and the key selects the environment — there is one host.
    */
-  readonly flutterwaveSecretKey: string | undefined;
-  readonly flutterwaveWebhookHash: string | undefined;
+  readonly koraSecretKey: string | undefined;
+  /** `https://api.korapay.com/merchant`, the only host the guides name. */
+  readonly koraBaseUrl: string | undefined;
   /**
-   * THE v4 PAIR, AND v4 IS USED FOR ONE READ.
-   *
-   * `POST /wallet-account/resolve` names the holder of a mobile money wallet.
-   * v3 has no such endpoint — its `/accounts/resolve` is a BANK-account
-   * resolver taking a three-digit bank code — so without these two a Ghanaian
-   * recipient cannot be named and the screen asks for a label instead, exactly
-   * as it does in Kenya. Money still moves on the v3 secret key.
+   * The bank Kora opens a naira virtual account at — required on every
+   * request. Wema `035` by default, the first bank in the NGN guide's table;
+   * the sandbox takes `000`, so a staging deployment sets it.
    */
-  readonly flutterwaveV4ClientId: string | undefined;
-  readonly flutterwaveV4ClientSecret: string | undefined;
-  /** Two public sources disagree about v4's host, so it is a value with a
-   *  documented default rather than a constant this repo has to be right
-   *  about — the lesson its provider tables have taught twice. */
-  readonly flutterwaveV4BaseUrl: string | undefined;
-  readonly flutterwaveBaseUrl: string | undefined;
+  readonly koraVbaBankCode: string;
   /** Bare host: `https://api.paystack.co`. */
   readonly paystackBaseUrl: string | undefined;
   /**
@@ -933,13 +923,10 @@ export function loadConfig(env: Env): ApiConfig {
     bitnobClientSecret: optional(env, 'BITNOB_CLIENT_SECRET'),
     bitnobWebhookSecret: optional(env, 'BITNOB_WEBHOOK_SECRET'),
     paystackSecretKey: optional(env, 'PAYSTACK_SECRET_KEY'),
-    flutterwaveSecretKey: optional(env, 'FLUTTERWAVE_SECRET_KEY'),
-    flutterwaveWebhookHash: optional(env, 'FLUTTERWAVE_WEBHOOK_HASH'),
-    flutterwaveV4ClientId: optional(env, 'FLUTTERWAVE_V4_CLIENT_ID'),
-    flutterwaveV4ClientSecret: optional(env, 'FLUTTERWAVE_V4_CLIENT_SECRET'),
-    flutterwaveV4BaseUrl: optional(env, 'FLUTTERWAVE_V4_BASE_URL'),
-    flutterwaveBaseUrl:
-      optional(env, 'FLUTTERWAVE_BASE_URL') ?? 'https://api.flutterwave.com',
+    koraSecretKey: optional(env, 'KORA_SECRET_KEY'),
+    // Kora's ONE host for test and live; the key selects the environment.
+    koraBaseUrl: optional(env, 'KORA_BASE_URL') ?? 'https://api.korapay.com/merchant',
+    koraVbaBankCode: optional(env, 'KORA_VBA_BANK_CODE') ?? '035',
     paystackBaseUrl: optional(env, 'PAYSTACK_BASE_URL') ?? 'https://api.paystack.co',
     paystackPreferredBank: optional(env, 'PAYSTACK_PREFERRED_BANK'),
     metricsToken: optional(env, 'METRICS_TOKEN'),
@@ -1146,25 +1133,20 @@ function assertProviderSandbox(env: Env): void {
   }
 
   /*
-   * FLUTTERWAVE CAN BE CHECKED AT BOOT, and Bitnob cannot — the difference is
-   * worth stating beside the paragraph above that explains why.
-   *
-   * Bitnob v2 serves both environments from one host and the SECRET selects
-   * between them, so nothing visible here says which money is real; the guard
-   * had to move to the first call. Flutterwave puts it in the key itself —
-   * `FLWSECK_TEST-` against `FLWSECK-` — so it is visible with no network, no
-   * database and no round trip, which is strictly better and is why this one
-   * refuses here.
+   * KORA CAN BE CHECKED AT BOOT, and Bitnob cannot. Kora serves both
+   * environments from one host too, but its live key says so in its prefix —
+   * `sk_live_`, the prefix the Webhooks guide's own samples carry — so it is
+   * visible with no network, no database and no round trip.
    *
    * WHAT IT PREVENTS is a staging box collecting real cedis. The person who
    * makes that mistake is copying a production `.env` to get something
    * working quickly, which is exactly when nobody re-reads the key prefix.
    */
-  const flutterwave = optional(env, 'FLUTTERWAVE_SECRET_KEY');
-  if (flutterwave !== undefined && !/TEST/i.test(flutterwave)) {
+  const kora = optional(env, 'KORA_SECRET_KEY');
+  if (kora !== undefined && kora.startsWith('sk_live_')) {
     // The VALUE is never echoed — it is a live credential, and this message
     // reaches a log. Naming the variable is enough to act on.
-    live.push('FLUTTERWAVE_SECRET_KEY (a live key; staging needs FLWSECK_TEST-…)');
+    live.push('KORA_SECRET_KEY (a live key; staging needs a test-mode key)');
   }
 
   if (live.length > 0) {

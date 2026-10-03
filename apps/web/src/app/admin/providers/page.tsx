@@ -169,8 +169,8 @@ export default function Providers() {
         <div className="panel">
           <h2>What we hold at our providers</h2>
           <p className="lead">
-            Flutterwave is a prefunded wallet: a cedi payout spends a cedi
-            balance we have to put there first. A corridor with nothing in it
+            Kora is a prefunded wallet: a cedi payout spends a cedi balance we
+            have to put there first. A corridor with nothing in it
             refuses every transfer, and until now that refusal reached the
             customer as a message about their own account.
           </p>
@@ -255,12 +255,11 @@ export default function Providers() {
                   <td className="right amount">{row.refusals}</td>
                   <td>
                     {/*
-                      THE FIELD MOST LIKELY TO ANSWER THE WHOLE THING.
-                      Flutterwave's sandbox cannot verify a real account —
-                      their own documentation says only test accounts resolve
-                      in test mode — so a deployment on a test key refuses
-                      every genuine number, correctly, for a reason that has
-                      nothing to do with the number.
+                      THE FIELD MOST LIKELY TO ANSWER THE WHOLE THING. A
+                      sandbox key resolves only the provider's test accounts,
+                      so a deployment on one refuses every genuine number,
+                      correctly, for a reason that has nothing to do with the
+                      number.
                     */}
                     {row.key_mode === 'test' ? (
                       <span className="badge danger">test key</span>
@@ -332,7 +331,7 @@ export default function Providers() {
 /* ------------------------------------------------------------------------ */
 
 const NAMES: Readonly<Record<string, string>> = {
-  flutterwave: 'Flutterwave',
+  kora: 'Kora',
   bitnob: 'Bitnob',
   paystack: 'Paystack',
 };
@@ -393,7 +392,7 @@ function providerCards(
   health: AdminProviderHealth | undefined,
   routes: readonly AdminRoute[],
 ): readonly Card[] {
-  const names = new Set<string>(['flutterwave', 'bitnob', 'paystack']);
+  const names = new Set<string>(['kora', 'bitnob', 'paystack']);
   for (const r of routes) if (r.provider !== null) names.add(r.provider);
   for (const r of health?.recent ?? []) names.add(r.provider);
 
@@ -422,8 +421,8 @@ function providerCards(
  *
  * WHAT WAS MISSING was not the routing — 059 built that — but any way to
  * change it short of an UPDATE at a production prompt. The product owner's
- * request was a toggle: naira account numbers on Flutterwave or Bitnob,
- * payouts on Flutterwave or Bitnob, flipped by whoever is on call.
+ * request was a toggle: naira account numbers on the previous cedi rail or Bitnob,
+ * payouts on the previous cedi rail or Bitnob, flipped by whoever is on call.
  *
  * ONE PRESS DOES NOT MOVE MONEY. Picking a company opens the confirmation in
  * place, with the PIN beside it — the rule `prices` records about every

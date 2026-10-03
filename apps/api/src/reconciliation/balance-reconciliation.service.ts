@@ -246,7 +246,7 @@ export class BalanceReconciliationService implements OnApplicationShutdown {
    * WHAT EVERY PROVIDER TOGETHER SAYS IT HOLDS, per currency.
    *
    * `provider_float` is ONE account per currency for every provider at once —
-   * naira collected at Paystack and naira sent out through Flutterwave move
+   * naira collected at Paystack and naira sent out through the previous cedi rail move
    * the same row. Comparing it against Bitnob's balance alone, as this did,
    * reports the other providers' money as a discrepancy on every sweep. So
    * each payout rail is asked and the answers summed; and the sum is only

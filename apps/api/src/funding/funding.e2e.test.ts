@@ -318,7 +318,7 @@ describe('getting an account number', () => {
    *
    * This asserted the opposite — a Ghanaian's account opened in CEDIS — and
    * that is exactly what broke Activate Account in Accra: the request went to
-   * Flutterwave for a cedi account number no rail issues, and the naira one
+   * The previous cedi rail for a cedi account number no rail issues, and the naira one
    * every customer is offered (040: money paid to a Ghanaian by a Nigerian
    * lands in naira) was never asked for. 079's coverage says where an account
    * number is a product; the customer's own currency is used only there.

@@ -857,13 +857,12 @@ export function buildRoutePolicy(): RoutePolicyRegistry {
 
       .public(
         'POST',
-        '/v1/webhooks/flutterwave/deposits',
-        'Flutterwave has no session with us. It does NOT sign the body: it returns ' +
-          'verbatim, in a verif-hash header, the secret an operator set on its own ' +
-          'dashboard — so a valid header proves the SENDER and nothing about what ' +
-          'was sent. The header decides only whether to listen; every figure that ' +
-          'moves money is re-read from Flutterwave by our own reference before a ' +
-          'posting exists. An unset secret refuses rather than accepting',
+        '/v1/webhooks/kora',
+        'Kora has no session with us; the request is authenticated by an ' +
+          'HMAC-SHA256 of the data object keyed by the SECRET KEY, checked before ' +
+          'anything is acted on. It signs data and not the event name, so every ' +
+          'figure that moves money is re-read from Kora by reference before a ' +
+          'posting exists. An unset key refuses rather than accepting',
       )
 
       .public(

@@ -428,7 +428,7 @@ function OwedByCurrency({ liability }: { readonly liability: AdminOverview['liab
 }
 
 const PROVIDER_NAMES: Readonly<Record<string, string>> = {
-  flutterwave: 'Flutterwave', bitnob: 'Bitnob', paystack: 'Paystack', vtpass: 'VTpass',
+  kora: 'Kora', bitnob: 'Bitnob', paystack: 'Paystack', vtpass: 'VTpass',
   airalo: 'Airalo', twilio: 'Twilio', brevo: 'Brevo', exchangerate: 'ExchangeRate', expo: 'Expo',
 };
 
@@ -446,7 +446,7 @@ function ProviderStrip({
     const had = byProvider.get(row.provider) ?? { calls: 0, failures: 0 };
     byProvider.set(row.provider, { calls: had.calls + Number(row.attempts), failures: had.failures + Number(row.failures) });
   }
-  for (const p of ['flutterwave', 'bitnob', 'paystack']) if (!byProvider.has(p)) byProvider.set(p, { calls: 0, failures: 0 });
+  for (const p of ['kora', 'bitnob', 'paystack']) if (!byProvider.has(p)) byProvider.set(p, { calls: 0, failures: 0 });
   return (
     <Link href="/admin/providers" className="panel ov-providers">
       <span className="lab">Providers</span>

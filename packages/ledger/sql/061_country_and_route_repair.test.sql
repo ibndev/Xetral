@@ -77,8 +77,10 @@ END $$;
 --
 --  KENYAN COLLECTION IS NOT ON THIS LIST, deliberately: 083 leaves it
 --  unrouted because no provider is confirmed for it, and 083's own suite
---  asserts that. A corridor unrouted ON PURPOSE is not the gap this test
---  exists to catch.
+--  asserts that. NOR IS DOLLAR COLLECTION: 095 replaced the rail that took
+--  it with Kora, which documents card payments in naira only, so it is
+--  unrouted on purpose too. A corridor unrouted ON PURPOSE is not the gap
+--  this test exists to catch.
 -- ---------------------------------------------------------------------------
 DO $$
 DECLARE v_missing TEXT;
@@ -87,7 +89,6 @@ BEGIN
       INTO v_missing
       FROM (VALUES
              ('collect', 'NGN'), ('collect', 'GHS'),
-             ('collect', 'USD'),
              ('payout',  'NGN'), ('payout',  'GHS'), ('payout', 'KES')
            ) AS want(operation, currency)
      WHERE NOT EXISTS (
@@ -109,13 +110,15 @@ END $$;
 --  response at the worst possible moment.
 -- ---------------------------------------------------------------------------
 DO $$
-DECLARE v_now TEXT;
+DECLARE v_now TEXT; v_before TEXT;
 BEGIN
+    SELECT provider INTO v_before FROM provider_routes
+     WHERE operation = 'collect' AND currency = 'GHS';
     UPDATE provider_routes SET provider = 'bitnob'
      WHERE operation = 'collect' AND currency = 'GHS';
 
     INSERT INTO provider_routes (operation, currency, provider)
-    VALUES ('collect', 'GHS', 'flutterwave')
+    VALUES ('collect', 'GHS', 'kora')
     ON CONFLICT (operation, currency) DO NOTHING;
 
     SELECT provider INTO v_now FROM provider_routes
@@ -124,8 +127,9 @@ BEGIN
         RAISE EXCEPTION 'TEST FAILED 5: the seed overwrote a moved corridor';
     END IF;
 
-    -- Put it back, so a later suite reading this table sees the shipped answer.
-    UPDATE provider_routes SET provider = 'flutterwave'
+    -- Put back WHAT WAS THERE, so a later suite reading this table sees the
+    -- shipped answer rather than one this suite names.
+    UPDATE provider_routes SET provider = v_before
      WHERE operation = 'collect' AND currency = 'GHS';
     RAISE NOTICE 'PASS 5: a corridor an operator moved is left alone';
 END $$;

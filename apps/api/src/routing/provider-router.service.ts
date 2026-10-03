@@ -8,7 +8,7 @@ import { DATABASE } from '../tokens.js';
  * `collect` is a checkout — money a payer pushes through a hosted page.
  * `payout` is money leaving. `account` is WHO OPENS A DEDICATED ACCOUNT
  * NUMBER, and it is its own operation because it is its own decision: moving
- * naira account numbers to Flutterwave must not also move every naira payment
+ * naira account numbers to the previous cedi rail must not also move every naira payment
  * link, which is what re-pointing `collect` would do. Where no `account` row
  * exists the `collect` route answers, which is how every account was opened
  * before 076.
@@ -34,7 +34,7 @@ interface Cached {
  */
 export type RoutingMode = 'per_route' | 'by_coverage' | 'single';
 
-export const ROUTING_PROVIDERS: readonly string[] = ['flutterwave', 'bitnob', 'paystack'];
+export const ROUTING_PROVIDERS: readonly string[] = ['kora', 'bitnob', 'paystack'];
 
 export interface RoutingPolicy {
   readonly mode: RoutingMode;
@@ -55,7 +55,7 @@ export interface CoverageRow {
 /**
  * WHAT A DEPLOYMENT BEHIND 079 READS AS. The route table, unchanged, and the
  * fallback OFF — 089's default. It shipped on, and a naira account request
- * the owner had assigned to Paystack then went on to Flutterwave and Bitnob
+ * the owner had assigned to Paystack then went on to the previous cedi rail and Bitnob
  * after Paystack refused: two more companies handed a customer's details, two
  * more refusals on `/admin/diagnostics`, and nothing the owner had chosen.
  * Trying another rail is a decision an operator turns on, never a default.

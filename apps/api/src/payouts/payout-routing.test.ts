@@ -13,7 +13,7 @@ import { SwitchingPayoutPort } from './payout-provider.js';
  * code no bank list contains.
  *
  * So the Send screen showed a customer in Accra a list of banks under a label
- * saying Mobile Money, and the Flutterwave payout adapter — written for
+ * saying Mobile Money, and the previous cedi rail's payout adapter — written for
  * exactly this — was registered nowhere and asked nothing. 046 put
  * `payout_method` on the country so the SCREEN would stop offering a product
  * the customer's money cannot reach; this is the half that stops the SERVER
@@ -38,7 +38,7 @@ function fake(name: string, banks: readonly PayoutBank[]): PayoutPort {
 }
 
 const PAYSTACK = fake('paystack', [{ code: '044', name: 'Access Bank' }]);
-const FLUTTERWAVE = fake('flutterwave', [{ code: 'MTN', name: 'MTN Mobile Money' }]);
+const KORA = fake('kora', [{ code: 'MTN', name: 'MTN Mobile Money' }]);
 
 function port(options: {
   readonly routes?: Readonly<Record<string, string>>;
@@ -51,7 +51,7 @@ function port(options: {
       options.adapters ??
       new Map([
         ['paystack', PAYSTACK],
-        ['flutterwave', FLUTTERWAVE],
+        ['kora', KORA],
       ]),
     settings: {
       text: async (_key: string, fallback: string) => options.setting ?? fallback,
@@ -66,7 +66,7 @@ function port(options: {
 }
 
 /** The seed 059 ships. Shared, because both blocks reason about it. */
-const routes = { NGN: 'paystack', GHS: 'flutterwave', KES: 'flutterwave' };
+const routes = { NGN: 'paystack', GHS: 'kora', KES: 'kora' };
 
 describe('which rail answers a customer in which country', () => {
   it('offers a customer in Ghana MOBILE MONEY NETWORKS, not banks', async () => {
@@ -99,12 +99,12 @@ describe('which rail answers a customer in which country', () => {
       amount: { amount: 100n, currency: 'GHS' },
       reference: 'r',
     });
-    expect(receipt.providerPayoutId).toBe('flutterwave-1');
+    expect(receipt.providerPayoutId).toBe('kora-1');
   });
 
   it('asks the same rail who holds the destination', async () => {
     const found = await port({ routes }).lookup('GH', 'MTN', '0244123456');
-    expect(found.accountName).toBe('flutterwave says who');
+    expect(found.accountName).toBe('kora says who');
   });
 });
 

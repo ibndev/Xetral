@@ -6,7 +6,7 @@
  * the same wallet. Three places in this API needed to agree about that and
  * only two of them did: registration and `MomoService` both stripped the trunk
  * zero and prefixed the country's dialling code, while a MOBILE MONEY PAYOUT
- * sent whatever the customer typed straight to Flutterwave, who have no idea
+ * sent whatever the customer typed straight to the previous cedi rail, who have no idea
  * what a Ghanaian trunk zero is. `0501234567` is not a number their transfers
  * API can reach, so every cedi payout was refused at the rail.
  *
@@ -19,7 +19,7 @@
  *   `e164`               `+233501234567`   how a number is STORED and shown
  *   `internationalDigits`  `233501234567`  what a payout rail takes on the wire
  *
- * `bank_payouts.account_number` is CHECKed `^[0-9]{6,20}$` and Flutterwave's
+ * `bank_payouts.account_number` is CHECKed `^[0-9]{6,20}$` and the previous cedi rail's
  * `account_number` on a mobile money transfer is digits, so a leading `+`
  * there is refused by our own schema before it can be refused by theirs.
  * Neither form is a preference; each is what its destination accepts.

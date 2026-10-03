@@ -43,9 +43,9 @@ const IDENTIFIER_KEY_PATTERNS: readonly (readonly [pattern: string, visible: num
   /*
    * A CONTACT DETAIL IS NOT A SECRET AND STILL DOES NOT BELONG IN A LOG.
    *
-   * These arrived with the Flutterwave request trace, which prints the body of
-   * every outbound call so an operator can see the currency and the payment
-   * options a checkout was opened with. Those fields are exactly what a
+   * These arrived with the payment-rail request trace, which prints the body
+   * of every outbound call so an operator can see the currency and the
+   * payment channel a checkout was opened with. Those fields are exactly what a
    * diagnostic needs; the payer's address and number are exactly what it does
    * not, and a log is copied into a ticket, a screenshot and a chat thread.
    *
@@ -70,9 +70,19 @@ function matches(key: string, patterns: readonly string[]): boolean {
   return patterns.some((p) => normalised.includes(p));
 }
 
+/**
+ * Identifier keys matched EXACTLY rather than by substring. Kora's payout
+ * body names a bank account number plain `account`; a substring match on
+ * that word would also catch `account_reference` and `account_status`, which
+ * are ours and are what a diagnosis reads.
+ */
+const EXACT_IDENTIFIER_KEYS: Readonly<Record<string, number>> = { account: 4 };
+
 /** The tail length for an identifier key, or undefined if it is not one. */
 function identifierTail(key: string): number | undefined {
   const normalised = normalise(key);
+  const exact = EXACT_IDENTIFIER_KEYS[normalised];
+  if (exact !== undefined) return exact;
   for (const [pattern, visible] of IDENTIFIER_KEY_PATTERNS) {
     if (normalised.includes(pattern)) return visible;
   }

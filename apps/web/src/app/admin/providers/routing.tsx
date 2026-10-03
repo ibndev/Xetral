@@ -80,7 +80,7 @@ export function RoutingPolicyPanel(props: {
             ...d,
             mode,
             // Carry the other mode's choice across rather than blanking it:
-            // "Flutterwave for everything" and "Flutterwave where it can" are
+            // "the previous cedi rail for everything" and "the previous cedi rail where it can" are
             // usually the same operator's next thought.
             single_provider: mode === 'single' ? (d.single_provider ?? d.preferred_provider ?? providers[0] ?? null) : d.single_provider,
             preferred_provider:
@@ -394,7 +394,7 @@ const OPERATION_LABEL: Readonly<Record<AdminRoute['operation'], string>> = {
 };
 
 const NAMES: Readonly<Record<string, string>> = {
-  flutterwave: 'Flutterwave',
+  kora: 'Kora',
   bitnob: 'Bitnob',
   paystack: 'Paystack',
 };
@@ -416,7 +416,7 @@ function changed(a: AdminRoutingPolicy, b: AdminRoutingPolicy): boolean {
 function providersOf(routing: AdminRouting | undefined): readonly string[] {
   const all = new Set<string>();
   for (const list of Object.values(routing?.configured ?? {})) for (const p of list) all.add(p);
-  return ['flutterwave', 'bitnob', 'paystack'].filter((p) => all.has(p));
+  return ['kora', 'bitnob', 'paystack'].filter((p) => all.has(p));
 }
 
 interface PreviewCell {
@@ -454,10 +454,10 @@ function previewOf(routing: AdminRouting, policy: AdminRoutingPolicy): readonly 
         push(policy.preferred_provider);
       }
       if (cell.routed !== null && covering.includes(cell.routed)) push(cell.routed);
-      for (const p of ['flutterwave', 'bitnob', 'paystack']) if (covering.includes(p)) push(p);
+      for (const p of ['kora', 'bitnob', 'paystack']) if (covering.includes(p)) push(p);
     }
     push(cell.routed);
-    for (const p of ['flutterwave', 'bitnob', 'paystack']) if (covering.includes(p)) push(p);
+    for (const p of ['kora', 'bitnob', 'paystack']) if (covering.includes(p)) push(p);
 
     const usable = ordered.filter((p) => configured.includes(p));
     const serving = policy.mode === 'per_route' ? cell.routed : (ordered[0] ?? null);

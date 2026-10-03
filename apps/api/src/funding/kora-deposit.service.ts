@@ -9,15 +9,15 @@ import { DATABASE, FUNDING_PORT, LEDGER } from '../tokens.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { NotificationService } from '../notifications/notification.service.js';
 
-const PROVIDER = 'flutterwave';
+const PROVIDER = 'kora';
 
-export type FlutterwaveDepositOutcome =
+export type KoraDepositOutcome =
   | 'credited'
   | 'replayed'
   | 'suspense'
   /** No account of ours was opened under this reference. */
   | 'not_ours'
-  /** Flutterwave does not call it successful — nothing to credit yet. */
+  /** Kora does not call it successful — nothing to credit yet. */
   | 'not_settled';
 
 interface AccountRow {
@@ -28,30 +28,23 @@ interface AccountRow {
 }
 
 /**
- * Money arriving in a Flutterwave DEDICATED ACCOUNT NUMBER.
+ * Money arriving in a Kora FIXED VIRTUAL ACCOUNT.
  *
- * WHY THIS EXISTS. Every Flutterwave `charge.completed` went to the payment
- * link settler, which knows about checkouts. A transfer into a customer's
- * permanent account number is also a `charge.completed` — so the day naira
- * account numbers moved to Flutterwave, every deposit into one would have
- * been handed to a settler that found no such link and acknowledged it. The
- * money would be in our Flutterwave balance and in nobody's wallet, with
- * nothing retrying: 008's lost-webhook failure, caused by our own routing.
+ * A payment into a customer's own account number arrives as `charge.success`
+ * on the same URL as a checkout, carrying the account's reference — ours —
+ * under `virtual_bank_account_details`. That reference decides only WHETHER
+ * TO ASK. Kora signs only the `data` object, and nothing on the payload is
+ * acted on: the deposit is re-read from Kora's Charge Query by the payment's
+ * own reference and credited on that answer, and the account it credits is
+ * the one the VERIFIED answer names, not the one the payload named.
  *
- * WHAT IT TRUSTS: the reference on the event decides only WHETHER TO ASK.
- * Flutterwave does not sign the body, so the amount, the currency and the
- * status on the payload are a claim by whoever holds one shared secret. The
- * deposit is re-read by THEIR transaction id and credited on that answer —
- * and the account it credits is the one the VERIFIED reference names, not
- * the one the payload named.
- *
- * THE KEY IS `flutterwave:<transaction id>`, the same one the reconciliation
- * sweep derives from the same list, so whichever of the two arrives second is
- * a replay at the ledger.
+ * THE KEY IS `kora:<reference>`, the same one the reconciliation sweep derives
+ * from the account's transaction list, so whichever of the two arrives second
+ * is a replay at the ledger.
  */
 @Injectable()
-export class FlutterwaveDepositService {
-  readonly #logger = new Logger(FlutterwaveDepositService.name);
+export class KoraDepositService {
+  readonly #logger = new Logger(KoraDepositService.name);
 
   constructor(
     @Inject(DATABASE) private readonly pool: Pool,
@@ -62,17 +55,17 @@ export class FlutterwaveDepositService {
   ) {}
 
   /**
-   * Whether this reference names one of OUR Flutterwave accounts.
+   * Whether this reference names one of OUR Kora accounts.
    *
    * A database read and nothing else, so a checkout event costs no extra call
-   * to Flutterwave on its way to the link settler.
+   * to Kora on its way to the link settler.
    */
   async isAccountReference(reference: string): Promise<boolean> {
     return (await this.#accountFor(reference)) !== undefined;
   }
 
-  async credit(transactionId: string): Promise<FlutterwaveDepositOutcome> {
-    const verified = await this.#verify(transactionId);
+  async credit(reference: string): Promise<KoraDepositOutcome> {
+    const verified = await this.#verify(reference);
     if (verified === undefined) return 'not_settled';
 
     const account =
@@ -150,7 +143,7 @@ export class FlutterwaveDepositService {
     if (posted.replayed) return 'replayed';
     if (suspense !== undefined) {
       this.#logger.error(
-        `FLUTTERWAVE DEPOSIT ${verified.providerReference} is held in suspense: ${suspense}. ` +
+        `KORA DEPOSIT ${verified.providerReference} is held in suspense: ${suspense}. ` +
           `A person must resolve it.`,
       );
       return 'suspense';
@@ -160,16 +153,16 @@ export class FlutterwaveDepositService {
     return 'credited';
   }
 
-  async #verify(transactionId: string): Promise<VerifiedDeposit | undefined> {
+  async #verify(reference: string): Promise<VerifiedDeposit | undefined> {
     const switching = this.port as FundingPort & {
       verifyDepositAt?: (provider: string, ref: string) => Promise<VerifiedDeposit | undefined>;
     };
     if (typeof switching.verifyDepositAt === 'function') {
-      return switching.verifyDepositAt(PROVIDER, transactionId);
+      return switching.verifyDepositAt(PROVIDER, reference);
     }
     // A single-rail deployment: only ask it if it IS this rail.
     if (this.port.provider === PROVIDER && supportsDepositVerification(this.port)) {
-      return this.port.verifyDeposit(transactionId);
+      return this.port.verifyDeposit(reference);
     }
     return undefined;
   }
@@ -186,8 +179,8 @@ export class FlutterwaveDepositService {
 
   /**
    * Best effort, and DETACHED from the webhook's answer: a missing email must
-   * not become a non-2xx that makes Flutterwave redeliver a deposit we have
-   * already credited.
+   * not become a non-2xx that makes Kora redeliver a deposit we have already
+   * credited.
    */
   async #receipt(userId: string, deposit: VerifiedDeposit, currency: Currency): Promise<void> {
     try {

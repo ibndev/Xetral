@@ -219,7 +219,7 @@ function sentenceFor(error: ApiError): string {
      * NOT "TRY AGAIN SHORTLY", because it will never work.
      *
      * The rail serving this country does not issue dedicated account numbers
-     * in its currency at all — Flutterwave's are an NGN product, and in Ghana
+     * in its currency at all — the previous cedi rail's are an NGN product, and in Ghana
      * and Kenya money arrives by a mobile money charge instead. Telling
      * somebody to wait for something permanent is the one answer that is
      * certainly wrong, and it is what the generic sentence above was doing.

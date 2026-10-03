@@ -909,7 +909,7 @@ function ChooseMethod({
  * THE ACCOUNT NAME IS FETCHED, NEVER TYPED — where the rail can answer. That
  * is the whole of what "the momo details cannot be found" was: the adapter
  * matched a network code and refused before making the call, so a Ghanaian
- * number whose owner Flutterwave will name was reported as unfindable.
+ * number whose owner the previous cedi rail will name was reported as unfindable.
  *
  * AND WHERE THE RAIL *CAN* ANSWER, SILENCE IS A REFUSAL. `name_status` tells
  * the two apart: `unavailable` means no name enquiry EXISTS — Kenya's M-PESA,
@@ -992,7 +992,7 @@ function RecipientDetails({
 
   /*
    * THE BRANCHES OF THE CHOSEN BANK, and an empty list is the common answer.
-   * Flutterwave refuses a Ghanaian transfer without a branch code; the SERVER
+   * The previous cedi rail refuses a Ghanaian transfer without a branch code; the SERVER
    * decides which corridors need one, so this screen draws a picker when
    * something comes back and nothing when it does not.
    */

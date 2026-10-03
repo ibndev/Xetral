@@ -3,8 +3,8 @@
 -- ============================================================================
 \set ON_ERROR_STOP on
 
--- 1. `account` is a routable operation, and naira account numbers go to
---    Flutterwave unless somebody decided otherwise.
+-- 1. `account` is a routable operation, and naira account numbers are
+--    routed somewhere.
 DO $$
 DECLARE v TEXT;
 BEGIN
@@ -63,14 +63,14 @@ BEGIN
     RAISE NOTICE 'PASS 4: moving naira account numbers is on the record';
 END $$;
 
--- 5. No Flutterwave account is still keyed on an email address.
+-- 5. No live account on a rail that echoes our reference is keyed on an email.
 DO $$
 DECLARE n INT;
 BEGIN
     SELECT count(*) INTO n FROM virtual_accounts
-     WHERE provider = 'flutterwave' AND provider_customer_ref LIKE '%@%';
+     WHERE provider = 'kora' AND status <> 'closed' AND provider_customer_ref LIKE '%@%';
     IF n <> 0 THEN
-        RAISE EXCEPTION 'TEST FAILED 5: % Flutterwave account(s) still keyed on an email', n;
+        RAISE EXCEPTION 'TEST FAILED 5: % Kora account(s) keyed on an email', n;
     END IF;
-    RAISE NOTICE 'PASS 5: every Flutterwave account is found by its own reference';
+    RAISE NOTICE 'PASS 5: every Kora account is found by its own reference';
 END $$;

@@ -97,7 +97,7 @@ export class DepositReconciliationService implements OnApplicationShutdown {
      * opened anywhere else, its lost webhooks were never looked for: the
      * sweep ran, reported nothing and found nothing, which is exactly what a
      * rail with no lost webhooks looks like. The moment naira account numbers
-     * move to Flutterwave that would have been every new account on the
+     * move to the previous cedi rail that would have been every new account on the
      * platform.
      */
     const accounts = await this.pool.query<SweptAccount>(
@@ -145,7 +145,7 @@ export class DepositReconciliationService implements OnApplicationShutdown {
   async #list(account: SweptAccount): Promise<readonly ProviderDeposit[]> {
     const lookup = {
       providerAccountId: account.provider_account_id,
-      // Paystack keys its transaction list on the CUSTOMER and Flutterwave on
+      // Paystack keys its transaction list on the CUSTOMER and the previous cedi rail on
       // the reference the account was opened under. Passing only the account
       // id — what this did — asked Paystack about a customer that does not
       // exist.

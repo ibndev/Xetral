@@ -31,13 +31,11 @@ export const WEBHOOK_ENDPOINTS: readonly WebhookEndpoint[] = [
     secret: 'paystack.secret_key',
   },
   {
-    path: '/v1/webhooks/flutterwave/deposits',
-    label: 'Payments collected in cedis and shillings (Flutterwave)',
-    // NOT the secret key. Flutterwave verifies with a value an operator sets
-    // on its own dashboard and returns verbatim in `verif-hash`, so naming
-    // the key here would send them to paste the wrong string and wonder why
-    // every event was refused.
-    secret: 'flutterwave.webhook_hash',
+    path: '/v1/webhooks/kora',
+    label: 'Checkouts, virtual account deposits and payout outcomes (Kora)',
+    // The SAME key that authorises outbound calls: Kora signs the `data`
+    // object of every event with it, so there is no separate webhook secret.
+    secret: 'kora.secret_key',
   },
   {
     path: '/v1/webhooks/bitnob/deposits',

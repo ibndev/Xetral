@@ -6,7 +6,7 @@ import { MomoService } from './funding/momo.service.js';
  * THE NUMBER THAT COULD NOT BE PAID.
  *
  * A Ghanaian types `0501234567`, because that is how a number is written in
- * Accra. Flutterwave's transfers API takes `233501234567` and has no idea what
+ * Accra. The previous cedi rail's transfers API takes `233501234567` and has no idea what
  * a trunk zero is, so a mobile money payout was refused at the rail with a
  * sentence about an invalid account — which reads to the customer as their own
  * number being wrong.
@@ -55,7 +55,7 @@ describe('a national number into the form a rail accepts', () => {
   it('is the same number with and without the plus', () => {
     /*
      * ONE DIFFERENCE, ONE CHARACTER. `bank_payouts.account_number` is CHECKed
-     * digits-only and Flutterwave's wire format is digits; a stored number is
+     * digits-only and the previous cedi rail's wire format is digits; a stored number is
      * E.164. Neither is a preference — each is what its destination accepts.
      */
     expect(e164('233', '0501234567')).toBe('+233501234567');

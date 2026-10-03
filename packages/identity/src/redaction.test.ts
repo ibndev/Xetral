@@ -120,3 +120,14 @@ describe('payload scrubbing', () => {
     expect(redactPayload('plain')).toBe('plain');
   });
 });
+
+describe('a bank account named plain `account`', () => {
+  it('keeps a tail of the number and leaves our own account_* fields alone', () => {
+    const scrubbed = redactPayload({
+      bank_account: { bank: '033', account: '0123456789' },
+      account_reference: 'xetral-va-1-NGN',
+    }) as { bank_account: { account: string }; account_reference: string };
+    expect(scrubbed.bank_account.account).toBe('******6789');
+    expect(scrubbed.account_reference).toBe('xetral-va-1-NGN');
+  });
+});

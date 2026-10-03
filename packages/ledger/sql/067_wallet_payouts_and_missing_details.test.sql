@@ -215,11 +215,11 @@ BEGIN
         (reference, link_id, user_id, amount_minor, currency, payer_email, provider,
          refusal_reason)
     VALUES
-        ('067-refused-1', link, who, 2500, 'GHS', 'payer@example.test', 'flutterwave',
-         'no Flutterwave secret key is configured');
+        ('067-refused-1', link, who, 2500, 'GHS', 'payer@example.test', 'kora',
+         'no Kora secret key is configured');
 
     SELECT refusal_reason INTO seen FROM checkout_refusals WHERE reference = '067-refused-1';
-    IF seen IS DISTINCT FROM 'no Flutterwave secret key is configured' THEN
+    IF seen IS DISTINCT FROM 'no Kora secret key is configured' THEN
         RAISE EXCEPTION 'TEST FAILED: the rail''s own sentence was not recorded';
     END IF;
 

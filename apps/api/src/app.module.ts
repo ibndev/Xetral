@@ -13,10 +13,9 @@ import {
   PaystackClient,
   PaystackFundingAdapter,
   PaystackPayoutAdapter,
-  FlutterwavePayoutAdapter,
-  FlutterwaveClient,
-  FlutterwaveV4Client,
-  FlutterwaveFundingAdapter,
+  KoraPayoutAdapter,
+  KoraClient,
+  KoraFundingAdapter,
   BitnobPayoutAdapter,
   TwilioAdapter,
   VtpassAdapter,
@@ -82,7 +81,7 @@ import {
 } from './funding/funding.controller.js';
 import { FundingService } from './funding/funding.service.js';
 import { MomoService } from './funding/momo.service.js';
-import { flutterwaveTrace } from './funding/flutterwave-trace.js';
+import { koraTrace } from './funding/kora-trace.js';
 import { DepositWebhookService } from './funding/deposit-webhook.service.js';
 import { DepositReconciliationService } from './funding/deposit-reconciliation.service.js';
 import { BitnobCryptoAdapter, BitnobFundingAdapter, BitnobFxAdapter } from '@xetral/providers';
@@ -98,8 +97,8 @@ import { ProviderLiquidityService } from './payouts/provider-liquidity.service.j
 import { TreasuryService } from './payouts/treasury.service.js';
 import { RecipientBookService } from './recipients/recipient-book.service.js';
 import { PaystackWebhookService } from './funding/paystack-webhook.service.js';
-import { FlutterwaveWebhookService } from './funding/flutterwave-webhook.service.js';
-import { FlutterwaveDepositService } from './funding/flutterwave-deposit.service.js';
+import { KoraWebhookService } from './funding/kora-webhook.service.js';
+import { KoraDepositService } from './funding/kora-deposit.service.js';
 import { ProviderRoutesService } from './routing/provider-routes.service.js';
 import { SwitchingFundingPort } from './funding/funding-provider.js';
 import { SwitchingPayoutPort } from './payouts/payout-provider.js';
@@ -274,68 +273,34 @@ export function paystackSecretKey(
 }
 
 /**
- * The Flutterwave secret, resolved per call.
+ * The Kora secret, resolved per call.
  *
  * Same shape as `paystackSecretKey` and for the same reason: a key pasted on
  * `/admin/credentials` must reach a port constructed at boot, and a rotation
  * during an incident must take effect within the credential cache rather than
- * at the next restart.
+ * at the next restart. It is also what verifies Kora's webhooks — Kora signs
+ * them with this same key.
  */
-export function flutterwaveSecretKey(
+export function koraSecretKey(
   config: ApiConfig,
   credentials?: ProviderCredentialService,
 ): string | (() => Promise<string | undefined>) {
-  if (credentials === undefined) return config.flutterwaveSecretKey ?? '';
-  return () => credentials.secretFor('flutterwave', 'secret_key', config.flutterwaveSecretKey);
+  if (credentials === undefined) return config.koraSecretKey ?? '';
+  return () => credentials.secretFor('kora', 'secret_key', config.koraSecretKey);
 }
 
-/**
- * The Flutterwave WEBHOOK HASH — a different secret from the key above.
- *
- * They send it back verbatim in `verif-hash`; there is nothing to recompute.
- * It is resolved per call like every other credential so an operator can
- * rotate it on the dashboard the moment they believe it has leaked.
- */
-export function flutterwaveWebhookHash(
+/** One Kora client per port, or undefined where no base URL is configured. */
+export function koraClient(
   config: ApiConfig,
   credentials?: ProviderCredentialService,
-): () => Promise<string | undefined> {
-  if (credentials === undefined) return async () => config.flutterwaveWebhookHash;
-  return () =>
-    credentials.secretFor('flutterwave', 'webhook_hash', config.flutterwaveWebhookHash);
-}
-
-/**
- * THE v4 PAIR, FOR ONE READ.
- *
- * v4 authorises with OAuth2 client credentials rather than a bearer secret
- * key, and this platform uses it for exactly one thing: `POST
- * /wallet-account/resolve`, the endpoint that names the holder of a mobile
- * money wallet. v3 has no such endpoint at all — its `/accounts/resolve` is a
- * BANK-account resolver taking a three-digit bank code, which is why five
- * rounds of fixing the v3 call changed nothing.
- *
- * RESOLVED PER CALL, like every other credential, so an operator pasting them
- * on `/admin/credentials` does not wait for a restart. Returns `undefined`
- * where nothing is set, which the client turns into `name_unavailable` — the
- * send proceeds with a label, exactly as it does in Kenya.
- */
-export function flutterwaveV4Credentials(
-  config: ApiConfig,
-  credentials?: ProviderCredentialService,
-): { clientId: () => Promise<string | undefined>; clientSecret: () => Promise<string | undefined> } {
-  if (credentials === undefined) {
-    return {
-      clientId: async () => config.flutterwaveV4ClientId,
-      clientSecret: async () => config.flutterwaveV4ClientSecret,
-    };
-  }
-  return {
-    clientId: () =>
-      credentials.secretFor('flutterwave', 'v4_client_id', config.flutterwaveV4ClientId),
-    clientSecret: () =>
-      credentials.secretFor('flutterwave', 'v4_client_secret', config.flutterwaveV4ClientSecret),
-  };
+): KoraClient | undefined {
+  const { koraBaseUrl } = config;
+  if (koraBaseUrl === undefined) return undefined;
+  return new KoraClient({
+    onTrace: koraTrace,
+    baseUrl: koraBaseUrl,
+    secretKey: koraSecretKey(config, credentials),
+  });
 }
 
 export function bitnobCredentials(
@@ -592,26 +557,13 @@ export function createFundingPort(
   }
 
   /*
-   * FLUTTERWAVE, for the currencies `provider_routes` sends here.
-   *
-   * Without it a routed cedi or shilling reached a switch with no adapter to
-   * hand the request to, so `providerForCurrency` fell back to the global
-   * setting and a customer in Accra was routed to Paystack — which cannot
-   * open an account that settles in cedis. See the adapter's own header for
-   * what is and is not established about virtual accounts on this rail.
+   * KORA, for the cells `provider_routes` sends here. A naira fixed virtual
+   * account on Kora needs the customer's BVN, so it is a verified customer's
+   * product there; see the adapter's own header.
    */
-  const { flutterwaveBaseUrl } = config;
-  if (flutterwaveBaseUrl !== undefined) {
-    adapters.set(
-      'flutterwave',
-      new FlutterwaveFundingAdapter(
-        new FlutterwaveClient({
-          onTrace: flutterwaveTrace,
-          baseUrl: flutterwaveBaseUrl,
-          secretKey: flutterwaveSecretKey(config, credentials),
-        }),
-      ),
-    );
+  const kora = koraClient(config, credentials);
+  if (kora !== undefined) {
+    adapters.set('kora', new KoraFundingAdapter(kora, { bankCode: config.koraVbaBankCode }));
   }
 
   const { bitnobBaseUrl } = config;
@@ -658,10 +610,10 @@ export function createFundingPort(
     // in which case falling back to a rail that cannot answer would be worse
     // than falling back to the one that can.
     // The first rail this deployment HAS. It named `bitnob` whenever Paystack
-    // was absent, so a deployment holding only a Flutterwave key fell back to
-    // an adapter it did not have and refused every account with an error
+    // was absent, so a deployment holding only one other rail's key fell back
+    // to an adapter it did not have and refused every account with an error
     // about Bitnob.
-    fallback: ['paystack', 'flutterwave', 'bitnob'].find((p) => adapters.has(p)) ?? 'paystack',
+    fallback: ['paystack', 'kora', 'bitnob'].find((p) => adapters.has(p)) ?? 'paystack',
     /*
      * PASSED ON, AND THE FIRST VERSION OF THIS DID NOT.
      *
@@ -673,7 +625,7 @@ export function createFundingPort(
      * missing argument, so the one thing this parameter exists for silently
      * did not happen.
      *
-     * The same shape as `FlutterwavePayoutAdapter` being written, tested and
+     * The same shape as a payout adapter once being written, tested and
      * registered nowhere. A dependency threaded through three call sites and
      * dropped at the fourth is invisible in a diff, so `funding.e2e.test.ts`
      * asserts the CURRENCY the port is asked for, per country — which is the
@@ -722,40 +674,18 @@ export function createPayoutPort(
   }
 
   /*
-   * FLUTTERWAVE, AND ITS ABSENCE HERE WAS THE BUG.
-   *
-   * The adapter was written for Ghana and Kenya — where money moves to a
-   * MOBILE MONEY WALLET rather than to a bank account — and then registered
-   * nowhere, so nothing could ever reach it. Every payout question, including
-   * "what can a customer in Accra send to?", went to whichever single rail
-   * `payout_provider` named; Paystack answers that with Ghanaian BANKS, and a
-   * customer was offered a product their money cannot reach under a heading
-   * that said Mobile Money.
+   * KORA, for Ghana's wallets and whatever else `provider_routes` sends here.
+   * A payout adapter registered nowhere is one nothing can reach — the fault
+   * this map once had — so it is built wherever a base URL is set.
    *
    * `provider_routes` decides which of these serves a currency. This map is
    * only what the deployment CAN reach.
    */
-  const { flutterwaveBaseUrl } = config;
-  if (flutterwaveBaseUrl !== undefined) {
+  const koraRail = koraClient(config, credentials);
+  if (koraRail !== undefined) {
     adapters.set(
-      'flutterwave',
-      new FlutterwavePayoutAdapter(
-        new FlutterwaveClient({
-          onTrace: flutterwaveTrace,
-          baseUrl: flutterwaveBaseUrl,
-          secretKey: flutterwaveSecretKey(config, credentials),
-        }),
-        /* v4, for the wallet name enquiry and nothing else. Constructed
-           unconditionally: it answers `configured()` false where the
-           credentials are absent, which the adapter turns into
-           `name_unavailable` rather than a refusal. */
-        new FlutterwaveV4Client({
-          ...(config.flutterwaveV4BaseUrl === undefined
-            ? {}
-            : { baseUrl: config.flutterwaveV4BaseUrl }),
-          ...flutterwaveV4Credentials(config, credentials),
-        }),
-      ),
+      'kora',
+      new KoraPayoutAdapter(koraRail, { customerEmail: config.operationsEmail }),
     );
   }
 
@@ -1503,8 +1433,8 @@ export class AppModule {
         MomoService,
         DepositWebhookService,
         PaystackWebhookService,
-        FlutterwaveWebhookService,
-        FlutterwaveDepositService,
+        KoraWebhookService,
+        KoraDepositService,
         ProviderRoutesService,
         CryptoService,
         PayoutService,

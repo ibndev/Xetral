@@ -53,7 +53,8 @@ shipped, that is called out explicitly.
 | 42 — An account number without a BVN, tiers counted from one, a request in another currency | ✅ | migration 092 |
 | 43 — A whole-code money audit: one outcome per thing | ✅ | |
 | 44 — What the screens claim: a UI audit of both apps | ✅ | |
-| 45 — Enabled, Coming soon, Hidden; crypto out of the legal pages | ✅ | migrations 093 and 094; Kora's docs, for replacing Flutterwave |
+| 45 — Enabled, Coming soon, Hidden; crypto out of the legal pages | ✅ | migrations 093 and 094 |
+| 46 — Kora replaces Flutterwave | ✅ | migration 095; a Kora secret key and its webhook URL |
 
 All eleven phases are built, a **pre-deployment audit** (Phase 12) closed what
 building them phase by phase had left between the phases, and **Phase 13** is
@@ -3046,3 +3047,32 @@ the closed test account on `/admin/users` and press **Delete permanently**.
 **Before this goes live, an operator must:** apply **093** and **094** (094
 asks every customer to accept the terms and privacy notice again), then set
 crypto to Hidden on `/admin/settings`.
+
+---
+
+## Phase 46 — Kora replaces Flutterwave ✅
+
+| File | What it is |
+|---|---|
+| `packages/providers/src/kora/` | client, checkout, fixed virtual accounts, payouts, balance, webhook verification |
+| `apps/api/src/funding/kora-webhook.service.ts` | one URL for checkouts, deposits and payout outcomes |
+| `apps/api/src/funding/kora-deposit.service.ts` | a deposit credited on Kora's Charge Query, not on the event |
+| `packages/ledger/sql/095_kora.sql` | routes, coverage, policy, credential slots, closed old accounts, privacy republished |
+
+1. **Every endpoint, header and signature rule comes from Kora's guides**, each
+   cited beside it; the API reference site was unreachable and nothing was
+   taken from it or guessed.
+2. **Cedis move to Kora both ways.** Dollar collection is unrouted — Kora
+   documents card payments in naira only — and Kenyan collection stays
+   unrouted by the owner's earlier decision.
+3. **The old rail is gone from the dashboard**: its routes, coverage, keys,
+   health rows and refusals, and the account numbers it issued are closed so
+   Add Money opens a fresh one.
+
+**Before this goes live, an operator must:** apply **095** (it republishes the
+privacy notice, so `consent_outstanding` fills — the mechanism working); paste
+the Kora secret key at `/admin/credentials`; give Kora
+`<WEBHOOK_BASE_URL>/v1/webhooks/kora` under Settings, API Configuration; set
+`OPERATIONS_EMAIL` (Kora requires an email on every payout); fund the Kora GHS
+balance; and switch off or reconcile the Flutterwave account numbers 095 closed.
+

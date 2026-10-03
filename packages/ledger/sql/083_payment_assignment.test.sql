@@ -13,8 +13,9 @@ BEGIN
       INTO v_wrong
       FROM (VALUES ('account', 'NGN', 'paystack'),
                    ('payout',  'NGN', 'paystack'),
-                   ('collect', 'GHS', 'flutterwave'),
-                   ('payout',  'GHS', 'flutterwave'),
+                   -- 095: Kora replaced the rail 083 assigned cedis to.
+                   ('collect', 'GHS', 'kora'),
+                   ('payout',  'GHS', 'kora'),
                    ('payout',  'KES', 'bitnob')) AS w(operation, currency, provider)
       LEFT JOIN provider_routes r
         ON r.operation = w.operation AND r.currency = w.currency

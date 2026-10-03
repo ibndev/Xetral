@@ -13,7 +13,7 @@ BEGIN
     --    Kenya so the Add Money button would appear there, and 051's
     --    invariant — "a NUBAN is offered outside Nigeria" is a TEST FAILURE —
     --    turned red. The invariant was right: a NUBAN is a NIGERIAN account
-    --    number, and whatever Flutterwave issues in Accra is not one.
+    --    number, and whatever a rail issues in Accra is not one.
     --
     --    The button never needed the column. The screen offers it wherever
     --    the platform operates and the rail answers, so what was bought was
@@ -64,7 +64,7 @@ DECLARE
     v_gap BIGINT;
 BEGIN
     -- 4. NO ENABLED COUNTRY OFFERS AN ACCOUNT WITH NOTHING ROUTED TO SERVE
-    --    IT. 059 routes GHS and KES to Flutterwave for collection, so this
+    --    IT. 059 routed GHS and KES for collection, so this
     --    must be empty — and if a later migration removes a route while
     --    leaving the offer, this is what says so.
     SELECT count(*) INTO v_gap FROM countries_offering_an_unrouted_account;

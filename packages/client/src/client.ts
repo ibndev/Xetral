@@ -561,7 +561,7 @@ export interface PayoutBank {
 /**
  * A BRANCH OF A BANK, which one corridor genuinely requires.
  *
- * Flutterwave refuses a Ghanaian transfer without a `destination_branch_code`.
+ * The previous cedi rail refuses a Ghanaian transfer without a `destination_branch_code`.
  * Everywhere else the list comes back empty and no picker is drawn, so the
  * question "does this corridor need one?" is answered by the server rather
  * than hardcoded in two apps.

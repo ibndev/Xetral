@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import { createServer } from 'node:http';
 import type { Server } from 'node:http';
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
 import { ExpressAdapter } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
@@ -18,15 +18,17 @@ import { DepositReconciliationService } from './deposit-reconciliation.service.j
 import { ProviderRouterService } from '../routing/provider-router.service.js';
 
 /**
- * A NAIRA ACCOUNT NUMBER ON FLUTTERWAVE, end to end, through the REAL adapter
- * over HTTP to a stub speaking their published v3 protocol.
+ * A KORA FIXED VIRTUAL ACCOUNT, end to end, through the REAL adapter over
+ * HTTP to a stub speaking the protocol Kora's guides publish
+ * (developers.korapay.com, read 3 October 2026).
  *
  * What it pins, each observed at the only place it is observable:
- *   - 076 routes the next naira account to Flutterwave, and the BVN that
- *     reaches their wire is the one sealed at KYC — and none reaches it for an
+ *   - with naira account numbers routed to Kora, the BVN that reaches their
+ *     wire is the one sealed at KYC — and nothing at all reaches it for an
  *     unverified customer, who is refused before anything is sent;
- *   - a transfer into the account is credited on FLUTTERWAVE'S answer about
- *     their transaction id, not on the unsigned body that announced it;
+ *   - a transfer into the account is credited on KORA'S answer from the
+ *     Charge Query, not on the signed-but-unverified body that announced it,
+ *     and a body with a bad signature moves nothing;
  *   - the webhook and the sweep derive one key, so either arriving second is
  *     a replay rather than a second credit.
  */
@@ -36,7 +38,7 @@ if (DATABASE_URL === undefined || DATABASE_URL === '') {
 }
 
 const PASSWORD = 'a-long-enough-password';
-const HASH = 'flutterwave-hash-for-tests';
+const KEY = 'sk_test_kora_e2e_key';
 const BVN = '22212345678';
 
 let pool: Pool;
@@ -48,8 +50,9 @@ let stub: Server;
 let routeBefore: string | undefined;
 
 const seen: { method: string; url: string; body: unknown }[] = [];
-/** What their API says about each transaction id, and each account's history. */
+/** Kora's charges, by reference, and the virtual accounts it has opened. */
 const transactions = new Map<string, Record<string, unknown>>();
+const accounts = new Map<string, Record<string, unknown>>();
 
 /** Paystack refusing the account, for the one test about what is said then. */
 let paystackRefuses = false;
@@ -65,7 +68,7 @@ beforeAll(async () => {
 
       /*
        * PAYSTACK, for the account fallback — the rail 079 moves on to when
-       * Flutterwave refuses an unverified customer. Served here so no test in
+       * Kora refuses an unverified customer. Served here so no test in
        * this file can reach the real api.paystack.co with a made-up key.
        */
       if (req.method === 'POST' && url === '/customer') {
@@ -96,35 +99,68 @@ beforeAll(async () => {
         );
         return;
       }
-      if (req.method === 'POST' && url === '/v3/virtual-account-numbers') {
+      if (req.method === 'POST' && url === '/api/v1/virtual-bank-account') {
+        const body = JSON.parse(raw) as { account_reference: string; account_name: string };
+        const row = {
+          account_name: body.account_name,
+          account_number: String(7_000_000_000 + Math.floor(Math.random() * 999_999_999)),
+          bank_code: '000',
+          bank_name: 'Test Bank',
+          account_reference: body.account_reference,
+          unique_id: `KPY-VA-${randomUUID()}`,
+          account_status: 'active',
+          currency: 'NGN',
+        };
+        accounts.set(body.account_reference, row);
+        res.end(JSON.stringify({ status: true, message: 'Virtual bank account created successfully', data: row }));
+        return;
+      }
+      if (req.method === 'GET' && url.startsWith('/api/v1/virtual-bank-account/transactions?')) {
+        const number = new URL(url, 'http://stub').searchParams.get('account_number');
+        const mine = [...transactions.values()].filter(
+          (t) => (t['virtual_bank_account'] as { account_number?: string } | undefined)?.account_number === number,
+        );
         res.end(
           JSON.stringify({
-            status: 'success',
-            message: 'Virtual account created',
+            status: true,
             data: {
-              order_ref: `URF_${randomUUID()}`,
-              flw_ref: 'FLW-x',
-              account_number: String(7_000_000_000 + Math.floor(Math.random() * 999_999_999)),
-              bank_name: 'WEMA BANK',
+              account_number: number,
+              currency: 'NGN',
+              transactions: mine.map((t) => ({
+                reference: t['reference'],
+                status: t['status'],
+                amount: t['amount'],
+                currency: t['currency'],
+              })),
             },
           }),
         );
         return;
       }
-      const verify = /^\/v3\/transactions\/([^/]+)\/verify$/.exec(url);
-      if (verify !== null) {
-        const row = transactions.get(decodeURIComponent(verify[1] as string));
-        res.end(JSON.stringify(row === undefined ? { status: 'error', message: 'No transaction' } : { status: 'success', data: row }));
+      const account = /^\/api\/v1\/virtual-bank-account\/([^/?]+)$/.exec(url);
+      if (req.method === 'GET' && account !== null) {
+        const row = accounts.get(decodeURIComponent(account[1] as string));
+        if (row === undefined) {
+          res.statusCode = 404;
+          res.end(JSON.stringify({ status: false, message: 'Virtual bank account not found' }));
+          return;
+        }
+        res.end(JSON.stringify({ status: true, data: row }));
         return;
       }
-      if (url.startsWith('/v3/transactions?')) {
-        // DELIBERATELY IGNORES THE FILTER and returns everything, which is the
-        // server the adapter's own re-filter exists for.
-        res.end(JSON.stringify({ status: 'success', data: [...transactions.values()] }));
+      const charge = /^\/api\/v1\/charges\/([^/?]+)$/.exec(url);
+      if (charge !== null) {
+        const row = transactions.get(decodeURIComponent(charge[1] as string));
+        if (row === undefined) {
+          res.statusCode = 404;
+          res.end(JSON.stringify({ status: false, message: 'Charge not found' }));
+          return;
+        }
+        res.end(JSON.stringify({ status: true, message: 'Charge retrieved successfully', data: row }));
         return;
       }
       res.statusCode = 404;
-      res.end(JSON.stringify({ status: 'error', message: 'no such endpoint' }));
+      res.end(JSON.stringify({ status: false, message: 'no such endpoint' }));
     });
   });
   await new Promise<void>((resolve) => stub.listen(0, '127.0.0.1', resolve));
@@ -139,8 +175,8 @@ beforeAll(async () => {
   );
   routeBefore = before.rows[0]?.provider;
   await pool.query(
-    `INSERT INTO provider_routes (operation, currency, provider) VALUES ('account', 'NGN', 'flutterwave')
-     ON CONFLICT (operation, currency) DO UPDATE SET provider = 'flutterwave'`,
+    `INSERT INTO provider_routes (operation, currency, provider) VALUES ('account', 'NGN', 'kora')
+     ON CONFLICT (operation, currency) DO UPDATE SET provider = 'kora'`,
   );
 
   const mod = await Test.createTestingModule({
@@ -148,9 +184,8 @@ beforeAll(async () => {
       AppModule.forRoot({
         config: {
           ...config,
-          flutterwaveBaseUrl: `http://127.0.0.1:${port}`,
-          flutterwaveSecretKey: 'FLWSECK_TEST-not-a-real-key',
-          flutterwaveWebhookHash: HASH,
+          koraBaseUrl: `http://127.0.0.1:${port}`,
+          koraSecretKey: KEY,
           paystackBaseUrl: `http://127.0.0.1:${port}`,
           paystackSecretKey: 'sk_test_not_a_real_key',
         },
@@ -181,7 +216,7 @@ interface Customer {
 }
 
 async function nigerian(verified: boolean): Promise<Customer> {
-  const email = `fw-account-${randomUUID()}@example.ng`;
+  const email = `kora-account-${randomUUID()}@example.ng`;
   const inserted = await pool.query<{ id: string }>(
     `INSERT INTO users (email, status, country, full_name) VALUES ($1, 'active', 'NG', 'Ada Obi') RETURNING id`,
     [email],
@@ -217,8 +252,13 @@ async function reference(userId: string): Promise<string> {
     `SELECT provider, provider_customer_ref FROM virtual_accounts WHERE user_id = $1::bigint`,
     [userId],
   );
-  expect(row.rows[0]?.provider).toBe('flutterwave');
+  expect(row.rows[0]?.provider).toBe('kora');
   return row.rows[0]!.provider_customer_ref;
+}
+
+/** The account number Kora opened under a reference. */
+function numberOf(ref: string): string {
+  return accounts.get(ref)!['account_number'] as string;
 }
 
 async function balance(userId: string, currency = 'NGN'): Promise<bigint> {
@@ -230,30 +270,49 @@ async function balance(userId: string, currency = 'NGN'): Promise<bigint> {
   return BigInt(row.rows[0]?.balance_minor ?? '0');
 }
 
-function webhook(body: Record<string, unknown>, hash = HASH) {
+/** An event as Kora sends it: the `data` object signed with our key. */
+function webhook(body: { event: string; data: Record<string, unknown> }, key = KEY) {
   return request(app.getHttpServer())
-    .post('/v1/webhooks/flutterwave/deposits')
-    .set('verif-hash', hash)
+    .post('/v1/webhooks/kora')
+    .set('x-korapay-signature', createHmac('sha256', key).update(JSON.stringify(body.data)).digest('hex'))
     .set('content-type', 'application/json')
     .send(JSON.stringify(body));
 }
 
-function deposited(id: string, txRef: string, overrides: Record<string, unknown> = {}) {
-  transactions.set(id, {
-    id: Number(id),
-    tx_ref: txRef,
-    amount: 5000,
+/** A payment into an account, as Kora's Charge Query would describe it. */
+function deposited(reference: string, accountRef: string, overrides: Record<string, unknown> = {}) {
+  transactions.set(reference, {
+    reference,
+    status: 'success',
+    amount: '5000.00',
+    amount_paid: '5000.00',
     currency: 'NGN',
-    status: 'successful',
-    payment_type: 'bank_transfer',
-    created_at: new Date().toISOString(),
-    meta: { originatorname: 'EMEKA OBI', bankname: 'Kuda' },
+    virtual_bank_account: {
+      account_number: numberOf(accountRef),
+      account_reference: accountRef,
+      payer_bank_account: { account_name: 'EMEKA OBI', bank_name: 'Kuda', account_number: '******1001' },
+    },
     ...overrides,
   });
 }
 
+/** The event that announces it — what the BODY claims is deliberately wrong. */
+function arrival(reference: string, accountRef: string, claims: Record<string, unknown> = {}) {
+  return {
+    event: 'charge.success',
+    data: {
+      reference,
+      currency: 'NGN',
+      amount: 9_999_999,
+      status: 'success',
+      virtual_bank_account_details: { virtual_bank_account: { account_reference: accountRef } },
+      ...claims,
+    },
+  };
+}
+
 let nextId = 900_000_000 + Math.floor(Math.random() * 90_000_000);
-const newId = () => String(nextId++);
+const newId = () => `KPY-PAY-${nextId++}`;
 
 async function setFallback(on: boolean): Promise<void> {
   // Through the service, not a raw UPDATE, so its five-second cache is
@@ -267,8 +326,8 @@ async function setFallback(on: boolean): Promise<void> {
   });
 }
 
-describe('opening a naira account number on Flutterwave', () => {
-  it('with the fallback OFF, refuses an unverified customer with kyc_required and sends Flutterwave nothing', async () => {
+describe('opening a naira account number on Kora', () => {
+  it('with the fallback OFF, refuses an unverified customer with kyc_required and sends Kora nothing', async () => {
     await setFallback(false);
     try {
       const customer = await nigerian(false);
@@ -276,15 +335,15 @@ describe('opening a naira account number on Flutterwave', () => {
       const res = await openAccount(customer);
       expect(res.status).toBe(422);
       expect(res.body.error).toBe('kyc_required');
-      expect(seen.filter((r) => r.url === '/v3/virtual-account-numbers')).toHaveLength(0);
+      expect(seen.filter((r) => r.url.startsWith('/api/v1/virtual-bank-account'))).toHaveLength(0);
     } finally {
       await setFallback(true);
     }
   });
 
   /*
-   * THE ACTIVATE ACCOUNT FAULT, as a test. Flutterwave will not open a
-   * permanent naira account without a verified BVN, and nothing else was ever
+   * THE ACTIVATE ACCOUNT FAULT, as a test. Kora will not open a naira
+   * virtual account without a verified BVN, and nothing else was ever
    * asked — so an unverified Nigerian was refused while Paystack, which opens
    * a tier 1 account from a name, sat one row away. With 079's fallback on
    * (as it ships) the refusal moves on, and the account is recorded against
@@ -296,7 +355,7 @@ describe('opening a naira account number on Flutterwave', () => {
     const res = await openAccount(customer);
     expect(res.status).toBe(200);
     expect(res.body.currency).toBe('NGN');
-    expect(seen.filter((r) => r.url === '/v3/virtual-account-numbers')).toHaveLength(0);
+    expect(seen.filter((r) => r.url.startsWith('/api/v1/virtual-bank-account'))).toHaveLength(0);
     expect(seen.some((r) => r.method === 'POST' && r.url === '/dedicated_account')).toBe(true);
 
     const row = await pool.query<{ provider: string }>(
@@ -307,7 +366,7 @@ describe('opening a naira account number on Flutterwave', () => {
   });
 
   /*
-   * NOT A KYC PROMPT ABOUT AN OPERATOR'S PROBLEM. Flutterwave wanted a BVN;
+   * NOT A KYC PROMPT ABOUT AN OPERATOR'S PROBLEM. Kora wanted a BVN;
    * Paystack — which needs none — refused for a reason of its own. Telling
    * this customer to verify would send them to do something that changes
    * nothing, and it is the prompt the auto-opened account exists to not show.
@@ -331,29 +390,26 @@ describe('opening a naira account number on Flutterwave', () => {
     const res = await openAccount(customer);
     expect(res.status).toBe(200);
 
-    const create = seen.find((r) => r.url === '/v3/virtual-account-numbers');
-    expect(create?.body).toMatchObject({ bvn: BVN, is_permanent: true, currency: 'NGN' });
+    const create = seen.find((r) => r.method === 'POST' && r.url === '/api/v1/virtual-bank-account');
+    expect(create?.body).toMatchObject({ kyc: { bvn: BVN }, permanent: true, bank_code: '000' });
     expect(await reference(customer.userId)).toBe(`xetral-va-${customer.userId}-NGN`);
   });
 });
 
 describe('money arriving in it', () => {
-  it('credits what FLUTTERWAVE says arrived, not what the webhook body claims', async () => {
+  it('credits what KORA says arrived, not what the webhook body claims', async () => {
     const customer = await nigerian(true);
     await openAccount(customer).expect(200);
     const ref = await reference(customer.userId);
     const id = newId();
-    deposited(id, ref, { amount: 5000 });
+    deposited(id, ref);
 
     const before = await balance(customer.userId);
-    await webhook({
-      event: 'charge.completed',
-      data: { id: Number(id), tx_ref: ref, amount: 9_999_999, currency: 'NGN', status: 'successful' },
-    }).expect((r) => expect(r.status).toBeLessThan(300));
+    await webhook(arrival(id, ref)).expect((r) => expect(r.status).toBeLessThan(300));
 
     expect((await balance(customer.userId)) - before).toBe(500_000n);
     const row = await pool.query<{ status: string; sender_name: string }>(
-      `SELECT status, sender_name FROM deposits WHERE provider = 'flutterwave' AND provider_reference = $1`,
+      `SELECT status, sender_name FROM deposits WHERE provider = 'kora' AND provider_reference = $1`,
       [id],
     );
     expect(row.rows[0]).toEqual({ status: 'credited', sender_name: 'EMEKA OBI' });
@@ -366,7 +422,7 @@ describe('money arriving in it', () => {
     const id = newId();
     deposited(id, ref);
 
-    const event = { event: 'charge.completed', data: { id: Number(id), tx_ref: ref, status: 'successful' } };
+    const event = arrival(id, ref);
     await webhook(event).expect((r) => expect(r.status).toBeLessThan(300));
     await webhook(event).expect((r) => expect(r.status).toBeLessThan(300));
     expect(await balance(customer.userId)).toBe(500_000n);
@@ -377,16 +433,13 @@ describe('money arriving in it', () => {
     await openAccount(customer).expect(200);
     const ref = await reference(customer.userId);
     const id = newId();
-    deposited(id, ref, { currency: 'GHS', amount: 50 });
+    deposited(id, ref, { currency: 'GHS', amount: '50.00', amount_paid: '50.00' });
 
-    await webhook({
-      event: 'charge.completed',
-      data: { id: Number(id), tx_ref: ref, status: 'successful' },
-    }).expect((r) => expect(r.status).toBeLessThan(300));
+    await webhook(arrival(id, ref)).expect((r) => expect(r.status).toBeLessThan(300));
 
     expect(await balance(customer.userId)).toBe(0n);
     const row = await pool.query<{ status: string; suspense_reason: string }>(
-      `SELECT status, suspense_reason FROM deposits WHERE provider = 'flutterwave' AND provider_reference = $1`,
+      `SELECT status, suspense_reason FROM deposits WHERE provider = 'kora' AND provider_reference = $1`,
       [id],
     );
     expect(row.rows[0]?.status).toBe('suspense');
@@ -398,20 +451,23 @@ describe('money arriving in it', () => {
     await openAccount(customer).expect(200);
     const ref = await reference(customer.userId);
     const id = newId();
-    deposited(id, ref, { status: 'pending' });
+    deposited(id, ref, { status: 'processing' });
 
-    const res = await webhook({
-      event: 'charge.completed',
-      data: { id: Number(id), tx_ref: ref, status: 'successful' },
-    });
+    const res = await webhook(arrival(id, ref));
     // Acknowledging would drop money that is on its way; a non-2xx is what
-    // makes Flutterwave deliver it again once it has settled.
+    // makes Kora deliver it again once it has settled.
     expect(res.status).toBeGreaterThanOrEqual(500);
     expect(await balance(customer.userId)).toBe(0n);
   });
 
-  it('refuses an event without the right hash', async () => {
-    await webhook({ event: 'charge.completed', data: { id: 1, tx_ref: 'x' } }, 'wrong').expect(401);
+  it('refuses an event signed with any other key, and credits nothing', async () => {
+    const customer = await nigerian(true);
+    await openAccount(customer).expect(200);
+    const ref = await reference(customer.userId);
+    const id = newId();
+    deposited(id, ref);
+    await webhook(arrival(id, ref), 'sk_test_somebody_else').expect(401);
+    expect(await balance(customer.userId)).toBe(0n);
   });
 });
 
@@ -421,21 +477,18 @@ describe('the sweep, for a webhook that never came', () => {
     await openAccount(customer).expect(200);
     const ref = await reference(customer.userId);
     const id = newId();
-    deposited(id, ref, { amount: 1234.5 });
+    deposited(id, ref, { amount: '1234.50', amount_paid: '1234.50' });
 
     await app.get(DepositReconciliationService).sweep();
     expect(await balance(customer.userId)).toBe(123_450n);
 
-    await webhook({
-      event: 'charge.completed',
-      data: { id: Number(id), tx_ref: ref, status: 'successful' },
-    }).expect((r) => expect(r.status).toBeLessThan(300));
+    await webhook(arrival(id, ref)).expect((r) => expect(r.status).toBeLessThan(300));
     expect(await balance(customer.userId)).toBe(123_450n);
   });
 
-  it('credits nobody else’s money, even from a server that ignored the filter', async () => {
-    // Every transaction above is in the stub's list for EVERY account; each
-    // account must be credited only with its own.
+  it('credits nobody else’s money', async () => {
+    // Every transaction above belongs to another account; this one, swept,
+    // must be credited only with its own — which is nothing.
     const customer = await nigerian(true);
     await openAccount(customer).expect(200);
     await app.get(DepositReconciliationService).sweep();

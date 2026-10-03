@@ -98,7 +98,7 @@ export default function AddMoney() {
   const usesMobileMoney = funding.includes('mobile_money');
   /*
    * WHERE AN ACCOUNT NUMBER IS ACTUALLY A PRODUCT — see the web screen.
-   * Flutterwave issues dedicated numbers in NGN only, so in Accra and Nairobi
+   * The previous cedi rail issues dedicated numbers in NGN only, so in Accra and Nairobi
    * Activate could never succeed and answered "try again shortly" about
    * something permanent. Falls back to TRUE while the country list loads.
    */

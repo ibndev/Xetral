@@ -94,7 +94,7 @@ export class SwitchingFundingPort implements FundingPort {
     if (this.#router !== undefined) {
       /*
        * `account` FIRST, then `collect`. 076 made "who opens a naira account
-       * number" its own route so it can move to Flutterwave without taking
+       * number" its own route so it can move to the previous cedi rail without taking
        * every naira payment link with it. A currency with no `account` row is
        * answered by `collect`, which is exactly how it was answered before.
        */
@@ -118,7 +118,7 @@ export class SwitchingFundingPort implements FundingPort {
    * this currency and that this deployment has an adapter for.
    *
    * WHY A SECOND RAIL AT ALL. Naira account numbers were routed to
-   * Flutterwave, which opens a permanent account only with a verified BVN —
+   * The previous cedi rail, which opens a permanent account only with a verified BVN —
    * so every unverified customer, and every Ghanaian (who has no BVN to
    * give), was refused with nothing else asked, while Paystack opens a tier 1
    * account from a name. The caller moves on only after a DEFINITE refusal;

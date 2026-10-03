@@ -23,9 +23,9 @@ export interface PayoutBank {
   /**
    * THE PROVIDER'S OWN ID FOR THE BANK, WHICH IS NOT ITS CODE.
    *
-   * Flutterwave answer `{ id: 280, code: "GH280100", name: … }` and the
-   * branches call takes the ID. Optional because no other rail has one, and
-   * because a country that needs no branch code never asks.
+   * A rail whose branches call takes an id rather than the bank's code sets
+   * it. Optional because no rail in use has one, and because a country that
+   * needs no branch code never asks.
    */
   readonly id?: string;
 }
@@ -33,9 +33,8 @@ export interface PayoutBank {
 /**
  * A BRANCH OF A BANK, which one corridor genuinely requires.
  *
- * FLUTTERWAVE, VERBATIM: "When transferring to Ghanaian bank accounts and
- * mobile money wallets, you need to pass the branch code of the institution or
- * telco in your Initiate Transfer request as destination_branch_code."
+ * No rail in use asks for one today: Kora's payout takes none. The method
+ * stays so a corridor that does need one is answered by its adapter.
  *
  * It is a port method rather than a detail inside the adapter because the
  * SCREEN has to ask for it — a customer paying a Ghanaian bank account picks a
@@ -133,12 +132,11 @@ export interface PayoutRequest<C extends Currency = Currency> {
   /**
    * WHICH OF OUR BALANCES FUNDS THIS, when the rail holds several.
    *
-   * Flutterwave is a PREFUNDED WALLET, not a rail that moves money on demand:
-   * it debits the balance matching the payout currency unless told otherwise,
-   * so a cedi payout needs cedis. A platform with no GHS float can either hold
-   * one or name a different balance here and accept the provider's conversion
-   * rate — and that is a treasury decision somebody has to make, which is why
-   * it arrives as a value rather than being assumed by this file.
+   * A prefunded rail debits the balance matching the payout currency unless
+   * told otherwise, so a cedi payout needs cedis. Naming a different balance
+   * is a treasury decision, which is why it arrives as a value rather than
+   * being assumed by this file — and Kora has no field for one, so its
+   * adapter refuses a request that names another currency before sending.
    *
    * Undefined means "the payout currency", which is the provider's own
    * default.
@@ -174,8 +172,8 @@ export interface PayoutReceipt {
  * 046 put ONE value on the country and that was right at the time — the Send
  * screen was offering a Nigerian bank list in Accra. What it cannot say is
  * "both", and Ghana and Kenya are both: most people there are paid into a
- * wallet, plenty into a bank account, and Flutterwave serves the two from one
- * transfers endpoint with different destination shapes.
+ * wallet, plenty into a bank account, and Kora serves the two from one disburse
+ * endpoint with different destination types.
  *
  * So the CALLER says which. Undefined means "whatever this country's default
  * is", which is what every caller written before 070 meant.
@@ -194,7 +192,7 @@ export interface PayoutPort {
   /**
    * WHETHER THIS RAIL SPENDS A BALANCE WE HAVE TO PUT THERE FIRST.
    *
-   * Flutterwave does: it debits the balance matching the payout currency, so
+   * Kora does: it disburses from the balance in the payout currency, so
    * a cedi payout needs a cedi float and a deployment that has never
    * collected a cedi has none. Paystack and Bitnob do not — they settle from
    * accounts this platform keeps no float in.

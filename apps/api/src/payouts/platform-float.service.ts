@@ -8,10 +8,10 @@ import { SettingsService } from '../settings/settings.service.js';
  *
  * THE QUESTION NOTHING ASKED. Every control in this codebase before now is
  * about the CUSTOMER's money — the overdraft guard, the daily ceiling, the
- * velocity rules. Flutterwave is a PREFUNDED wallet: it debits the balance
+ * velocity rules. Kora is a PREFUNDED wallet: it debits the balance
  * matching the payout currency, so a cedi payout needs a cedi float, and a
  * deployment that has never collected a cedi has none. The transfer is then
- * refused by Flutterwave with a message about funds, which arrives through
+ * refused by the previous cedi rail with a message about funds, which arrives through
  * the adapter as a failure on a transfer whose customer, amount and account
  * number were all perfectly correct.
  *

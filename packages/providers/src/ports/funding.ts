@@ -90,8 +90,8 @@ export interface FundingCustomer {
    * THE BVN, FETCHED ONLY IF THE RAIL ASKS FOR IT.
    *
    * A function rather than a field, and that shape is the privacy rule
-   * written as a type. Flutterwave will not open a PERMANENT naira account in
-   * production without a BVN; Paystack opens one from a name and an email. A
+   * written as a type. Kora will not open a naira virtual account without a
+   * BVN; Paystack opens one from a name and an email. A
    * field would put every verified customer's BVN in memory on every request
    * to every adapter — including the ones that never send it — and the first
    * log line that serialised a request would carry it. As a function, the BVN
@@ -202,9 +202,9 @@ export interface ProviderDeposit {
 /**
  * A deposit the RAIL has confirmed, read back by its own id.
  *
- * For a rail whose webhook is not signed over the body — Flutterwave returns a
- * shared secret verbatim — the event is a doorbell and says nothing anybody
- * may act on. This is what the platform acts on instead: the provider's own
+ * For a rail whose webhook covers only part of the body — Kora signs the
+ * `data` object and not the event name beside it — the event is a doorbell
+ * and says nothing anybody may act on. This is what the platform acts on instead: the provider's own
  * answer to "what is transaction N", asked by us.
  */
 export interface VerifiedDeposit extends ProviderDeposit {

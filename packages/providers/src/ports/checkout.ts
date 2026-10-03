@@ -19,8 +19,8 @@ import type { ProviderError } from './errors.js';
  *
  * AMOUNTS ARE MINOR UNITS ACROSS THIS PORT, always, in both directions. That
  * is the ledger's unit and it is the only one that cannot lose a fraction.
- * Paystack happens to want minor units on the wire and Flutterwave happens to
- * want major ones — a difference of a FACTOR OF A HUNDRED, in the direction
+ * Paystack happens to want minor units on the wire and Kora happens to want
+ * major ones — a difference of a FACTOR OF A HUNDRED, in the direction
  * of charging a customer a hundred times too much — so each adapter converts
  * at its own boundary and neither convention reaches a caller. That is the
  * rule `bitnob/amounts.ts` records for micro-units, applied one provider on.
@@ -94,8 +94,10 @@ export type CheckoutMethod = 'card' | 'ussd' | 'mobile_money' | 'bank';
  */
 export const CHECKOUT_METHODS: Readonly<Record<string, readonly CheckoutMethod[]>> = {
   NGN: ['bank', 'card', 'ussd'],
-  GHS: ['mobile_money', 'bank', 'card'],
-  KES: ['mobile_money', 'card'],
+  /* Cedis and shillings are collected by Kora, whose Pay-ins Overview
+   * documents mobile money in both and card and bank transfer in naira only. */
+  GHS: ['mobile_money'],
+  KES: ['mobile_money'],
   USD: ['card'],
 };
 

@@ -121,7 +121,7 @@ export default function AddMoney() {
    * AND THE ADAPTER NO LONGER ASSERTS. It used to refuse every non-NGN
    * currency in its own code before calling anything — the same unfalsifiable
    * shape as the momo name belief. It asks now, so a refusal is
-   * Flutterwave's own sentence carried to an operator as
+   * The previous cedi rail's own sentence carried to an operator as
    * `account_issue_refused`, which is something somebody can act on. A hidden
    * button is a silence nobody can.
    */
@@ -793,7 +793,7 @@ function LinkMomo({
  * DEBIT CARD OR USSD, AS A TOP-UP THAT NEEDS NO ACCOUNT NUMBER.
  *
  * An account number is the cheapest way in, and it is not always there: it is
- * a verified customer's product on Flutterwave, and a transfer from a bank
+ * a verified customer's product on the previous cedi rail, and a transfer from a bank
  * app is three screens the customer may not have to hand. A card and a USSD
  * short code are the two ways almost every Nigerian can pay in from where
  * they are standing — and a card is how somebody abroad funds a cedi or

@@ -7,34 +7,28 @@ DO $$
 DECLARE
     v_count BIGINT;
 BEGIN
-    -- 1. BOTH HALVES OF THE v4 PAIR EXIST AS SLOTS. One without the other is
-    --    a box an operator fills and nothing reads — 026's rule that a
-    --    credential with no adapter behind it reads as "this is running".
+    -- 1. THE v4 PAIR 071 ADDED IS GONE WITH ITS RAIL. 095 replaced that rail
+    --    with Kora; a slot nothing reads is a box an operator fills and
+    --    believes is running — 026's rule.
     SELECT count(*) INTO v_count FROM provider_credential_slots
-     WHERE provider = 'flutterwave'
-       AND name IN ('v4_client_id', 'v4_client_secret')
-       AND in_use;
-    IF v_count <> 2 THEN
-        RAISE EXCEPTION 'TEST FAILED 1: % of 2 v4 slots are in use', v_count;
+     WHERE name IN ('v4_client_id', 'v4_client_secret');
+    IF v_count <> 0 THEN
+        RAISE EXCEPTION 'TEST FAILED 1: % v4 slots of a removed rail remain', v_count;
     END IF;
-    RAISE NOTICE 'PASS 1: both v4 credential slots exist and are in use';
+    RAISE NOTICE 'PASS 1: no credential slot of the removed rail remains';
 END $$;
 
 DO $$
 DECLARE
     v_secret BIGINT;
 BEGIN
-    -- 2. THE v3 SECRET KEY IS UNTOUCHED. v4 is used for ONE READ that moves
-    --    nothing; every payout, every checkout and every webhook still
-    --    authorises with the v3 key. Retiring it here would be 042's mistake
-    --    in reverse — turning "you need a second credential" into "your first
-    --    one is wrong".
+    -- 2. THE RAIL THAT SERVES THESE CORRIDORS NOW HAS ITS KEY SLOT IN USE.
     SELECT count(*) INTO v_secret FROM provider_credential_slots
-     WHERE provider = 'flutterwave' AND name = 'secret_key' AND in_use;
+     WHERE provider = 'kora' AND name = 'secret_key' AND in_use;
     IF v_secret <> 1 THEN
-        RAISE EXCEPTION 'TEST FAILED 2: the v3 secret key slot is no longer in use';
+        RAISE EXCEPTION 'TEST FAILED 2: the Kora secret key slot is not in use';
     END IF;
-    RAISE NOTICE 'PASS 2: the v3 secret key is still the credential money moves on';
+    RAISE NOTICE 'PASS 2: the cedi rail''s secret key is the credential money moves on';
 END $$;
 
 DO $$

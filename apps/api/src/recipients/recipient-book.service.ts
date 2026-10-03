@@ -38,7 +38,7 @@ export interface RecipientView {
    * ON THE SAVED ROW rather than asked again at send time, because 068's whole
    * argument is that the first screen is a list of people TAPPED WITHOUT
    * RE-READING. A Ghanaian bank recipient with no branch would be tapped, sent
-   * to, refused by Flutterwave, and the screen that asks for a branch is the
+   * to, refused by the previous cedi rail, and the screen that asks for a branch is the
    * one that tap skips.
    */
   readonly branch_code: string | null;
@@ -162,7 +162,7 @@ export class RecipientBookService {
    * THIS IS THE CALL THAT WAS NEVER MADE FOR A GHANAIAN WALLET. The payout
    * adapter matched the network code and threw `name_unavailable` without
    * asking — so "it says it cannot find the user name" was our own refusal,
-   * relayed correctly by every layer above it, about a number Flutterwave
+   * relayed correctly by every layer above it, about a number the previous cedi rail
    * will happily resolve.
    */
   async resolve(userUuid: string, body: ResolveRecipientBody): Promise<RecipientResolution> {
@@ -262,7 +262,7 @@ export class RecipientBookService {
        * proceeds; refusing there is what stopped the Kenyan corridor.
        *
        * Anything else is an enquiry that EXISTS and did not answer: an unknown
-       * Ghanaian wallet, or Flutterwave refusing. That is a number nobody has
+       * Ghanaian wallet, or the previous cedi rail refusing. That is a number nobody has
        * checked, and the screen must not let it through — which is the whole
        * point of asking.
        */

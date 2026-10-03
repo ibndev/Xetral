@@ -40,7 +40,7 @@ import type { SettingsService } from '../settings/settings.service.js';
  * bank list contains.
  *
  * So the Send screen showed a customer in Accra a list of banks under a label
- * saying Mobile Money, and the Flutterwave payout adapter — written for
+ * saying Mobile Money, and the previous cedi rail's payout adapter — written for
  * exactly this and registered nowhere — was never asked anything. 046 put
  * `payout_method` on the country so the SCREEN would stop offering a product
  * the customer's money cannot reach; this is the other half, which stops the
@@ -179,7 +179,7 @@ export class SwitchingPayoutPort implements PayoutPort {
      *
      * `bankCode` came from `banks()`, so it is that provider's code and means
      * nothing to another one — an MTN network code sent to Paystack is not a
-     * bank, and a Paystack bank code sent to Flutterwave is not a network.
+     * bank, and a Paystack bank code sent to the previous cedi rail is not a network.
      * Routing on the destination country keeps the three calls on one rail.
      */
     return this.#adapterFor(await this.providerForCountry(request.country)).send(request);

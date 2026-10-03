@@ -127,6 +127,17 @@ function credentialSlots(): Set<string> {
         found.add(`${row[1] as string}.${row[2] as string}`);
       }
     }
+    /* A LATER MIGRATION CAN REMOVE A PROVIDER'S SLOTS — 095 removed the rail
+     * Kora replaced — and an entry for a slot that no longer exists is one an
+     * operator is told to fill and nothing reads. Applied in file order, so a
+     * slot deleted and later re-added is still counted. */
+    for (const deleted of sql.matchAll(
+      /DELETE FROM provider_credential_slots WHERE provider = '([a-z]+)'/g,
+    )) {
+      for (const slot of [...found]) {
+        if (slot.startsWith(`${deleted[1] as string}.`)) found.delete(slot);
+      }
+    }
   }
   return found;
 }

@@ -39,7 +39,7 @@ interface SuspenseDeposit {
 }
 
 const PROVIDER_NAMES: Readonly<Record<string, string>> = {
-  flutterwave: 'Flutterwave',
+  kora: 'Kora',
   paystack: 'Paystack',
   bitnob: 'Bitnob',
 };

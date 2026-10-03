@@ -102,34 +102,33 @@ describe('staging cannot reach a live provider', () => {
     ).toThrow(/LIVE provider/);
   });
 
-  it('refuses to boot with a LIVE Flutterwave key', () => {
+  it('refuses to boot with a LIVE Kora key', () => {
     /*
      * AND THIS ONE CAN BE CHECKED AT BOOT, unlike Bitnob's.
      *
-     * Bitnob v2 serves both environments from one host and the secret selects
-     * between them, so nothing visible at boot says which money is real and
-     * the guard had to move to the first call. Flutterwave puts it in the key
-     * — `FLWSECK_TEST-` against `FLWSECK-` — so a staging box collecting real
-     * cedis is refused before it serves a request.
+     * Kora serves both environments from one host too, but a live key says
+     * so in its prefix — `sk_live_`, as the Webhooks guide's own samples show
+     * it — so a staging box collecting real cedis is refused before it serves
+     * a request.
      */
     expect(() =>
       loadConfig(
         env({
           XETRAL_ENVIRONMENT: 'staging',
-          FLUTTERWAVE_SECRET_KEY: 'FLWSECK-0123456789abcdef',
+          KORA_SECRET_KEY: 'sk_live_0123456789abcdef',
         }),
       ),
     ).toThrow(/LIVE provider/);
   });
 
-  it('accepts a Flutterwave TEST key on staging', () => {
+  it('accepts a Kora test key on staging', () => {
     const config = loadConfig(
       env({
         XETRAL_ENVIRONMENT: 'staging',
-        FLUTTERWAVE_SECRET_KEY: 'FLWSECK_TEST-0123456789abcdef',
+        KORA_SECRET_KEY: 'sk_test_0123456789abcdef',
       }),
     );
-    expect(config.flutterwaveSecretKey).toBe('FLWSECK_TEST-0123456789abcdef');
+    expect(config.koraSecretKey).toBe('sk_test_0123456789abcdef');
   });
 
   it('never echoes a live credential into the refusal', () => {
@@ -140,7 +139,7 @@ describe('staging cannot reach a live provider', () => {
         loadConfig(
           env({
             XETRAL_ENVIRONMENT: 'staging',
-            FLUTTERWAVE_SECRET_KEY: 'FLWSECK-0123456789abcdef',
+            KORA_SECRET_KEY: 'sk_live_0123456789abcdef',
           }),
         );
         return undefined;
@@ -148,7 +147,7 @@ describe('staging cannot reach a live provider', () => {
         return e as Error;
       }
     })();
-    expect(error?.message).toContain('FLUTTERWAVE_SECRET_KEY');
+    expect(error?.message).toContain('KORA_SECRET_KEY');
     expect(error?.message).not.toContain('0123456789abcdef');
   });
 

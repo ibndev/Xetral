@@ -14,7 +14,7 @@ import { ProviderLiquidityService } from './provider-liquidity.service.js';
  * how much the platform holds in cedis in total; and only the provider can
  * say whether IT, the rail that must pay them out, holds any. Cedis credited
  * by a conversion the platform priced itself, or naira that arrived through
- * Paystack, read as held in the ledger and are nowhere near Flutterwave. No
+ * Paystack, read as held in the ledger and are nowhere near the previous cedi rail. No
  * code can move money between providers — that is a bank transfer somebody
  * makes — so what this does is make the gap impossible to miss, and name the
  * rail and the balance that would close it.

@@ -408,64 +408,29 @@ export const PROVIDERS: readonly Item[] = [
       'whether the money is real.',
   },
   {
-    name: 'FLUTTERWAVE_SECRET_KEY',
+    name: 'KORA_SECRET_KEY',
     kind: 'env',
     failure: 'refuses-the-first-request',
-    flow: 'collecting cedis and shillings',
+    flow: 'collecting and paying out cedis, and Kora account numbers',
     ifMissed:
-      'every payment in GHS or KES is refused, on both the public payment ' +
-      'link and Add Money — those corridors are routed to Flutterwave ' +
-      'because a Paystack account registered in Nigeria settles in naira. ' +
-      'Starts FLWSECK_TEST or FLWSECK, which is what decides whether the ' +
-      'money is real.',
+      'every payment and payout routed to Kora is refused — cedi payment ' +
+      'links, Add Money in Ghana and Ghanaian wallet payouts. ONE value does ' +
+      'both jobs: it authorises calls AND verifies webhooks, because Kora ' +
+      'signs the data object of every event with this same key — so there is ' +
+      'no separate webhook secret to forget. Test and live keys differ and ' +
+      'the key decides whether the money is real; a sk_live_ key refuses to ' +
+      'boot on staging.',
   },
   {
-    name: 'FLUTTERWAVE_WEBHOOK_HASH',
-    kind: 'env',
-    failure: 'silent',
-    flow: 'collecting cedis and shillings',
-    ifMissed:
-      'A DIFFERENT SECRET FROM THE KEY ABOVE, and this is the one that fails ' +
-      'quietly. Flutterwave does not sign the body: it returns verbatim a ' +
-      'value you set on their dashboard. Unset, every inbound event is ' +
-      'refused — outbound calls keep working perfectly, so the integration ' +
-      'looks healthy while payments are only ever credited when the payer ' +
-      'happens to come back to the page.',
-  },
-  {
-    name: 'FLUTTERWAVE_V4_CLIENT_ID',
-    kind: 'env',
-    failure: 'silent',
-    flow: 'naming a mobile money recipient',
-    ifMissed:
-      'THE NAME ON A GHANAIAN WALLET COMES FROM v4, and this is one half of ' +
-      'its OAuth2 pair. v3 has no wallet resolver at all — its ' +
-      '/accounts/resolve is a BANK-account lookup taking a three-digit bank ' +
-      'code — which is why five rounds of fixing the v3 call changed nothing. ' +
-      'Unset, a Ghanaian recipient cannot be named: the send still works and ' +
-      'the screen asks the customer for a label, exactly as it does in Kenya. ' +
-      'Money still moves on FLUTTERWAVE_SECRET_KEY.',
-  },
-  {
-    name: 'FLUTTERWAVE_V4_CLIENT_SECRET',
-    kind: 'env',
-    failure: 'silent',
-    flow: 'naming a mobile money recipient',
-    ifMissed:
-      'The other half. Both or neither: one alone authorises nothing and the ' +
-      'name enquiry is skipped exactly as if neither were set.',
-  },
-  {
-    name: 'FLUTTERWAVE_V4_BASE_URL',
+    name: 'KORA_VBA_BANK_CODE',
     kind: 'env',
     failure: 'default-is-deliberate',
-    flow: 'naming a mobile money recipient',
+    flow: 'Kora naira account numbers',
     ifMissed:
-      'TWO PUBLIC SOURCES DISAGREE about v4\'s host — their published OpenAPI ' +
-      'says api.flutterwave.cloud/f4b/production and their own developer blog ' +
-      'says f4bexperience.flutterwave.com. The specification is the default. ' +
-      'This exists so a wrong one is a setting rather than a release, which is ' +
-      'the lesson this repo\'s provider tables have taught twice.',
+      'defaults to 035 (Wema), the first bank in Kora\'s NGN virtual account ' +
+      'table; Fidelity 070, Globus 103, UBA 033, Moniepoint 090405, Optimus ' +
+      '107, Parallex 104 and FCMB 214 are the others. Kora requires one on ' +
+      'every account. The SANDBOX takes 000, so a test-mode deployment sets it.',
   },
   {
     name: 'TEST_ACCOUNT_EMAILS',
@@ -500,15 +465,15 @@ export const PROVIDERS: readonly Item[] = [
       'whitelisted account, so keep the lists short.',
   },
   {
-    name: 'FLUTTERWAVE_BASE_URL',
+    name: 'KORA_BASE_URL',
     kind: 'env',
     failure: 'default-is-deliberate',
-    flow: 'collecting cedis and shillings',
+    flow: 'collecting and paying out cedis',
     ifMissed:
-      'defaults to https://api.flutterwave.com, which is the only host they ' +
-      'serve. The /v3 prefix is on each path rather than on this value, so a ' +
-      'base URL carrying one produces /v3/v3/payments — the doubling 042 ' +
-      'records about Bitnob.',
+      'defaults to https://api.korapay.com/merchant, the only host Kora\'s ' +
+      'guides name, for test and live alike. The /api/v1 prefix is on each ' +
+      'path rather than on this value, so a base URL carrying one produces a ' +
+      'doubled segment — the fault 042 records about Bitnob.',
   },
   {
     name: 'PAYSTACK_BASE_URL',
@@ -760,9 +725,12 @@ export const PROVIDERS: readonly Item[] = [
     failure: 'silent',
     flow: 'error alerting',
     ifMissed:
-      'error alerts are composed and have nowhere to go. Unset, alerts go to '  +
-      '`ADMIN_BOOTSTRAP_EMAIL` — the first administrator is the one address '  +
-      'this deployment is certain belongs to somebody responsible for it.',
+      'error alerts are composed and have nowhere to go, and every Kora payout '  +
+      'is refused before it is sent — Kora requires a customer email on each '  +
+      'one and this address is what is given, never a customer\'s. Unset, it '  +
+      'falls back to `ADMIN_BOOTSTRAP_EMAIL` — the first administrator is the '  +
+      'one address this deployment is certain belongs to somebody responsible '  +
+      'for it.',
     fallsBackTo: 'ADMIN_BOOTSTRAP_EMAIL',
   },
 ];
@@ -1003,11 +971,10 @@ export const SETTINGS: readonly Item[] = [
   },
   {
     /*
-     * FLUTTERWAVE IS A PREFUNDED WALLET AND NOTHING IN THIS PLATFORM SAID SO.
-     * It debits the balance matching the payout currency, so a cedi payout
-     * needs a cedi float — and a deployment that has never collected a cedi
-     * has none. Every Ghanaian transfer then fails with a message about funds,
-     * which reads as a broken integration and is not one.
+     * A PREFUNDED RAIL DEBITS THE BALANCE MATCHING THE PAYOUT CURRENCY, so a
+     * cedi payout needs a cedi float — and a deployment that has never
+     * collected a cedi has none. Kora has no field naming another balance, so
+     * on Kora a payout naming one here is refused before it is sent.
      */
     name: 'payout_debit_currencies',
     kind: 'setting',
@@ -1703,26 +1670,16 @@ export const CREDENTIALS: readonly Item[] = [
       'it no dedicated account can be opened and no deposit can be credited.',
   },
   {
-    name: 'flutterwave.secret_key',
+    name: 'kora.secret_key',
     kind: 'credential',
     failure: 'refuses-the-first-request',
-    flow: 'collecting cedis and shillings, and paying a mobile money wallet',
+    flow: 'collecting and paying out cedis, and Kora account numbers',
     ifMissed:
-      'Ghana and Kenya are routed to Flutterwave by provider_routes, so ' +
-      'without this every payment and every payout there is refused. Read ' +
-      'provider_route_coverage to see which corridors depend on it.',
-  },
-  {
-    name: 'flutterwave.webhook_hash',
-    kind: 'credential',
-    failure: 'silent',
-    flow: 'collecting cedis and shillings',
-    ifMissed:
-      'NOT the secret key. It is the value you type into Flutterwave\'s own ' +
-      'webhook settings, returned verbatim in verif-hash. Unset, every ' +
-      'inbound event is refused while outbound calls keep working — the ' +
-      'integration looks healthy and payments land only when a payer ' +
-      'happens to return to the page.',
+      'ONE credential, not two: it authorises calls and verifies webhooks, ' +
+      'because Kora signs every event with the same key. Cedis are routed to ' +
+      'Kora by provider_routes, so without it every payment and payout there ' +
+      'is refused. A Kora payout also needs OPERATIONS_EMAIL, which Kora ' +
+      'requires as the customer email on every disbursement.',
   },
   {
     name: 'brevo.api_key',

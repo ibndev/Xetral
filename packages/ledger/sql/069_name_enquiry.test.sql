@@ -11,20 +11,20 @@ BEGIN
     --    row with a count of two — 015's rule, restated by 037. A row per call
     --    is the log this shape exists to avoid.
     PERFORM record_name_enquiry_refusal(
-        'flutterwave', 'GH', 'MTN', 'Sorry, that account number is invalid',
+        'kora', 'GH', 'MTN', 'Sorry, that account number is invalid',
         'MTN/233…1133: invalid', 'test');
     PERFORM record_name_enquiry_refusal(
-        'flutterwave', 'GH', 'MTN', 'Sorry, that account number is invalid',
+        'kora', 'GH', 'MTN', 'Sorry, that account number is invalid',
         'MTN/0…1133: invalid', 'test');
 
     SELECT count(*) INTO v_rows FROM name_enquiry_refusals
-     WHERE provider = 'flutterwave' AND country = 'GH' AND rail_code = 'MTN';
+     WHERE provider = 'kora' AND country = 'GH' AND rail_code = 'MTN';
     IF v_rows <> 1 THEN
         RAISE EXCEPTION 'TEST FAILED 1a: two refusals made % rows, not one', v_rows;
     END IF;
 
     SELECT refusals INTO v_rows FROM name_enquiry_refusals
-     WHERE provider = 'flutterwave' AND country = 'GH' AND rail_code = 'MTN';
+     WHERE provider = 'kora' AND country = 'GH' AND rail_code = 'MTN';
     IF v_rows <> 2 THEN
         RAISE EXCEPTION 'TEST FAILED 1b: the count says % rather than 2', v_rows;
     END IF;
@@ -44,22 +44,22 @@ BEGIN
     SELECT first_seen_at, last_seen_at, last_message
       INTO v_first, v_last, v_msg
       FROM name_enquiry_refusals
-     WHERE provider = 'flutterwave' AND country = 'GH' AND rail_code = 'MTN';
+     WHERE provider = 'kora' AND country = 'GH' AND rail_code = 'MTN';
 
     IF v_first > v_last THEN
         RAISE EXCEPTION 'TEST FAILED 2a: first_seen_at is after last_seen_at';
     END IF;
 
     PERFORM record_name_enquiry_refusal(
-        'flutterwave', 'GH', 'MTN', 'Name enquiry is not enabled for this merchant',
+        'kora', 'GH', 'MTN', 'Name enquiry is not enabled for this merchant',
         'MTN/233…1133: not enabled', 'live');
 
     IF (SELECT first_seen_at FROM name_enquiry_refusals
-         WHERE provider = 'flutterwave' AND country = 'GH' AND rail_code = 'MTN') <> v_first THEN
+         WHERE provider = 'kora' AND country = 'GH' AND rail_code = 'MTN') <> v_first THEN
         RAISE EXCEPTION 'TEST FAILED 2b: first_seen_at moved';
     END IF;
     IF (SELECT last_message FROM name_enquiry_refusals
-         WHERE provider = 'flutterwave' AND country = 'GH' AND rail_code = 'MTN') = v_msg THEN
+         WHERE provider = 'kora' AND country = 'GH' AND rail_code = 'MTN') = v_msg THEN
         RAISE EXCEPTION 'TEST FAILED 2c: the newest sentence did not replace the old';
     END IF;
     RAISE NOTICE 'PASS 2: the first sighting is kept and the sentence is current';
@@ -72,7 +72,7 @@ BEGIN
     --    "sandbox", "TEST" and "test key" meaning the same thing.
     BEGIN
         PERFORM record_name_enquiry_refusal(
-            'flutterwave', 'GH', 'VOD', 'nope', 'VOD/233…1133: nope', 'sandbox');
+            'kora', 'GH', 'VOD', 'nope', 'VOD/233…1133: nope', 'sandbox');
         RAISE EXCEPTION 'TEST FAILED 3: an unknown key mode was accepted';
     EXCEPTION WHEN check_violation THEN
         RAISE NOTICE 'PASS 3: the key mode is a closed set';
@@ -86,7 +86,7 @@ BEGIN
     --    reading the screen would see one corridor three times.
     BEGIN
         PERFORM record_name_enquiry_refusal(
-            'flutterwave', 'Ghana', 'MTN', 'nope', 'MTN: nope', 'live');
+            'kora', 'Ghana', 'MTN', 'nope', 'MTN: nope', 'live');
         RAISE EXCEPTION 'TEST FAILED 4: a country name was accepted as a code';
     EXCEPTION WHEN check_violation THEN
         RAISE NOTICE 'PASS 4: the country is an ISO code';

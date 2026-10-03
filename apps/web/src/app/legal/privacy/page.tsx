@@ -31,7 +31,7 @@ export const metadata: Metadata = {
  */
 export default function Privacy() {
   return (
-    <LegalPage title="Privacy notice" updated="3 October 2026">
+    <LegalPage title="Privacy notice" updated="4 October 2026">
       <p className="legal-lede">
         This notice explains what {COMPANY.tradingName} collects about you, why,
         who else sees it, how long it is kept and what you can ask us to do with
@@ -77,7 +77,7 @@ export default function Privacy() {
           are checked with <strong>Dojah Inc.</strong>, an identity
           verification company licensed in Nigeria. Once they are verified,
           your Bank Verification Number is also given to{' '}
-          <strong>Flutterwave</strong> or <strong>Bitnob</strong> — whichever
+          <strong>Kora</strong> or <strong>Bitnob</strong> — whichever
           opens your naira account number — because a bank will not open a
           permanent account in your name without one. Bitnob is also given
           your date of birth, which it checks against the same record. If{' '}
@@ -233,7 +233,7 @@ export default function Privacy() {
           opens your naira account number. Your Bank Verification Number goes
           to Dojah, to check it; to Paystack, with a bank account number held
           on it, when Paystack asks to confirm who you are before opening your
-          naira account number; and to Flutterwave or Bitnob, whichever opens
+          naira account number; and to Kora or Bitnob, whichever opens
           it.
         </strong>{' '}
         Your address is checked by our own reviewers and goes to nobody at all.

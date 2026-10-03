@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import { createServer } from 'node:http';
 import type { Server } from 'node:http';
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
 import { ExpressAdapter } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
@@ -18,19 +18,13 @@ import { testApiConfig } from '../test-support/api-config.js';
  * A PAYMENT LINK, PAID, ON EACH RAIL — against a stub speaking the provider's
  * own wire protocol.
  *
- * NOTHING COVERED THIS PATH AT ALL, and that is why it shipped broken. The
- * checkout adapters are constructed INSIDE `PaymentLinkService.#checkout()`
- * rather than injected, so there was no port to fake and no test was written;
- * the only proof the Flutterwave half worked was that the code read correctly.
- * It did read correctly. On a deployment holding a Paystack key and no
- * Flutterwave one, every cedi, shilling and dollar link answered
- * `checkout_unavailable` and naira worked perfectly — and nothing anywhere
- * connected the two facts.
- *
- * So this drives the REAL adapter over HTTP to a stub that answers exactly
- * what Flutterwave's published v3 API answers. That exercises the route table,
- * the unit conversion, the payment options and the envelope check — every one
- * of which is a place a plausible-looking constant could be wrong.
+ * The checkout adapters are constructed INSIDE `PaymentLinkService.#checkout()`
+ * rather than injected, so there is no port to fake: this drives the REAL Kora
+ * adapter over HTTP to a stub that answers exactly what Kora's guides publish
+ * (developers.korapay.com, read 3 October 2026). That exercises the route
+ * table, the unit conversion, the channels, the envelope check and the
+ * webhook signature — every one of which is a place a plausible-looking
+ * constant could be wrong.
  */
 const DATABASE_URL = process.env['DATABASE_URL'];
 /*
@@ -54,6 +48,8 @@ const seen: { url: string; auth: string | undefined; body: unknown }[] = [];
 /** What the stub says when a payment is verified by its reference. */
 let verifyAnswer: { status: string; amount: string; currency: string } | undefined;
 
+const KEY = 'sk_test_not-a-real-key';
+
 beforeAll(async () => {
   stub = createServer((req, res) => {
     let raw = '';
@@ -65,29 +61,29 @@ beforeAll(async () => {
         body: raw === '' ? undefined : JSON.parse(raw),
       });
       res.setHeader('content-type', 'application/json');
-      if ((req.url ?? '').startsWith('/v3/transactions/verify_by_reference') && verifyAnswer !== undefined) {
-        const txRef = new URL(req.url ?? '', 'http://stub').searchParams.get('tx_ref') ?? '';
+      if ((req.url ?? '').startsWith('/api/v1/charges/initialize')) {
+        const reference = (JSON.parse(raw) as { reference: string }).reference;
         res.end(
           JSON.stringify({
-            status: 'success',
-            message: 'Transaction fetched successfully',
-            data: { ...verifyAnswer, tx_ref: txRef, id: 4242, payment_type: 'mobilemoneygh' },
+            status: true,
+            message: 'Charge created successfully',
+            data: { reference, checkout_url: `https://checkout.korapay.com/${reference}/pay` },
           }),
         );
         return;
       }
-      if ((req.url ?? '').startsWith('/v3/payments')) {
+      if ((req.url ?? '').startsWith('/api/v1/charges/') && verifyAnswer !== undefined) {
         res.end(
           JSON.stringify({
-            status: 'success',
-            message: 'Hosted Link',
-            data: { link: 'https://checkout.flutterwave.com/pay/abc' },
+            status: true,
+            message: 'Charge retrieved successfully',
+            data: { ...verifyAnswer, amount_paid: verifyAnswer.amount, payment_method: 'mobile_money' },
           }),
         );
         return;
       }
       res.statusCode = 404;
-      res.end(JSON.stringify({ status: 'error', message: 'no such endpoint' }));
+      res.end(JSON.stringify({ status: false, message: 'no such endpoint' }));
     });
   });
   await new Promise<void>((resolve) => stub.listen(0, '127.0.0.1', resolve));
@@ -99,9 +95,8 @@ beforeAll(async () => {
       AppModule.forRoot({
         config: {
           ...testApiConfig(DATABASE_URL as string),
-          flutterwaveBaseUrl: `http://127.0.0.1:${stubPort}`,
-          flutterwaveSecretKey: 'FLWSECK_TEST-not-a-real-key',
-          flutterwaveWebhookHash: 'checkout-e2e-hash',
+          koraBaseUrl: `http://127.0.0.1:${stubPort}`,
+          koraSecretKey: KEY,
         },
         pool,
         clock: systemClock,
@@ -144,64 +139,56 @@ const charge = (slug: string, currency: string, amount = '25.00') =>
     .post(`/v1/pay/${slug}/charge`)
     .send({ amount, currency, email: 'payer@example.com' });
 
-describe('paying a link in a currency Flutterwave collects', () => {
-  it('starts a checkout for GHS and USD', async () => {
+const initialized = () => seen.filter((r) => r.url.startsWith('/api/v1/charges/initialize'));
+
+describe('paying a link in a currency Kora collects', () => {
+  it('starts a cedi checkout and answers Kora\'s checkout URL', async () => {
     const slug = await ghanaian();
-    for (const currency of ['GHS', 'USD']) {
-      const res = await charge(slug, currency).expect(200);
-      expect(res.body.authorization_url).toContain('checkout.flutterwave.com');
-    }
+    const res = await charge(slug, 'GHS').expect(200);
+    expect(res.body.authorization_url).toContain('checkout.korapay.com');
   });
 
-  it('REFUSES SHILLINGS WHILE NO PROVIDER IS CONFIRMED FOR THEM — before a row or a request', async () => {
+  it('REFUSES DOLLARS AND SHILLINGS WHILE NOTHING IS ROUTED FOR THEM — before a row or a request', async () => {
     /*
-     * 083 leaves Kenyan collection unrouted by the owner's assignment: no
-     * provider is confirmed, so nothing is sent anywhere and the payer reads
-     * a code the page turns into words, rather than a Flutterwave page that
-     * fails for a reason nobody on our side can see.
+     * Kora documents card payments in naira only, so 095 left dollar
+     * collection unrouted rather than guessed; and 083 leaves Kenyan
+     * collection unrouted until a provider is confirmed. Nothing is sent and
+     * the payer reads a code the page turns into words.
      */
     const slug = await ghanaian();
     seen.length = 0;
-    const res = await charge(slug, 'KES');
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBe('currency_not_supported');
-    expect(seen.filter((r) => r.url.startsWith('/v3/payments'))).toHaveLength(0);
+    for (const currency of ['USD', 'KES']) {
+      const res = await charge(slug, currency);
+      expect(res.status, currency).toBe(400);
+      expect(res.body.error, currency).toBe('currency_not_supported');
+    }
+    expect(initialized()).toHaveLength(0);
   });
 
   it('SENDS MAJOR UNITS, which is the opposite of Paystack one directory away', async () => {
     /*
      * Copying the Paystack adapter's `amountMinor.toString()` into this rail
      * charges a payer ONE HUNDRED TIMES the amount, in the direction that
-     * takes their money, and neither API would refuse it: 2500 cedis is a
-     * perfectly valid charge. This is the assertion that catches that.
+     * takes their money, and neither API would refuse it.
      */
     const slug = await ghanaian();
     seen.length = 0;
     await charge(slug, 'GHS', '25.00').expect(200);
 
-    const sent = seen.find((r) => r.url.startsWith('/v3/payments'));
+    const sent = initialized()[0];
     expect(sent).toBeDefined();
     expect((sent!.body as { amount: string }).amount).toBe('25.00');
     expect((sent!.body as { currency: string }).currency).toBe('GHS');
   });
 
   it('bears the secret key, and does not sign', async () => {
-    // Three providers in this package, three auth schemes. Copying Bitnob's
-    // signing onto this rail is a 401 that reads as a bad key.
     const slug = await ghanaian();
     seen.length = 0;
     await charge(slug, 'GHS').expect(200);
-
-    const sent = seen.find((r) => r.url.startsWith('/v3/payments'))!;
-    expect(sent.auth).toBe('Bearer FLWSECK_TEST-not-a-real-key');
+    expect(initialized()[0]!.auth).toBe(`Bearer ${KEY}`);
   });
 
-  it('offers the methods that CURRENCY can actually be paid with', async () => {
-    /*
-     * Left to itself their page leads with card, which in Accra and Nairobi is
-     * the method fewest payers have. A method the currency cannot use is not
-     * an error either — it is a checkout page with nothing on it.
-     */
+  it('opens a cedi or shilling payer on mobile money, the channel Kora documents there', async () => {
     const slug = await ghanaian();
     seen.length = 0;
     await charge(slug, 'GHS').expect(200);
@@ -214,7 +201,7 @@ describe('paying a link in a currency Flutterwave collects', () => {
     await app.get(ProviderRouterService).route({
       operation: 'collect',
       currency: 'KES',
-      provider: 'flutterwave',
+      provider: 'kora',
       byUserUuid: operator.rows[0]!.uuid,
     });
     try {
@@ -228,57 +215,22 @@ describe('paying a link in a currency Flutterwave collects', () => {
       }
     }
 
-    const bodies = seen
-      .filter((r) => r.url.startsWith('/v3/payments'))
-      .map((r) => r.body as { payment_options?: string; currency?: string });
-
-    /*
-     * `account` AND NOT `banktransfer`, which is the distinction a Ghanaian
-     * checkout failing while a Nigerian one worked turned on. Flutterwave's
-     * two bank options are different products: `banktransfer` is the Nigerian
-     * pay-with-transfer one. A payer offered a method the account cannot serve
-     * does not get an error — they get a page with that method missing.
-     *
-     * And `card` is on both, because a link exists to be paid by people whose
-     * rails we do not know in advance.
-     */
-    expect(bodies.map((b) => b.payment_options)).toEqual([
-      'card,account,mobilemoneyghana',
-      'card,account,mpesa',
-    ]);
-
-    /*
-     * AND THE CURRENCY IS THE LITERAL CODE, asserted here because it was one
-     * of four candidate explanations for the Ghanaian refusal and the only one
-     * a test could settle: a country code, a blank, or anything but `GHS`
-     * reaches Flutterwave as a refusal the payer reads as "try again shortly".
-     */
+    const bodies = initialized().map((r) => r.body as { channels?: string[]; currency?: string });
+    expect(bodies.map((b) => b.channels)).toEqual([['mobile_money'], ['mobile_money']]);
     expect(bodies.map((b) => b.currency)).toEqual(['GHS', 'KES']);
   });
 
-  it('opens a cedi payer on the method THEY picked, and refuses one the currency lacks', async () => {
-    /*
-     * THE REPORT: a payer chose cedis and landed on a card form. Offered every
-     * option, Flutterwave's page leads with card; the payer now chooses on our
-     * page — Mobile money, Bank or Card for cedis — and theirs opens on it.
-     */
+  it('refuses a method the currency lacks, before a row or a call', async () => {
+    /* Kora documents card payments in naira only, so a card is not offered
+     * for cedis — refused here rather than sent to a page without it. */
     const slug = await ghanaian();
-    seen.length = 0;
-    await request(app.getHttpServer())
-      .post(`/v1/pay/${slug}/charge`)
-      .send({ amount: '25.00', currency: 'GHS', email: 'payer@example.com', method: 'mobile_money' })
-      .expect(200);
-    const body = seen.find((r) => r.url.startsWith('/v3/payments'))?.body as { payment_options?: string };
-    expect(body.payment_options).toBe('mobilemoneyghana');
-
-    // A dollar has no wallet rail: refused before a row or a call exists.
     seen.length = 0;
     const refused = await request(app.getHttpServer())
       .post(`/v1/pay/${slug}/charge`)
-      .send({ amount: '25.00', currency: 'USD', email: 'payer@example.com', method: 'mobile_money' })
+      .send({ amount: '25.00', currency: 'GHS', email: 'payer@example.com', method: 'card' })
       .expect(400);
     expect(refused.body.error).toBe('payment_method_not_supported');
-    expect(seen.filter((r) => r.url.startsWith('/v3/payments'))).toHaveLength(0);
+    expect(initialized()).toHaveLength(0);
   });
 
   it('writes the row BEFORE the payer leaves, naming the rail', async () => {
@@ -296,33 +248,43 @@ describe('paying a link in a currency Flutterwave collects', () => {
       [res.body.reference],
     );
     expect(row.rows[0]).toMatchObject({
-      provider: 'flutterwave',
+      provider: 'kora',
       currency: 'GHS',
       status: 'pending',
     });
   });
 
   it('ASKS FOR THE EVENT AGAIN while the rail has not confirmed the payment, then credits it once', async () => {
-    // A charge event for a payment Flutterwave had not finished was
-    // acknowledged and dropped, and nothing else ever asks about a link
-    // payment: the payee was never credited unless the payer came back.
+    // A charge event for a payment Kora had not finished must not be
+    // acknowledged and dropped: nothing else ever asks about a link payment.
     const slug = await ghanaian();
     const res = await charge(slug, 'GHS', '25.00').expect(200);
     const reference = res.body.reference as string;
-    const event = (status: string) =>
-      request(app.getHttpServer())
-        .post('/v1/webhooks/flutterwave/deposits')
-        .set('verif-hash', 'checkout-e2e-hash')
+    const event = (status: string) => {
+      const data = { reference, currency: 'GHS', amount: 25, fee: 0.25, status, payment_method: 'mobile_money' };
+      return request(app.getHttpServer())
+        .post('/v1/webhooks/kora')
+        .set('x-korapay-signature', createHmac('sha256', KEY).update(JSON.stringify(data)).digest('hex'))
         .set('content-type', 'application/json')
-        .send(JSON.stringify({ event: 'charge.completed', data: { id: 4242, tx_ref: reference, status } }));
+        .send(JSON.stringify({ event: 'charge.success', data }));
+    };
+
+    // A forged event — signed with a different key — is refused and moves nothing.
+    await request(app.getHttpServer())
+      .post('/v1/webhooks/kora')
+      .set('x-korapay-signature', createHmac('sha256', 'sk_test_other').update('{}').digest('hex'))
+      .set('content-type', 'application/json')
+      .send(JSON.stringify({ event: 'charge.success', data: {} }))
+      .expect(401);
 
     try {
-      verifyAnswer = { status: 'pending', amount: '25.00', currency: 'GHS' };
-      await event('successful').expect(503);
+      verifyAnswer = { status: 'processing', amount: '25.00', currency: 'GHS' };
+      await event('success').expect(503);
 
-      verifyAnswer = { status: 'successful', amount: '25.00', currency: 'GHS' };
-      await event('successful').expect(200);
-      await event('successful').expect(200);
+      verifyAnswer = { status: 'success', amount: '25.00', currency: 'GHS' };
+      await event('success').expect(200);
+      // A redelivery is a replay: processed idempotently by its reference.
+      await event('success').expect(200);
     } finally {
       verifyAnswer = undefined;
     }
@@ -359,7 +321,7 @@ describe('paying a link in a currency Flutterwave collects', () => {
     const slug = await ghanaian();
     const res = await charge(slug, 'NGN', '2500.00').expect(503);
     const body = JSON.stringify(res.body);
-    expect(body).not.toMatch(/paystack|flutterwave|FLWSECK|sk_/i);
+    expect(body).not.toMatch(/paystack|kora|sk_/i);
   });
 });
 
@@ -385,17 +347,17 @@ describe('topping up by card or USSD', () => {
     return created.body.access_token as string;
   }
 
-  it('opens the page on the card when the card was pressed', async () => {
+  it('opens the page on mobile money when mobile money was pressed', async () => {
     const token = await ghanaianToken();
     seen.length = 0;
     const res = await request(app.getHttpServer())
       .post('/v1/funding/topup')
       .set('Authorization', `Bearer ${token}`)
-      .send({ amount: '25.00', method: 'card' })
+      .send({ amount: '25.00', method: 'mobile_money' })
       .expect(200);
-    expect(res.body.authorization_url).toContain('checkout.flutterwave.com');
-    const body = seen.find((r) => r.url.startsWith('/v3/payments'))?.body as { payment_options?: string };
-    expect(body.payment_options).toBe('card');
+    expect(res.body.authorization_url).toContain('checkout.korapay.com');
+    const body = initialized()[0]?.body as { channels?: string[] };
+    expect(body.channels).toEqual(['mobile_money']);
   });
 
   it('REFUSES USSD for cedis, before anything is written or sent', async () => {
@@ -407,7 +369,7 @@ describe('topping up by card or USSD', () => {
       .send({ amount: '25.00', method: 'ussd' })
       .expect(400);
     expect(res.body.error).toBe('payment_method_not_supported');
-    expect(seen.filter((r) => r.url.startsWith('/v3/payments'))).toHaveLength(0);
+    expect(initialized()).toHaveLength(0);
   });
 
   it('refuses a method it does not know, rather than ignoring it', async () => {
